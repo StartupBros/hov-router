@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import type { DatabaseOperations } from "@better-ccflare/database";
 import { Logger } from "@better-ccflare/logger";
 
@@ -8,7 +9,7 @@ export async function runDoctor(
 	const logger = new Logger("Doctor");
 	let exitCode = 0;
 
-	console.log("\n🏥 better-ccflare doctor");
+	console.log(`\n🏥 ${PRODUCT_NAME} doctor`);
 	console.log("═".repeat(50));
 
 	// Integrity check

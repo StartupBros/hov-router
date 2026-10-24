@@ -193,10 +193,10 @@ describe("packaged CLI post-create managed-routing handoff", () => {
 
 		expect(result).toBe(0);
 		expect(stdout).toContain(
-			"Inspect this persisted account: better-ccflare routing detail immutable-account-id --api-url http://127.0.0.1:9191",
+			"Inspect this persisted account: hov-router routing detail immutable-account-id --api-url http://127.0.0.1:9191",
 		);
 		expect(stdout).toContain(
-			"Review a family before applying: better-ccflare routing preview <family> --api-url http://127.0.0.1:9191",
+			"Review a family before applying: hov-router routing preview <family> --api-url http://127.0.0.1:9191",
 		);
 
 		const packagedSource = readFileSync(

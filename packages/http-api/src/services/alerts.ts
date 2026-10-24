@@ -22,6 +22,7 @@ import {
 	type RequestEvt,
 	requestEvents,
 } from "@better-ccflare/core";
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import {
 	type BunSqlAdapter,
 	CacheHealthRepository,
@@ -790,12 +791,12 @@ export function buildCodexIdentityRecordAlert(
 	cooldownMinutes: number,
 ): AlertEvent {
 	const advertised = event.verifiedAt
-		? `ccflare advertises Codex client version ${event.version} from the last valid record (verified ${event.verifiedAt})`
-		: `ccflare advertises its compiled fallback Codex client version ${event.version}`;
+		? `${PRODUCT_NAME} advertises Codex client version ${event.version} from the last valid record (verified ${event.verifiedAt})`
+		: `${PRODUCT_NAME} advertises its compiled fallback Codex client version ${event.version}`;
 	let message: string;
 	switch (event.error) {
 		case "stale_record":
-			message = `The verified Codex CLI version record is past its freshness window${event.verifiedAt ? ` (last verified ${event.verifiedAt})` : ""}. ccflare still advertises Codex client version ${event.version}; the managed Codex updater appears to have stalled.`;
+			message = `The verified Codex CLI version record is past its freshness window${event.verifiedAt ? ` (last verified ${event.verifiedAt})` : ""}. ${PRODUCT_NAME} still advertises Codex client version ${event.version}; the managed Codex updater appears to have stalled.`;
 			break;
 		case "unavailable_record":
 			message = `The configured verified Codex CLI version record is missing. ${advertised}; the managed Codex updater appears to have stalled or has not published a record yet.`;
