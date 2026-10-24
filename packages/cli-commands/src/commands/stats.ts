@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { Config } from "@better-ccflare/config";
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import type { DatabaseOperations } from "@better-ccflare/database";
 
 /**
@@ -43,7 +44,7 @@ export function formatClearRequestHistoryResult(
  * Compact SQLite database (checkpoint + vacuum + WAL truncate).
  *
  * REFUSES if another process holds the writer lock — typically the running
- * better-ccflare server. Running compact concurrently with a live server
+ * HoV Router server. Running compact concurrently with a live server
  * stalls every main-thread DB write in the server (rate-limit updates,
  * OAuth refresh, post-processor inserts) on SQLite's busy_timeout, which on
  * a multi-GB DB freezes the proxy for the entire VACUUM. See the design
@@ -63,7 +64,7 @@ export function formatClearRequestHistoryResult(
  * busy_timeout (10 s by default), so this manifests as a short stall in
  * the CLI rather than the multi-minute hang the guard is meant to prevent.
  * For maintenance against an auto-restarting service, verify with
- * `systemctl is-active better-ccflare` (should report `inactive` or
+ * `systemctl is-active <unit>` (should report `inactive` or
  * `failed`) before invoking this command. A fully race-free guarantee
  * would require holding a write transaction across the entire compact
  * call, which `VACUUM` itself disallows.
@@ -82,8 +83,8 @@ export async function compactDatabase(dbOps: DatabaseOperations): Promise<{
 		if (reason !== null) {
 			throw new Error(
 				`Refusing to compact: ${reason}. ` +
-					`Stop the better-ccflare service first (e.g. \`systemctl stop better-ccflare\` ` +
-					`then \`systemctl is-active better-ccflare\` to confirm it's not auto-restarting) ` +
+					`Stop the running ${PRODUCT_NAME} server first (for a systemd service, \`systemctl stop <unit>\` ` +
+					`then \`systemctl is-active <unit>\` to confirm it's not auto-restarting) ` +
 					`and re-run this command. Running compact while the server is live blocks ` +
 					`every request the server tries to persist.`,
 			);

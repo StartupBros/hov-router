@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useProviderModels } from "../../hooks/useProviderModels";
@@ -307,7 +308,7 @@ export function ModelCombobox({
 					{known.length > 0 && (
 						<>
 							<div className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-								Known to ccflare
+								Known to {PRODUCT_NAME}
 							</div>
 							{known.map((model) => (
 								<ModelOption

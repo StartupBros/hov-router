@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { Config } from "@better-ccflare/config";
 import { shutdown } from "@better-ccflare/core";
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import { container, SERVICE_KEYS } from "@better-ccflare/core-di";
 import type { ComboFamily } from "@better-ccflare/types";
 import type { CreatedAccountIdentity } from "./commands/account";
@@ -361,8 +362,8 @@ function postCreateRoutingGuidance(
 ): string[] {
 	const apiUrlSuffix = apiUrl ? ` --api-url ${apiUrl}` : "";
 	return [
-		`Inspect this persisted account: better-ccflare routing detail ${identity.id}${apiUrlSuffix}`,
-		`Review a family before applying: better-ccflare routing preview <family>${apiUrlSuffix}`,
+		`Inspect this persisted account: ${COMMAND_NAME} routing detail ${identity.id}${apiUrlSuffix}`,
+		`Review a family before applying: ${COMMAND_NAME} routing preview <family>${apiUrlSuffix}`,
 	];
 }
 

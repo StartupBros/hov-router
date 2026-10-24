@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
 	AlertCircle,
@@ -132,7 +133,7 @@ export function CodexCreditDrainControl({
 			<Switch
 				checked={account.codexCreditDrainEnabled ?? false}
 				onCheckedChange={() => onToggle(account)}
-				title="Lets ccflare keep routing to this account after its plan window is spent, which spends purchased credits. Applies only while fresh usage data confirms credits are available."
+				title={`Lets ${PRODUCT_NAME} keep routing to this account after its plan window is spent, which spends purchased credits. Applies only while fresh usage data confirms credits are available.`}
 			/>
 			{account.codexCreditDrainServing && (
 				<span
