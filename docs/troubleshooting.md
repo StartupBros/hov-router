@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose and resolve common issues with better-ccflare.
+This guide helps you diagnose and resolve common issues with HoV Router (formerly better-ccflare).
 
 ## Table of Contents
 
@@ -435,7 +435,7 @@ Environment variables override config file settings:
 
 3. Use a custom database path:
    ```bash
-   export better-ccflare_DB_PATH=/path/to/custom/better-ccflare.db
+   export BETTER_CCFLARE_DB_PATH=/path/to/custom/better-ccflare.db
    bun start
    ```
 
@@ -491,7 +491,7 @@ Environment variables override config file settings:
 - `SQLITE_BUSY`
 
 **Solutions**:
-1. Ensure only one instance of better-ccflare is running:
+1. Ensure only one instance of HoV Router is running:
    ```bash
    ps aux | grep "bun start" | grep -v grep
    ps aux | grep "better-ccflare --serve" | grep -v grep
@@ -594,7 +594,7 @@ Logs are stored in the system's temporary directory:
 
 **Method 1: Environment Variable**
 ```bash
-export better-ccflare_DEBUG=1
+export BETTER_CCFLARE_DEBUG=1
 export LOG_LEVEL=DEBUG
 bun start
 ```
@@ -810,7 +810,7 @@ grep "\[Server\]" /tmp/better-ccflare-logs/app.log
 **Solutions**:
 1. Check directory permissions
 2. Ensure parent directory exists
-3. Use custom path: `export better-ccflare_DB_PATH=/custom/path/db.db`
+3. Use custom path: `export BETTER_CCFLARE_DB_PATH=/custom/path/db.db`
 
 ## Environment Variables Reference
 
@@ -830,14 +830,14 @@ grep "\[Server\]" /tmp/better-ccflare-logs/app.log
 
 | Variable | Description | Default | Example |
 |----------|-------------|---------|---------|
-| `better-ccflare_CONFIG_PATH` | Custom config file location | Platform-specific | `/opt/better-ccflare/config.json` |
-| `better-ccflare_DB_PATH` | Custom database location | Platform-specific | `/opt/better-ccflare/data.db` |
+| `BETTER_CCFLARE_CONFIG_PATH` | Custom config file location | Platform-specific | `/opt/better-ccflare/config.json` |
+| `BETTER_CCFLARE_DB_PATH` | Custom database location | Platform-specific | `/opt/better-ccflare/data.db` |
 
 ### Logging and Debugging
 
 | Variable | Description | Default | Example |
 |----------|-------------|---------|---------|
-| `better-ccflare_DEBUG` | Enable debug mode | `0` | `1` |
+| `BETTER_CCFLARE_DEBUG` | Enable debug mode | `0` | `1` |
 | `LOG_LEVEL` | Log level | `INFO` | `DEBUG`, `WARN`, `ERROR` |
 | `LOG_FORMAT` | Log format | `pretty` | `json` |
 
@@ -860,14 +860,14 @@ grep "\[Server\]" /tmp/better-ccflare-logs/app.log
 
 ```bash
 # Development setup with debug logging
-export better-ccflare_DEBUG=1
+export BETTER_CCFLARE_DEBUG=1
 export LOG_LEVEL=DEBUG
 export LOG_FORMAT=json
 bun start
 
 # Production setup with custom paths
-export better-ccflare_CONFIG_PATH=/etc/better-ccflare/config.json
-export better-ccflare_DB_PATH=/var/lib/better-ccflare/data.db
+export BETTER_CCFLARE_CONFIG_PATH=/etc/better-ccflare/config.json
+export BETTER_CCFLARE_DB_PATH=/var/lib/better-ccflare/data.db
 export PORT=3000
 bun start
 
@@ -880,7 +880,7 @@ bun start
 
 ## FAQ
 
-### Q: How do I know if better-ccflare is working?
+### Q: How do I know if HoV Router is working?
 
 **A**: Check the health endpoint:
 ```bash
@@ -1167,7 +1167,7 @@ Auto is opt-in; an absent policy is not a working live deployment. Diagnose thro
 
 Auto was enabled under separate approval at **04:42:21Z**, with six assignments, eight accounts, two fallback edges and zero spend grants. Independent read-only checks found healthy `312ff63d` on both production ports, ten discovery choices (six manual plus four quality), and HTTP 404 `{"status":"unknown"}` for an unused session. Background-merge policy remained enabled. The integrating session verified unchanged before/after checksums for the app config and both profile files; the independent verifier corroborated the app config and route-profile drop-in but could not read the protected profile environment file.
 
-Remaining acceptance evidence is explicit: Astra/Sol subscription-specific output/tool/billing guarantees have not been established; native missing capability facts remain unknown. The reported GPT-5.6 picker row has not been observed in the actual affected UI/source, so no picker cleanup is claimed. The needed observation is that UI row plus its actual discovery/configuration source, not unrelated cached model names. No real interactive Auto turn has yet been supplied to verify selected-account admission, main/worker routing, stable homes or fallback. [Issue #398](https://github.com/StartupBros-com/better-ccflare/issues/398) remains open for those gates and the picker report. Do not scan credential stores, restart shared daemons or delete settings to guess at the cause.
+Remaining acceptance evidence is explicit: Astra/Sol subscription-specific output/tool/billing guarantees have not been established; native missing capability facts remain unknown. The reported GPT-5.6 picker row has not been observed in the actual affected UI/source, so no picker cleanup is claimed. The needed observation is that UI row plus its actual discovery/configuration source, not unrelated cached model names. No real interactive Auto turn has yet been supplied to verify selected-account admission, main/worker routing, stable homes or fallback. [Issue #398](https://github.com/StartupBros/hov-router/issues/398) remains open for those gates and the picker report. Do not scan credential stores, restart shared daemons or delete settings to guess at the cause.
 
 Deployment and activation require separate authorization from current main. Reverse-disable the policy using [the configuration procedure](configuration.md#activation-and-reverse-disable), preserving durable state and legacy routes. Do not use the generic database deletion, account recreation or process-killing suggestions below to repair Auto state.
 
@@ -1183,4 +1183,4 @@ Deployment and activation require separate authorization from current main. Reve
 | Analytics missing | Clear history: `better-ccflare --clear-history` |
 | Slow responses | Check session duration settings (default 5 hours) |
 
-Remember: Most issues can be resolved by checking logs, verifying account status, and ensuring proper network connectivity. When in doubt, restart the service with debug logging enabled: `better-ccflare_DEBUG=1 LOG_LEVEL=DEBUG bun start`
+Remember: Most issues can be resolved by checking logs, verifying account status, and ensuring proper network connectivity. When in doubt, restart the service with debug logging enabled: `BETTER_CCFLARE_DEBUG=1 LOG_LEVEL=DEBUG bun start`

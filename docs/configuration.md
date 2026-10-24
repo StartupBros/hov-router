@@ -1,4 +1,4 @@
-# better-ccflare Configuration Guide
+# HoV Router Configuration Guide
 
 This guide covers all configuration options for better-ccflare, including file-based configuration, environment variables, and runtime API updates.
 
@@ -54,7 +54,7 @@ The configuration file is stored at:
 
 - **Linux/macOS**: `~/.config/better-ccflare/better-ccflare.json` (or `$XDG_CONFIG_HOME/better-ccflare/better-ccflare.json`)
 - **Windows**: `%LOCALAPPDATA%\better-ccflare\better-ccflare.json` (or `%APPDATA%\better-ccflare\better-ccflare.json`)
-- **Custom path**: Set via `better-ccflare_CONFIG_PATH` environment variable
+- **Custom path**: Set via `BETTER_CCFLARE_CONFIG_PATH` environment variable
 
 ### File Structure
 
@@ -104,7 +104,7 @@ The configuration file is stored at:
 |----------|------|---------|-------------|
 | `LOG_LEVEL` | string | `"INFO"` | Logging level: `DEBUG`, `INFO`, `WARN`, `ERROR` |
 | `LOG_FORMAT` | string | `"pretty"` | Log format: `"pretty"` or `"json"` |
-| `better-ccflare_DEBUG` | string | - | Set to `"1"` to enable debug mode with console output |
+| `BETTER_CCFLARE_DEBUG` | string | - | Set to `"1"` to enable debug mode with console output |
 
 ## Environment Variables
 
@@ -123,7 +123,7 @@ The configuration file is stored at:
 | `REQUEST_RETENTION_DAYS` | `request_retention_days` | number | `REQUEST_RETENTION_DAYS=90` (metadata) |
 | `CCFLARE_EXTERNAL_CODEX_HOMES` | `external_codex_homes` | string (comma-separated paths) | `CCFLARE_EXTERNAL_CODEX_HOMES=/home/me/.codex` |
 | `CCFLARE_EXTERNAL_CODEX_CLOUD_ROOTS` | `external_codex_cloud_roots` | string (comma-separated `account=path`) | `CCFLARE_EXTERNAL_CODEX_CLOUD_ROOTS=codex-main=/srv/codex-cloud/codex` |
-| `better-ccflare_CONFIG_PATH` | - | string | `better-ccflare_CONFIG_PATH=/etc/better-ccflare.json` |
+| `BETTER_CCFLARE_CONFIG_PATH` | - | string | `BETTER_CCFLARE_CONFIG_PATH=/etc/better-ccflare.json` |
 
 ### Additional Environment Variables
 
@@ -133,9 +133,9 @@ These environment variables are not stored in the configuration file and must be
 |----------|-------------|---------|---------|
 | `LOG_LEVEL` | Set logging verbosity (DEBUG, INFO, WARN, ERROR) | `INFO` | `LOG_LEVEL=DEBUG` |
 | `LOG_FORMAT` | Set log output format (pretty, json) | `pretty` | `LOG_FORMAT=json` |
-| `better-ccflare_DEBUG` | Enable debug mode with console output | - | `better-ccflare_DEBUG=1` |
-| `better-ccflare_DB_PATH` | Custom database file path (SQLite only) | Platform-specific | `better-ccflare_DB_PATH=/var/lib/better-ccflare/db.sqlite` |
-| `DATABASE_URL` | Use PostgreSQL instead of SQLite. Set to a `postgresql://` or `postgres://` connection string. When set, `better-ccflare_DB_PATH` is ignored. | - | `DATABASE_URL=postgresql://user:pass@localhost:5432/ccflare` |
+| `BETTER_CCFLARE_DEBUG` | Enable debug mode with console output | - | `BETTER_CCFLARE_DEBUG=1` |
+| `BETTER_CCFLARE_DB_PATH` | Custom database file path (SQLite only) | Platform-specific | `BETTER_CCFLARE_DB_PATH=/var/lib/better-ccflare/db.sqlite` |
+| `DATABASE_URL` | Use PostgreSQL instead of SQLite. Set to a `postgresql://` or `postgres://` connection string. When set, `BETTER_CCFLARE_DB_PATH` is ignored. | - | `DATABASE_URL=postgresql://user:pass@localhost:5432/ccflare` |
 | `CF_PRICING_REFRESH_HOURS` | Hours between pricing data refreshes | `24` | `CF_PRICING_REFRESH_HOURS=12` |
 | `CF_PRICING_OFFLINE` | Disable online pricing updates | - | `CF_PRICING_OFFLINE=1` |
 | `CF_PRICING_TIMEOUT_MS` | Pricing estimate deadline in milliseconds. Accepts integers from `1` through `60000`; unset or invalid values fall back to `5000` | `5000` | `CF_PRICING_TIMEOUT_MS=10000` |
@@ -763,7 +763,7 @@ Admission is FIFO: a request at the head may intentionally block smaller later b
 
 ## Outbound Proxy
 
-better-ccflare can route all of its outbound HTTP(S) traffic — provider requests, OAuth flows, usage polling, and webhooks — through an explicit forward proxy using HTTP CONNECT. This is useful for enterprises that want every egress connection from better-ccflare to pass through a security/inspection proxy.
+HoV Router can route all of its outbound HTTP(S) traffic — provider requests, OAuth flows, usage polling, and webhooks — through an explicit forward proxy using HTTP CONNECT. This is useful for enterprises that want every egress connection from better-ccflare to pass through a security/inspection proxy.
 
 Configure it via the `BETTER_CCFLARE_OUTBOUND_PROXY` environment variable (or the equivalent `outbound_proxy` config file key); env var takes precedence over the config file value, matching the pattern used elsewhere in this doc. A dedicated variable is used instead of the conventional `HTTPS_PROXY`/`HTTP_PROXY` because those affect every process on the machine by convention — a dedicated variable lets operators scope the proxy to just this application (e.g. via MDM/provisioning) without redirecting traffic for every other tool.
 
@@ -777,7 +777,7 @@ Coverage spans both the running server process and CLI-only commands that never 
 
 ## Alerts
 
-better-ccflare can emit threshold and anomaly alerts and deliver them via webhook and the dashboard. Alerts are persisted to the same database as requests and deduplicated per cooldown bucket; persistence is best-effort — a database failure is logged and skipped rather than failing the request or crashing the proxy. All `ALERT_*` env vars have equivalent config-file fields (`alert_daily_spend_usd`, `alert_tokens_per_hour`, `alert_request_tokens`, `alert_anomaly_enabled`, `alert_anomaly_interval_minutes`, `alert_cooldown_minutes`, `alert_webhook_url`, `alert_webhook_types`); env vars take precedence.
+HoV Router can emit threshold and anomaly alerts and deliver them via webhook and the dashboard. Alerts are persisted to the same database as requests and deduplicated per cooldown bucket; persistence is best-effort — a database failure is logged and skipped rather than failing the request or crashing the proxy. All `ALERT_*` env vars have equivalent config-file fields (`alert_daily_spend_usd`, `alert_tokens_per_hour`, `alert_request_tokens`, `alert_anomaly_enabled`, `alert_anomaly_interval_minutes`, `alert_cooldown_minutes`, `alert_webhook_url`, `alert_webhook_types`); env vars take precedence.
 
 | Variable | Purpose | Default | Example |
 |----------|---------|---------|---------|
@@ -1116,7 +1116,7 @@ Environment variables:
 export PORT=3000
 export LOG_LEVEL=DEBUG
 export LOG_FORMAT=pretty
-export better-ccflare_DEBUG=1
+export BETTER_CCFLARE_DEBUG=1
 export RETRY_ATTEMPTS=5
 ```
 
@@ -1352,7 +1352,7 @@ As of **2026-10-03 UTC**, [#402](https://github.com/StartupBros-com/better-ccfla
 
 A later, separate approval authorized Auto activation at **04:42:21Z**: six line assignments, eight enrolled accounts, two fallback edges and **zero paid-spend grants**. Authenticated discovery returned ten choices (six preserved manual, four quality); an unused session returned HTTP 404 with exactly `{"status":"unknown"}`, not disabled. Background-merge policy remained enabled. The integrating session verified unchanged before/after checksums for the app config and both profile files. The independent verifier corroborated the app config and route-profile drop-in checksums, but could not read the protected profile environment file. Discovery and policy presence do not prove selected-account eligibility or inference success.
 
-[Issue #398](https://github.com/StartupBros-com/better-ccflare/issues/398) remains open for U8: selected-account eligibility, real interactive tool-rich main-agent/home/worker/fallback acceptance and the actual unwanted picker-row source are still outstanding. No real interactive Auto turn or original affected GPT-5.6 picker UI has been supplied for this acceptance check.
+[Issue #398](https://github.com/StartupBros/hov-router/issues/398) remains open for U8: selected-account eligibility, real interactive tool-rich main-agent/home/worker/fallback acceptance and the actual unwanted picker-row source are still outstanding. No real interactive Auto turn or original affected GPT-5.6 picker UI has been supplied for this acceptance check.
 
 ### Activation and reverse-disable
 
@@ -1387,7 +1387,7 @@ Independent installed-binary verification at `312ff63d` passed **17/17 tests (14
 Enable comprehensive debugging:
 
 ```bash
-export better-ccflare_DEBUG=1
+export BETTER_CCFLARE_DEBUG=1
 export LOG_LEVEL=DEBUG
 export LOG_FORMAT=json  # For structured logging
 ```

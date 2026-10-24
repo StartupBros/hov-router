@@ -1,5 +1,7 @@
 # Migration Guide: Version 2 to Version 3
 
+> This guide covers the upstream better-ccflare v2 to v3 transition (the `better-ccflare` npm package). The npm commands below are upstream commands. HoV Router is a continuation of upstream and publishes no npm package; see [reference.md](reference.md#install-from-source) for installing it.
+
 This guide covers the important changes and migration steps when upgrading from better-ccflare version 2.x to version 3.x.
 
 ## Overview
@@ -181,5 +183,5 @@ If you encounter issues during migration:
 
 1. Check the logs for error messages
 2. Verify your database backup exists
-3. Consult the [GitHub Issues](https://github.com/tombii/better-ccflare/issues) page
+3. Consult the [GitHub Issues](https://github.com/StartupBros/hov-router/issues) page
 4. Create a new issue if needed with your version information and error details

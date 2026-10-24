@@ -197,7 +197,7 @@ npm install -g better-ccflare
 # Start better-ccflare (Server + Dashboard)
 better-ccflare
 ```
-Continue to [Configure Claude SDK](https://github.com/tombii/better-ccflare#configure-claude-sdk).
+Continue to [Configure Claude SDK](#configure-claude-sdk).
 
 **⚠️ Windows npm Installation Issue**: If you installed via npm on Windows and encounter a path error like `"C:\\Program Files\\nodejs\\\\node_modules\\better-ccflare\\dist\\better-ccflare" is either misspelled or could not be found`, this is a known [npm bug on Windows](https://github.com/npm/cli/issues/969) affecting how npm generates wrapper scripts. See [Windows Troubleshooting](#windows-troubleshooting) for workarounds.
 ### Install via bun
@@ -208,7 +208,7 @@ bun install -g better-ccflare
 # Start better-ccflare (Server + Dashboard)
 better-ccflare
 ```
-Continue to [Configure Claude SDK](https://github.com/tombii/better-ccflare#configure-claude-sdk).
+Continue to [Configure Claude SDK](#configure-claude-sdk).
 ### Install Pre-compiled Binary (All Architectures)
 
 Download the appropriate binary for your platform from [GitHub Releases](https://github.com/tombii/better-ccflare/releases/latest):
@@ -219,14 +219,14 @@ wget https://github.com/tombii/better-ccflare/releases/latest/download/better-cc
 chmod +x better-ccflare-linux-amd64
 ./better-ccflare-linux-amd64
 ```
-Continue to [Configure Claude SDK](https://github.com/tombii/better-ccflare#configure-claude-sdk).
+Continue to [Configure Claude SDK](#configure-claude-sdk).
 #### Linux ARM64 (Raspberry Pi 3/4/5, Oracle Cloud ARM, AWS Graviton)
 ```bash
 wget https://github.com/tombii/better-ccflare/releases/latest/download/better-ccflare-linux-arm64
 chmod +x better-ccflare-linux-arm64
 ./better-ccflare-linux-arm64
 ```
-Continue to [Configure Claude SDK](https://github.com/tombii/better-ccflare#configure-claude-sdk).
+Continue to [Configure Claude SDK](#configure-claude-sdk).
 #### macOS Intel
 ```bash
 curl -L -o better-ccflare-macos-x86_64 https://github.com/tombii/better-ccflare/releases/latest/download/better-ccflare-macos-x86_64
@@ -237,7 +237,7 @@ xattr -d com.apple.quarantine better-ccflare-macos-x86_64
 
 ./better-ccflare-macos-x86_64
 ```
-Continue to [Configure Claude SDK](https://github.com/tombii/better-ccflare#configure-claude-sdk).
+Continue to [Configure Claude SDK](#configure-claude-sdk).
 #### macOS Apple Silicon
 ```bash
 curl -L -o better-ccflare-macos-arm64 https://github.com/tombii/better-ccflare/releases/latest/download/better-ccflare-macos-arm64
@@ -248,13 +248,13 @@ xattr -d com.apple.quarantine better-ccflare-macos-arm64
 
 ./better-ccflare-macos-arm64
 ```
-Continue to [Configure Claude SDK](https://github.com/tombii/better-ccflare#configure-claude-sdk).
+Continue to [Configure Claude SDK](#configure-claude-sdk).
 
 **macOS Gatekeeper Notice:** The upstream macOS binaries are not notarized by Apple as this requires a paid Apple Developer subscription. After downloading, you must remove the quarantine attribute using the `xattr` command shown above to run the binary. If you prefer not to run unsigned binaries, you can [install from source](#install-from-source) instead.
 
 #### Windows x86_64
 Download [`better-ccflare-windows-x64.exe`](https://github.com/tombii/better-ccflare/releases/latest/download/better-ccflare-windows-x64.exe) and run it.
-Continue to [Configure Claude SDK](https://github.com/tombii/better-ccflare#configure-claude-sdk).
+Continue to [Configure Claude SDK](#configure-claude-sdk).
 ### Run without installation (npx/bunx)
 
 ```bash
@@ -264,7 +264,7 @@ npx better-ccflare@latest
 # Run with bunx (faster for bun users)
 bunx better-ccflare@latest
 ```
-Continue to [Configure Claude SDK](https://github.com/tombii/better-ccflare#configure-claude-sdk).
+Continue to [Configure Claude SDK](#configure-claude-sdk).
 </details>
 
 The configuration reference below applies to HoV Router. Both compatibility commands work with the optional release aliases or the source installation.
@@ -285,7 +285,7 @@ BETTER_CCFLARE_DB_PATH=/path/to/database.db  # Custom database path (default: ~/
 # Logging and Debugging
 LOG_LEVEL=INFO                         # Log level (ERROR, WARN, INFO, DEBUG)
 LOG_FORMAT=json                        # Log format (json or text)
-better-ccflare_DEBUG=0                  # Enable debug mode (1 for enabled)
+BETTER_CCFLARE_DEBUG=0                  # Enable debug mode (1 for enabled)
 
 # SSL/TLS Configuration
 SSL_KEY_PATH=/path/to/key.pem          # SSL private key path (for HTTPS)
