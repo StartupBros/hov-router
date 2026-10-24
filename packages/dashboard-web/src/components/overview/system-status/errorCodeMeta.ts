@@ -43,7 +43,7 @@ const KNOWN_ERROR_META: Record<
 	upstream_429_no_reset_default_5h: {
 		title: "Provider rate limit (legacy 5h ban)",
 		description:
-			"Legacy ban from ccflare ≤ v3.5.x. No longer emitted by current code.",
+			"Legacy ban from better-ccflare ≤ v3.5.x, before HoV Router. No longer emitted by current code.",
 		suggestion: "Historical record — no action needed.",
 		severity: "warning",
 	},

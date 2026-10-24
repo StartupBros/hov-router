@@ -24,6 +24,7 @@
  * would multiply the effective budget by the replica count; that setup needs
  * shared state (or affinity) and is out of scope here.
  */
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { Logger } from "@better-ccflare/logger";
 
 const log = new Logger("SessionGovernor");
@@ -164,7 +165,7 @@ export function buildSessionRejectResponse(
 			type: "error",
 			error: {
 				type: "rate_limit_error",
-				message: `better-ccflare session budget exceeded: ${verdict.count} requests in the last hour (limit ${verdict.maxLimit}). This usually indicates runaway subagent fan-out. Raise ${SESSION_GOVERNOR_MAX_ENV} to increase the budget or set it to 0 to disable enforcement.`,
+				message: `${PRODUCT_NAME} session budget exceeded: ${verdict.count} requests in the last hour (limit ${verdict.maxLimit}). This usually indicates runaway subagent fan-out. Raise ${SESSION_GOVERNOR_MAX_ENV} to increase the budget or set it to 0 to disable enforcement.`,
 			},
 		}),
 		{

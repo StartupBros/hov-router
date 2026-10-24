@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { getLegacyDbPath, resolveDbPath } from "./paths";
 
 /**
@@ -51,7 +52,7 @@ export function migrateFromCcflare(): boolean {
 		}
 
 		console.log(`
-⚠️  Migration complete! Your ccflare data has been copied to better-ccflare.
+⚠️  Migration complete! Your ccflare data has been copied to ${PRODUCT_NAME}.
    The original ccflare files have been left intact for safety.
    You can delete them manually if desired: ${dirname(legacyDbPath)}/
 `);

@@ -1,3 +1,4 @@
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import { Logger } from "@better-ccflare/logger";
 import type { XaiUsageData } from "@better-ccflare/types";
 
@@ -320,7 +321,7 @@ export async function fetchXaiUsageData(
 				"Content-Type": "application/grpc-web+proto",
 				"x-grpc-web": "1",
 				"x-user-agent": "connect-es/2.1.1",
-				"User-Agent": "better-ccflare/xai-usage",
+				"User-Agent": `${COMMAND_NAME}/xai-usage`,
 			},
 			body: EMPTY_GRPC_WEB_FRAME,
 			signal: controller.signal,

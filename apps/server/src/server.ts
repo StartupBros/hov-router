@@ -26,6 +26,7 @@ import {
 	shutdown,
 	TIME_CONSTANTS,
 } from "@better-ccflare/core";
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { container, SERVICE_KEYS } from "@better-ccflare/core-di";
 import type { DatabaseOperations } from "@better-ccflare/database";
 import {
@@ -2616,7 +2617,7 @@ export default async function startServer(options?: {
 					? "unavailable (assets not found)"
 					: "disabled";
 		console.log(`
-🎯 better-ccflare Server v${version}
+🎯 ${PRODUCT_NAME} Server v${version}
 🌐 Port: ${serverInstance.port}
 🌍 Host: ${hostname}
 ${tlsEnabled ? "🔒 TLS: enabled" : ""}
