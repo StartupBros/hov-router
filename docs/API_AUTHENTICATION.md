@@ -2,7 +2,7 @@
 
 ## Overview
 
-better-ccflare now supports optional API authentication that allows you to secure your proxy endpoint with API keys. When API keys are configured, all requests to the proxy API must include a valid API key.
+HoV Router (formerly better-ccflare) supports optional API authentication that allows you to secure your proxy endpoint with API keys. When API keys are configured, all requests to the proxy API must include a valid API key.
 
 ## 🚀 Quick Start
 
@@ -10,7 +10,7 @@ better-ccflare now supports optional API authentication that allows you to secur
 
 ```bash
 # Generate a new API key
-better-ccflare --generate-api-key "Production App"
+hov-router --generate-api-key "Production App"
 
 # ✅ API Key Generated Successfully!
 # Name: Production App
@@ -72,18 +72,18 @@ Authorization: Bearer btr-abcdef1234567890...
 ### Generate API Keys
 ```bash
 # Generate new API key
-better-ccflare --generate-api-key "My App"
+hov-router --generate-api-key "My App"
 
 # Generate multiple keys for different environments
-better-ccflare --generate-api-key "Production"
-better-ccflare --generate-api-key "Development"
-better-ccflare --generate-api-key "Testing"
+hov-router --generate-api-key "Production"
+hov-router --generate-api-key "Development"
+hov-router --generate-api-key "Testing"
 ```
 
 ### List API Keys
 ```bash
 # List all API keys with status
-better-ccflare --list-api-keys
+hov-router --list-api-keys
 
 # Output:
 # API Keys:
@@ -102,19 +102,19 @@ better-ccflare --list-api-keys
 ### Manage API Keys
 ```bash
 # Disable an API key (temporary)
-better-ccflare --disable-api-key "Production"
+hov-router --disable-api-key "Production"
 
 # Enable a disabled API key
-better-ccflare --enable-api-key "Production"
+hov-router --enable-api-key "Production"
 
 # Delete an API key permanently
-better-ccflare --delete-api-key "Production"
+hov-router --delete-api-key "Production"
 ```
 
 ## 🌐 Web Dashboard
 
 ### Access the API Keys Interface
-1. Navigate to your better-ccflare dashboard (default: http://localhost:8080)
+1. Navigate to your HoV Router dashboard (default: http://localhost:8080)
 2. Click **"API Keys"** in the navigation menu
 3. View statistics, generate new keys, and manage existing ones
 
@@ -242,22 +242,22 @@ curl -X DELETE http://localhost:8080/api/api-keys/Production \
 ### **Environment-Specific Keys**
 ```bash
 # Production environment
-better-ccflare --generate-api-key "Production-Web-App"
-better-ccflare --generate-api-key "Production-API"
+hov-router --generate-api-key "Production-Web-App"
+hov-router --generate-api-key "Production-API"
 
 # Development environment
-better-ccflare --generate-api-key "Dev-Local"
-better-ccflare --generate-api-key "Dev-Testing"
+hov-router --generate-api-key "Dev-Local"
+hov-router --generate-api-key "Dev-Testing"
 
 # Staging environment
-better-ccflare --generate-api-key "Staging-App"
+hov-router --generate-api-key "Staging-App"
 ```
 
 ### **Access Control**
 ```bash
 # Create keys with limited scope
-better-ccflare --generate-api-key "Read-Only-Integration"
-better-ccflare --generate-api-key "Write-Access-Service"
+hov-router --generate-api-key "Read-Only-Integration"
+hov-router --generate-api-key "Write-Access-Service"
 ```
 
 ## ⚡ Performance
@@ -294,7 +294,7 @@ Run the performance benchmark script to test your setup:
 
 2. **Generate First API Key**:
    ```bash
-   better-ccflare --generate-api-key "First Key"
+   hov-router --generate-api-key "First Key"
    ```
 
 3. **Update Client Code**:
@@ -314,7 +314,7 @@ Run the performance benchmark script to test your setup:
 #### API Key Not Working
 ```bash
 # Check if API key exists and is active
-better-ccflare --list-api-keys
+hov-router --list-api-keys
 
 # Verify key format (should start with "btr-")
 echo "btr-abcdef1234567890..." | grep -E "^btr-[a-zA-Z0-9]{32}$"
@@ -337,7 +337,7 @@ curl http://localhost:8080/health
 
 # Restart server with clean state
 pkill better-ccflare
-better-ccflare --serve
+hov-router --serve
 ```
 
 ### **Debug Mode**
@@ -345,7 +345,7 @@ Enable verbose logging for authentication debugging:
 
 ```bash
 # Start server with debug logging
-DEBUG=auth:* better-ccflare --serve
+DEBUG=auth:* hov-router --serve
 ```
 
 ## 📚 Reference
@@ -371,17 +371,17 @@ The following paths are exempt from authentication:
 ### **CLI Reference**
 ```bash
 # Help
-better-ccflare --help
+hov-router --help
 
 # Version
-better-ccflare --version
+hov-router --version
 
 # API Key Commands
-better-ccflare --generate-api-key <name>
-better-ccflare --list-api-keys
-better-ccflare --disable-api-key <name>
-better-ccflare --enable-api-key <name>
-better-ccflare --delete-api-key <name>
+hov-router --generate-api-key <name>
+hov-router --list-api-keys
+hov-router --disable-api-key <name>
+hov-router --enable-api-key <name>
+hov-router --delete-api-key <name>
 ```
 
 ## 🚀 Advanced Usage
@@ -410,8 +410,8 @@ console.log(`Generated key: ${apiKey} (prefix: ${prefixLast8})`);
 # deploy.sh - Deployment automation script
 
 # Generate deployment keys
-PROD_KEY=$(better-ccflare --generate-api-key "production" | grep "Key:" | awk '{print $2}')
-STAGING_KEY=$(better-ccflare --generate-api-key "staging" | grep "Key:" | awk '{print $2}')
+PROD_KEY=$(hov-router --generate-api-key "production" | grep "Key:" | awk '{print $2}')
+STAGING_KEY=$(hov-router --generate-api-key "staging" | grep "Key:" | awk '{print $2}')
 
 # Store keys securely (example with environment variables)
 export PROD_API_KEY="$PROD_KEY"
@@ -425,7 +425,9 @@ echo "✅ API keys generated for deployment"
 # Dockerfile.example
 FROM node:18-alpine
 
-# Install better-ccflare
+# Install better-ccflare. NOTE: this installs the UPSTREAM npm package (tombii/better-ccflare);
+# HoV Router has no registry package. To run HoV Router, install from source instead:
+# see docs/reference.md#install-from-source
 RUN npm install -g better-ccflare
 
 # Generate API key during build
@@ -440,11 +442,9 @@ CMD ["node", "server.js"]
 
 ## 🆘 Need Help?
 
-- **Documentation**: [Full Documentation](https://github.com/your-repo/better-ccflare)
-- **Issues**: [GitHub Issues](https://github.com/your-repo/better-ccflare/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-repo/better-ccflare/discussions)
-- **Community**: [Join our Discord](https://discord.gg/better-ccflare)
+- **Documentation**: [Full Documentation](https://github.com/StartupBros/hov-router)
+- **Issues**: [GitHub Issues](https://github.com/StartupBros/hov-router/issues)
 
 ---
 
-*API authentication is optional. Your better-ccflare instance will work exactly as before until you generate your first API key.*
+*API authentication is optional. Your HoV Router instance will work exactly as before until you generate your first API key.*

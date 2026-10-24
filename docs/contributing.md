@@ -1,6 +1,6 @@
-# Contributing to better-ccflare
+# Contributing to HoV Router
 
-Welcome to better-ccflare! We're thrilled that you're interested in contributing to our Claude load balancer project. This document provides guidelines and instructions for contributing to the project.
+Welcome to HoV Router (formerly better-ccflare)! We're thrilled that you're interested in contributing to our Claude load balancer project. This document provides guidelines and instructions for contributing to the project.
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@ Welcome to better-ccflare! We're thrilled that you're interested in contributing
 
 ## Welcome & Code of Conduct
 
-First off, thank you for considering contributing to better-ccflare! We welcome contributions from everyone, regardless of their background or experience level.
+First off, thank you for considering contributing to HoV Router! We welcome contributions from everyone, regardless of their background or experience level.
 
 ### Our Pledge
 
@@ -64,13 +64,13 @@ Before you begin, ensure you have the following installed:
 
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/better-ccflare.git
+   git clone https://github.com/YOUR_USERNAME/hov-router.git better-ccflare
    cd better-ccflare
    ```
 
 3. **Add the upstream remote**:
    ```bash
-   git remote add upstream https://github.com/ORIGINAL_OWNER/better-ccflare.git
+   git remote add upstream https://github.com/StartupBros/hov-router.git
    ```
 
 4. **Install dependencies**:
@@ -194,7 +194,7 @@ When contributing, document major architectural changes or new patterns in `AGEN
 
 ## Project Structure
 
-better-ccflare is organized as a Bun monorepo with clear separation of concerns:
+HoV Router is organized as a Bun monorepo with clear separation of concerns:
 
 ```
 better-ccflare/
@@ -231,6 +231,8 @@ better-ccflare/
 
 - Apps: Simple names (e.g., `server`, `cli`, `lander`)
 - Packages: Prefixed with `@better-ccflare/` (e.g., `@better-ccflare/core`, `@better-ccflare/database`)
+
+The `@better-ccflare/*` workspace package names are internal and intentionally unchanged.
 
 ## Coding Standards
 
@@ -742,7 +744,7 @@ Contributors are recognized in:
 The CLI functionality provides explicit commands for all operations. Use `bun run cli` with command-line flags:
 
 ```bash
-# If better-ccflare is not installed globally, use:
+# If the hov-router command is not installed globally, use:
 # bun run cli [options]
 # or build and run with: bun run better-ccflare
 
@@ -838,4 +840,4 @@ bun run build:lander
 3. **Import errors**: Ensure you're using workspace imports (`@better-ccflare/*`) for cross-package dependencies
 4. **Database issues**: The SQLite database is created automatically in the data directory
 
-Thank you for contributing to better-ccflare! Your efforts help make Claude AI more accessible to everyone.
+Thank you for contributing to HoV Router! Your efforts help make Claude AI more accessible to everyone.

@@ -18,12 +18,11 @@ A clear and concise description of any alternative solutions or features you've 
 **Environment Information**
 To help us understand the context of your feature request, please provide:
 
-- **better-ccflare version**: [e.g., v2.1.0, or commit hash if built from source]
+- **HoV Router version**: [output of `hov-router --version`, or commit hash if built from source]
 - **Installation method**: 
-  - [ ] npm (`npm install -g better-ccflare`)
-  - [ ] bun (`bun install -g better-ccflare`)
-  - [ ] Pre-compiled binary (downloaded from GitHub releases)
-  - [ ] Built from source (`git clone` and `bun install`)
+  - [ ] Linux x86_64 release binary (StartupBros/hov-router releases)
+  - [ ] Built from source (`git clone` + `bun install`)
+  - [ ] Upstream better-ccflare package (npm/bun) - please report upstream-only issues at tombii/better-ccflare
   - [ ] Docker/Docker Compose
   - [ ] Other (please specify)
 - **Use case**: Describe how you would use this feature in your workflow

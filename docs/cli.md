@@ -672,8 +672,8 @@ The SQLite database follows the same directory structure:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `better-ccflare_CONFIG_PATH` | Override config file location | Platform default |
-| `better-ccflare_DB_PATH` | Override database location | Platform default |
+| `BETTER_CCFLARE_CONFIG_PATH` | Override config file location | Platform default |
+| `BETTER_CCFLARE_DB_PATH` | Override database location | Platform default |
 | `PORT` | Server port | 8080 |
 | `CLIENT_ID` | OAuth client ID | 9d1c250a-e61b-44d9-88ed-5944d1962f5e |
 | `BETTER_CCFLARE_API_URL` | Loopback origin for live managed-routing CLI operations | `http://127.0.0.1:8788` |
@@ -705,7 +705,7 @@ The SQLite database follows the same directory structure:
 |----------|-------------|---------|
 | `LOG_LEVEL` | Log verbosity (DEBUG/INFO/WARN/ERROR) | INFO |
 | `LOG_FORMAT` | Output format (pretty/json) | pretty |
-| `better-ccflare_DEBUG` | Enable debug mode (1/0) - enables console output | 0 |
+| `BETTER_CCFLARE_DEBUG` | Enable debug mode (1/0) - enables console output | 0 |
 
 ### Pricing and Features
 
@@ -800,7 +800,7 @@ Status returns `known`, intent revision/preference, pending/in-flight state, cur
 
 **Installed-binary verification — 2026-10-03, `312ff63d`:** the independently hash-verified production executable passed **17/17 tests (149 assertions)** and **22/22 historical checks** under `env -i` / `bwrap --unshare-all`, with synthetic loopback services and no provider calls. Physical executable-directory `/app/.env` fallback, project fallback, precedence/expansion, control-mode credential refusal, proxy denial and redirect refusal passed. The actual compiled retry command produced GET → POST → POST with identical idempotency-bearing bodies and one synthetic mutation after a lost response. This proves CLI transport/redelivery against a synthetic receipt server, not live-handler persistence or live-provider routing.
 
-Auto was separately authorized and enabled at **2026-10-03 04:42:21Z**, with zero paid-spend grants. Production discovery lists six preserved manual choices plus four quality choices; an unused session returns HTTP 404 with `{"status":"unknown"}`, not disabled. The earlier `0666336e` **21/22, exit 1** smoke is retained as [historical evidence](troubleshooting.md#auto-quality-routing), not a current fallback blocker. [Issue #398](https://github.com/StartupBros-com/better-ccflare/issues/398) remains open for selected-account eligibility, real interactive tool-rich Auto/home/worker/fallback acceptance and the original picker report.
+Auto was separately authorized and enabled at **2026-10-03 04:42:21Z**, with zero paid-spend grants. Production discovery lists six preserved manual choices plus four quality choices; an unused session returns HTTP 404 with `{"status":"unknown"}`, not disabled. The earlier `0666336e` **21/22, exit 1** smoke is retained as [historical evidence](troubleshooting.md#auto-quality-routing), not a current fallback blocker. [Issue #398](https://github.com/StartupBros/hov-router/issues/398) remains open for selected-account eligibility, real interactive tool-rich Auto/home/worker/fallback acceptance and the original picker report.
 
 ### Getting Support
 

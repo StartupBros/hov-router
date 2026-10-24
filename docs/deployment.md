@@ -1,10 +1,10 @@
-# better-ccflare Deployment Documentation
+# HoV Router Deployment Documentation
 
 ## Overview
 
-better-ccflare is a load balancer proxy for Claude API accounts that can be deployed in various configurations, from simple local development to production-grade distributed systems. This document covers all deployment options, from single-instance setups to scalable architectures.
+HoV Router (formerly better-ccflare) is a load balancer proxy for Claude API accounts that can be deployed in various configurations, from simple local development to production-grade distributed systems. This document covers all deployment options, from single-instance setups to scalable architectures.
 
-> **Important**: better-ccflare provides a powerful CLI interface and web dashboard for monitoring and management. The main executable `better-ccflare` provides all functionality through command-line flags.
+> **Important**: HoV Router provides a powerful CLI interface and web dashboard for monitoring and management. The primary command is `hov-router` (the `wstack-router` and `better-ccflare` compatibility commands also work); the executable provides all functionality through command-line flags.
 
 ## Table of Contents
 
@@ -64,7 +64,7 @@ graph TB
 
 ```bash
 # Clone the repository
-git clone https://github.com/snipeship/better-ccflare.git
+git clone https://github.com/StartupBros/hov-router.git better-ccflare
 cd better-ccflare
 
 # Install dependencies
@@ -73,7 +73,7 @@ bun install
 # Build the project (dashboard and CLI)
 bun run build
 
-# Start better-ccflare (Server + Dashboard)
+# Start HoV Router (Server + Dashboard)
 bun run better-ccflare
 
 # Or use CLI commands:
@@ -117,13 +117,13 @@ bun run better-ccflare
 
 ### Bun Binary Compilation
 
-Compile better-ccflare into a single executable for easy deployment:
+Compile HoV Router into a single executable for easy deployment:
 
 ```bash
 # Build all components (dashboard and CLI)
 bun run build
 
-# Build the main better-ccflare binary (includes CLI and server)
+# Build the main HoV Router binary (includes CLI and server)
 cd apps/cli
 bun build src/main.ts --compile --outfile dist/better-ccflare --target=bun
 
@@ -203,7 +203,7 @@ Create a systemd service file:
 # Create service file
 sudo cat > /etc/systemd/system/better-ccflare.service << 'EOF'
 [Unit]
-Description=better-ccflare Load Balancer
+Description=HoV Router Load Balancer
 After=network.target
 
 StartLimitIntervalSec=300
@@ -313,7 +313,7 @@ USER better-ccflare
 
 # Environment
 ENV PORT=8080
-ENV better-ccflare_CONFIG_PATH=/config/better-ccflare.json
+ENV BETTER_CCFLARE_CONFIG_PATH=/config/better-ccflare.json
 
 EXPOSE 8080
 
@@ -580,7 +580,7 @@ better-ccflare.yourdomain.com {
 ```mermaid
 graph TB
     subgraph "Logging Architecture"
-        APP[better-ccflare Server]
+        APP[HoV Router Server]
         
         subgraph "Log Outputs"
             FILE[File Logs<br/>/var/log/better-ccflare/]
@@ -812,12 +812,12 @@ graph TB
 
 ### Database Considerations
 
-better-ccflare uses SQLite by default, which is suitable for single-instance deployments. For Kubernetes deployments where the pod's local disk isn't durable across restarts, set `DATABASE_URL` to use PostgreSQL instead (see [PostgreSQL Support for Kubernetes Deployments](#postgresql-support-for-kubernetes-deployments) above). This does not permit running multiple replicas — see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database) below.
+HoV Router uses SQLite by default, which is suitable for single-instance deployments. For Kubernetes deployments where the pod's local disk isn't durable across restarts, set `DATABASE_URL` to use PostgreSQL instead (see [PostgreSQL Support for Kubernetes Deployments](#postgresql-support-for-kubernetes-deployments) above). This does not permit running multiple replicas — see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database) below.
 
 #### SQLite Optimization (Default)
 
 ```sql
--- These optimizations are automatically applied by better-ccflare
+-- These optimizations are automatically applied by HoV Router
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -20000;  -- 20MB cache
@@ -827,7 +827,7 @@ PRAGMA mmap_size = 268435456;
 
 ### PostgreSQL Support for Kubernetes Deployments
 
-SQLite is unsuitable for Kubernetes deployments because a pod's local disk is not guaranteed to survive a restart or reschedule. better-ccflare has first-class PostgreSQL support via `Bun.SQL` — set the `DATABASE_URL` environment variable and the schema is created automatically on startup. Note this solves *durability*, not *concurrency*: better-ccflare is still [single-instance-per-database](#multi-instance-deployment-single-instance-per-database), so this is for a single pod (`replicas: 1`), not a multi-pod fleet sharing one database.
+SQLite is unsuitable for Kubernetes deployments because a pod's local disk is not guaranteed to survive a restart or reschedule. HoV Router has first-class PostgreSQL support via `Bun.SQL` — set the `DATABASE_URL` environment variable and the schema is created automatically on startup. Note this solves *durability*, not *concurrency*: HoV Router is still [single-instance-per-database](#multi-instance-deployment-single-instance-per-database), so this is for a single pod (`replicas: 1`), not a multi-pod fleet sharing one database.
 
 ```bash
 # Create a PostgreSQL database
@@ -843,7 +843,7 @@ The full schema (`accounts`, `requests`, `request_payloads`, `oauth_sessions`, `
 
 ### Kubernetes Deployment
 
-> **Important**: better-ccflare is [single-instance-per-database](#multi-instance-deployment-single-instance-per-database) — run exactly **one** replica per `DATABASE_URL`. Use PostgreSQL (not SQLite) so the pod's state survives a restart or reschedule, but do not scale this deployment horizontally; two pods sharing one database will silently diverge (as of [PR #376](https://github.com/tombii/better-ccflare/pull/376), the startup guard will warn — but not refuse by default — when this happens). To scale, run separate `DATABASE_URL`-per-deployment stacks with disjoint account sets (see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database)).
+> **Important**: HoV Router is [single-instance-per-database](#multi-instance-deployment-single-instance-per-database) — run exactly **one** replica per `DATABASE_URL`. Use PostgreSQL (not SQLite) so the pod's state survives a restart or reschedule, but do not scale this deployment horizontally; two pods sharing one database will silently diverge (as of [PR #376](https://github.com/tombii/better-ccflare/pull/376), the startup guard will warn — but not refuse by default — when this happens). To scale, run separate `DATABASE_URL`-per-deployment stacks with disjoint account sets (see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database)).
 
 ```yaml
 # better-ccflare-deployment.yaml
@@ -937,7 +937,7 @@ stringData:
 
 ## Multi-Instance Deployment: Single-Instance-per-Database
 
-> **Operator rule (read first):** better-ccflare is **single-instance-per-database**. Run exactly one process per database. Running two or more instances against the same database is unsupported and will silently diverge.
+> **Operator rule (read first):** HoV Router is **single-instance-per-database**. Run exactly one process per database. Running two or more instances against the same database is unsupported and will silently diverge.
 
 This is the most important sentence in the deployment guide. The rest of this section explains why, what diverges, and what the operator should do instead.
 
@@ -999,7 +999,7 @@ There is no error. Each instance sees the same database and the same set of acco
 
 ### Health Check Endpoint
 
-better-ccflare provides a health check endpoint for monitoring:
+HoV Router provides a health check endpoint for monitoring:
 
 ```bash
 # Check health status
@@ -1130,9 +1130,9 @@ healthcheck:
 4. **Rate Limit Issues**
    ```bash
    # Check account status
-   better-ccflare --list
+   hov-router --list
    # Reset statistics
-   better-ccflare --reset-stats
+   hov-router --reset-stats
    ```
 
 ## Maintenance
@@ -1141,7 +1141,7 @@ healthcheck:
 
 ```bash
 # Daily: Check recent logs
-better-ccflare --logs 100 | grep ERROR
+hov-router --logs 100 | grep ERROR
 
 # Weekly: Database maintenance
 # Linux/macOS:
@@ -1149,7 +1149,7 @@ sqlite3 ~/.config/better-ccflare/better-ccflare.db "VACUUM;"
 sqlite3 ~/.config/better-ccflare/better-ccflare.db "ANALYZE;"
 
 # Monthly: Clean old request history
-better-ccflare --clear-history
+hov-router --clear-history
 
 # Quarterly: Update dependencies (if running from source)
 cd /path/to/better-ccflare
@@ -1207,7 +1207,7 @@ find /backup/better-ccflare -name "*.tar.gz" -mtime +30 -delete
 | `LB_STRATEGY` | session | Load balancing strategy: `session`, `least-used`, `session-affinity`, or opt-in `session-drain-soonest`. Session-based strategies preserve OAuth stickiness; `least-used` spreads requests by utilization. |
 | `LOG_LEVEL` | INFO | Logging level: `DEBUG`, `INFO`, `WARN`, `ERROR` |
 | `LOG_FORMAT` | pretty | Log format: `pretty` (human-readable) or `json` (structured) |
-| `better-ccflare_DEBUG` | 0 | Enable debug mode (1/0) - enables console output |
+| `BETTER_CCFLARE_DEBUG` | 0 | Enable debug mode (1/0) - enables console output |
 
 ### Advanced Configuration
 
@@ -1218,13 +1218,13 @@ find /backup/better-ccflare -name "*.tar.gz" -mtime +30 -delete
 | `RETRY_ATTEMPTS` | 3 | Number of retry attempts for failed requests |
 | `RETRY_DELAY_MS` | 1000 | Initial delay between retries in milliseconds |
 | `RETRY_BACKOFF` | 2 | Backoff multiplier for exponential retry delays |
-| `better-ccflare_CONFIG_PATH` | Platform-specific | Path to configuration file |
-| `better-ccflare_DB_PATH` | Platform-specific | Path to SQLite database file (ignored when `DATABASE_URL` is set) |
+| `BETTER_CCFLARE_CONFIG_PATH` | Platform-specific | Path to configuration file |
+| `BETTER_CCFLARE_DB_PATH` | Platform-specific | Path to SQLite database file (ignored when `DATABASE_URL` is set) |
 | `DATABASE_URL` | - | PostgreSQL connection string. When set, PostgreSQL is used instead of SQLite. Recommended for single-pod Kubernetes deployments (durable state across restarts). Each better-ccflare instance requires its own database — see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database). Example: `postgresql://user:pass@host:5432/db` |
 
 ### Configuration File
 
-better-ccflare also supports a JSON configuration file that takes precedence over environment variables:
+HoV Router also supports a JSON configuration file that takes precedence over environment variables:
 
 ```json
 {
@@ -1244,7 +1244,7 @@ The configuration file is located at:
 
 ## Conclusion
 
-better-ccflare is designed to be flexible and scalable, supporting everything from simple local deployments to complex distributed architectures. Choose the deployment option that best fits your needs and scale as your requirements grow.
+HoV Router is designed to be flexible and scalable, supporting everything from simple local deployments to complex distributed architectures. Choose the deployment option that best fits your needs and scale as your requirements grow.
 
 ### Key Features Summary
 
@@ -1260,17 +1260,17 @@ better-ccflare is designed to be flexible and scalable, supporting everything fr
 - [Configuration Guide](./configuration.md)
 - [Load Balancing Strategies](./load-balancing.md)
 - [API Reference](./api-http.md)
-- [GitHub Repository](https://github.com/snipeship/better-ccflare)
+- [GitHub Repository](https://github.com/StartupBros/hov-router)
 
 ## Web Dashboard
 
-better-ccflare includes a powerful web-based dashboard for monitoring and management.
+HoV Router includes a powerful web-based dashboard for monitoring and management.
 
 ### Accessing the Dashboard
 
 ```bash
-# Start better-ccflare server with embedded dashboard
-better-ccflare --serve
+# Start HoV Router server with embedded dashboard
+hov-router --serve
 
 # Or from source:
 bun run better-ccflare
@@ -1299,12 +1299,12 @@ bun run better-ccflare
 
 ### Remote API Connection
 
-The better-ccflare CLI can connect to a remote API server for distributed deployments:
+The HoV Router CLI can connect to a remote API server for distributed deployments:
 
 ```bash
 # Set API URL for remote connection
 export BETTER_CCFLARE_API_URL=https://better-ccflare.example.com
-better-ccflare --list  # Will query the remote server
+hov-router --list  # Will query the remote server
 ```
 
 For support and updates, check the project repository and documentation.

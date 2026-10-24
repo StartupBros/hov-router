@@ -25,12 +25,11 @@ If applicable, add screenshots to help explain your problem.
 **Environment Information**
 Please complete the following information to help us troubleshoot the issue:
 
-- **better-ccflare version**: [e.g., v2.1.0, or commit hash if built from source]
+- **HoV Router version**: [output of `hov-router --version`, or commit hash if built from source]
 - **Installation method**: 
-  - [ ] npm (`npm install -g better-ccflare`)
-  - [ ] bun (`bun install -g better-ccflare`)
-  - [ ] Pre-compiled binary (downloaded from GitHub releases)
-  - [ ] Built from source (`git clone` and `bun install`)
+  - [ ] Linux x86_64 release binary (StartupBros/hov-router releases)
+  - [ ] Built from source (`git clone` + `bun install`)
+  - [ ] Upstream better-ccflare package (npm/bun) - please report upstream-only issues at tombii/better-ccflare
   - [ ] Docker/Docker Compose
   - [ ] Other (please specify)
 - **Operating System**: [e.g., Ubuntu 22.04, macOS 13.0, Windows 11]
