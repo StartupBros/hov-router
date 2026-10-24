@@ -1,6 +1,6 @@
 # Repository Agent Instructions
 
-Repository instructions for any agent working on better-ccflare, a load balancer proxy distributing requests across multiple account providers to avoid rate limiting.
+Instructions for any agent working on **HoV Router** (`hov-router`): a load balancer and gateway that routes Claude Code and other clients across multiple provider accounts, with a dashboard for usage, cost and errors. It is a House of Vibe project at [StartupBros/hov-router](https://github.com/StartupBros/hov-router), a product fork of [tombii/better-ccflare](https://github.com/tombii/better-ccflare) (MIT). `CLAUDE.md` only imports this file, so edit this one.
 
 ## ⚠️ CRITICAL: Testing Restrictions
 
@@ -8,9 +8,22 @@ Repository instructions for any agent working on better-ccflare, a load balancer
 
 **Raw scripted Anthropic inference remains prohibited** — directly and through the proxy: no curl, test harness, or diagnostic-script probes, whether or not you would call them "testing". Real Anthropic accounts can get banned for automated/scripted usage. For scripted API requests, use a non-Anthropic account (ollama, litellm, omniroute, etc.) and force-route with `x-better-ccflare-account-id`.
 
-## ⚠️ CRITICAL: File Exclusions
+## ⚠️ CRITICAL: Names that must NOT be renamed
 
-**README files** - Only modify `./README.md` (root). Do NOT modify `apps/cli/README.md`.
+The product is HoV Router, but these operational names predate it and existing installs depend on them. A "consistency" rename breaks configuration, credentials, clients or deployments. Change them only in a separately approved migration.
+
+- **Commands:** `hov-router` is preferred; `wstack-router` and `better-ccflare` must keep working (`COMMAND_NAMES` in `packages/core/src/product-identity.ts`).
+- **Storage:** config directory `~/.config/better-ccflare` (or `$XDG_CONFIG_HOME/better-ccflare`; Windows `better-ccflare` under `LOCALAPPDATA`/`APPDATA`), `better-ccflare.json`, `better-ccflare.db`.
+- **Environment variables:** `BETTER_CCFLARE_*`, `CCFLARE_*`, and the legacy `ccflare_*` fallbacks. **Headers:** `x-better-ccflare-*`.
+- **Packages and artifacts:** npm package name `better-ccflare`, internal `@better-ccflare/*` workspaces, `apps/cli/dist/better-ccflare`, release asset `better-ccflare-linux-amd64`.
+- **Ports and services:** default `8080`; production guard `:8788` → binary `:8789`; `ccflare-stack.service`.
+- **Release identity:** distribution/provenance tokens such as `v1:startupbros-wstack-router-binary`, and published v3.6.2 bytes and signer identity (historical; never rewrite).
+- **Upstream recognition and credit:** `tombii` distribution contexts in build provenance and the version checker exist to classify upstream builds; LICENSE, `docs/acknowledgements.md`, `UPSTREAM.md` and historical citations stay.
+- **Doc filenames:** `docs/wstack-router-migration.md` and `docs/wstack-router-releases.md` keep their names and anchors.
+
+Display text uses the constants instead of hard-coded names: `PRODUCT_NAME` / `COMMAND_NAME` from `@better-ccflare/core/product-identity`. Import that subpath directly, not the core barrel, which the dashboard cannot load. Reference: [docs/wstack-router-migration.md](docs/wstack-router-migration.md#what-stays-the-same).
+
+## ⚠️ CRITICAL: Generated files
 
 **NEVER TOUCH these auto-generated files** — must be excluded from all reads, edits, searches, and commits:
 - `packages/database/src/inline-vacuum-worker.ts`
@@ -28,16 +41,32 @@ import until you build once.
 export has no importers left. Still do not touch or commit it, but there is no build
 that will bring it back — deleting it is a deliberate cleanup decision, not a recovery.
 
-## Git Refspecs
-This repo has both a `main` branch and a `main` tag. **Always use `refs/heads/main`** (not `main`) for local branch operations (push, checkout). For merge-base and log comparisons against the remote, use `origin/main` (the remote ref) to avoid the ambiguous refspec warning from the local tag.
+**`apps/cli/README.md`** is a short pointer to the root README. Upstream's npm `prepublishOnly` script overwrites it with the root README at publish time, and this fork publishes no npm package. Keep product documentation in `./README.md` and `docs/`.
 
-## Branch Management
-Always branch from `main` with a fresh pull. Never make changes directly on main.
-PRs: `gh pr checkout <PR_NUMBER>` or `git checkout <branch-name>`.
-- If `git push origin main` fails with `src refspec main matches more than one` (branch/tag name collision), push explicitly: `git push origin refs/heads/main:refs/heads/main`.
+## Git
+
+This repo has both a `main` branch and a `main` tag:
+- **Push/fetch:** use `refs/heads/main` (`git push origin refs/heads/main:refs/heads/main`, `git fetch origin refs/heads/main`).
+- **Checkout:** use `git switch main`. `git checkout refs/heads/main` detaches HEAD, and the deploy gate then refuses with "checkout has detached HEAD".
+- **Comparisons:** use `origin/main` (`git merge-base`, `git log X..origin/main`) to avoid the ambiguous-refspec warning.
+
+Branch from a freshly fetched `origin/main`; never change `main` directly. Before changing anything, run `git status` and note pre-existing changes so you can tell them apart from yours. Stage files by name (`git add <files>`), never `git add .`, which picks up generated workers.
 
 ## Deployment source (production)
-Production is a root systemd service, `ccflare-stack.service` (guard on `:8788` in front of the binary on `:8789`). Deploys build from `main` ONLY, via `scripts/deploy-ccflare.sh` — it refuses to build or ship any commit that is not an ancestor of `origin/main`. The binary embeds its git SHA at build time, verifiable at runtime via the health endpoint's `git_sha` field (no need to trust the binary filename). The systemd pin lives at `/etc/systemd/system/ccflare-stack.service.d/50-pinned-build.conf`. Never let a long-lived feature branch become the de-facto trunk again — merge to `main` and deploy from there.
+Production is a root systemd service, `ccflare-stack.service` (guard on `:8788` in front of the binary on `:8789`). Deploys build from `main` ONLY, via `scripts/deploy-ccflare.sh` — it refuses to build or ship any commit that is not an ancestor of `origin/main`. The binary embeds its git SHA at build time, verifiable at runtime via the health endpoint's `git_sha` field (no need to trust the binary filename). The systemd pin lives at `/etc/systemd/system/ccflare-stack.service.d/50-pinned-build.conf`. Never let a long-lived feature branch become the de-facto trunk again — merge to `main` and deploy from there. Merging never deploys; the script is the only deploy path.
+
+## Releases and versions
+
+**NEVER bump the version by hand, and never publish to npm.** Router releases are draft-only GitHub releases produced by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`); publishing a draft is a separate operator decision. Upstream's npm, container, signing and `release.yml`/`release-dispatch.yml` publishers are fenced off for this repository and must stay that way. Full policy: [docs/wstack-router-releases.md](docs/wstack-router-releases.md).
+
+Commit prefixes drive the version and changelog (`release-please-config.json`, plus the alias map in `scripts/router-release.ts`):
+- `feat:` → minor, under Features (`feature:`/`add:`/`new:` are accepted aliases)
+- `fix:` → patch, under Bug Fixes (`bug:`/`resolve:` aliases)
+- `security:` → Security; `refactor:` → Improvements (`improve:`/`enhance:`/`update:` aliases); `perf:` → Performance Improvements
+- `docs:`, `chore:`, `test:`, `style:` alone produce no release
+- `!` or `BREAKING CHANGE` → major
+
+`CLAUDE_CLI_VERSION` in `packages/core/src/version.ts` tracks the Claude Code CLI version used in user-agent headers. It is not the product version.
 
 ## PR Review Against Current Main (MANDATORY)
 
@@ -45,7 +74,7 @@ Before reviewing or merging any PR, always find the merge base and identify what
 
 ```bash
 git fetch origin pull/<PR_NUMBER>/head:<branch-name>
-git fetch origin main
+git fetch origin refs/heads/main
 MERGE_BASE=$(git merge-base <branch-name> origin/main)
 git log $MERGE_BASE..origin/main --oneline          # commits on main the PR doesn't have
 git diff $MERGE_BASE..origin/main --name-only        # files main changed since PR branched
@@ -54,31 +83,30 @@ git diff $MERGE_BASE..origin/main --name-only        # files main changed since 
 Cross-check the PR's changed files against main's post-branch files. If they overlap, inspect those specific hunks to confirm the PR doesn't regress recent fixes. A PR based on an old main can silently overwrite hotfixes, security patches, or behaviour changes that landed after it branched.
 
 ## Merging PRs from External Contributors
-When merging PRs from external contributors (not tombii), **create a merge commit** instead of squashing or rebasing. This preserves the contributor's commit history and ensures they appear in the git log as a contributor. Use:
-```bash
-git merge --no-ff <branch-name>
-```
-The `--no-ff` flag creates a merge commit even if the branch could be fast-forwarded.
+When merging a PR from an external contributor (someone other than the repository owner), **create a merge commit** instead of squashing or rebasing, so the contributor's commits and authorship stay in history. Do **not** use `gh pr merge` for these, since it may squash or rebase:
 
-**Do NOT use `gh pr merge`** — it may squash or rebase, losing the contributor's identity. Always merge manually with `git merge --no-ff`.
-
-Note: a `--no-ff` merge commit's subject carries the PR title (e.g. `fix(proxy): ... (PR #N)`), **not** GitHub-UI's `Merge pull request #N from user/branch` format. Any tooling that scans merge commits for contributor credit or PR association must handle both formats — the release workflow (`release.yml`) does this by collecting PR numbers from both shapes and resolving authors via `gh pr view`.
-
-If the PR branch isn't available locally, fetch it first:
 ```bash
 git fetch origin pull/<PR_NUMBER>/head:<branch-name>
 git merge --no-ff <branch-name>
 ```
 
-**Merge workflow order (do not push between steps):**
+A `--no-ff` merge commit's subject carries the PR title (e.g. `fix(proxy): ... (PR #N)`), **not** GitHub-UI's `Merge pull request #N from user/branch` format. Tooling that scans merge commits for contributor credit must handle both shapes.
+
+Order, pushing only once at the end:
 1. `git merge --no-ff <branch-name>`
-2. If there are still unresolved review findings (e.g. Greptile P1s not yet fixed by the contributor), fix them directly on `main` in a follow-up commit — do not push until acknowledgements are also done.
-3. Update the Acknowledgements section in README.md to thank the contributor for their specific contributions, then commit. Ask the user whether this commit should use `[skip-version]` if not already told (most acknowledgement-only commits do use it).
-4. Push once, after merge + fixes (if any) + acknowledgement are all committed locally.
+2. Fix any still-unresolved review findings in a follow-up commit.
+3. Thank the contributor for their specific contribution in [docs/acknowledgements.md](docs/acknowledgements.md), committed as `chore: acknowledge <name> for PR #<N>` (excluded from release notes). Commit real fixes separately with their own prefix.
+4. Push merge, fixes and acknowledgement together.
+
+The owner's own PRs merge normally (squash).
+
+## Upstream syncs
+
+This is a product fork with intentional hard divergence, not a mirror. Adopt upstream releases deliberately, protecting the fork contracts listed in [UPSTREAM.md](UPSTREAM.md). Never merge or cherry-pick upstream on ahead/behind counts alone. Upstream-only issue reports belong at tombii/better-ccflare.
 
 ## Issue Management
-- Never close issues automatically
-- Wait for the issue reporter to confirm that fixes work for them before closing
+- Never close issues automatically, and use `Refs #N` rather than closing keywords in commits and PR bodies.
+- Wait for the issue reporter to confirm that fixes work for them before closing.
 
 ## Issue Staleness Check (MANDATORY before implementing)
 Before implementing any GitHub issue, always run:
@@ -105,14 +133,6 @@ When adding a new column or table to SQLite:
 
 New tables also need to be created in `ensureSchemaPg()` AND in `runMigrationsPg()` (using `CREATE TABLE IF NOT EXISTS` so upgrades work).
 
-## Subagents for Multi-Task Work
-When a session involves multiple independent tasks, always spawn subagents rather than doing them sequentially in the main context. This conserves tokens and keeps the main context clean. Tasks don't need to run in parallel — the goal is context isolation, not speed.
-
-**Default to subagents for any task that can be handed off:** code changes, research, code review, test runs, exploration, impact analysis, and any work that doesn't require direct interaction with the user mid-task. Only work inline in the main session for short, one-off responses or when you need to ask the user something before proceeding.
-
-## Plan Execution
-When executing implementation plans, always use subagent-driven development. Never execute plans inline in the main session. Always dispatch a fresh subagent per task.
-
 ## Test-Driven Development
 When creating new functionality: write tests first, then implement, then run tests. This ensures the implementation matches the specs/request before and after coding.
 
@@ -126,30 +146,17 @@ grep its call sites yourself (`grep -a`, not plain `grep` — see the doc) and r
 affected suites, including any gated behind `DATABASE_URL`. Details:
 [docs/solutions/workflow-issues/typecheck-does-not-cover-test-call-sites.md](docs/solutions/workflow-issues/typecheck-does-not-cover-test-call-sites.md)
 
+Run affected suites one file at a time (`bun test <file>`). A full `bun test` batch shows cross-file mock-isolation failures that do not occur in isolation.
+
 `docs/solutions/` is the searchable store for documented bugs, practices, and workflow patterns, organized by category and YAML frontmatter (`module`, `tags`, `problem_type`); `CONCEPTS.md` defines shared domain vocabulary. Both are relevant when implementing or debugging in documented areas.
-
-## Git Commits
-- **Before making any changes, run `git status` to check for pre-existing uncommitted changes.** Note which files were already modified so you can distinguish your changes from theirs throughout the session.
-- Use `git add <specific-files>` (not `git add .`) to avoid committing inline-worker.ts
-- Check `git status` before committing
-
-## Publishing to npm
-- Use `cd apps/cli && bun publish` (avoids workspace errors)
-- When pushing to git (triggers auto-publish), show complete output including npmjs.com auth URL: `https://www.npmjs.com/auth/cli/[uuid]`
-- **NEVER bump the version** — version bumps are handled automatically by the release system
-
-## Version Updates
-**NEVER bump the version** — handled automatically by the release system.
-`CLAUDE_CLI_VERSION` in `packages/core/src/version.ts` tracks the Claude Code CLI version used in user-agent headers.
-If ever needed manually: update both `package.json` (root) and `apps/cli/package.json`.
 
 ## Commands
 
 ### Server
-- First run: `bun run build` (builds dashboard/CLI)
+- First run: `bun install --frozen-lockfile && bun run build` (builds dashboard/CLI)
 - Start: `bun start` (port 8080) or `bun start --serve --port 8081` (testing)
 - Startup: Takes ~15 seconds, wait before testing with curl
-- Production: guard on `:8788` forwards to the upstream binary on `:8789`. Test local changes on port 8081.
+- Production: guard on `:8788` forwards to the binary on `:8789`. Test local changes on port 8081.
 
 ### Account Management
 - Add: `bun run cli --add-account <name> --mode <mode> --priority <number>`
@@ -194,12 +201,3 @@ with a `message_stop` event.
 ## Qwen Provider
 - When working on the Qwen provider or streaming transform, **always mirror the qwen-code implementation** using a locally available checkout of `QwenLM/qwen-code`. In the final response, state the checkout path and revision compared; if the comparison was not performed, explicitly say so and explain why.
 - Qwen/DashScope sends incremental tool call argument chunks (not cumulative like standard OpenAI). The streaming transform buffers all chunks and emits complete JSON at stream end, matching `StreamingToolCallParser` in qwen-code.
-
-## Commit Message Categories
-Automated release system uses commit prefixes for changelog:
-- Features: `feat:|add:|new:`
-- Fixes: `fix:|bug:|resolve:`
-- Security: `security:|vulnerabilit:|redact:|ReDoS:`
-- Improvements: `improve:|enhance:|update:|refactor:`
-
-**Acknowledgement commits** (when merging external PRs): always use `chore: acknowledge <name> for PR #<N>` as the commit subject. This prefix is excluded from release notes. If the merge also includes real fixes, commit them separately with the appropriate prefix.
