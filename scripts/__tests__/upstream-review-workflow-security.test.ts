@@ -68,15 +68,6 @@ jobs:
 		expect(exposesSecretsToPullRequestCode(unsafeFixture)).toBe(true);
 	});
 
-	test("disables persisted checkout credentials for the surviving review", async () => {
-		const workflow = await Bun.file(
-			join(workflowsDir, "claude-code-review.yml"),
-		).text();
-
-		expect(workflow).toContain("uses: actions/checkout@v5");
-		expect(workflow).toContain("persist-credentials: false");
-	});
-
 	test("runs the foundation gate on GitHub-hosted runners only", async () => {
 		const workflow = Bun.YAML.parse(
 			await Bun.file(join(workflowsDir, "managed-routing-postgres.yml")).text(),

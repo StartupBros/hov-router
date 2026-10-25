@@ -921,7 +921,7 @@ curl -X POST http://localhost:8080/api/config/provider-model-defaults \
 
 #### GET /api/config/combos-enabled
 
-Whether saved combos take part in routing. Config-file-only setting, no environment variable — see [FEATURE_COMBOS.md](../FEATURE_COMBOS.md).
+Whether saved combos take part in routing. Config-file-only setting, no environment variable — see [combos.md](combos.md).
 
 **Response:**
 ```json
