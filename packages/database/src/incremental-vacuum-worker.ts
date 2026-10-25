@@ -67,6 +67,19 @@ import { Database } from "bun:sqlite";
  */
 const ANALYZE_ANALYSIS_LIMIT = 400;
 
+/**
+ * `PRAGMA optimize` mask. A bare `PRAGMA optimize` only considers tables that
+ * queries on the same connection have used, and this worker opens a fresh
+ * connection every tick, so it never re-analyzed anything: production planned
+ * against sqlite_stat1 written when `requests` held 39k rows, at 2.1M. 0x10000
+ * checks every table; 0x02 runs ANALYZE on those whose size has drifted far
+ * from their stats (SQLite's documented setting for a newly opened connection,
+ * https://sqlite.org/pragma.html#pragma_optimize). Most ticks analyze nothing.
+ * Other open connections, including the main one, keep the statistics they
+ * loaded until they next reload the schema (in practice, the next restart).
+ */
+const OPTIMIZE_MASK = "0x10002";
+
 export type IncrementalVacuumRequest = (
 	| { kind?: "vacuum"; dbPath: string; pages: number }
 	| { kind: "optimize"; dbPath: string }
@@ -143,7 +156,7 @@ function runOptimize(dbPath: string): IncrementalVacuumResult {
 		db.exec("PRAGMA busy_timeout = 0");
 		applyWorkerPragmas(db);
 		db.exec(`PRAGMA analysis_limit = ${ANALYZE_ANALYSIS_LIMIT}`);
-		db.exec("PRAGMA optimize");
+		db.exec(`PRAGMA optimize=${OPTIMIZE_MASK}`);
 		db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
 		return { ok: true, skipped: false };
 	} catch (err) {
