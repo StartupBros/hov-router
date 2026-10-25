@@ -352,7 +352,6 @@ describe("native tagged release rehearsal", () => {
 						!path.endsWith(".test.ts") &&
 						(path.startsWith("apps/cli/") ||
 							path.startsWith("apps/server/") ||
-							path === "apps/lander/package.json" ||
 							path.startsWith("packages/") ||
 							[
 								"package.json",
