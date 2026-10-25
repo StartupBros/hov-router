@@ -371,7 +371,11 @@ export function createAnalyticsHandler(context: APIContext) {
 					count: Number(row.count) || 0,
 				}));
 
-			// Get model performance metrics
+			// Get model performance metrics. MATERIALIZED keeps SQLite from
+			// flattening `filtered` into the window function: otherwise it walks
+			// idx_requests_response_time (model, response_time_ms) to skip a sort
+			// and checks the timestamp of every request ever logged (~3 s on 2M
+			// rows, whatever the range) instead of reading only the window.
 			const modelPerfData = await db.query<{
 				model: string;
 				avg_response_time: number;
@@ -385,7 +389,7 @@ export function createAnalyticsHandler(context: APIContext) {
 				max_tokens_per_second: number | null;
 			}>(
 				`
-				WITH filtered AS (
+				WITH filtered AS MATERIALIZED (
 					SELECT
 						model,
 						response_time_ms,
