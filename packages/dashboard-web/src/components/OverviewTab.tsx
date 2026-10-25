@@ -17,12 +17,10 @@ import {
 	Zap,
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { REFRESH_INTERVALS } from "../constants";
 import {
 	useAccounts,
 	useAnalytics,
 	useRoutingObservations,
-	useStats,
 } from "../hooks/queries";
 import {
 	computePoolUsage,
@@ -46,9 +44,6 @@ import { TimeRangeSelector } from "./overview/TimeRangeSelector";
 
 export const OverviewTab = React.memo(() => {
 	// Fetch all data using React Query hooks
-	const { data: stats, isLoading: statsLoading } = useStats(
-		REFRESH_INTERVALS.default,
-	);
 	const [timeRange, setTimeRange] = useState("24h");
 	const { data: analytics, isLoading: analyticsLoading } = useAnalytics(
 		timeRange,
@@ -150,9 +145,8 @@ export const OverviewTab = React.memo(() => {
 		}
 	}, []);
 
-	const loading = statsLoading || analyticsLoading || accountsLoading;
-	const combinedData =
-		stats && analytics && accounts ? { stats, analytics, accounts } : null;
+	const loading = analyticsLoading || accountsLoading;
+	const combinedData = analytics && accounts ? { analytics, accounts } : null;
 
 	// Transform time series data
 	const timeSeriesData = useMemo(() => {

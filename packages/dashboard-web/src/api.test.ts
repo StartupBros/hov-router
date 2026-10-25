@@ -414,6 +414,33 @@ describe("dashboard error cause preservation", () => {
 	});
 });
 
+describe("dashboard startup API contracts", () => {
+	it("checks access on a cheap authenticated route, never the statistics scan", async () => {
+		await api.checkDashboardAccess();
+		expect(calls().map(([url]) => url)).toEqual(["/api/config/strategy"]);
+	});
+
+	it("passes a rejected key through as the original HttpError", async () => {
+		// The startup check tells a rejected key from an outage by HttpError status.
+		const rejection = new HttpError(401, "Invalid API key");
+		api.request = mock(async () => {
+			throw rejection;
+		}) as typeof api.request;
+		await expect(api.checkDashboardAccess()).rejects.toBe(rejection);
+	});
+
+	it("reads one window of recent error groups without the full statistics", async () => {
+		const group = { errorCode: "overloaded", latestRequestId: "r1" };
+		requestMock = mock(async () => ({ recentErrors: [group] }));
+		api.request = requestMock as typeof api.request;
+
+		expect(await api.getRecentErrors(168)).toEqual([group]);
+		expect(calls().map(([url]) => url)).toEqual([
+			"/api/stats/recent-errors?errorsSinceHours=168",
+		]);
+	});
+});
+
 describe("setAccountPublicValue", () => {
 	it("posts enabled and the label to the public-value endpoint", async () => {
 		const request = mock(async () => ({

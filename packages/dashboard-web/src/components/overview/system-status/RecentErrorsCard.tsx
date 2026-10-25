@@ -1,6 +1,6 @@
 import { NO_ACCOUNT_ID, type RecentErrorGroup } from "@better-ccflare/types";
 import { useState } from "react";
-import { useAccounts, useStats } from "../../../hooks/queries";
+import { useAccounts, useRecentErrors } from "../../../hooks/queries";
 import {
 	Select,
 	SelectContent,
@@ -23,20 +23,19 @@ const WINDOW_OPTIONS: Array<{ value: ErrorWindowKey; label: string }> = [
 
 export function RecentErrorsCard() {
 	const { windowKey, setWindowKey, windowHours } = useErrorWindow();
-	const { data, isLoading } = useStats(undefined, windowHours);
+	const { data: recentErrors, isLoading } = useRecentErrors(windowHours);
 	const { data: accounts } = useAccounts();
 	const { dismiss, isDismissed } = useDismissedErrors();
 	const [selectedError, setSelectedError] = useState<RecentErrorGroup | null>(
 		null,
 	);
 
-	const recentErrors = data?.recentErrors;
 	const visibleErrors = recentErrors?.filter((err) => !isDismissed(err)) ?? [];
 
 	const hasOtherAvailableAccounts = (errorAccountId: string | null) =>
 		otherAccountsAvailable(accounts, errorAccountId);
 
-	if (isLoading && !data) return null;
+	if (isLoading && !recentErrors) return null;
 	if (visibleErrors.length === 0) return null;
 
 	return (

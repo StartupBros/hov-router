@@ -14,7 +14,7 @@ const failWith = (error: unknown) => async () => {
 };
 
 describe("runStartupCheck", () => {
-	it("is ready when the stats request succeeds, and needs auth only with a stored key", async () => {
+	it("is ready when the access check succeeds, and needs auth only with a stored key", async () => {
 		expect(await runStartupCheck(ok, () => true)).toEqual({
 			kind: "ready",
 			authRequired: true,

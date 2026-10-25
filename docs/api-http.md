@@ -660,6 +660,37 @@ Get overall usage statistics.
 curl http://localhost:8080/api/stats
 ```
 
+#### GET /api/stats/recent-errors
+
+Get recent error groups only: the same groups as `recentErrors` in `GET /api/stats`, without that endpoint's lifetime account and model totals. The dashboard's Recent Errors card uses it.
+
+**Query parameters:**
+- `errorsSinceHours`: window in hours (default 24, maximum 8760)
+
+**Response:**
+```json
+{
+  "recentErrors": [
+    {
+      "errorCode": "overloaded_error",
+      "accountId": "account-id",
+      "accountName": "work",
+      "occurrenceCount": 3,
+      "latestTimestamp": 1761400000000,
+      "firstTimestamp": 1761390000000,
+      "latestRequestId": "request-id"
+    }
+  ]
+}
+```
+
+Each group also carries `provider`, `model`, `statusCode`, `path`, `failoverAttempts` and the account's rate-limit fields, as in `GET /api/stats`.
+
+**Example:**
+```bash
+curl "http://localhost:8080/api/stats/recent-errors?errorsSinceHours=168"
+```
+
 #### POST /api/stats/reset
 
 Reset all usage statistics.

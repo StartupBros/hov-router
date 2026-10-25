@@ -279,7 +279,7 @@ export function App() {
 				: current,
 		);
 		void runStartupCheck(
-			() => api.getStats(),
+			() => api.checkDashboardAccess(),
 			() => api.hasApiKey(),
 		).then((outcome) => {
 			if (cancelled) return;
@@ -339,7 +339,7 @@ export function App() {
 
 		// Try to make a request to verify the key
 		try {
-			await api.getStats();
+			await api.checkDashboardAccess();
 			setIsAuthenticated(true);
 			setShowAuthDialog(false);
 			return true;

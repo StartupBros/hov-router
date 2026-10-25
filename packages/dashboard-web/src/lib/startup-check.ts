@@ -30,13 +30,13 @@ function errorText(error: unknown): string {
 }
 
 export async function runStartupCheck(
-	getStats: () => Promise<unknown>,
+	checkAccess: () => Promise<unknown>,
 	hasStoredKey: () => boolean,
 ): Promise<StartupCheckOutcome> {
 	// Read before the request: a 401 clears the stored key on its way back.
 	const sentKey = hasStoredKey();
 	try {
-		await getStats();
+		await checkAccess();
 		return { kind: "ready", authRequired: sentKey };
 	} catch (error) {
 		if (isKeyRejection(error)) {
