@@ -729,7 +729,6 @@ for (const file of [
 	"release.yml",
 	"signpath-release.yml",
 	"signpath-test.yml",
-	"docker-publish.yml",
 ]) {
 	test(`${file}: publisher gate fixtures deny both Router names and stable ID and preserve upstream conditions`, () => {
 		for (const job of Object.values(workflow(file).jobs)) {
@@ -763,11 +762,7 @@ for (const file of [
 							repository: "tombii/better-ccflare",
 							repository_id: "123",
 						}),
-					).toBe(
-						file !== "docker-publish.yml" ||
-							event_name !== "workflow_run" ||
-							conclusion === "success",
-					);
+					).toBe(true);
 				}
 		}
 	});

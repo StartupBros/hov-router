@@ -24,7 +24,7 @@ Router 3.6.2 publishes a Linux x86_64 binary only. The [platform notes](referenc
 - [Account routing architecture](routing-architecture.md), [load-balancing strategies](load-balancing.md), and [Combos](combos.md).
 - [Auto-fallback](auto-fallback.md) and [auto-refresh](auto-refresh.md).
 - [Troubleshooting](troubleshooting.md), including [database repair](reference.md#troubleshooting-database-issues).
-- [Deployment](deployment.md), [systemd](systemd.md), and [Docker](../DOCKER.md). Upstream container recipes retain their upstream images.
+- [Deployment](deployment.md), [systemd](systemd.md), and [Docker](docker.md), built from source (no prebuilt image is published).
 - [Security](security.md), [database schema](database.md), and [v2-to-v3 migration](migration-v2-to-v3.md).
 
 ## Develop and maintain

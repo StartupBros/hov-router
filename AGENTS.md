@@ -57,7 +57,7 @@ Production is a root systemd service, `ccflare-stack.service` (guard on `:8788` 
 
 ## Releases and versions
 
-**NEVER bump the version by hand, and never publish to npm.** Router releases are draft-only GitHub releases produced by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`); publishing a draft is a separate operator decision. Upstream's npm, container, signing and `release.yml`/`release-dispatch.yml` publishers are fenced off for this repository and must stay that way. Full policy: [docs/wstack-router-releases.md](docs/wstack-router-releases.md).
+**NEVER bump the version by hand, and never publish to npm.** Router releases are draft-only GitHub releases produced by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`); publishing a draft is a separate operator decision. Upstream's npm, multi-architecture and signing publishers (`release.yml`, `release-dispatch.yml`, `signpath-*.yml`) are fenced off for this repository and must stay that way. No container image is published; Docker builds from source ([docs/docker.md](docs/docker.md)). Full policy: [docs/wstack-router-releases.md](docs/wstack-router-releases.md).
 
 Commit prefixes drive the version and changelog (`release-please-config.json`, plus the alias map in `scripts/router-release.ts`):
 - `feat:` → minor, under Features (`feature:`/`add:`/`new:` are accepted aliases)

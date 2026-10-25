@@ -1,410 +1,210 @@
 import { describe, expect, it } from "bun:test";
-import {
-	chmodSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveBuildProvenance } from "./build-provenance";
 
-const dockerfile = join(import.meta.dir, "../../../Dockerfile");
-const dockerWorkflow = join(
-	import.meta.dir,
-	"../../../.github/workflows/docker-publish.yml",
-);
+const root = join(import.meta.dir, "../../..");
+const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");
+const compose = readFileSync(join(root, "docker-compose.yml"), "utf8");
 
-const sourceSha = "abcdef1234567890abcdef1234567890abcdef12";
-const differentSha = "1234567890abcdef1234567890abcdef12345678";
+/** Dockerfile instructions with line continuations joined, comments dropped. */
+const instructions = dockerfile
+	.replace(/\\\n/g, " ")
+	.split("\n")
+	.map((line) => line.trim())
+	.filter((line) => line !== "" && !line.startsWith("#"));
 
-type ScriptEnvironment = Readonly<Record<string, string>>;
-type MockGit = Readonly<{
-	checkoutSha: string;
-	tags: readonly string[];
-	tagSha?: string;
-}>;
-
-type WorkflowStep = Readonly<{
-	name?: string;
-	if?: string;
-	uses?: string;
-	run?: string;
-	with?: Readonly<Record<string, unknown>>;
-}>;
-
-type DockerWorkflow = Readonly<{
-	jobs?: Readonly<{
-		"build-and-push"?: Readonly<{ steps?: readonly WorkflowStep[] }>;
-	}>;
-}>;
-
-function parseDockerWorkflow(): DockerWorkflow {
-	return Bun.YAML.parse(readFileSync(dockerWorkflow, "utf8")) as DockerWorkflow;
-}
-
-function findWorkflowStep(name: string): WorkflowStep | undefined {
-	return parseDockerWorkflow().jobs?.["build-and-push"]?.steps?.find(
-		(step) => step.name === name,
+function stageRange(name: string): string[] {
+	const start = instructions.findIndex((line) =>
+		new RegExp(`^FROM .* AS ${name}$`).test(line),
 	);
-}
-
-function readBuildProvenanceScript(): string {
-	const run = findWorkflowStep("Set build provenance")?.run;
-	expect(run).toEqual(expect.any(String));
-	return run ?? "";
-}
-
-/** Executes the workflow's exact run block against a local, deterministic Git facade. */
-function runBuildProvenanceScript(
-	env: ScriptEnvironment,
-	git: MockGit,
-): Record<string, string> {
-	const outputDirectory = mkdtempSync(
-		join(tmpdir(), "ccflare-docker-provenance-"),
+	expect(start, `stage ${name}`).toBeGreaterThanOrEqual(0);
+	const next = instructions.findIndex(
+		(line, index) => index > start && line.startsWith("FROM "),
 	);
-	const outputPath = join(outputDirectory, "github-output");
-	const mockGitPath = join(outputDirectory, "git");
-	writeFileSync(
-		mockGitPath,
-		`#!/usr/bin/env bash
-set -euo pipefail
-case "\${1:-}" in
-  tag)
-    [[ "\${2:-}" == "--points-at" && "\${3:-}" == "HEAD" ]]
-    printf '%s\\n' "\${MOCK_TAGS:-}"
-    ;;
-  rev-parse)
-    if [[ "\${2:-}" == "HEAD" ]]; then
-      printf '%s\\n' "\${MOCK_CHECKOUT_SHA:-}"
-    elif [[ "\${2:-}" == refs/tags/*'^{commit}' ]]; then
-      printf '%s\\n' "\${MOCK_TAG_SHA:-\${MOCK_CHECKOUT_SHA:-}}"
-    else
-      exit 64
-    fi
-    ;;
-  *)
-    exit 64
-    ;;
-esac
-`,
-	);
-	chmodSync(mockGitPath, 0o755);
-
-	try {
-		const result = Bun.spawnSync({
-			cmd: ["bash", "-euo", "pipefail", "-c", readBuildProvenanceScript()],
-			env: {
-				...process.env,
-				EVENT_NAME: "",
-				WORKFLOW_RUN_EVENT: "",
-				WORKFLOW_RUN_CONCLUSION: "",
-				GITHUB_REPOSITORY: "",
-				HEAD_SHA: "",
-				MOCK_TAGS: git.tags.join("\n"),
-				MOCK_TAG_SHA: git.tagSha ?? "",
-				MOCK_CHECKOUT_SHA: git.checkoutSha,
-				...env,
-				GITHUB_OUTPUT: outputPath,
-				PATH: `${outputDirectory}:${process.env.PATH ?? ""}`,
-			},
-		});
-		expect(result.exitCode).toBe(0);
-		return Object.fromEntries(
-			readFileSync(outputPath, "utf8")
-				.trim()
-				.split("\n")
-				.filter(Boolean)
-				.map((line) => line.split("=", 2) as [string, string]),
-		);
-	} finally {
-		rmSync(outputDirectory, { recursive: true, force: true });
-	}
+	return instructions.slice(start, next === -1 ? undefined : next);
 }
 
-const unproven = {
-	proven: "false",
-	version: "latest",
-	is_prerelease: "false",
-	git_sha: "unknown",
-	git_ref: "unknown",
-	checkout_sha: "unknown",
-	event_sha: "unknown",
-	tag_sha: "unknown",
-	distribution: "unknown",
-	producer: "unknown",
-	artifact_mode: "unknown",
-	update_channel: "unknown",
-	can_publish: "false",
-	can_attest: "false",
-} as const;
-
-const provenEnvironment: ScriptEnvironment = {
-	EVENT_NAME: "workflow_run",
-	WORKFLOW_RUN_EVENT: "push",
-	WORKFLOW_RUN_CONCLUSION: "success",
-	GITHUB_REPOSITORY: "tombii/better-ccflare",
-	HEAD_SHA: sourceSha,
-};
-
-const validGit: MockGit = { checkoutSha: sourceSha, tags: ["v1.2.3"] };
-
-describe("Docker distribution provenance", () => {
-	it("gates failed workflow-run release builds and checks out the event SHA with tags", () => {
-		const workflow = readFileSync(dockerWorkflow, "utf8");
-		expect(workflow).toContain(
-			"github.event.workflow_run.conclusion == 'success'",
-		);
-		expect(workflow).toMatch(
-			/- name: Checkout triggering workflow source\n\s+if: github\.event_name == 'workflow_run'\n\s+uses: actions\/checkout@v5\n\s+with:\n(?:\s+#.*\n)+\s+ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}\n\s+fetch-depth: 0\n\s+fetch-tags: true/,
-		);
-		expect(workflow).toContain("context: .");
-	});
-
-	it("derives one strict local release tag at the checked-out event SHA", () => {
-		const outputs = runBuildProvenanceScript(provenEnvironment, validGit);
-		expect(outputs).toMatchObject({
-			proven: "true",
-			version: "1.2.3",
-			is_prerelease: "false",
-			git_sha: sourceSha,
-			git_ref: "refs/tags/v1.2.3",
-			checkout_sha: sourceSha,
-			event_sha: sourceSha,
-			tag_sha: sourceSha,
-			distribution: "v1:tombii-ghcr-docker",
-			producer: "tombii",
-			artifact_mode: "docker",
-			update_channel: "ghcr",
-			image_sha: sourceSha,
-			can_publish: "true",
-			can_attest: "true",
-		});
-		for (const [name, tag, isPrerelease] of [
-			["prerelease", "v1.2.3-preview.1", "true"],
-			["build metadata", "v1.2.3+build.1", "false"],
-		] as const) {
-			expect(
-				runBuildProvenanceScript(provenEnvironment, {
-					checkoutSha: sourceSha,
-					tags: [tag],
-				}),
-				name,
-			).toMatchObject({
-				...unproven,
-				version: tag.slice(1),
-				is_prerelease: isPrerelease,
-				image_sha: sourceSha,
-			});
-		}
+describe("Dockerfile builds HoV Router from source", () => {
+	it("compiles in a Bun builder stage and ships only the binary in a slim runtime", () => {
+		const builder = stageRange("builder");
+		expect(builder[0]).toMatch(/^FROM oven\/bun:\$\{BUN_VERSION\}-debian AS/);
+		expect(builder).toContain("RUN bun run build");
 		expect(
-			resolveBuildProvenance({
-				CCFLARE_VERSION: outputs.version,
-				CCFLARE_GIT_SHA: outputs.git_sha,
-				CCFLARE_GIT_REF: outputs.git_ref,
-				CCFLARE_SOURCE_SHA: outputs.git_sha,
-				CCFLARE_SOURCE_REF: outputs.git_ref,
-				CCFLARE_DISTRIBUTION: outputs.distribution,
-				CCFLARE_PRODUCER: outputs.producer,
-				CCFLARE_ARTIFACT_MODE: outputs.artifact_mode,
-				CCFLARE_UPDATE_CHANNEL: outputs.update_channel,
-			}),
-		).toMatchObject({ proven: true, actionable: true });
+			builder.some((l) => l.includes("bun install --frozen-lockfile")),
+		).toBe(true);
+		// Manifests and the lockfile are copied before the full source so the
+		// dependency layer caches.
+		const lockfileCopy = builder.indexOf("COPY package.json bun.lock ./");
+		const install = builder.findIndex((l) => l.includes("bun install"));
+		const sourceCopy = builder.indexOf("COPY . .");
+		expect(lockfileCopy).toBeGreaterThanOrEqual(0);
+		expect(install).toBeGreaterThan(lockfileCopy);
+		expect(sourceCopy).toBeGreaterThan(install);
+
+		const froms = instructions.filter((l) => l.startsWith("FROM "));
+		expect(froms).toHaveLength(2);
+		expect(froms[1]).toBe("FROM debian:trixie-slim");
+		expect(dockerfile).toContain(
+			"COPY --from=builder /src/apps/cli/dist/better-ccflare /usr/local/bin/better-ccflare",
+		);
 	});
 
-	it("allows exact-tag dispatches to publish immutable images without provenance", () => {
-		const outputs = runBuildProvenanceScript(
-			{ EVENT_NAME: "workflow_dispatch" },
-			validGit,
+	it("pins the builder to the repo's Bun version", () => {
+		const pinned = readFileSync(join(root, ".bun-version"), "utf8").trim();
+		expect(dockerfile).toContain(`ARG BUN_VERSION=${pinned}`);
+	});
+
+	it("copies every workspace manifest before installing", () => {
+		const manifests = ["apps", "packages"].flatMap((group) =>
+			Array.from(
+				new Bun.Glob(`${group}/*/package.json`).scanSync({ cwd: root }),
+			),
 		);
-		expect(outputs).toMatchObject({
-			...unproven,
-			version: "1.2.3",
-			image_sha: sourceSha,
-			can_publish: "true",
-			can_attest: "false",
+		expect(manifests.length).toBeGreaterThan(10);
+		for (const manifest of manifests) {
+			expect(dockerfile, manifest).toContain(`COPY ${manifest} ./${manifest}`);
+		}
+		// A COPY of a removed workspace's manifest fails the build.
+		const copied = instructions.flatMap((line) => {
+			const match = /^COPY ((?:apps|packages)\/[^/]+\/package\.json) /.exec(
+				line,
+			);
+			return match ? [match[1]] : [];
 		});
-		for (const [name, tag, isPrerelease] of [
-			["prerelease", "v1.2.3-preview.1", "true"],
-			["build metadata", "v1.2.3+build.1", "false"],
-		] as const) {
-			expect(
-				runBuildProvenanceScript(
-					{ EVENT_NAME: "workflow_dispatch" },
-					{ checkoutSha: sourceSha, tags: [tag] },
-				),
-				name,
-			).toMatchObject({
-				...unproven,
-				version: tag.slice(1),
-				is_prerelease: isPrerelease,
-				image_sha: sourceSha,
-			});
-		}
+		expect(copied.sort()).toEqual(manifests.sort());
 	});
 
-	it("keeps malformed, mismatched, ambiguous, and invalid workflow runs unpublishable", () => {
-		const cases: ReadonlyArray<
-			Readonly<{ name: string; env: ScriptEnvironment; git: MockGit }>
-		> = [
-			{
-				name: "failed release workflow",
-				env: { ...provenEnvironment, WORKFLOW_RUN_CONCLUSION: "failure" },
-				git: validGit,
-			},
-			{
-				name: "fork repository",
-				env: {
-					...provenEnvironment,
-					GITHUB_REPOSITORY: "StartupBros/better-ccflare",
-				},
-				git: validGit,
-			},
-			{
-				name: "non-push workflow run",
-				env: { ...provenEnvironment, WORKFLOW_RUN_EVENT: "workflow_dispatch" },
-				git: validGit,
-			},
-			{
-				name: "uppercase SHA",
-				env: { ...provenEnvironment, HEAD_SHA: sourceSha.toUpperCase() },
-				git: validGit,
-			},
-			{
-				name: "checkout mismatch",
-				env: provenEnvironment,
-				git: { ...validGit, checkoutSha: differentSha },
-			},
-			{
-				name: "tag mismatch",
-				env: provenEnvironment,
-				git: { ...validGit, tagSha: differentSha },
-			},
-			{
-				name: "zero strict tags",
-				env: { EVENT_NAME: "workflow_dispatch" },
-				git: { ...validGit, tags: ["v01.2.3"] },
-			},
-			{
-				name: "ambiguous strict tags",
-				env: { EVENT_NAME: "workflow_dispatch" },
-				git: { ...validGit, tags: ["v1.2.3", "v1.2.4"] },
-			},
-		];
-
-		for (const testCase of cases) {
-			expect(
-				runBuildProvenanceScript(testCase.env, testCase.git),
-				testCase.name,
-			).toMatchObject(unproven);
+	it("does not fetch or reference upstream release binaries or images", () => {
+		for (const text of [dockerfile, compose]) {
+			expect(text).not.toContain("tombii");
+			expect(text).not.toContain("ghcr.io");
+			expect(text).not.toMatch(/curl[^\n]*-o /);
+			expect(text).not.toContain("releases/download");
 		}
+		// The upstream publisher is gone and must not return in this repo.
+		expect(existsSync(join(root, ".github/workflows/docker-publish.yml"))).toBe(
+			false,
+		);
 	});
 
-	it("passes the complete provenance tuple and verifies versioned release binaries exactly", () => {
-		const workflow = readFileSync(dockerWorkflow, "utf8");
-		const source = readFileSync(dockerfile, "utf8");
-		const metadataTags = findWorkflowStep("Extract metadata")?.with?.tags;
-		expect(metadataTags).toEqual(expect.any(String));
-		expect(workflow).toContain('proven="false"');
-		expect(workflow).toContain('proven="true"');
-		const tags = metadataTags as string;
-		expect(tags).not.toContain("type=sha");
-		const exactTag = tags
-			.split("\n")
-			.find((line) =>
-				line.includes(
-					`type=raw,value=\${{ steps.provenance.outputs.version }}`,
-				),
-			);
-		expect(exactTag).toContain("steps.provenance.outputs.proven == 'true'");
-		expect(exactTag).toContain(
-			"steps.provenance.outputs.is_prerelease == 'false'",
+	it("runs as the non-root ccflare user with persistent /data", () => {
+		expect(instructions).toContain("USER ccflare");
+		expect(
+			instructions.some((l) => /useradd -u 1000 .* ccflare( |$)/.test(l)),
+		).toBe(true);
+		expect(instructions).toContain('VOLUME ["/data"]');
+		expect(instructions).toContain(
+			"ENV BETTER_CCFLARE_DB_PATH=/data/better-ccflare.db",
 		);
-		expect(exactTag).not.toContain(
-			"steps.provenance.outputs.can_publish == 'true'",
+		expect(instructions).toContain("ENV XDG_CONFIG_HOME=/data");
+		expect(instructions).toContain("ENV BETTER_CCFLARE_LOG_DIR=/app/logs");
+		expect(instructions).toContain("ENV NODE_ENV=production");
+	});
+
+	it("serves on 8080 with a /health check and the serve entrypoint", () => {
+		expect(instructions).toContain("EXPOSE 8080");
+		const health = instructions.find((l) => l.startsWith("HEALTHCHECK"));
+		expect(health).toContain("curl -f http://localhost:8080/health");
+		expect(instructions).toContain(
+			'ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]',
 		);
-		const shaTag = tags
-			.split("\n")
-			.find((line) => line.includes("type=raw,value=sha-"));
-		expect(shaTag).toContain("steps.provenance.outputs.image_sha");
-		expect(shaTag).toContain("steps.provenance.outputs.can_publish == 'true'");
-		for (const mutableTag of [
-			"type=semver,pattern={{major}}.{{minor}}",
-			"type=semver,pattern={{major}}",
-			"type=raw,value=latest",
-			"type=raw,value=main",
-		]) {
-			const line = tags
-				.split("\n")
-				.find((candidate) => candidate.includes(mutableTag));
-			expect(line, mutableTag).toContain(
-				"steps.provenance.outputs.proven == 'true'",
-			);
-			expect(line, mutableTag).toContain(
-				"steps.provenance.outputs.is_prerelease == 'false'",
-			);
+		expect(instructions).toContain('CMD ["--serve", "--port", "8080"]');
+		expect(dockerfile).toContain("HoV Router Docker Container");
+	});
+
+	it("labels the image as HoV Router from this repository", () => {
+		expect(dockerfile).toContain('org.opencontainers.image.title="HoV Router"');
+		expect(dockerfile).toContain(
+			'org.opencontainers.image.source="https://github.com/StartupBros/hov-router"',
+		);
+		expect(dockerfile).toContain('org.opencontainers.image.licenses="MIT"');
+	});
+});
+
+describe("Docker guide reaches the install's real data volume", () => {
+	const guide = readFileSync(join(root, "docs/docker.md"), "utf8");
+
+	it("backs up and restores through the fixed container name", () => {
+		// Compose prefixes the volume with the project name, so a bare
+		// `-v better-ccflare-data:` mounts a new, empty volume instead.
+		expect(guide).not.toMatch(/-v\s+better-ccflare-data:/);
+		expect(compose).toContain("container_name: better-ccflare");
+		const volumesFrom = guide.match(/--volumes-from better-ccflare /g) ?? [];
+		expect(volumesFrom.length).toBeGreaterThanOrEqual(2);
+		expect(guide).toContain("test -f /data/better-ccflare.db");
+	});
+
+	it("tells upgraders to keep the old compose project name", () => {
+		expect(guide).toContain("com.docker.compose.project");
+		expect(guide).toContain("COMPOSE_PROJECT_NAME=");
+	});
+});
+
+describe("Dockerfile provenance wiring", () => {
+	const wiring: ReadonlyArray<readonly [string, string]> = [
+		["CCFLARE_VERSION", "VERSION"],
+		["CCFLARE_GIT_REF", "GIT_REF"],
+		["CCFLARE_SOURCE_REF", "GIT_REF"],
+		["CCFLARE_CHECKOUT_SHA", "CHECKOUT_SHA"],
+		["CCFLARE_EVENT_SHA", "EVENT_SHA"],
+		["CCFLARE_TAG_SHA", "TAG_SHA"],
+		["CCFLARE_BUILD_DATE", "BUILD_DATE"],
+		["CCFLARE_DISTRIBUTION", "DISTRIBUTION"],
+		["CCFLARE_PRODUCER", "PRODUCER"],
+		["CCFLARE_ARTIFACT_MODE", "ARTIFACT_MODE"],
+		["CCFLARE_UPDATE_CHANNEL", "UPDATE_CHANNEL"],
+	];
+
+	it("feeds each provenance ENV from its build ARG", () => {
+		for (const [env, arg] of wiring) {
+			expect(instructions, env).toContain(`ENV ${env}=\${${arg}}`);
 		}
-		const buildStep = findWorkflowStep("Build and push Docker images");
-		expect(buildStep?.if).toBe(
-			"steps.provenance.outputs.can_publish == 'true'",
+		expect(instructions).toContain("ENV CCFLARE_GIT_SHA=${GIT_SHA:-unknown}");
+		expect(instructions).toContain(
+			"ENV CCFLARE_SOURCE_SHA=${GIT_SHA:-unknown}",
 		);
-		expect(buildStep?.with?.push).toBe(
-			"$" + "{{ steps.provenance.outputs.can_publish == 'true' }}",
-		);
-		const attestationStep = findWorkflowStep("Generate artifact attestation");
-		expect(attestationStep?.if).toBe(
-			"steps.provenance.outputs.proven == 'true' && steps.provenance.outputs.is_prerelease == 'false' && steps.provenance.outputs.can_attest == 'true'",
-		);
-		expect(workflow).toContain(
-			`echo "image_sha=\${image_sha}" >> "$GITHUB_OUTPUT"`,
-		);
-		expect(workflow).toContain(`echo "proven=\${proven}" >> "$GITHUB_OUTPUT"`);
-		for (const name of [
-			"VERSION",
-			"GIT_SHA",
-			"GIT_REF",
-			"CHECKOUT_SHA",
-			"EVENT_SHA",
-			"TAG_SHA",
-			"IMAGE_SHA",
+		// /health git_sha comes from this when the binary has no embedded SHA.
+		expect(instructions).toContain("ENV BETTER_CCFLARE_GIT_SHA=${GIT_SHA}");
+	});
+
+	it("defaults every identity ARG to unknown so a source build proves nothing", () => {
+		for (const arg of [
 			"DISTRIBUTION",
 			"PRODUCER",
 			"ARTIFACT_MODE",
 			"UPDATE_CHANNEL",
+			"VERSION",
 		]) {
-			expect(workflow).toContain(
-				`${name}=$` + `{{ steps.provenance.outputs.${name.toLowerCase()} }}`,
+			expect(instructions, arg).toContain(`ARG ${arg}=unknown`);
+		}
+	});
+
+	it("resolves the default image environment to an unproven distribution", () => {
+		const env: Record<string, string> = {};
+		for (const line of instructions) {
+			const match = /^ENV (CCFLARE_[A-Z_]+)=(.*)$/.exec(line);
+			if (!match) continue;
+			// Evaluate ${ARG} / ${ARG:-fallback} with every ARG at its default.
+			const [, name, value] = match;
+			env[name] = value.replace(
+				/\$\{([A-Z_]+)(?::-([^}]*))?\}/g,
+				(_all, arg: string, fallback?: string) => {
+					const declared = instructions.find((l) =>
+						l.startsWith(`ARG ${arg}=`),
+					);
+					return declared
+						? declared.slice(`ARG ${arg}=`.length)
+						: (fallback ?? "");
+				},
 			);
 		}
-		expect(source).toContain(
-			"https://github.com/tombii/better-ccflare/releases/",
-		);
-		expect(source).toContain(
-			'expected_version="better-ccflare v$' + '{VERSION}"',
-		);
-		expect(source).toContain(
-			'reported_version="$(/usr/local/bin/better-ccflare --version)"',
-		);
-		expect(source).toContain(
-			'"$' + '{reported_version}" = "$' + '{expected_version}"',
-		);
-		expect(source).toContain("ARG IMAGE_SHA=unknown");
-		expect(source).toContain(
-			'reported_sha="$(/usr/local/bin/better-ccflare --git-sha)"',
-		);
-		expect(source).toContain('"$' + '{reported_sha}" = "$' + '{IMAGE_SHA}"');
-		expect(source).toContain("full checked-out release SHA");
-		for (const line of [
-			"ARG DISTRIBUTION=unknown",
-			"ARG CHECKOUT_SHA=unknown",
-			"ARG IMAGE_SHA=unknown",
-			"ENV CCFLARE_DISTRIBUTION=$" + "{DISTRIBUTION}",
-			"ENV CCFLARE_CHECKOUT_SHA=$" + "{CHECKOUT_SHA}",
-			"ENV CCFLARE_EVENT_SHA=$" + "{EVENT_SHA}",
-			"ENV CCFLARE_TAG_SHA=$" + "{TAG_SHA}",
-		]) {
-			expect(source).toContain(line);
-		}
+		expect(env.CCFLARE_DISTRIBUTION).toBe("unknown");
+		expect(resolveBuildProvenance(env)).toMatchObject({
+			proven: false,
+			actionable: false,
+			reason: "unknown_distribution",
+			identity: null,
+		});
 	});
 });

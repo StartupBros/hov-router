@@ -1,6 +1,14 @@
+# Builds HoV Router from this checkout; no prebuilt image is published.
+#   docker compose up -d --build
 services:
+  # Service, container and volume names keep the pre-rename "better-ccflare"
+  # on purpose. Compose names the real volume <project>_better-ccflare-data,
+  # and the project defaults to this directory's name; docs/docker.md covers
+  # moving an existing install. The backup commands rely on the fixed
+  # container name, and a second name would collide on port 8080.
   better-ccflare:
-    image: ghcr.io/tombii/better-ccflare:latest
+    build: .
+    image: hov-router:local
     container_name: better-ccflare
     restart: unless-stopped
     ports:
@@ -18,10 +26,10 @@ services:
       # - LOG_LEVEL=info
       # Optional: expose per-account detail on /health?detail=1 (default: off)
       # - HEALTH_DETAIL_ENABLED=false
-    # Load environment variables from .env file (optional)
-    # Create a .env file in the same directory as docker-compose.yml
+    # Optional .env file next to this compose file; compose starts without it.
     env_file:
-      - .env  # Optional: load from .env file
+      - path: .env
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
