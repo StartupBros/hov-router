@@ -627,51 +627,16 @@ hov-router --serve
 docker-compose up
 
 # Docker (mount .env file)
-docker run -v $(pwd)/.env:/app/.env:ro -p 8080:8080 ghcr.io/tombii/better-ccflare:latest
+docker run --env-file .env -p 8080:8080 -v hov-router-data:/data hov-router:local
 ```
 
 <a id="docker-legacy-upstream-images-not-wstack-router"></a>
 
-### Docker (legacy upstream images, not HoV Router)
+### Docker
 
-All `ghcr.io/tombii/better-ccflare` recipes here, including the `.env` and Traefik examples, run upstream images. The checked-in Docker Compose behavior is unchanged; no branded image is available from this change.
+HoV Router builds its Docker image from source and publishes none. Build and run it with `docker compose up -d --build`; the [Docker guide](docker.md) covers plain `docker run`, the `/data` volume, backups, health checks and upgrades. The `ghcr.io/tombii/better-ccflare` image is upstream's and is not this fork.
 
-```bash
-# Quick start with docker-compose
-curl -O https://raw.githubusercontent.com/tombii/better-ccflare/main/docker-compose.yml
-
-# Optional: Create and configure .env file
-cp .env.example .env
-# Edit .env with your settings (SSL, port, etc.)
-nano .env
-
-# Start with docker-compose (automatically loads .env file)
-docker-compose up -d
-
-# Or use docker run with environment variables
-docker run -d \
-  --name better-ccflare \
-  -p 8080:8080 \
-  -v better-ccflare-data:/data \
-  -e SSL_KEY_PATH=/path/to/ssl/key.pem \
-  -e SSL_CERT_PATH=/path/to/ssl/cert.pem \
-  ghcr.io/tombii/better-ccflare:latest
-
-# View logs
-docker logs -f better-ccflare
-```
-
-Once the container is running, **open http://localhost:8080 in your browser** to add and manage accounts through the Web UI. This is the recommended way — using `docker exec` to run CLI commands inside the container won't work for OAuth-based account modes since the container has no browser.
-
-**🆕 Environment Variable Support**: Docker Compose now automatically loads `.env` files from the same directory as `docker-compose.yml`. Simply create a `.env` file alongside your `docker-compose.yml` file and the container will use those settings.
-
-**Available Docker tags:**
-- `latest` - Latest stable release
-- `main` - Latest build from main branch
-- `1.2.28`, `1.2`, `1` - Specific version tags
-- `sha-abc123` - Commit-specific tags
-
-See [DOCKER.md](../DOCKER.md) for detailed Docker documentation.
+Once the container is running, **open http://localhost:8080 in your browser** to add and manage accounts through the Web UI. This is the recommended way: using `docker exec` to run CLI commands inside the container won't work for OAuth-based account modes since the container has no browser.
 
 ### Systemd Deployment
 

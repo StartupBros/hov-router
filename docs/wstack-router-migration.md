@@ -87,7 +87,6 @@ The CI counterpart is the separate [artifact preparation](../.github/workflows/p
 - `release-dispatch.yml` bumps versions, commits, pushes a tag, and publishes to npm.
 - `release.yml` runs on version tags or manual dispatch and creates releases/uploads assets.
 - `signpath-release.yml` and `signpath-test.yml` submit signing requests; they are not local smoke checks.
-- `docker-publish.yml` can publish images on manual dispatch or after the release workflow completes successfully.
 
 Do not invoke those workflows for preparation, change versions manually, or push a tag to test this path. Actual publication requires separate approval and validation of release wiring, version/tag agreement, provenance, and intended destinations **before** creating a release tag. These locally prepared files are not a published downloadable release. For the separately published 3.6.2 artifact, use the [consumer installation](reference.md#install-the-linux-x86_64-release).
 
