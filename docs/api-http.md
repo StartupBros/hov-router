@@ -1,4 +1,4 @@
-# better-ccflare HTTP API Documentation
+# HoV Router HTTP API Documentation
 
 ## Quick Start
 
@@ -25,7 +25,7 @@ open http://localhost:8080/dashboard
 
 ## Overview
 
-better-ccflare provides a RESTful HTTP API for managing accounts, monitoring usage, and proxying requests to Claude. The API runs on port 8080 by default and requires no authentication.
+HoV Router provides a RESTful HTTP API for managing accounts, monitoring usage, and proxying requests to Claude. The API runs on port 8080 by default and requires no authentication.
 
 ### Base URL
 

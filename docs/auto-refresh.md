@@ -1,6 +1,6 @@
 # Auto-Refresh Configuration Guide
 
-This guide covers the auto-refresh feature in better-ccflare, which automatically sends a small probe message to an account when its usage window resets, to start the new window. It applies to `anthropic`, `codex` and `zai` accounts.
+This guide covers the auto-refresh feature in HoV Router, which automatically sends a small probe message to an account when its usage window resets, to start the new window. It applies to `anthropic`, `codex` and `zai` accounts.
 
 ## Table of Contents
 

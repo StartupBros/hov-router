@@ -1,6 +1,6 @@
 # HoV Router Configuration Guide
 
-This guide covers all configuration options for better-ccflare, including file-based configuration, environment variables, and runtime API updates.
+This guide covers all configuration options for HoV Router, including file-based configuration, environment variables, and runtime API updates.
 
 ## Table of Contents
 

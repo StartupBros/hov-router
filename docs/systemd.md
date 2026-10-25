@@ -1,6 +1,6 @@
 # Systemd Deployment Guide
 
-Production deployment of better-ccflare as a systemd service on Linux.
+Production deployment of HoV Router as a systemd service on Linux.
 
 ## Reference Unit File
 

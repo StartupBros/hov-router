@@ -1,4 +1,4 @@
-# Load Balancing in better-ccflare
+# Load Balancing in HoV Router
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -12,7 +12,7 @@
 
 ## Overview
 
-better-ccflare supports four load-balancing strategies for distributing requests across compatible accounts: `session` (the default), `least-used`, `session-affinity`, and the opt-in `session-drain-soonest`. Session-based strategies preserve account or client stickiness where prompt-cache locality and provider safety matter; `least-used` is available when per-request spreading is appropriate.
+HoV Router supports four load-balancing strategies for distributing requests across compatible accounts: `session` (the default), `least-used`, `session-affinity`, and the opt-in `session-drain-soonest`. Session-based strategies preserve account or client stickiness where prompt-cache locality and provider safety matter; `least-used` is available when per-request spreading is appropriate.
 
 ### Key Features
 - **Account Health Monitoring**: Automatically filters out rate-limited or paused accounts

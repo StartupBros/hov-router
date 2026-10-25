@@ -1,8 +1,8 @@
-# Model Mappings in better-ccflare
+# Model Mappings in HoV Router
 
 ## Overview
 
-better-ccflare includes centralized model definitions and mappings for Claude AI models. These mappings are defined in `packages/core/src/models.ts` and are used throughout the system for consistent model identification and display.
+HoV Router includes centralized model definitions and mappings for Claude AI models. These mappings are defined in `packages/core/src/models.ts` and are used throughout the system for consistent model identification and display.
 
 ## Model Constants
 
