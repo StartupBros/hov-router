@@ -842,7 +842,7 @@ With production certificates from trusted CAs, you don't need `NODE_OPTIONS="--u
 
 #### Option 3: Docker with Traefik (Recommended for Production)
 
-For Docker deployments, we recommend using [Traefik](https://traefik.io/) as a reverse proxy to handle TLS automatically with Let's Encrypt:
+For Docker deployments, we recommend using [Traefik](https://traefik.io/) as a reverse proxy to handle TLS automatically with Let's Encrypt. This recipe builds HoV Router from source, so save it as `docker-compose.traefik.yml` in the repository root (next to the `Dockerfile`) and run `docker compose -f docker-compose.traefik.yml up -d --build`. See the [Docker guide](docker.md):
 
 ```yaml
 # docker-compose.yml
@@ -868,7 +868,8 @@ services:
     restart: unless-stopped
 
   better-ccflare:
-    image: ghcr.io/tombii/better-ccflare:latest
+    build: .
+    image: hov-router:local
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ccflare.rule=Host(`your-domain.com`)"
@@ -876,8 +877,11 @@ services:
       - "traefik.http.routers.ccflare.tls.certresolver=myresolver"
       - "traefik.http.services.ccflare.loadbalancer.server.port=8080"
     volumes:
-      - ~/.config/better-ccflare:/root/.config/better-ccflare
+      - better-ccflare-data:/data
     restart: unless-stopped
+
+volumes:
+  better-ccflare-data:
 ```
 
 **Benefits:**
