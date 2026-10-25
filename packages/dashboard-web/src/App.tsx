@@ -21,8 +21,19 @@ import { Navigation } from "./components/navigation";
 import { OverviewTab } from "./components/OverviewTab";
 import { RequestsTab } from "./components/RequestsTab";
 import { SettingsTab } from "./components/SettingsTab";
+import {
+	RouterUnreachableView,
+	StartupCheckingView,
+} from "./components/StartupStatus";
 import { QUERY_CONFIG, REFRESH_INTERVALS } from "./constants";
 import { ThemeProvider } from "./contexts/theme-context";
+import {
+	authenticateErrorMessage,
+	isKeyRejection,
+	runStartupCheck,
+	STARTUP_SLOW_NOTICE_MS,
+	startupRetryDelayMs,
+} from "./lib/startup-check";
 import "./index.css";
 
 // Lazy load heavy components for better bundle splitting
@@ -173,7 +184,17 @@ export function App() {
 		routes.find((route) => route.path === location.pathname) || routes[0];
 	const [showAuthDialog, setShowAuthDialog] = useState(false);
 	const [isAuthenticated, setIsAuthenticated] = useState(false);
-	const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+	// "unreachable" means the startup request got no answer from the router;
+	// the check keeps retrying until it does.
+	const [startup, setStartup] = useState<
+		| { phase: "checking" }
+		| { phase: "unreachable"; message: string; retrying: boolean }
+		| { phase: "done" }
+	>({ phase: "checking" });
+	const [slowCheck, setSlowCheck] = useState(false);
+	const [checkRun, setCheckRun] = useState(0);
+	const startupFailuresRef = useRef(0);
+	const isCheckingAuth = startup.phase !== "done";
 	const [authError, setAuthError] = useState<string | null>(null);
 	const [authRequired, setAuthRequired] = useState(false);
 
@@ -241,34 +262,59 @@ export function App() {
 		[],
 	);
 
-	// Check if authentication is required
 	useEffect(() => {
-		const checkAuth = async () => {
-			setIsCheckingAuth(true);
+		const timer = setTimeout(() => setSlowCheck(true), STARTUP_SLOW_NOTICE_MS);
+		return () => clearTimeout(timer);
+	}, []);
 
-			// Always verify with a test request, even if we have a stored key
-			// The stored key might be invalid, deleted, or expired
-			try {
-				await api.getStats();
-				// If successful, we're authenticated (either no auth required, or valid key)
+	// Check if authentication is required. Always verify with a test request,
+	// even with a stored key: the key might be invalid, deleted, or expired.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: each change of checkRun starts one attempt
+	useEffect(() => {
+		let cancelled = false;
+		let retryTimer: ReturnType<typeof setTimeout> | undefined;
+		setStartup((current) =>
+			current.phase === "unreachable"
+				? { ...current, retrying: true }
+				: current,
+		);
+		void runStartupCheck(
+			() => api.getStats(),
+			() => api.hasApiKey(),
+		).then((outcome) => {
+			if (cancelled) return;
+			if (outcome.kind === "unreachable") {
+				// No answer, e.g. while a deploy swaps the backend and the guard
+				// holds new requests. Say so and retry, never show an empty page.
+				const delay = startupRetryDelayMs(startupFailuresRef.current);
+				startupFailuresRef.current += 1;
+				setStartup({
+					phase: "unreachable",
+					message: outcome.message,
+					retrying: false,
+				});
+				retryTimer = setTimeout(() => setCheckRun((run) => run + 1), delay);
+				return;
+			}
+			startupFailuresRef.current = 0;
+			if (outcome.kind === "ready") {
 				setIsAuthenticated(true);
 				// Auth is required only if we got here with a stored key
-				setAuthRequired(!!api.getApiKey());
-			} catch (error) {
-				// If we get a 401, auth is required
-				if (error instanceof HttpError && error.status === 401) {
-					// Clear any invalid stored key
-					api.clearApiKey();
-					setAuthRequired(true);
-					setShowAuthDialog(true);
-				}
-			} finally {
-				setIsCheckingAuth(false);
+				setAuthRequired(outcome.authRequired);
+			} else {
+				// Clear the rejected stored key
+				api.clearApiKey();
+				setAuthError(outcome.message);
+				setAuthRequired(true);
+				setShowAuthDialog(true);
 			}
+			setStartup({ phase: "done" });
+		});
+		return () => {
+			cancelled = true;
+			clearTimeout(retryTimer);
 		};
-
-		checkAuth();
-	}, []);
+	}, [checkRun]);
 
 	// Listen for 401 errors from API client
 	useEffect(() => {
@@ -298,12 +344,10 @@ export function App() {
 			setShowAuthDialog(false);
 			return true;
 		} catch (error) {
-			// Invalid API key or insufficient permissions, clear it
-			api.clearApiKey();
-			// Use the actual error message from the server if available
-			const errorMessage =
-				error instanceof Error ? error.message : "Invalid API key";
-			setAuthError(errorMessage);
+			// Clear the key only when the router rejected it; a timeout or 5xx
+			// says nothing about the key.
+			if (isKeyRejection(error)) api.clearApiKey();
+			setAuthError(authenticateErrorMessage(error));
 			return false;
 		}
 	};
@@ -315,18 +359,25 @@ export function App() {
 	};
 
 	// Show loading state while checking authentication
-	if (isCheckingAuth) {
+	if (startup.phase === "checking") {
 		return (
 			<QueryClientProvider client={queryClient}>
 				<ThemeProvider>
-					<div className="min-h-screen bg-background flex items-center justify-center">
-						<div className="text-center">
-							<div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
-							<p className="text-muted-foreground">
-								Checking authentication...
-							</p>
-						</div>
-					</div>
+					<StartupCheckingView slow={slowCheck} />
+				</ThemeProvider>
+			</QueryClientProvider>
+		);
+	}
+
+	if (startup.phase === "unreachable") {
+		return (
+			<QueryClientProvider client={queryClient}>
+				<ThemeProvider>
+					<RouterUnreachableView
+						message={startup.message}
+						retrying={startup.retrying}
+						onRetry={() => setCheckRun((run) => run + 1)}
+					/>
 				</ThemeProvider>
 			</QueryClientProvider>
 		);
