@@ -671,6 +671,16 @@ function isLimitedPath(req) {
 	);
 }
 
+// Dashboard reads are short and idempotent, so the draining backend can still
+// answer them instead of leaving the dashboard blank for the whole drain.
+// Inference and writes wait for the replacement, and an event stream on the old
+// generation would hold the drain open until the forced timeout.
+export function isDrainAdmissibleRead(req) {
+	if (!["GET", "HEAD"].includes(req.method || "GET")) return false;
+	const path = (req.url || "").split("?", 1)[0];
+	return path !== "/v1" && !path.startsWith("/v1/") && !path.endsWith("/stream");
+}
+
 function requiresAnthropicMessageStop(req) {
 	return (req.url || "").split("?", 1)[0] === "/v1/messages";
 }
@@ -1954,6 +1964,13 @@ export function createGuard(options = {}) {
 		checkRecycle();
 		return promise;
 	}
+	function admitsWithoutGeneration(context) {
+		return (
+			lifecycle === "serving" ||
+			(lifecycle === "shutdown" && shutdownAllowsAdmission) ||
+			(lifecycle === "draining" && context?.drainAdmissible === true)
+		);
+	}
 	function waitForServing(context) {
 		context.ensureBudget();
 		if (context.generation != null) {
@@ -1964,11 +1981,7 @@ export function createGuard(options = {}) {
 				return Promise.resolve();
 			return Promise.reject(lifecycleError());
 		}
-		if (
-			lifecycle === "serving" ||
-			(lifecycle === "shutdown" && shutdownAllowsAdmission)
-		)
-			return Promise.resolve();
+		if (admitsWithoutGeneration(context)) return Promise.resolve();
 		if (lifecycle === "shutdown") return Promise.reject(lifecycleError());
 		if (lifecycleWaiters.size >= maxQueue) {
 			counters.recycleQueueFull += 1;
@@ -2393,10 +2406,9 @@ export function createGuard(options = {}) {
 		};
 	}
 
-	function canAcquireBodyReader(reservationBytes) {
+	function canAcquireBodyReader(reservationBytes, id) {
 		return (
-			(lifecycle === "serving" ||
-				(lifecycle === "shutdown" && shutdownAllowsAdmission)) &&
+			admitsWithoutGeneration(contexts.get(id)) &&
 			bodyReadersActive < maxBodyReaders &&
 			reservationBytes <= maxBufferedRequestBodyBytes - reservedBodyReaderBytes
 		);
@@ -2409,7 +2421,7 @@ export function createGuard(options = {}) {
 				bodyReaderQueue.shift();
 				continue;
 			}
-			if (!canAcquireBodyReader(next.reservationBytes)) {
+			if (!canAcquireBodyReader(next.reservationBytes, next.id)) {
 				if (bodyReadersActive < maxBodyReaders) {
 					counters.bodyReaderBudgetBlocked += 1;
 				}
@@ -2428,7 +2440,7 @@ export function createGuard(options = {}) {
 		if (signal?.aborted) return Promise.reject(signal.reason || abortError());
 		if (
 			bodyReaderQueue.length === 0 &&
-			canAcquireBodyReader(reservationBytes)
+			canAcquireBodyReader(reservationBytes, id)
 		) {
 			return Promise.resolve(grantBodyReaderLease(0, reservationBytes));
 		}
@@ -2596,13 +2608,7 @@ export function createGuard(options = {}) {
 		const context = contexts.get(guardRequestId);
 		do {
 			await waitForServing(context);
-		} while (
-			context.generation == null &&
-			!(
-				lifecycle === "serving" ||
-				(lifecycle === "shutdown" && shutdownAllowsAdmission)
-			)
-		);
+		} while (context.generation == null && !admitsWithoutGeneration(context));
 		context.ensureBudget();
 		context.generation ??= generation;
 		// Sign at the physical-fetch boundary so ordinals describe actual guard
@@ -2718,6 +2724,7 @@ export function createGuard(options = {}) {
 		const context = {
 			id: randomUUID(),
 			generation: null,
+			drainAdmissible: isDrainAdmissibleRead(req),
 			abortRecycle() {
 				abortOwner.record("maintenance", "recycle");
 				recycleController.abort(lifecycleError());

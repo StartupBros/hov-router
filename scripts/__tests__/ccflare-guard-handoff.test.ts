@@ -7,7 +7,11 @@ import net from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createGuard, matchesPinnedSourceId } from "../ccflare-guard.mjs";
+import {
+	createGuard,
+	isDrainAdmissibleRead,
+	matchesPinnedSourceId,
+} from "../ccflare-guard.mjs";
 import { resolveNodeExecutable } from "./node-runtime";
 
 const sourceSha = "0123456789abcdef0123456789abcdef01234567";
@@ -138,6 +142,70 @@ test("handoff preserves listener and old stream, queues new work before body rea
 		(await (await fetch(`${f.base}/_guard/health`)).json()).runtime.process
 			.upstreamPid,
 	).toBe(process.pid);
+});
+
+test.each([
+	["GET", "/", true],
+	["GET", "/accounts", true],
+	["GET", "/assets/index-abc123.js", true],
+	["GET", "/api/accounts?include=routing", true],
+	["HEAD", "/api/config/strategy", true],
+	["GET", "/v1beta/models", true],
+	["GET", "/v1", false],
+	["GET", "/v1/models", false],
+	["GET", "/api/logs/stream", false],
+	["GET", "/api/insights/alerts/stream?token=t", false],
+	["POST", "/api/accounts/a/pause", false],
+	["DELETE", "/api/accounts/a", false],
+	["POST", "/v1/messages", false],
+])("%s %s is a drain-admissible dashboard read: %j", (method, url, expected) => {
+	expect(isDrainAdmissibleRead({ method, url })).toBe(expected);
+});
+
+test("dashboard reads mid-drain reach the draining backend; inference, writes and streams wait", async () => {
+	const f = await fixture({ maxQueue: 8 });
+	const old = await fetch(`${f.base}/hold`);
+	const oldBody = old.text().catch(() => "aborted");
+	const drain = f.guard.recycle.begin(1);
+	expect(f.guard.state.lifecycle.state).toBe("draining");
+
+	const read = await fetch(`${f.base}/api/accounts`);
+	expect(read.status).toBe(200);
+	expect(await read.text()).toBe("done");
+	expect((await fetch(`${f.base}/api/config/strategy`, { method: "HEAD" })).status).toBe(200);
+
+	const inference = fetch(`${f.base}/v1/messages`, {
+		method: "POST",
+		body: "fixture",
+	});
+	const write = fetch(`${f.base}/api/accounts/a/pause`, {
+		method: "POST",
+		body: "{}",
+	});
+	const stream = fetch(`${f.base}/api/logs/stream`);
+	await until(() => f.guard.state.lifecycle.waiting === 3);
+	expect(f.calls).toEqual(["/hold", "/api/accounts", "/api/config/strategy"]);
+
+	f.release();
+	expect(await oldBody).toBe("firstlast");
+	expect((await drain).outcome).toBe("natural");
+
+	// Between the drain and the replacement there is no backend to answer.
+	const afterDrain = fetch(`${f.base}/api/accounts`);
+	await until(() => f.guard.state.lifecycle.waiting === 4);
+	expect(f.calls).toHaveLength(3);
+
+	await f.guard.recycle.attach({
+		generation: 2,
+		...identity,
+		correlationSecret: secret,
+	});
+	for (const pending of [inference, write, stream, afterDrain]) {
+		expect((await pending).status).toBe(200);
+	}
+	expect(f.calls.slice(3).sort()).toEqual(
+		["/api/accounts", "/api/accounts/a/pause", "/api/logs/stream", "/v1/messages"].sort(),
+	);
 });
 
 test("handoff waiters are bounded, cancel without dispatch and retain the original deadline", async () => {
