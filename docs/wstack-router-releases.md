@@ -13,7 +13,8 @@ derives the current repository name from validated metadata. Historical release 
 below intentionally keeps the old repository and signer identity.
 The automation stages a verified **draft** GitHub release. It never publishes a
 release, publishes npm packages or images, announces, installs, restarts services,
-or deploys. Public publication is a separate operator decision; the consumer
+or deploys. Public publication is a separate operator decision, and it posts a
+[tool-drops announcement](#publishing-announces-the-release); the consumer
 instructions above do not use the draft-only automation helpers.
 
 ## Optional consumer provenance verification
@@ -292,6 +293,23 @@ The coordinator processes every validated pending candidate. Its concurrency gro
 is separate from the artifact workflow's per-tag groups. All use
 `cancel-in-progress: false`: staging for the same tag is serialized, while distinct
 release tags do not replace each other's pending runs.
+
+## Publishing announces the release
+
+The automation never announces, but publishing does. Once a published release
+becomes the repository's **Latest** release, the members site's hourly tool-drops
+sweep posts a card for it in the House of Vibe #tool-drops Discord channel. This
+applies from 3.7.1 on; earlier versions are never posted.
+The sweep posts only a full, non-draft release on a `v<major>.<minor>.<patch>` tag
+whose commit is on `main` in this repository. A later edit to the body does not
+change a card that has already posted.
+
+The card's "What's new" section is the first three bullets under a `## Highlights`
+heading in the release body. A body without that heading gets a card with no
+"What's new" section. Before publishing, edit the draft so its body has a
+`## Highlights` list of short, user-facing changes, as
+[3.7.0](https://github.com/StartupBros/hov-router/releases/tag/v3.7.0) does. The
+card's other text lives in pushbot's product registry, not in this repository.
 
 ## Fixed inventory and provenance
 
