@@ -1,5 +1,6 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { DatabaseOperations } from "@better-ccflare/database";
+import { Logger } from "@better-ccflare/logger";
 import {
 	type ApiKey,
 	type ApiKeyRole,
@@ -7,6 +8,8 @@ import {
 } from "@better-ccflare/types/api-key";
 import { classifyAuthPath } from "./auth-paths";
 import { extractApiKey } from "./extract-api-key";
+
+const log = new Logger("AuthService");
 
 /**
  * Constant-time string comparison for secrets (internal-probe secret,
@@ -87,6 +90,9 @@ function isLocalControlNotifyPath(path: string, method: string): boolean {
  * dashboard fetches it and opens the EventSource in the same tick). */
 const STREAM_TOKEN_TTL_MS = 60_000;
 
+/** Upper bound on remembered verified keys; the oldest is dropped first. */
+const MAX_VERIFIED_KEYS = 64;
+
 type StreamAudience = "logs" | "requests" | "alerts";
 
 interface StreamTokenRecord {
@@ -105,6 +111,18 @@ export class AuthService {
 	 * these are ephemeral (60s TTL) and only ever needed within the same
 	 * server process that minted them. */
 	private streamTokens = new Map<string, StreamTokenRecord>();
+	/** SHA-256 of a presented key -> the stored record it already matched.
+	 * Each scrypt verify costs ~20 ms of CPU and a 16 MiB work buffer, and every
+	 * dashboard poll and proxied request presents the same key. A hit is still
+	 * checked against the active-key list read on this request, so disabling,
+	 * deleting, rotating or re-roling a key applies immediately. Only keys
+	 * that verified are stored. */
+	private verifiedKeys = new Map<string, { id: string; hashedKey: string }>();
+	/** Per-request results; weakly held, so nothing outlives its Request. */
+	private requestAuth = new WeakMap<
+		Request,
+		{ path: string; method: string; result: AuthenticationResult }
+	>();
 
 	constructor(
 		dbOps: DatabaseOperations,
@@ -181,6 +199,16 @@ export class AuthService {
 		// Get all active API keys
 		const activeApiKeys = await this.dbOps.getActiveApiKeys();
 
+		const digest = createHash("sha256").update(apiKey).digest("hex");
+		const remembered = this.verifiedKeys.get(digest);
+		if (remembered) {
+			const keyRecord = activeApiKeys.find(
+				(k) => k.id === remembered.id && k.hashedKey === remembered.hashedKey,
+			);
+			if (keyRecord) return this.acceptApiKey(keyRecord);
+			this.verifiedKeys.delete(digest);
+		}
+
 		// Derive the last-8 suffix of the incoming key for a cheap pre-filter.
 		// This matches how `prefixLast8` is stored: apiKey.slice(-8).
 		const incomingLast8 = apiKey.slice(-8);
@@ -196,22 +224,41 @@ export class AuthService {
 				keyRecord.hashedKey,
 			);
 			if (isValid) {
-				// Update usage statistics
-				this.dbOps.updateApiKeyUsage(keyRecord.id, Date.now());
-
-				return {
-					isAuthenticated: true,
-					apiKey: keyRecord,
-					apiKeyId: keyRecord.id,
-					apiKeyName: keyRecord.name,
-					role: keyRecord.role,
-				};
+				if (this.verifiedKeys.size >= MAX_VERIFIED_KEYS) {
+					const oldest = this.verifiedKeys.keys().next().value;
+					if (oldest !== undefined) this.verifiedKeys.delete(oldest);
+				}
+				this.verifiedKeys.set(digest, {
+					id: keyRecord.id,
+					hashedKey: keyRecord.hashedKey,
+				});
+				return this.acceptApiKey(keyRecord);
 			}
 		}
 
 		return {
 			isAuthenticated: false,
 			error: "Invalid API key",
+		};
+	}
+
+	private acceptApiKey(keyRecord: ApiKey): AuthenticationResult {
+		// Best-effort usage stamp, not awaited. It must never reject
+		// unhandled: an uncaught SQLITE_FULL here exited the whole router.
+		void Promise.resolve()
+			.then(() => this.dbOps.updateApiKeyUsage(keyRecord.id, Date.now()))
+			.catch((error: unknown) => {
+				log.warn(
+					`Failed to record API key usage for ${keyRecord.id}: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			});
+
+		return {
+			isAuthenticated: true,
+			apiKey: keyRecord,
+			apiKeyId: keyRecord.id,
+			apiKeyName: keyRecord.name,
+			role: keyRecord.role,
 		};
 	}
 
@@ -458,9 +505,26 @@ export class AuthService {
 	}
 
 	/**
-	 * Authenticate a request
+	 * Authenticate a request. The result is computed once per Request object,
+	 * path and method: a proxied request is authenticated by the API router,
+	 * which then finds no /api route, and again by server.ts before proxying,
+	 * which counted every proxied request twice in the key's usage_count.
 	 */
 	async authenticateRequest(
+		req: Request,
+		path: string,
+		method: string,
+	): Promise<AuthenticationResult> {
+		const prior = this.requestAuth.get(req);
+		if (prior && prior.path === path && prior.method === method) {
+			return prior.result;
+		}
+		const result = await this.authenticateRequestOnce(req, path, method);
+		this.requestAuth.set(req, { path, method, result });
+		return result;
+	}
+
+	private async authenticateRequestOnce(
 		req: Request,
 		path: string,
 		method: string,
