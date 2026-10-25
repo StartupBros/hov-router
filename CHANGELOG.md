@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.7.0](https://github.com/StartupBros/hov-router/compare/v3.6.2...v3.7.0) (2026-10-25)
+
+
+### Features
+
+* **dashboard:** give HoV Router its own favicon and sidebar mark ([#592](https://github.com/StartupBros/hov-router/issues/592)) ([6f1b655](https://github.com/StartupBros/hov-router/commit/6f1b655cae18ccf9a540fb3e4e10538918e14a23)), refs [#584](https://github.com/StartupBros/hov-router/issues/584)
+* **docker:** build HoV Router images from source ([#591](https://github.com/StartupBros/hov-router/issues/591)) ([6a76fc1](https://github.com/StartupBros/hov-router/commit/6a76fc190fc02e52b073388c4fd04020e993c288)), refs [#584](https://github.com/StartupBros/hov-router/issues/584)
+
+
+### Bug Fixes
+
+* name HoV Router in remaining runtime and dashboard messages ([#585](https://github.com/StartupBros/hov-router/issues/585)) ([c10f346](https://github.com/StartupBros/hov-router/commit/c10f34642f1ebdc5cc6f335f3e0cdebae60da102))
+
 ## [3.6.2](https://github.com/StartupBros/wstack-router/compare/v3.6.1...v3.6.2) (2026-10-20)
 
 

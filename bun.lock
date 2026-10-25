@@ -15,7 +15,7 @@
     },
     "apps/cli": {
       "name": "better-ccflare",
-      "version": "3.6.2",
+      "version": "3.7.0",
       "bin": {
         "hov-router": "dist/better-ccflare",
         "better-ccflare": "dist/better-ccflare",
