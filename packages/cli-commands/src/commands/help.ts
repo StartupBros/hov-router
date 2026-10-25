@@ -1,6 +1,6 @@
 import {
 	COMMAND_NAME,
-	COMMAND_NAMES,
+	LEGACY_COMMAND_NAME,
 	PRODUCT_NAME,
 } from "@better-ccflare/core/product-identity";
 
@@ -31,7 +31,7 @@ export function getHelpText(): string {
 	return `
 ${PRODUCT_NAME}
 Usage: ${COMMAND_NAME} <command> [options]
-${COMMAND_NAMES.filter((name) => name !== COMMAND_NAME).join(" and ")} remain supported aliases.
+Earlier command names, such as ${LEGACY_COMMAND_NAME}, remain supported aliases.
 
 Commands:
   add <name> [--mode <claude-oauth|console|codex|qwen|xai|zai|minimax|anthropic-compatible|openai-compatible|nanogpt|kilo|openrouter|ollama|ollama-cloud|meta>] [--priority <number>] [--modelMappings <JSON>] [--api-url <loopback-url>]

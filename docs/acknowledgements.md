@@ -33,7 +33,7 @@ Inspired by [snipeship/ccflare](https://github.com/snipeship/ccflare) - thanks f
 
 ## Upstream Sponsors
 
-Credit retained from upstream; this does not claim signing or sponsorship for wstack Router builds.
+Credit retained from upstream; this does not claim signing or sponsorship for this fork's builds.
 
 | | |
 |---|---|

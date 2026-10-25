@@ -16,7 +16,7 @@ execution: code
 - **Authority:** The operator approved implementation on 2026-10-19. Requirements below govern scope; technical decisions govern mechanisms; units change neither.
 - **Execution:** Three dependency-ordered units, each implemented by a fresh worker. The parent owns integration, verification, the ready PR, one CI-sensitive Pro review, merge, and closeout.
 - **Stop conditions:** Never change account permissions, create a real acceptance-test release/tag, publish publicly, or bypass a failed trust check. A source implementation may proceed while activation is blocked; do not describe it as operating automation.
-- **Tracking:** [Issue #553](https://github.com/StartupBros/wstack-router/issues/553), kept open pending operator confirmation.
+- **Tracking:** [Issue #553](https://github.com/StartupBros/hov-router/issues/553), kept open pending operator confirmation.
 
 ---
 
@@ -49,12 +49,12 @@ The inherited manual release path pushes a version commit directly to main, publ
 
 **Compatibility and authority**
 
-- R5. Keep upstream publication behavior outside StartupBros/wstack-router, local unpublished preparation, package and command names, storage/config namespaces, and attribution unchanged. Router's inherited publishing and signing jobs must not run through any of their triggers.
+- R5. Keep upstream publication behavior outside StartupBros/hov-router, local unpublished preparation, package and command names, storage/config namespaces, and attribution unchanged. Router's inherited publishing and signing jobs must not run through any of their triggers.
 - R6. This increment never publicly publishes, announces, installs, restarts services, deploys, changes account permissions, or uses provider inference. Published releases and their assets are never deleted or overwritten; reruns verify existing bytes rather than clobbering them.
 
 ### Scope Boundaries
 
-No npm/GHCR rollout, Windows/macOS release matrix, preview channel, updater, service transaction, HoV/wstack source edits, or TUF deployment. These are not prerequisites for this draft-only increment.
+No npm/GHCR rollout, Windows/macOS release matrix, preview channel, updater, service transaction, edits to other HoV source repositories, or TUF deployment. These are not prerequisites for this draft-only increment.
 
 No new public CLI flag solely for build verification: existing version/SHA exits and compiled provenance fixtures cover the available surface. A fixture is not full introspection of the shipped executable.
 
@@ -173,7 +173,7 @@ Existing `--version` and `--git-sha` verify the actual binary's public identity.
 
 **Requirements:** R1–R6; KTD3, KTD5–KTD7. **Dependencies:** U1 and U2.
 
-**Files:** `.github/workflows/router-release.yml`, `.github/workflows/router-release-artifacts.yml`, `.github/workflows/release-dispatch.yml`, `.github/workflows/release.yml`, `.github/workflows/signpath-release.yml`, `.github/workflows/signpath-test.yml`, `.github/workflows/docker-publish.yml`, `.github/workflows/auto-rerun-failed.yml`, `scripts/router-release-assets.ts` (testable remote asset reconciliation), `scripts/__tests__/router-release-workflow.test.ts`, `.github/workflows/managed-routing-postgres.yml` (static check of release scripts), a read-only draft validation in `scripts/router-release.ts` with its test, `tests/bun-toolchain-pin.test.ts` when the workflow inventory changes, and `docs/wstack-router-releases.md`.
+**Files:** `.github/workflows/router-release.yml`, `.github/workflows/router-release-artifacts.yml`, `.github/workflows/release-dispatch.yml`, `.github/workflows/release.yml`, `.github/workflows/signpath-release.yml`, `.github/workflows/signpath-test.yml`, `.github/workflows/docker-publish.yml`, `.github/workflows/auto-rerun-failed.yml`, `scripts/router-release-assets.ts` (testable remote asset reconciliation), `scripts/__tests__/router-release-workflow.test.ts`, `.github/workflows/managed-routing-postgres.yml` (static check of release scripts), a read-only draft validation in `scripts/router-release.ts` with its test, `tests/bun-toolchain-pin.test.ts` when the workflow inventory changes, and `docs/hov-router-releases.md`.
 
 **Approach:**
 1. Add trusted main-push foundation completion and bounded explicit retry handling, with exact-source checks and serialized publication effects.

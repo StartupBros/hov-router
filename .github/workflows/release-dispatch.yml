@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   release:
-    # Router publishes only through the draft-only wstack release workflows.
+    # Router publishes only through the draft-only HoV Router release workflows.
     if: github.repository != 'StartupBros/wstack-router' && github.repository != 'StartupBros/hov-router' && github.repository_id != '1278801682'
     runs-on: ubuntu-latest
     steps:

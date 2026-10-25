@@ -29,7 +29,7 @@ import {
 } from "@better-ccflare/core";
 import {
 	COMMAND_NAME,
-	COMMAND_NAMES,
+	LEGACY_COMMAND_NAME,
 	PRODUCT_NAME,
 } from "@better-ccflare/core/product-identity";
 import { container, SERVICE_KEYS } from "@better-ccflare/core-di";
@@ -136,7 +136,7 @@ export function renderHelpText(version: string): string {
 🎯 ${PRODUCT_NAME} v${version} - Load Balancer for Claude
 
 Usage: ${COMMAND_NAME} [options]
-${COMMAND_NAMES.filter((name) => name !== COMMAND_NAME).join(" and ")} remain supported aliases.
+Earlier command names, such as ${LEGACY_COMMAND_NAME}, remain supported aliases.
 
 Options:
   --version, -v       Show version number

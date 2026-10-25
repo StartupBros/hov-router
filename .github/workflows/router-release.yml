@@ -1,4 +1,4 @@
-name: wstack Router Release Coordinator
+name: HoV Router Release Coordinator
 
 # Draft-only coordinator. It never publishes a release, package or image.
 # Release PRs use a repository-scoped App token; missing App configuration fails
@@ -22,7 +22,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: wstack-router-release-coordinator
+  group: hov-router-release-coordinator
   cancel-in-progress: false
 
 jobs:

@@ -1,6 +1,6 @@
 # Technical reference
 
-Manual installation, client configuration, and operating details for HoV Router. For agent-assisted setup, start with the [agent setup guide](agent-setup.md). Use `hov-router`; `wstack-router` and `better-ccflare` remain compatible commands.
+Manual installation, client configuration, and operating details for HoV Router. For agent-assisted setup, start with the [agent setup guide](agent-setup.md). Use `hov-router`; older command names such as `better-ccflare` remain compatible.
 
 - [Linux x86_64 release](#install-the-linux-x86_64-release) or [source build](#install-from-source)
 - [Local server and account setup](#start-the-local-server)
@@ -46,7 +46,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 - **Database Integration** - SQLite (default) or PostgreSQL for persistent storage and analytics, supporting Kubernetes multi-pod deployments
 
 **Distribution & Updates:**
-- **Local Source Build** - Install the built artifact as `hov-router`, `wstack-router`, and `better-ccflare`
+- **Local Source Build** - Install the built artifact as `hov-router` and its compatibility command names
 - **Manual Updates** - Fetch the current fork and rebuild; branded builds do not offer upstream auto-updates
 - **Compatibility** - Package names, build filenames, environment variables, paths, ports, and headers retain their existing names
 
@@ -64,7 +64,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 
 [Release 3.7.0](https://github.com/StartupBros/hov-router/releases/tag/v3.7.0) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
 
-The public home is `StartupBros/hov-router`, renamed from `StartupBros/wstack-router` on 2026-10-21 with the same repository ID `1278801682`. Use the current download and clone URLs below. Release 3.7.0 prints `HoV Router v3.7.0` through all three command names. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints `wstack Router v3.6.2`. If you installed 3.6.2 with this guide, install 3.7.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
+The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 3.7.0 prints `HoV Router v3.7.0` through all three command names. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed 3.6.2 with this guide, install 3.7.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
 
 Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, `chmod`). No GitHub CLI, Node.js, or Bun is needed.
 
@@ -88,7 +88,7 @@ Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, 
 ```
 <!-- /router-release-install -->
 
-The checksum verifies the bytes against this trusted reference; it does not independently prove who built them. Before the first run, you can also [verify signed build provenance](wstack-router-releases.md#optional-consumer-provenance-verification). That optional check verifies the binary against the exact repository, source commit, tag, workflow identity, signer commit, and hosted runner that built it.
+The checksum verifies the bytes against this trusted reference; it does not independently prove who built them. Before the first run, you can also [verify signed build provenance](hov-router-releases.md#optional-consumer-provenance-verification). That optional check verifies the binary against the exact repository, source commit, tag, workflow identity, signer commit, and hosted runner that built it.
 
 If any command fails, stop: do not run the binary. The block refuses any existing `3.7.0` path, including a symlink, and leaves partial downloads for inspection rather than deleting or overwriting them. Inspect the error and existing files before retrying.
 
@@ -100,7 +100,7 @@ If any command fails, stop: do not run the binary. The block refuses any existin
 ```
 <!-- /router-release-run -->
 
-Continue at [Start the local server](#start-the-local-server), or add the optional aliases below. Existing service users should follow the [migration and rollback guide](wstack-router-migration.md) instead; this quickstart does not change running services.
+Continue at [Start the local server](#start-the-local-server), or add the optional aliases below. Existing service users should follow the [migration and rollback guide](hov-router-migration.md) instead; this quickstart does not change running services.
 
 #### Optional: add commands to PATH
 
@@ -214,11 +214,9 @@ Leave the server running, then:
 2. Follow [Configure Claude SDK](#configure-claude-sdk), using this server's origin. A provider credential belongs to the account you just added; a proxy API key, when required, authenticates your client to Router.
 3. After your first client request, open the dashboard's **Requests** tab. Find that request and check its account and status to confirm which account handled it and whether it succeeded. An account appearing in **Accounts** alone does not prove a request routed successfully.
 
-If port 8080 is occupied, choose an unused port and use it consistently for the server, dashboard, CLI routing commands, and client configuration. `wstack-router` and `better-ccflare` remain equivalent commands. This guide does not change a running service or move existing accounts.
+If port 8080 is occupied, choose an unused port and use it consistently for the server, dashboard, CLI routing commands, and client configuration. The compatibility command names remain equivalent. This guide does not change a running service or move existing accounts.
 
-See [manual updates, unchanged paths, and rollback](wstack-router-migration.md). Report fork issues at [StartupBros/hov-router/issues](https://github.com/StartupBros/hov-router/issues).
-
-<a id="legacy-upstream-distributions-not-wstack-router"></a>
+See [manual updates, unchanged paths, and rollback](hov-router-migration.md). Report fork issues at [StartupBros/hov-router/issues](https://github.com/StartupBros/hov-router/issues).
 
 ### Legacy upstream distributions (not HoV Router)
 
@@ -668,8 +666,6 @@ docker-compose up
 docker run --env-file .env -p 8080:8080 -v hov-router-data:/data hov-router:local
 ```
 
-<a id="docker-legacy-upstream-images-not-wstack-router"></a>
-
 ### Docker
 
 HoV Router builds its Docker image from source and publishes none. Build and run it with `docker compose up -d --build`; the [Docker guide](docker.md) covers plain `docker run`, the `/data` volume, backups, health checks and upgrades. The `ghcr.io/tombii/better-ccflare` image is upstream's and is not this fork.
@@ -1097,7 +1093,7 @@ Interactive apply can preview, show exact deltas, require an explicit proposal s
 See [Service-Lifetime Cohort Seal configuration and operator guidance](configuration.md#service-lifetime-cohort-seal) for activation, report and health commands, retention, privacy, and the mandatory pre-transport runtime-safety gate.
 
 ### Developer Tools
-- CLI (`hov-router`, with `wstack-router` and `better-ccflare` compatibility)
+- CLI (`hov-router`, with compatibility command names)
 - Web dashboard (`http://localhost:8080/dashboard`)
 - CLI for account management
 - REST API for automation

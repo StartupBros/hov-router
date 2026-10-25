@@ -339,7 +339,7 @@ describe("CLI Integration Tests", () => {
 			expect(result.stdout).toContain("HoV Router");
 			expect(result.stdout).toContain("Usage: hov-router [options]");
 			expect(result.stdout).toContain(
-				"wstack-router and better-ccflare remain supported aliases",
+				"Earlier command names, such as better-ccflare, remain supported aliases",
 			);
 			expect(result.stdout).toContain("hov-router --serve");
 			expect(result.stdout).not.toContain("  wstack-router ");

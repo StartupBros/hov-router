@@ -1,8 +1,6 @@
 # HoV Router CLI Documentation
 
-<a id="wstack-router-cli-documentation"></a>
-
-The HoV Router CLI provides a command-line interface for managing accounts, monitoring usage statistics, and controlling the load balancer. Use `hov-router`; `wstack-router` and `better-ccflare` remain equivalent commands, and existing `BETTER_CCFLARE_*` configuration names remain unchanged.
+The HoV Router CLI provides a command-line interface for managing accounts, monitoring usage statistics, and controlling the load balancer. Use `hov-router`; older command names such as `better-ccflare` remain equivalent, and existing `BETTER_CCFLARE_*` configuration names remain unchanged.
 
 ## Table of Contents
 
@@ -26,9 +24,9 @@ The HoV Router CLI provides a command-line interface for managing accounts, moni
 
 ### Installation
 
-For agent-assisted setup, use the [agent setup guide](agent-setup.md). For manual installation, follow the [Linux x86_64 release installation](reference.md#install-the-linux-x86_64-release) for Router 3.7.0: download, verify the pinned SHA-256, then run. [Signed provenance verification](./wstack-router-releases.md#optional-consumer-provenance-verification) is optional and available before the first run. You can also [build from source](reference.md#install-from-source). Router npm packages, container images, and other-platform binaries are not published. Upstream registry packages and releases are not Router distributions.
+For agent-assisted setup, use the [agent setup guide](agent-setup.md). For manual installation, follow the [Linux x86_64 release installation](reference.md#install-the-linux-x86_64-release) for Router 3.7.0: download, verify the pinned SHA-256, then run. [Signed provenance verification](./hov-router-releases.md#optional-consumer-provenance-verification) is optional and available before the first run. You can also [build from source](reference.md#install-from-source). Router npm packages, container images, and other-platform binaries are not published. Upstream registry packages and releases are not Router distributions.
 
-The examples below assume you completed the optional [PATH setup](reference.md#optional-add-commands-to-path) or the source install, which provide all three command names. Without PATH setup, replace `hov-router` with `"$HOME/.local/lib/hov-router/3.7.0/hov-router"`. Release 3.7.0 and new source builds display HoV Router through every alias; the earlier 3.6.2 binary still prints `wstack Router v3.6.2`. After building, source-checkout commands such as `bun run cli [command]` remain supported. In a second terminal, use the same installation directory on PATH or the same explicit binary path.
+The examples below assume you completed the optional [PATH setup](reference.md#optional-add-commands-to-path) or the source install, which provide all three command names. Without PATH setup, replace `hov-router` with `"$HOME/.local/lib/hov-router/3.7.0/hov-router"`. Release 3.7.0 and new source builds display HoV Router through every alias; the earlier 3.6.2 binary still prints its original product name. After building, source-checkout commands such as `bun run cli [command]` remain supported. In a second terminal, use the same installation directory on PATH or the same explicit binary path.
 
 ### First-time Setup
 
@@ -84,7 +82,7 @@ Current source builds use this format, with the installed version in the heading
 🎯 HoV Router v<version> - Load Balancer for Claude
 
 Usage: hov-router [options]
-wstack-router and better-ccflare remain supported aliases.
+Earlier command names, such as better-ccflare, remain supported aliases.
 
 Options:
   --serve              Start API server with dashboard

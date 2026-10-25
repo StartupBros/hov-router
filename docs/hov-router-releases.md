@@ -1,15 +1,13 @@
 # HoV Router release automation (draft-only)
 
-<a id="wstack-router-release-automation-draft-only"></a>
-
 For the current published release, 3.7.0 (Linux x86_64), follow the technical
 reference's [consumer installation and verification instructions](reference.md#install-the-linux-x86_64-release).
 
 This is the operator guide for HoV Router release automation at
-`StartupBros/hov-router`. The repository was renamed from
-`StartupBros/wstack-router` on 2026-10-21, retaining repository ID `1278801682`.
-Current automation accepts either exact name only with that repository ID and
-derives the current repository name from validated metadata. Historical release evidence
+`StartupBros/hov-router`, repository ID `1278801682` (see
+[the repository move](hov-router-migration.md#repository-move)).
+Current automation accepts the current or former exact name only with that
+repository ID and derives the current repository name from validated metadata. Historical release evidence
 below intentionally keeps the old repository and signer identity.
 The automation stages a verified **draft** GitHub release. It never publishes a
 release, publishes npm packages or images, announces, installs, restarts services,
@@ -101,7 +99,7 @@ block expects the 3.6.2 install path that earlier versions of this guide used.
   digest=b01a4989323ecf4e2d0a68394b45828741430d89eb35288f7318a28c45b4c9d7
   printf '%s  %s\n' "$digest" "$binary" | sha256sum --check --strict -
   retrieval_repo=StartupBros/hov-router
-  bundle_dir=$(mktemp -d "${TMPDIR:-/tmp}/wstack-router-provenance.XXXXXX")
+  bundle_dir=$(mktemp -d "${TMPDIR:-/tmp}/router-provenance.XXXXXX")
   cd "$bundle_dir"
   gh attestation download "$binary" --repo "$retrieval_repo"
   gh attestation verify "$binary" \
@@ -219,31 +217,30 @@ artifact jobs retain their separate built-in tokens and existing permissions.
 ## Intentional first release or explicit version request
 
 An intentional release request can use the engine's `Release-As` commit-body
-trailer without inventing a feature or editing version files. The following is the
-historical first-release recipe, preserving its wstack Router subject, repository,
-and requested 3.6.0 version. It is not a current request to release 3.6.0 again;
-future requests use their approved version and the current repository name.
-For that first-release recipe, preserve this complete request PR squash message:
+trailer without inventing a feature or editing version files. The first release,
+3.6.0, was requested this way. Replace `<subject>` with an honest description and
+`<version>` with the approved version, and preserve this complete request PR squash
+message:
 
 ```text
-chore: prepare the first wstack Router release
+chore: <subject>
 
-Release-As:3.6.0
+Release-As:<version>
 ```
 
 1. Open a normal request PR and let its required checks pass. Ordinary unmarked
    `docs`, `chore`, `test` and `style` commits remain no-ops; the trailer is a
    deliberate release request, not a new rule that releases every chore.
-2. When merging the request PR, put `Release-As:3.6.0` in a local body file and use
-   `gh pr merge <request-pr> --squash --subject "chore: prepare the first wstack Router release" --body-file <body-file>`.
+2. When merging the request PR, put `Release-As:<version>` in a local body file and use
+   `gh pr merge <request-pr> --squash --subject "chore: <subject>" --body-file <body-file>`.
    Do not rely on the PR description or GitHub's default squash body to retain it.
    Use the normal checked merge path, never a direct-main push, force push or bypass.
 3. Read back the **actual main commit message** using the merged PR's
-   `mergeCommit.oid` and `gh api repos/StartupBros/wstack-router/commits/<sha> --jq .commit.message`.
-   Confirm the honest subject, blank line and exact `Release-As:3.6.0` trailer before
+   `mergeCommit.oid` and `gh api repos/StartupBros/hov-router/commits/<sha> --jq .commit.message`.
+   Confirm the honest subject, blank line and exact `Release-As:<version>` trailer before
    treating the request as delivered. A local message or PR description is not proof.
 4. After that commit's foundation gate passes, observe the coordinator's generated
-   release PR. The pinned engine selects 3.6.0 and synchronizes root/CLI packages,
+   release PR. The pinned engine selects `<version>` and synchronizes root/CLI packages,
    release manifest and Bun workspace version without changing dependency resolution.
    The request subject appears in generated PR notes and `CHANGELOG.md`; arbitrary
    body prose is not a supported way to enrich those notes. Leave version-file edits

@@ -2,7 +2,7 @@
 
 For a coding agent with computer and terminal access, helping a human connect Claude Code to HoV Router. Choose client-only or new-host setup **before installing anything**. Installation commands live in the [technical reference](reference.md), not here. Finish with a working client request and matching dashboard evidence, directly or with the owner's help; otherwise name the evidence or human step still needed.
 
-Use `hov-router` for current builds; `wstack-router` and `better-ccflare` remain compatible commands. The public home is `StartupBros/hov-router`, renamed from `StartupBros/wstack-router` on 2026-10-21 with the same repository ID `1278801682`. Use the current home in guide, clone, download, and support URLs. Keep the local clone directory `better-ccflare`. Release 3.7.0 reports `HoV Router v3.7.0` through every alias. The earlier 3.6.2 release still reports `wstack Router v3.6.2`; preserve its historical verification pins. HoV Router and hovstack are independent House of Vibe projects; no hovstack installation is needed.
+Use `hov-router` for current builds; older command names such as `better-ccflare` remain compatible and run the same product ([migration](hov-router-migration.md#install-without-replacing-your-current-executable)). The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current home in guide, clone, download, and support URLs. Keep the local clone directory `better-ccflare`. Release 3.7.0 reports `HoV Router v3.7.0` through every alias. The earlier 3.6.2 release still reports its original product name; it is the same product, so preserve its [historical verification pins](hov-router-releases.md#verify-the-historical-362-release). HoV Router and hovstack are independent House of Vibe projects; no hovstack installation is needed.
 
 ## 1. Choose the setup path
 
@@ -11,7 +11,7 @@ Inspect the intended Claude Code client, its OS, and relevant non-secret setting
 - **Existing local or shared server:** use [Shared client only](#shared-client-only). One central Router can serve many clients over Tailscale. Do not assume this computer needs to host another instance.
 - **New local host:** inspect server OS/architecture, installed tools, command locations, and local listening ports. Use a separate installation and private state with an unused loopback port. Keep existing executables, services, account data, client settings, and login intact. Continue at [Install without replacing anything](#2-install-without-replacing-anything).
 
-Ask only for choices inspection cannot resolve. Autostart, shell-profile edits, system services, remote exposure, and existing-server changes require a separate decision. Read [migration and rollback](wstack-router-migration.md#what-stays-the-same) before changing an existing command selection.
+Ask only for choices inspection cannot resolve. Autostart, shell-profile edits, system services, remote exposure, and existing-server changes require a separate decision. Read [migration and rollback](hov-router-migration.md#what-stays-the-same) before changing an existing command selection.
 
 ### Shared client only
 
@@ -25,7 +25,7 @@ Ask only for choices inspection cannot resolve. Autostart, shell-profile edits, 
 
 **New hosts only.** Shared clients skip directly to [client configuration](#5-connect-claude-code-and-prove-the-route).
 
-- **Linux x86_64:** follow [the verified 3.7.0 binary installation](reference.md#install-the-linux-x86_64-release). If the host already has a 3.6.2 binary install with PATH aliases, [upgrade it](reference.md#upgrade-an-earlier-binary-install) after step 1 instead of rerunning the PATH block. Check its pinned checksum before execution; offer [signed provenance verification](wstack-router-releases.md#optional-consumer-provenance-verification) before the first run. Stop on a failed download or verification. Existing paths are intentionally refused, not overwritten. [PATH aliases](reference.md#optional-add-commands-to-path) are optional; using the full executable path is enough.
+- **Linux x86_64:** follow [the verified 3.7.0 binary installation](reference.md#install-the-linux-x86_64-release). If the host already has a 3.6.2 binary install with PATH aliases, [upgrade it](reference.md#upgrade-an-earlier-binary-install) after step 1 instead of rerunning the PATH block. Check its pinned checksum before execution; offer [signed provenance verification](hov-router-releases.md#optional-consumer-provenance-verification) before the first run. Stop on a failed download or verification. Existing paths are intentionally refused, not overwritten. [PATH aliases](reference.md#optional-add-commands-to-path) are optional; using the full executable path is enough.
 - **Source build:** follow [Install from source](reference.md#install-from-source), including Git, Node.js, and pinned Bun 1.4.2. It uses a POSIX shell on Linux/macOS or WSL on Windows. Linux x86_64 is the tested source-install platform; don't claim other platforms were verified. Router has no native Windows/macOS/ARM binary or npm/container distribution. The manual's upstream recipes install upstream, not Router.
 
 Record the selected executable's path and version. Keep the previous command path for rollback.

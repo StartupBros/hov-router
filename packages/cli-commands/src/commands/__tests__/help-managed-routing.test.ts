@@ -7,7 +7,7 @@ describe("legacy CLI managed-routing help", () => {
 		expect(help).toContain("HoV Router");
 		expect(help).toContain("Usage: hov-router <command> [options]");
 		expect(help).toContain(
-			"wstack-router and better-ccflare remain supported aliases",
+			"Earlier command names, such as better-ccflare, remain supported aliases",
 		);
 		expect(help).toContain("hov-router add myaccount");
 		expect(help).not.toContain("  wstack-router ");

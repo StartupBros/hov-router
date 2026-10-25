@@ -1,7 +1,5 @@
 # HoV Router
 
-<a id="wstack-router"></a>
-
 Use your AI accounts from one place, and see which account handled each request. HoV Router connects Claude Code to your chosen providers, routes requests across available accounts, and shows usage, costs, and errors in a dashboard. Run one Router privately over Tailscale for several computers, or start with one local computer.
 
 ## Send this to your AI agent
@@ -44,7 +42,7 @@ Shared clients need Claude Code and access to the confirmed server, not a Router
 - **Source builds:** instructions use a POSIX shell on Linux/macOS, or WSL on Windows, with Git, Node.js, and Bun 1.4.2. The source-install acceptance check runs on Linux x86_64; macOS and native Windows installation have not been verified here.
 - **Other distributions:** Router does not publish npm packages, container images, or binaries for other platforms. The upstream better-ccflare packages and downloads are a different distribution.
 
-Use `hov-router`; `wstack-router` and `better-ccflare` remain compatible commands with unchanged storage/configuration names. See [migration and rollback](docs/wstack-router-migration.md). The repository was renamed to [StartupBros/hov-router](https://github.com/StartupBros/hov-router) on 2026-10-21; it is the same repository, not a new fork.
+Use `hov-router`; older command names such as `better-ccflare` remain compatible, with unchanged storage/configuration names. See [migration and rollback](docs/hov-router-migration.md). The repository was renamed to [StartupBros/hov-router](https://github.com/StartupBros/hov-router) on 2026-10-21; it is the same repository, not a new fork.
 
 ## Help and contributions
 

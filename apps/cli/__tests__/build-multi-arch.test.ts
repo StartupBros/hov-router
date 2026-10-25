@@ -103,7 +103,7 @@ function releaseFixtureDefines() {
 	];
 }
 
-describe("wstack Router build provenance", () => {
+describe("Router build provenance", () => {
 	for (const [context, token, mode] of [
 		["wstack-router-binary", "v1:startupbros-wstack-router-binary", "binary"],
 		[

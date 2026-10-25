@@ -1,4 +1,4 @@
-name: Prepare wstack Router Artifacts
+name: Prepare HoV Router Artifacts
 
 on:
   pull_request:
@@ -34,5 +34,5 @@ jobs:
       - name: Prepare and verify unpublished Linux artifacts
         run: |
           printf '%s\n' 'Local ephemeral preparation only; not release publication. No artifacts are uploaded or retained.'
-          preparation_root="$(mktemp -d "$RUNNER_TEMP/wstack-router.XXXXXX")"
+          preparation_root="$(mktemp -d "$RUNNER_TEMP/hov-router.XXXXXX")"
           bun run apps/cli/prepare-router-artifacts.ts "$preparation_root/artifacts"

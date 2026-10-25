@@ -34,7 +34,7 @@ describe("documented source installer shell (synthetic artifact, not native buil
 			?.split("```bash\n")[1]
 			?.split("```")[0];
 		expect(commands).toBeDefined();
-		const home = mkdtempSync(join(tmpdir(), "wstack-source-install-"));
+		const home = mkdtempSync(join(tmpdir(), "hov-router-source-install-"));
 		homes.push(home);
 		const checkout = join(home, "better-ccflare");
 		const built = join(checkout, "apps/cli/dist/better-ccflare");
@@ -181,7 +181,7 @@ describe("documented source install", () => {
 		expect(section).toBeDefined();
 		const commands = section.split("```bash\n")[1].split("```")[0];
 		expect(existsSync(join(root, "apps/cli/dist/better-ccflare"))).toBe(true);
-		const home = mkdtempSync(join(tmpdir(), "wstack-source-install-"));
+		const home = mkdtempSync(join(tmpdir(), "hov-router-source-install-"));
 		homes.push(home);
 		const env = {
 			HOME: home,
