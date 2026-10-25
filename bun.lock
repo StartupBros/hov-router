@@ -28,10 +28,6 @@
         "@types/node": "^20.0.0"
       }
     },
-    "apps/lander": {
-      "name": "@better-ccflare/lander",
-      "version": "1.0.0"
-    },
     "apps/server": {
       "name": "@better-ccflare/server",
       "version": "0.1.0",
@@ -1044,9 +1040,6 @@
     ],
     "@better-ccflare/http-common": [
       "@better-ccflare/http-common@workspace:packages/http-common"
-    ],
-    "@better-ccflare/lander": [
-      "@better-ccflare/lander@workspace:apps/lander"
     ],
     "@better-ccflare/load-balancer": [
       "@better-ccflare/load-balancer@workspace:packages/load-balancer"

@@ -200,8 +200,7 @@ HoV Router is organized as a Bun monorepo with clear separation of concerns:
 better-ccflare/
 ├── apps/                    # Deployable applications
 │   ├── cli/                # Command-line interface
-│   ├── lander/            # Static landing page
-│   ├── server/            # Main HTTP server
+│   └── server/            # Main HTTP server
 ├── packages/              # Shared libraries
 │   ├── cli-commands/      # CLI command implementations
 │   ├── config/            # Configuration management
@@ -229,7 +228,7 @@ better-ccflare/
 
 ### Package Naming Convention
 
-- Apps: Simple names (e.g., `server`, `cli`, `lander`)
+- Apps: Simple names (e.g., `server`, `cli`)
 - Packages: Prefixed with `@better-ccflare/` (e.g., `@better-ccflare/core`, `@better-ccflare/database`)
 
 The `@better-ccflare/*` workspace package names are internal and intentionally unchanged.
@@ -377,7 +376,7 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 ### Scope
 
 The scope should be the package or app name:
-- `server`, `cli`, `lander`
+- `server`, `cli`
 - `core`, `database`, `proxy`, `load-balancer`, etc.
 
 ### Examples
@@ -830,7 +829,6 @@ bun run build
 # Build specific applications
 bun run build:dashboard
 bun run build:cli
-bun run build:lander
 ```
 
 ### Troubleshooting Common Issues

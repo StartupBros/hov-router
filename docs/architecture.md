@@ -149,7 +149,6 @@ The project is organized as a Bun monorepo with clear separation of concerns:
 better-ccflare/
 ├── apps/                    # Deployable applications
 │   ├── cli/               # Command-line interface
-│   ├── lander/            # Static landing page
 │   └── server/            # Main HTTP server
 ├── packages/              # Shared libraries
 │   ├── agents/            # Agent discovery and workspace management
@@ -1058,14 +1057,6 @@ Command-line interface application with explicit commands:
   - Configuration updates
 
 **Note**: The CLI app provides all functionality through explicit command-line flags with server startup as the default behavior.
-
-### 3. Landing Page (`apps/lander`)
-
-Static landing page for the project:
-- Project overview
-- Screenshots
-- Getting started guide
-- Built with vanilla HTML/CSS
 
 ## Component Interaction Patterns
 
