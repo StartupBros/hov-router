@@ -65,6 +65,11 @@ describe("navigation identity", () => {
 			expect(mobileHeader).toMatch(/<span\b[^>]*>HoV Router<\/span>/);
 			expect(sidebar).toContain("lg:translate-x-0");
 			expect(sidebar).toMatch(/<h1\b[^>]*>HoV Router<\/h1>/);
+			expect(mobileHeader).toContain('data-testid="brand-mark"');
+			expect(sidebar).toContain('data-testid="brand-mark"');
+			expect(html.match(/data-testid="brand-mark"/g)).toHaveLength(2);
+			expect(html).toContain('aria-hidden="true"');
+			expect(html).not.toContain("lucide-shield");
 			expect(html).not.toContain(">wstack Router<");
 			expect(html).not.toContain(">better-ccflare<");
 		} finally {
