@@ -69,7 +69,7 @@ describe("documented source installer shell (synthetic artifact, not native buil
 		);
 		expect(installed.status, installed.stderr).toBe(0);
 		const bin = installed.stdout.trim().split("INSTALL_DIR=")[1];
-		expect(bin).toStartWith(join(home, ".local/wstack-router."));
+		expect(bin).toStartWith(join(home, ".local/hov-router."));
 		expect(readdirSync(bin).sort()).toEqual([...COMMAND_NAMES].sort());
 		for (const name of COMMAND_NAMES) {
 			expect(readFileSync(join(bin, name), "utf8")).toBe(payload);

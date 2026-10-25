@@ -2,8 +2,8 @@
 
 <a id="wstack-router-release-automation-draft-only"></a>
 
-For the published 3.6.2 Linux x86_64 binary, follow the technical reference's
-[consumer installation and verification instructions](reference.md#install-the-linux-x86_64-release).
+For the current published release, 3.7.0 (Linux x86_64), follow the technical
+reference's [consumer installation and verification instructions](reference.md#install-the-linux-x86_64-release).
 
 This is the operator guide for HoV Router release automation at
 `StartupBros/hov-router`. The repository was renamed from
@@ -29,14 +29,69 @@ Attestation lookup may require your existing GitHub CLI authentication. If a too
 flag, authentication, or verification step fails, stop and resolve it; do not treat
 an incomplete provenance check as successful.
 
-Retrieval and signing identities are separate. Retrieve from the current public
-home, `StartupBros/hov-router`, while retaining every historical verification
-expectation. GitHub CLI 2.97 binds `--repo` during verification to
-`SourceRepositoryURI`, so replacing it with the new repository or an owner-only
-policy would change the historical trust policy. Download the bundle first, then
-verify that same local bundle with the exact old repository and certificate.
+Release 3.7.0 was built and signed in this repository under its current name, so
+it is retrieved from and verified against the same repository, `StartupBros/hov-router`.
 
 <!-- router-release-provenance -->
+```bash
+(
+  set -eu
+  binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"
+  source_sha=79a957526bd1994cb3c52b6a110de3c70c1e5c6f
+  digest=49e3ddbc9fc683ffc68dbbacbf4350db582e4cdac417df32a8e6244c90bf2afe
+  printf '%s  %s\n' "$digest" "$binary" | sha256sum --check --strict -
+  gh attestation verify "$binary" \
+    --repo StartupBros/hov-router \
+    --source-digest "$source_sha" \
+    --source-ref refs/tags/v3.7.0 \
+    --cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.0 \
+    --signer-digest "$source_sha" \
+    --deny-self-hosted-runners
+)
+```
+<!-- /router-release-provenance -->
+
+This independently checks GitHub's signed build provenance against the expected
+repository, source commit, tag, workflow identity, signer commit, and hosted-runner
+policy. Those expectations are pinned here, not read from a downloaded manifest.
+Neither a checksum nor provenance proves the program is free of bugs or malicious
+behavior. After verification succeeds, return to the technical reference's separate run step.
+This procedure does not execute the binary or change its installed aliases.
+
+The release also publishes `SHA256SUMS` and an attested `release-manifest.json` for
+release auditing; neither is required by the consumer install above. The operator
+pipeline below still verifies the complete inventory and both attestations before
+executing release smoke checks. Its strict verification policy is unchanged.
+
+Release ID **423116405** and tag `refs/tags/v3.7.0` identify source commit
+`79a957526bd1994cb3c52b6a110de3c70c1e5c6f`. The exact certificate is
+`https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.0`.
+
+| 3.7.0 asset | Asset ID | Size (bytes) | SHA-256 |
+| --- | --- | --- | --- |
+| `better-ccflare-linux-amd64` | 674050273 | 97965536 | `49e3ddbc9fc683ffc68dbbacbf4350db582e4cdac417df32a8e6244c90bf2afe` |
+| `release-manifest.json` | 674050665 | 811 | `48c84581f5640e698d743670d67637990e3242bb1f98c22c5328e9a4a8eb8940` |
+| `SHA256SUMS` | 674050062 | 93 | `df8114cb8aa7da5c4ba673ed910c61fd199041dd3da99f6d6ed708e0b81edec4` |
+
+For a manifest audit, download `release-manifest.json` from the v3.7.0 release,
+check its digest above, then run the same verify command with `binary` set to that
+local manifest and `digest` set to its SHA-256. The signed manifest names repository
+`StartupBros/hov-router`. Its distribution token stays
+`v1:startupbros-wstack-router-binary`, an operational name that predates HoV Router,
+with `actionable: false` and `updateChannel: null`.
+
+### Verify the historical 3.6.2 release
+
+The published v3.6.2 evidence remains historical, even when retrieved through the
+new public home. Its retrieval and signing identities are separate: retrieve from the
+current public home, `StartupBros/hov-router`, while keeping every historical
+verification expectation. GitHub CLI 2.97 binds `--repo` during verification to
+`SourceRepositoryURI`, so replacing it with the new repository or an owner-only
+policy would change the historical trust policy. Download the bundle first, then
+verify that same local bundle with the exact old repository and certificate. This
+block expects the 3.6.2 install path that earlier versions of this guide used.
+
+<!-- router-release-provenance-v3.6.2 -->
 ```bash
 (
   set -eu
@@ -58,23 +113,11 @@ verify that same local bundle with the exact old repository and certificate.
     --bundle "$bundle_dir/sha256:$digest.jsonl"
 )
 ```
-<!-- /router-release-provenance -->
+<!-- /router-release-provenance-v3.6.2 -->
 
-This independently checks GitHub's signed build provenance against the expected
-repository, source commit, tag, workflow identity, signer commit, and hosted-runner
-policy. Those expectations are pinned here, not read from a downloaded manifest.
-Neither a checksum nor provenance proves the program is free of bugs or malicious
-behavior. After verification succeeds, return to the technical reference's separate run step.
-The temporary bundle directory is left for inspection; this procedure does not
-execute the binary or change its installed aliases.
+The temporary bundle directory is left for inspection.
 
-The release also publishes `SHA256SUMS` and an attested `release-manifest.json` for
-release auditing; neither is required by the consumer install above. The operator
-pipeline below still verifies the complete inventory and both attestations before
-executing release smoke checks. Its strict verification policy is unchanged.
-
-The published v3.6.2 evidence remains historical, even when retrieved through the
-new public home. Release ID **418096444** and tag `refs/tags/v3.6.2` identify source
+Release ID **418096444** and tag `refs/tags/v3.6.2` identify source
 commit `5d7b2a888a9b61d87916332b414e46606498d896`. The exact certificate remains
 `https://github.com/StartupBros/wstack-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.6.2`.
 
@@ -84,7 +127,7 @@ commit `5d7b2a888a9b61d87916332b414e46606498d896`. The exact certificate remains
 | `release-manifest.json` | 658578455 | — | `a90aa5f71ba5ae9f4b255e487c2afc80f39d44bc70a6193da43d83f4b05dc60b` |
 | `SHA256SUMS` | 658577847 | — | `dee851d757ec92a28946c838a11919d34bf2fc4755613e67b34bd1e3cdf70b29` |
 
-For a manifest audit, download `release-manifest.json` from the current repository's
+For a 3.6.2 manifest audit, download `release-manifest.json` from the current repository's
 v3.6.2 release, check the independent digest above, then use the same download and
 verify commands with `binary` set to that local manifest and `digest` set to its
 pinned SHA-256. Keep the full old source SHA, tag ref, certificate, signer SHA,

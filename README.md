@@ -40,7 +40,7 @@ Router doesn't create more quota or make a paid provider free. If every eligible
 
 Shared clients need Claude Code and access to the confirmed server, not a Router binary. The limits below concern the **server**, not the client OS.
 
-- **Linux x86_64:** [Router 3.6.2](https://github.com/StartupBros/hov-router/releases/tag/v3.6.2) has a standalone binary with a pinned checksum. It still prints `wstack Router v3.6.2`; a command alias doesn't change its bytes. It doesn't need Node.js or Bun to run.
+- **Linux x86_64:** [HoV Router 3.7.0](https://github.com/StartupBros/hov-router/releases/tag/v3.7.0) has a standalone binary with a pinned checksum and signed build provenance. It doesn't need Node.js or Bun to run.
 - **Source builds:** instructions use a POSIX shell on Linux/macOS, or WSL on Windows, with Git, Node.js, and Bun 1.4.2. The source-install acceptance check runs on Linux x86_64; macOS and native Windows installation have not been verified here.
 - **Other distributions:** Router does not publish npm packages, container images, or binaries for other platforms. The upstream better-ccflare packages and downloads are a different distribution.
 
