@@ -121,7 +121,7 @@ export class AuthService {
 	/** Per-request results; weakly held, so nothing outlives its Request. */
 	private requestAuth = new WeakMap<
 		Request,
-		{ path: string; method: string; result: AuthenticationResult }
+		{ path: string; method: string; result: Promise<AuthenticationResult> }
 	>();
 
 	constructor(
@@ -519,8 +519,15 @@ export class AuthService {
 		if (prior && prior.path === path && prior.method === method) {
 			return prior.result;
 		}
-		const result = await this.authenticateRequestOnce(req, path, method);
+		// Store the in-flight promise so overlapping callers share it; drop it
+		// on failure so a later call can retry.
+		const result = this.authenticateRequestOnce(req, path, method);
 		this.requestAuth.set(req, { path, method, result });
+		result.catch(() => {
+			if (this.requestAuth.get(req)?.result === result) {
+				this.requestAuth.delete(req);
+			}
+		});
 		return result;
 	}
 

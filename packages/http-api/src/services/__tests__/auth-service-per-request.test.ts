@@ -9,7 +9,7 @@ import { AuthService } from "../auth-service";
  * key's usage_count, so proxy traffic was counted double.
  */
 describe("authentication is computed once per request", () => {
-	async function setup() {
+	async function setup(lookupDelayMs = 0) {
 		const crypto = new NodeCryptoUtils();
 		const raw = await crypto.generateApiKey();
 		const record: ApiKey = {
@@ -28,6 +28,7 @@ describe("authentication is computed once per request", () => {
 			countActiveApiKeys: async () => 1,
 			getActiveApiKeys: async () => {
 				calls.activeKeys++;
+				if (lookupDelayMs) await Bun.sleep(lookupDelayMs);
 				return [record];
 			},
 			updateApiKeyUsage: async () => {
@@ -54,6 +55,45 @@ describe("authentication is computed once per request", () => {
 		expect(second).toEqual(first);
 		expect(calls.usage).toBe(1);
 		expect(calls.activeKeys).toBe(1);
+	});
+
+	test("overlapping authentications of one Request share the in-flight result", async () => {
+		const { auth, calls, proxied } = await setup(20);
+		const req = proxied();
+
+		const [first, second] = await Promise.all([
+			auth.authenticateRequest(req, "/v1/messages", "POST"),
+			auth.authenticateRequest(req, "/v1/messages", "POST"),
+		]);
+		await Bun.sleep(5);
+
+		expect(first.isAuthenticated).toBe(true);
+		expect(second).toEqual(first);
+		expect(calls.activeKeys).toBe(1);
+		expect(calls.usage).toBe(1);
+	});
+
+	test("a failed authentication is not remembered for the next call", async () => {
+		let fail = true;
+		const auth = new AuthService({
+			countActiveApiKeys: async () => {
+				if (fail) throw new Error("database is locked");
+				return 0;
+			},
+			getActiveApiKeys: async () => [],
+			updateApiKeyUsage: async () => {},
+		} as never);
+		const req = new Request("http://localhost/v1/messages", { method: "POST" });
+
+		await expect(
+			auth.authenticateRequest(req, "/v1/messages", "POST"),
+		).rejects.toThrow("database is locked");
+		fail = false;
+		// No keys configured once the database answers: authentication is off.
+		expect(
+			(await auth.authenticateRequest(req, "/v1/messages", "POST"))
+				.isAuthenticated,
+		).toBe(true);
 	});
 
 	test("separate requests are each authenticated and counted", async () => {
