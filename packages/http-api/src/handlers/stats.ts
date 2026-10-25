@@ -1,5 +1,6 @@
 import type { DatabaseOperations } from "@better-ccflare/database";
 import { jsonResponse } from "@better-ccflare/http-common";
+import type { RecentErrorGroup } from "@better-ccflare/types";
 import { createTtlCache } from "../utils/ttl-cache";
 
 async function loadStats(
@@ -38,20 +39,32 @@ async function loadStats(
 }
 
 type Stats = Awaited<ReturnType<typeof loadStats>>;
-const caches = new WeakMap<
+type RecentErrors = { recentErrors: RecentErrorGroup[] };
+type Cache<T> = ReturnType<typeof createTtlCache<T>>;
+const caches = new WeakMap<DatabaseOperations, Cache<Stats>>();
+const recentErrorCaches = new WeakMap<
 	DatabaseOperations,
-	ReturnType<typeof createTtlCache<Stats>>
+	Cache<RecentErrors>
 >();
 
 /** One cache/subscription per database, regardless of how many routers use it. */
-function getCache(dbOps: DatabaseOperations) {
-	let cache = caches.get(dbOps);
+function getCache<T>(
+	store: WeakMap<DatabaseOperations, Cache<T>>,
+	dbOps: DatabaseOperations,
+): Cache<T> {
+	let cache = store.get(dbOps);
 	if (!cache) {
-		cache = createTtlCache<Stats>(10_000);
+		cache = createTtlCache<T>(10_000);
 		dbOps.onRequestsDeleted(cache.clear);
-		caches.set(dbOps, cache);
+		store.set(dbOps, cache);
 	}
 	return cache;
+}
+
+/** Error window in hours: defaults to 24, capped at 365 days. */
+function parseErrorsHours(url: URL): number {
+	const raw = Number(url.searchParams.get("errorsSinceHours") ?? 24);
+	return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 8760) : 24;
 }
 
 /** Create a stats handler. */
@@ -61,18 +74,32 @@ export function createStatsHandler(dbOps: DatabaseOperations) {
 		const sinceRaw = Number(url.searchParams.get("since") ?? 30);
 		const sinceDays =
 			Number.isFinite(sinceRaw) && sinceRaw > 0 ? Math.min(sinceRaw, 365) : 30;
-		// Error window defaults to 24 hours, capped at 365 days.
-		const errorsHoursRaw = Number(
-			url.searchParams.get("errorsSinceHours") ?? 24,
-		);
-		const errorsHours =
-			Number.isFinite(errorsHoursRaw) && errorsHoursRaw > 0
-				? Math.min(errorsHoursRaw, 8760)
-				: 24;
-		const stats = await getCache(dbOps).get(`${sinceDays}:${errorsHours}`, () =>
-			loadStats(dbOps, sinceDays, errorsHours),
+		const errorsHours = parseErrorsHours(url);
+		const stats = await getCache(caches, dbOps).get(
+			`${sinceDays}:${errorsHours}`,
+			() => loadStats(dbOps, sinceDays, errorsHours),
 		);
 		return jsonResponse(stats);
+	};
+}
+
+/**
+ * Create the recent-errors handler. Same error groups and window as
+ * GET /api/stats, without its lifetime account and model scans, which hold
+ * the router's only thread for seconds on a large database.
+ */
+export function createRecentErrorsHandler(dbOps: DatabaseOperations) {
+	return async (url: URL): Promise<Response> => {
+		const errorsHours = parseErrorsHours(url);
+		const body = await getCache(recentErrorCaches, dbOps).get(
+			String(errorsHours),
+			async () => ({
+				recentErrors: await dbOps
+					.getStatsRepository()
+					.getRecentErrorGroups(Date.now() - errorsHours * 60 * 60 * 1000, 50),
+			}),
+		);
+		return jsonResponse(body);
 	};
 }
 

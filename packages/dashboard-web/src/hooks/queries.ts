@@ -589,6 +589,17 @@ export const useStats = (
 	});
 };
 
+export const useRecentErrors = (errorsSinceHours: number) => {
+	return useQuery({
+		queryKey: queryKeys.recentErrors(errorsSinceHours),
+		queryFn: () => api.getRecentErrors(errorsSinceHours),
+		staleTime: 15000,
+		refetchInterval: 30000,
+		refetchIntervalInBackground: false,
+		gcTime: 5 * 60 * 1000,
+	});
+};
+
 export const useAnalytics = (
 	timeRange: string,
 	filters: {

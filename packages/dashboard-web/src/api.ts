@@ -33,6 +33,7 @@ import type {
 	LogEvent,
 	ModelCatalogRefreshResponse,
 	ModelCatalogResponse,
+	RecentErrorGroup,
 	RequestPayload,
 	RequestResponse,
 	RoutingAttemptSummaryResponse,
@@ -351,6 +352,23 @@ class API extends HttpClient {
 			}
 			throw error;
 		}
+	}
+
+	/**
+	 * Startup and sign-in check. Asks the cheapest route that still needs a
+	 * dashboard key, so the answer says whether the router is up and accepts
+	 * the key. GET /api/stats would answer the same question only after
+	 * scanning lifetime request history.
+	 */
+	async checkDashboardAccess(): Promise<void> {
+		await this.get("/api/config/strategy");
+	}
+
+	async getRecentErrors(errorsSinceHours: number): Promise<RecentErrorGroup[]> {
+		const response = await this.get<{ recentErrors: RecentErrorGroup[] }>(
+			`/api/stats/recent-errors?errorsSinceHours=${errorsSinceHours}`,
+		);
+		return response.recentErrors;
 	}
 
 	async getStats(opts?: {

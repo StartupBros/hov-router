@@ -149,7 +149,11 @@ import { createRequestsStreamHandler } from "./handlers/requests-stream";
 import { createRoutingAttemptsSummaryHandler } from "./handlers/routing-attempts";
 import { createRoutingObservationsHandler } from "./handlers/routing-observations";
 import { createSessionAccountHandler } from "./handlers/sessions";
-import { createStatsHandler, createStatsResetHandler } from "./handlers/stats";
+import {
+	createRecentErrorsHandler,
+	createStatsHandler,
+	createStatsResetHandler,
+} from "./handlers/stats";
 import {
 	createIntegrityCheckHandler,
 	createStorageHandler,
@@ -230,6 +234,7 @@ export class APIRouter {
 			getMemorySnapshot,
 		});
 		const statsHandler = createStatsHandler(dbOps);
+		const recentErrorsHandler = createRecentErrorsHandler(dbOps);
 		const statsResetHandler = createStatsResetHandler(dbOps);
 		const storageHandler = createStorageHandler(dbOps);
 		const integrityCheckHandler = createIntegrityCheckHandler(dbOps);
@@ -327,6 +332,9 @@ export class APIRouter {
 		// Register routes
 		this.handlers.set("GET:/health", (_req, url) => healthHandler(url));
 		this.handlers.set("GET:/api/stats", (_req, url) => statsHandler(url));
+		this.handlers.set("GET:/api/stats/recent-errors", (_req, url) =>
+			recentErrorsHandler(url),
+		);
 		this.handlers.set("POST:/api/stats/reset", () => statsResetHandler());
 		this.handlers.set("GET:/api/storage", (_req, _url) => storageHandler());
 		this.handlers.set("POST:/api/storage/integrity/check", (req) =>

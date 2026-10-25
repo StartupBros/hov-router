@@ -8,7 +8,11 @@ import {
 	spyOn,
 } from "bun:test";
 import { DatabaseOperations } from "@better-ccflare/database";
-import { createStatsHandler, createStatsResetHandler } from "../stats";
+import {
+	createRecentErrorsHandler,
+	createStatsHandler,
+	createStatsResetHandler,
+} from "../stats";
 
 const url = (query = "") => new URL(`http://localhost/api/stats${query}`);
 let db: DatabaseOperations;
@@ -153,5 +157,72 @@ describe("stats caching and database invalidation", () => {
 			await adapter.get("SELECT COUNT(*) AS n FROM routing_attempts"),
 		).toEqual({ n: 0 });
 		expect(load).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("recent error groups on their own route", () => {
+	const errorsUrl = (query = "") =>
+		new URL(`http://localhost/api/stats/recent-errors${query}`);
+	const insertError = (id: string, ageMs: number, message: string) =>
+		db
+			.getAdapter()
+			.run(
+				"INSERT INTO requests (id, timestamp, method, path, success, response_time_ms, failover_attempts, model, error_message, status_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				[
+					id,
+					clock - ageMs,
+					"POST",
+					"/v1/messages",
+					false,
+					12,
+					0,
+					"test-model",
+					message,
+					529,
+				],
+			);
+	const codes = async (response: Response) =>
+		(
+			(await response.json()) as { recentErrors: { errorCode: string }[] }
+		).recentErrors.map((group) => group.errorCode);
+
+	beforeEach(async () => {
+		await insertError("fresh", 60_000, "overloaded");
+		await insertError("stale", 3 * 86400000, "rate_limited");
+	});
+
+	it("returns only the error groups inside the requested window", async () => {
+		const handler = createRecentErrorsHandler(db);
+		expect(await codes(await handler(errorsUrl()))).toEqual(["overloaded"]);
+		expect(
+			await codes(await handler(errorsUrl("?errorsSinceHours=168"))),
+		).toEqual(["overloaded", "rate_limited"]);
+	});
+
+	it("skips the lifetime account, model and aggregate queries", async () => {
+		const repository = db.getStatsRepository();
+		const heavy = [
+			spyOn(repository, "getAggregatedStats"),
+			spyOn(repository, "getAccountStats"),
+			spyOn(repository, "getTopModels"),
+			spyOn(repository, "getActiveAccountCount"),
+		];
+		await createRecentErrorsHandler(db)(errorsUrl("?errorsSinceHours=168"));
+		for (const spy of heavy) expect(spy).not.toHaveBeenCalled();
+	});
+
+	it("caches per normalized window and clears when requests are deleted", async () => {
+		const load = spyOn(db.getStatsRepository(), "getRecentErrorGroups");
+		const handler = createRecentErrorsHandler(db);
+		await handler(errorsUrl());
+		await handler(errorsUrl("?errorsSinceHours=-1"));
+		await handler(errorsUrl("?errorsSinceHours=24"));
+		expect(load).toHaveBeenCalledTimes(1);
+		await handler(errorsUrl("?errorsSinceHours=99999"));
+		await handler(errorsUrl("?errorsSinceHours=8760"));
+		expect(load).toHaveBeenCalledTimes(2);
+		await db.cleanupOldRequests(0, 0);
+		expect(await codes(await handler(errorsUrl()))).toEqual([]);
+		expect(load).toHaveBeenCalledTimes(3);
 	});
 });
