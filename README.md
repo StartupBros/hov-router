@@ -32,7 +32,7 @@ With two coding accounts, the Router owner adds them and reviews their routing o
 
 Router doesn't create more quota or make a paid provider free. If every eligible account is unavailable, the request can still fail. Provider access, billing, and usage rules still apply.
 
-![Router dashboard showing account usage and request activity](apps/lander/src/screenshot-dashboard.png)
+![Router dashboard showing account usage and request activity](docs/images/screenshot-dashboard.png)
 
 [Watch the dashboard walkthrough](https://github.com/user-attachments/assets/c859872f-ca5e-4f8b-b6a0-7cc7461fe62a).
 

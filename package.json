@@ -26,7 +26,6 @@
 		"build": "echo \"🏗️  Building better-ccflare v$(node -p \"require('./package.json').version\")\" && bun run build:dashboard && bun run build:cli",
 		"build:dashboard": "bun run --cwd packages/dashboard-web build",
 		"build:cli": "bun run --cwd apps/cli build",
-		"build:lander": "bun run --cwd apps/lander build",
 		"format": "bunx biome format --write .",
 		"lint": "bunx --bun biome check --write --unsafe ."
 	},

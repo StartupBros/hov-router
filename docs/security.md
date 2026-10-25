@@ -575,22 +575,9 @@ interface User {
 
 ## Vulnerability Disclosure
 
-### Reporting Process
+### Reporting a vulnerability
 
-1. **Discovery**: If you discover a security vulnerability, please report it responsibly
-2. **Contact**: Email security concerns to the project maintainers
-3. **Information to Include**:
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fixes (if any)
-
-### Response Timeline
-
-- **Acknowledgment**: Within 48 hours
-- **Initial Assessment**: Within 7 days
-- **Fix Development**: Based on severity
-- **Disclosure**: Coordinated with reporter
+Report vulnerabilities privately through GitHub private vulnerability reporting: <https://github.com/StartupBros/hov-router/security/advisories/new>. Please do not open a public issue for a suspected vulnerability. [SECURITY.md](../SECURITY.md) lists what to include, which versions are supported and what is in scope.
 
 ### Severity Levels
 
