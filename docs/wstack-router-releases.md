@@ -297,10 +297,12 @@ requirements are satisfied. Unattended release-PR merging is outside this increm
 
 ## Containment
 
-The inherited npm release, multi-architecture release, both SignPath workflows and
-Docker publishing exclude both `StartupBros/wstack-router` and
-`StartupBros/hov-router`, plus repository ID `1278801682`, at the job level.
-Their triggers and other repositories' behavior are unchanged.
+The inherited npm release, multi-architecture release and both SignPath workflows
+exclude both `StartupBros/wstack-router` and `StartupBros/hov-router`, plus
+repository ID `1278801682`, at the job level. Their triggers and other
+repositories' behavior are unchanged. Upstream's Docker publishing workflow is
+removed: this fork publishes no container image, and the [Docker guide](docker.md)
+builds one from source.
 `prepare-router-artifacts.yml` stays a local, non-publishing preparation check.
 
 ## Evidence required for each release

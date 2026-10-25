@@ -845,7 +845,7 @@ With production certificates from trusted CAs, you don't need `NODE_OPTIONS="--u
 For Docker deployments, we recommend using [Traefik](https://traefik.io/) as a reverse proxy to handle TLS automatically with Let's Encrypt. This recipe builds HoV Router from source, so save it as `docker-compose.traefik.yml` in the repository root (next to the `Dockerfile`) and run `docker compose -f docker-compose.traefik.yml up -d --build`. See the [Docker guide](docker.md):
 
 ```yaml
-# docker-compose.yml
+# docker-compose.traefik.yml
 version: '3.8'
 
 services:
