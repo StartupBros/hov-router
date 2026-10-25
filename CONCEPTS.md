@@ -504,7 +504,7 @@ refusal message calls these instructions the *host template*.
 
 ## Retained ingress and cold backend handoff
 
-**Terminal full-service shutdown** stops admission by closing the public listener, then drains and retires all service children. **Retained-ingress replacement** keeps the public guard/listener alive while fencing physical dispatch, draining old streams and replacing exactly one backend database/routing authority. It has a dispatch pause, bounded unread queues and original accepted deadlines; it is not a zero-pause blue/green deployment.
+**Terminal full-service shutdown** stops admission by closing the public listener, then drains and retires all service children. **Retained-ingress replacement** keeps the public guard/listener alive while fencing physical dispatch, draining old streams and replacing exactly one backend database/routing authority. It has a dispatch pause, bounded unread queues and original accepted deadlines; it is not a zero-pause blue/green deployment. While the old backend drains, dashboard reads (GET or HEAD outside `/v1/`, not event streams) still reach it, so only inference, writes and streams pause for the whole drain.
 
 A **committed backend generation** has verified executable/source, PID/start, listener, nonce, timing/compatibility identity and a durable exact pin before it receives new work. **Admission continuity** measures listener acceptance separately from dispatch availability, stream completion and forced retirement. Ingress source identity may differ from backend source identity after a compatible handoff.
 
