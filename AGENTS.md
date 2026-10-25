@@ -19,9 +19,8 @@ The product is HoV Router, but these operational names predate it and existing i
 - **Ports and services:** default `8080`; production guard `:8788` → binary `:8789`; `ccflare-stack.service`.
 - **Release identity:** distribution/provenance tokens such as `v1:startupbros-wstack-router-binary`, and published v3.6.2 bytes and signer identity (historical; never rewrite).
 - **Upstream recognition and credit:** `tombii` distribution contexts in build provenance and the version checker exist to classify upstream builds; LICENSE, `docs/acknowledgements.md`, `UPSTREAM.md` and historical citations stay.
-- **Doc filenames:** `docs/wstack-router-migration.md` and `docs/wstack-router-releases.md` keep their names and anchors.
 
-Display text uses the constants instead of hard-coded names: `PRODUCT_NAME` / `COMMAND_NAME` from `@better-ccflare/core/product-identity`. Import that subpath directly, not the core barrel, which the dashboard cannot load. Reference: [docs/wstack-router-migration.md](docs/wstack-router-migration.md#what-stays-the-same).
+Display text uses the constants instead of hard-coded names: `PRODUCT_NAME` / `COMMAND_NAME` from `@better-ccflare/core/product-identity`. Import that subpath directly, not the core barrel, which the dashboard cannot load. Reference: [docs/hov-router-migration.md](docs/hov-router-migration.md#what-stays-the-same).
 
 ## ⚠️ CRITICAL: Generated files
 
@@ -57,7 +56,7 @@ Production is a root systemd service, `ccflare-stack.service` (guard on `:8788` 
 
 ## Releases and versions
 
-**NEVER bump the version by hand, and never publish to npm.** Router releases are draft-only GitHub releases produced by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`); publishing a draft is a separate operator decision. Upstream's npm, multi-architecture and signing publishers (`release.yml`, `release-dispatch.yml`, `signpath-*.yml`) are fenced off for this repository and must stay that way. No container image is published; Docker builds from source ([docs/docker.md](docs/docker.md)). Full policy: [docs/wstack-router-releases.md](docs/wstack-router-releases.md).
+**NEVER bump the version by hand, and never publish to npm.** Router releases are draft-only GitHub releases produced by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`); publishing a draft is a separate operator decision. Upstream's npm, multi-architecture and signing publishers (`release.yml`, `release-dispatch.yml`, `signpath-*.yml`) are fenced off for this repository and must stay that way. No container image is published; Docker builds from source ([docs/docker.md](docs/docker.md)). Full policy: [docs/hov-router-releases.md](docs/hov-router-releases.md).
 
 Commit prefixes drive the version and changelog (`release-please-config.json`, plus the alias map in `scripts/router-release.ts`):
 - `feat:` → minor, under Features (`feature:`/`add:`/`new:` are accepted aliases)

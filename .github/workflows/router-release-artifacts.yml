@@ -1,4 +1,4 @@
-name: wstack Router Release Artifacts
+name: HoV Router Release Artifacts
 
 # Dispatched only by the coordinator, at refs/tags/vX.Y.Z. Stages a verified
 # DRAFT release; it never publishes, deletes, clobbers, or installs anything.
@@ -18,7 +18,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: wstack-router-release-artifacts-${{ github.ref }}
+  group: hov-router-release-artifacts-${{ github.ref }}
   cancel-in-progress: false
 
 env:

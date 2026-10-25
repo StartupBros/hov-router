@@ -34,10 +34,10 @@ async function readWorkflow(): Promise<Workflow> {
 }
 
 // Configuration regression checks, not a sandbox or a proof about helper behavior.
-describe("unpublished wstack Router artifact preparation workflow", () => {
+describe("unpublished HoV Router artifact preparation workflow", () => {
 	test("has a distinct name and only PR/manual triggers without inputs", async () => {
 		const workflow = await readWorkflow();
-		expect(workflow.name).toBe("Prepare wstack Router Artifacts");
+		expect(workflow.name).toBe("Prepare HoV Router Artifacts");
 		expect(workflow.on).toEqual({
 			pull_request: null,
 			workflow_dispatch: null,
@@ -86,7 +86,7 @@ describe("unpublished wstack Router artifact preparation workflow", () => {
 		const { steps } = (await readWorkflow()).jobs.prepare;
 		const prepare = steps[4];
 		expect(prepare.run).toContain(
-			'preparation_root="$(mktemp -d "$RUNNER_TEMP/wstack-router.XXXXXX")"',
+			'preparation_root="$(mktemp -d "$RUNNER_TEMP/hov-router.XXXXXX")"',
 		);
 		expect(prepare.run).toContain(
 			'bun run apps/cli/prepare-router-artifacts.ts "$preparation_root/artifacts"',

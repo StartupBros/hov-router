@@ -21,7 +21,11 @@ import { COMMAND_NAMES } from "../../../packages/core/src/product-identity";
 const root = resolve(import.meta.dir, "../../..");
 const reference = readFileSync(join(root, "docs/reference.md"), "utf8");
 const releaseGuide = readFileSync(
-	join(root, "docs/wstack-router-releases.md"),
+	join(root, "docs/hov-router-releases.md"),
+	"utf8",
+);
+const migrationGuide = readFileSync(
+	join(root, "docs/hov-router-migration.md"),
 	"utf8",
 );
 const releaseDigest =
@@ -206,7 +210,7 @@ esac
 describe("documented binary install (synthetic downloads)", () => {
 	it("offers the full pinned provenance policy before the first run", () => {
 		const link =
-			"wstack-router-releases.md#optional-consumer-provenance-verification";
+			"hov-router-releases.md#optional-consumer-provenance-verification";
 		expect(reference.indexOf(link)).toBeGreaterThan(0);
 		expect(reference.indexOf(link)).toBeLessThan(
 			reference.indexOf("<!-- router-release-run -->"),
@@ -228,12 +232,14 @@ describe("documented binary install (synthetic downloads)", () => {
 			expect(policy).toContain(pin);
 		// The current release must not borrow the historical signing identity.
 		expect(policy).not.toContain("wstack-router");
+		// The former name is recorded once, in the migration guide's move history.
+		expect(migrationGuide.replace(/\s+/g, " ")).toContain(
+			"renamed from `StartupBros/wstack-router` on 2026-10-21",
+		);
 		for (const document of [reference, releaseGuide]) {
-			expect(document.replace(/\s+/g, " ")).toContain(
-				"renamed from `StartupBros/wstack-router` on 2026-10-21",
-			);
 			expect(document).toContain("`StartupBros/hov-router`");
 			expect(document).toContain("1278801682");
+			expect(document).toContain("hov-router-migration.md#repository-move");
 			expect(document).not.toContain("Before the repository rename");
 		}
 	});

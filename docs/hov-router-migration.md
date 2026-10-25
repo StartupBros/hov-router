@@ -1,12 +1,10 @@
 # Moving to HoV Router
 
-<a id="moving-to-wstack-router"></a>
-
 HoV Router is a House of Vibe project at [StartupBros/hov-router](https://github.com/StartupBros/hov-router). HoV Router and hovstack are independent sibling products; neither requires the other. Router continues tombii/better-ccflare and snipeship/ccflare under the existing MIT license. Git history, contributor acknowledgements, and license terms remain intact.
 
-The public repository moved from `StartupBros-com/better-ccflare` to `StartupBros/wstack-router` on 2026-10-19 and was renamed to `StartupBros/hov-router` on 2026-10-21. It is the same repository, ID `1278801682` (see [the repository move](#repository-move)). Use `StartupBros/hov-router` in clone, download, and support URLs. [Report Router issues here](https://github.com/StartupBros/hov-router/issues).
+The public repository moved from `StartupBros-com/better-ccflare` on 2026-10-19 and has been `StartupBros/hov-router` since 2026-10-21. It is the same repository, ID `1278801682` (see [the repository move](#repository-move)). Use `StartupBros/hov-router` in clone, download, and support URLs. [Report Router issues here](https://github.com/StartupBros/hov-router/issues).
 
-The current [Linux x86_64 binary](reference.md#install-the-linux-x86_64-release), release 3.7.0, displays HoV Router, as do new source builds. The earlier 3.6.2 binary remains historical wstack Router, including its exact bytes, source SHA, tag, and signing identity. It still prints `wstack Router v3.6.2` through `hov-router`; a filesystem alias cannot relabel its embedded output. Router npm packages, container images, and other-platform binaries are not published.
+The current [Linux x86_64 binary](reference.md#install-the-linux-x86_64-release), release 3.7.0, displays HoV Router, as do new source builds. The earlier 3.6.2 binary keeps its original product name, exact bytes, source SHA, tag, and signing identity, and prints that original name even through `hov-router`; a filesystem alias cannot relabel its embedded output. See [the historical 3.6.2 release](hov-router-releases.md#verify-the-historical-362-release). Router npm packages, container images, and other-platform binaries are not published.
 
 ## Install without replacing your current executable
 
@@ -15,7 +13,7 @@ Follow the [source quickstart](reference.md#install-from-source). It builds the 
 - `hov-router` is the preferred command.
 - `wstack-router` and `better-ccflare` remain compatible commands for the same server.
 
-Record the current executable location with `command -v wstack-router` or `command -v better-ccflare` before changing PATH. Keep that executable. The quickstart changes only the current shell's PATH unless you explicitly make it permanent; it does not replace a global package or repoint a service. Do not run multiple aliases as separate servers against the same database.
+Record the current executable location with `command -v` and the command name you use today before changing PATH. Keep that executable. The quickstart changes only the current shell's PATH unless you explicitly make it permanent; it does not replace a global package or repoint a service. Do not run multiple aliases as separate servers against the same database.
 
 ## What stays the same
 
@@ -31,7 +29,7 @@ Record the current executable location with `command -v wstack-router` or `comma
 | Default server port | `8080`; existing port overrides and deployment ports remain unchanged |
 | Build/package names | `apps/cli/dist/better-ccflare`, the `better-ccflare` package identity, and internal `@better-ccflare/*` packages |
 
-There is no new HoV configuration namespace and no config or credential migration. Do not rename storage directories, recovery files, environment variables, headers, or database files to match the product name. Existing deployments keep their paths, service names, and ports. Existing documentation filenames, including this guide's `wstack-router-migration.md`, remain unchanged.
+There is no new HoV configuration namespace and no config or credential migration. Do not rename storage directories, recovery files, environment variables, headers, or database files to match the product name. Existing deployments keep their paths, service names, and ports.
 
 `hov-router --get-model` reads the default agent model from configuration without opening the account database or contacting a provider. `--help` and `--version` alone do not prove that configuration was loaded. `--show-config` provides a broader diagnostic view, but its normal default-loading behavior may persist missing defaults; it is not a byte-preservation check.
 
@@ -63,7 +61,7 @@ Branded builds do not offer an actionable upstream update. Do not install a regi
 Preparation is not publication. From the repository root on **Linux x86_64**, install dependencies with `bun install --frozen-lockfile`, then run the helper with a new output directory:
 
 ```bash
-bun run apps/cli/prepare-router-artifacts.ts /tmp/wstack-router-prep-001
+bun run apps/cli/prepare-router-artifacts.ts /tmp/hov-router-prep-001
 ```
 
 The destination must not already exist; choose a different path for each run. The helper builds the dashboard and reuses the selected-platform CLI builder. Its output directory contains exactly:
@@ -71,12 +69,12 @@ The destination must not already exist; choose a different path for each run. Th
 - `better-ccflare-linux-amd64` — the compatibility asset name remains unchanged.
 - `SHA256SUMS` — the checksum for that executable.
 
-The helper checks copies named `hov-router`, `wstack-router`, and `better-ccflare` with `--help` and `--version` in an isolated environment. These checks do not start a server, exercise provider inference, or prove configuration/database compatibility. Existing all-platform build support remains available; this preparation helper only covers Linux x86_64.
+The helper checks a copy under each supported command name with `--help` and `--version` in an isolated environment. These checks do not start a server, exercise provider inference, or prove configuration/database compatibility. Existing all-platform build support remains available; this preparation helper only covers Linux x86_64.
 
 Verify the bytes from inside the output directory:
 
 ```bash
-cd /tmp/wstack-router-prep-001
+cd /tmp/hov-router-prep-001
 sha256sum -c SHA256SUMS
 ```
 
@@ -92,9 +90,9 @@ Do not invoke those workflows for preparation, change versions manually, or push
 
 ## Repository move
 
-On 2026-10-19 the source repository was transferred from `StartupBros-com/better-ccflare` to [`StartupBros/wstack-router`](https://github.com/StartupBros/wstack-router). It remains a public fork of tombii/better-ccflare, and the transfer retains the fork relationship, Git history, and the MIT license. Contributor credits are unchanged. The post-transfer check confirmed the same repository ID, default-branch commit, branches/tags, issue and pull-request identities, and active workflows. The old repository URL redirects to the new home. At the time of the transfer check, there were no releases or assets before or immediately after the move; the move itself was not a binary release. Router 3.6.2 was published separately afterward.
+On 2026-10-19 the source repository was transferred from `StartupBros-com/better-ccflare` to the `StartupBros` organization. It remains a public fork of tombii/better-ccflare, and the transfer retains the fork relationship, Git history, and the MIT license. Contributor credits are unchanged. The post-transfer check confirmed the same repository ID, default-branch commit, branches/tags, issue and pull-request identities, and active workflows. The old repository URL redirects to the new home. At the time of the transfer check, there were no releases or assets before or immediately after the move; the move itself was not a binary release. Router 3.6.2 was published separately afterward.
 
-On 2026-10-21, after [PR #579](https://github.com/StartupBros/hov-router/pull/579) merged, the same repository was renamed to `StartupBros/hov-router`, retaining ID `1278801682`. The [verified cutover record](https://github.com/StartupBros/hov-router/issues/578#issuecomment-6308306333) records the checks, including successful old repository-root, PR #579, release 3.6.2, and agent-setup document URL checks. This rename did not publish a new binary or change the historical release evidence.
+After [PR #579](https://github.com/StartupBros/hov-router/pull/579) merged, the same repository was renamed from `StartupBros/wstack-router` on 2026-10-21 to its current name, `StartupBros/hov-router`, retaining ID `1278801682`. The [verified cutover record](https://github.com/StartupBros/hov-router/issues/578#issuecomment-6308306333) records the checks, including successful old repository-root, PR #579, release 3.6.2, and agent-setup document URL checks. This rename did not publish a new binary or change the historical release evidence.
 
 Existing checkouts keep working under their current directory name; do not rename it. Inspect and update an existing checkout's remote to the current home:
 
@@ -104,15 +102,15 @@ git remote set-url origin https://github.com/StartupBros/hov-router.git
 git remote -v
 ```
 
-Old repository URLs remain in historical documentation, but old issue redirects have a request-header-dependent exception. Anonymous checks of `https://github.com/StartupBros/wstack-router/issues/578` with curl's default `Accept: */*` returned HTTP 404 with no redirect; the same request with `Accept: text/html` returned HTTP 301 to the canonical [issue #578](https://github.com/StartupBros/hov-router/issues/578), which returned HTTP 200. Repeating the wildcard request still returned HTTP 404. The authenticated browser also opened the old URL successfully, but authentication is not required for the successful HTML request. GitHub's internal cause remains unknown; this is not a platform fix. Use canonical issue URLs rather than relying on old redirects. A fresh clone uses the [source guide's](reference.md#install-from-source) `git clone https://github.com/StartupBros/hov-router.git better-ccflare` form, keeping the local directory name compatible.
+Old repository URLs redirect, but old issue redirects have a request-header-dependent exception. Anonymous checks of the old-name URL for [issue #578](https://github.com/StartupBros/hov-router/issues/578) with curl's default `Accept: */*` returned HTTP 404 with no redirect; the same request with `Accept: text/html` returned HTTP 301 to the canonical issue, which returned HTTP 200. Repeating the wildcard request still returned HTTP 404. The authenticated browser also opened the old URL successfully, but authentication is not required for the successful HTML request. GitHub's internal cause remains unknown; this is not a platform fix. Use canonical issue URLs rather than relying on old redirects. A fresh clone uses the [source guide's](reference.md#install-from-source) `git clone https://github.com/StartupBros/hov-router.git better-ccflare` form, keeping the local directory name compatible.
 
-At transfer time, npm publication, GHCR images, signing, and release workflows still required separate approval and validation. The move did not validate any of them; subsequent Router release automation is documented in the [release guide](wstack-router-releases.md). The existing publishing workflows listed above must not be invoked merely to move the repository. The transfer-time check also found that `.github/workflows/managed-routing-postgres.yml` used an exact repository match for its self-hosted runner, with the moved repository taking the hosted fallback; inspect current workflow configuration before making runner assumptions. The exact-origin allowlist in `apps/cli/build-provenance.ts` accepts the verified new origin forms while retaining the old ones. Its clean-tree, explicit-context, version, and exact-tag checks remain unchanged; untagged builds still have no proven release identity and branded builds have no actionable update channel.
+At transfer time, npm publication, GHCR images, signing, and release workflows still required separate approval and validation. The move did not validate any of them; subsequent Router release automation is documented in the [release guide](hov-router-releases.md). The existing publishing workflows listed above must not be invoked merely to move the repository. The transfer-time check also found that `.github/workflows/managed-routing-postgres.yml` used an exact repository match for its self-hosted runner, with the moved repository taking the hosted fallback; inspect current workflow configuration before making runner assumptions. The exact-origin allowlist in `apps/cli/build-provenance.ts` accepts the verified new origin forms while retaining the old ones. Its clean-tree, explicit-context, version, and exact-tag checks remain unchanged; untagged builds still have no proven release identity and branded builds have no actionable update channel.
 
 GitHub redirects can be broken by reuse of the old repository path. [Detaching a fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/detaching-a-fork) is a separate irreversible decision and has not been made.
 
 ## Not included
 
-No detaching of the fork or visibility change; registry/package, image or release publication; tag push; production deployment; provider inference; new installer; config migration; update adapter; or external harness/wstack integration was part of the identity-change and repository-transfer handoff. Upstream Docker Compose recipes retain their existing behavior and images. A new product name does not change the provider usage rules.
+No detaching of the fork or visibility change; registry/package, image or release publication; tag push; production deployment; provider inference; new installer; config migration; update adapter; or integration with other HoV tooling was part of the identity-change and repository-transfer handoff. Upstream Docker Compose recipes retain their existing behavior and images. A new product name does not change the provider usage rules.
 
 ## If installation fails
 

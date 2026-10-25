@@ -4,7 +4,7 @@
 
 HoV Router (formerly better-ccflare) is a load balancer proxy for Claude API accounts that can be deployed in various configurations, from simple local development to production-grade distributed systems. This document covers all deployment options, from single-instance setups to scalable architectures.
 
-> **Important**: HoV Router provides a powerful CLI interface and web dashboard for monitoring and management. The primary command is `hov-router` (the `wstack-router` and `better-ccflare` compatibility commands also work); the executable provides all functionality through command-line flags.
+> **Important**: HoV Router provides a powerful CLI interface and web dashboard for monitoring and management. The primary command is `hov-router` (older command names such as `better-ccflare` also work); the executable provides all functionality through command-line flags.
 
 ## Table of Contents
 

@@ -828,9 +828,9 @@ test.each([
 test.each([
 	["fix: repair routing", "3.5.79", "repair routing"],
 	[
-		"chore: prepare the first wstack Router release\n\nRelease-As:3.6.0",
+		"chore: prepare the first Router release\n\nRelease-As:3.6.0",
 		"3.6.0",
-		"prepare the first wstack Router release",
+		"prepare the first Router release",
 	],
 ])(
 	"candidate %s synchronizes product without changing dependency resolution",
