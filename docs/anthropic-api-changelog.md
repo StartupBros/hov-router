@@ -1,6 +1,6 @@
 # Anthropic API Changelog
 
-This document tracks changes to the Anthropic API responses that affect better-ccflare.
+This document tracks changes to the Anthropic API responses that affect HoV Router.
 
 ## Usage API Endpoint
 

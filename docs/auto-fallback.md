@@ -1,6 +1,6 @@
 # Auto-Fallback Configuration Guide
 
-This guide covers the auto-fallback feature in better-ccflare, which allows automatic switching back to higher priority accounts when their usage windows reset.
+This guide covers the auto-fallback feature in HoV Router, which allows automatic switching back to higher priority accounts when their usage windows reset.
 
 ## Table of Contents
 
