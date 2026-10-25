@@ -2,8 +2,10 @@
 #   docker compose up -d --build
 services:
   # Service, container and volume names keep the pre-rename "better-ccflare"
-  # on purpose: renaming the volume would orphan existing data, and a second
-  # container name would collide with an existing install on port 8080.
+  # on purpose. Compose names the real volume <project>_better-ccflare-data,
+  # and the project defaults to this directory's name; docs/docker.md covers
+  # moving an existing install. The backup commands rely on the fixed
+  # container name, and a second name would collide on port 8080.
   better-ccflare:
     build: .
     image: hov-router:local

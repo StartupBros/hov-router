@@ -17,7 +17,6 @@ WORKDIR /src
 # lockfile changes.
 COPY package.json bun.lock ./
 COPY apps/cli/package.json ./apps/cli/package.json
-COPY apps/lander/package.json ./apps/lander/package.json
 COPY apps/server/package.json ./apps/server/package.json
 COPY packages/agents/package.json ./packages/agents/package.json
 COPY packages/cli-commands/package.json ./packages/cli-commands/package.json

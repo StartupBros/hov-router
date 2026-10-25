@@ -65,6 +65,14 @@ describe("Dockerfile builds HoV Router from source", () => {
 		for (const manifest of manifests) {
 			expect(dockerfile, manifest).toContain(`COPY ${manifest} ./${manifest}`);
 		}
+		// A COPY of a removed workspace's manifest fails the build.
+		const copied = instructions.flatMap((line) => {
+			const match = /^COPY ((?:apps|packages)\/[^/]+\/package\.json) /.exec(
+				line,
+			);
+			return match ? [match[1]] : [];
+		});
+		expect(copied.sort()).toEqual(manifests.sort());
 	});
 
 	it("does not fetch or reference upstream release binaries or images", () => {
@@ -111,6 +119,25 @@ describe("Dockerfile builds HoV Router from source", () => {
 			'org.opencontainers.image.source="https://github.com/StartupBros/hov-router"',
 		);
 		expect(dockerfile).toContain('org.opencontainers.image.licenses="MIT"');
+	});
+});
+
+describe("Docker guide reaches the install's real data volume", () => {
+	const guide = readFileSync(join(root, "docs/docker.md"), "utf8");
+
+	it("backs up and restores through the fixed container name", () => {
+		// Compose prefixes the volume with the project name, so a bare
+		// `-v better-ccflare-data:` mounts a new, empty volume instead.
+		expect(guide).not.toMatch(/-v\s+better-ccflare-data:/);
+		expect(compose).toContain("container_name: better-ccflare");
+		const volumesFrom = guide.match(/--volumes-from better-ccflare /g) ?? [];
+		expect(volumesFrom.length).toBeGreaterThanOrEqual(2);
+		expect(guide).toContain("test -f /data/better-ccflare.db");
+	});
+
+	it("tells upgraders to keep the old compose project name", () => {
+		expect(guide).toContain("com.docker.compose.project");
+		expect(guide).toContain("COMPOSE_PROJECT_NAME=");
 	});
 });
 
