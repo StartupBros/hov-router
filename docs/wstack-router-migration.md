@@ -6,7 +6,7 @@ HoV Router is a House of Vibe project at [StartupBros/hov-router](https://github
 
 The public repository moved from `StartupBros-com/better-ccflare` to `StartupBros/wstack-router` on 2026-10-19 and was renamed to `StartupBros/hov-router` on 2026-10-21. It is the same repository, ID `1278801682` (see [the repository move](#repository-move)). Use `StartupBros/hov-router` in clone, download, and support URLs. [Report Router issues here](https://github.com/StartupBros/hov-router/issues).
 
-The published [3.6.2 Linux x86_64 binary](reference.md#install-the-linux-x86_64-release) remains historical wstack Router, including its exact bytes, source SHA, tag, and signing identity. It still prints `wstack Router v3.6.2` through `hov-router`; a filesystem alias cannot relabel its embedded output. New source builds display HoV Router. Router npm packages, container images, and other-platform binaries are not published.
+The current [Linux x86_64 binary](reference.md#install-the-linux-x86_64-release), release 3.7.0, displays HoV Router, as do new source builds. The earlier 3.6.2 binary remains historical wstack Router, including its exact bytes, source SHA, tag, and signing identity. It still prints `wstack Router v3.6.2` through `hov-router`; a filesystem alias cannot relabel its embedded output. Router npm packages, container images, and other-platform binaries are not published.
 
 ## Install without replacing your current executable
 
@@ -88,7 +88,7 @@ The CI counterpart is the separate [artifact preparation](../.github/workflows/p
 - `release.yml` runs on version tags or manual dispatch and creates releases/uploads assets.
 - `signpath-release.yml` and `signpath-test.yml` submit signing requests; they are not local smoke checks.
 
-Do not invoke those workflows for preparation, change versions manually, or push a tag to test this path. Actual publication requires separate approval and validation of release wiring, version/tag agreement, provenance, and intended destinations **before** creating a release tag. These locally prepared files are not a published downloadable release. For the separately published 3.6.2 artifact, use the [consumer installation](reference.md#install-the-linux-x86_64-release).
+Do not invoke those workflows for preparation, change versions manually, or push a tag to test this path. Actual publication requires separate approval and validation of release wiring, version/tag agreement, provenance, and intended destinations **before** creating a release tag. These locally prepared files are not a published downloadable release. For the current published artifact, use the [consumer installation](reference.md#install-the-linux-x86_64-release).
 
 ## Repository move
 

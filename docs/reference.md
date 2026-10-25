@@ -40,7 +40,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 - **Powerful CLI** - Complete command-line interface for account management and configuration
 - **REST API** - Complete API for automation and integration
 - **Claude Code `/model` Route Profiles** - Discover operator-defined exact-account or capability-pool routes in Claude Code's native picker and pin one authenticated session tree when caller/session identity is available, without changing other sessions. See [configuration](configuration.md#claude-code-model-route-profiles) and [routing semantics](routing-architecture.md#claude-code-model-route-profiles)
-- **Standalone Linux x86_64 Binary** - Router 3.6.2 runs without Node.js or Bun; other platforms use the source-build path
+- **Standalone Linux x86_64 Binary** - Router 3.7.0 runs without Node.js or Bun; other platforms use the source-build path
 - **Comprehensive Logging** - Request/response tracking with searchable history
 - **Alert Webhooks** - With an empty `ALERT_WEBHOOK_TYPES` list, Discord keeps cache-efficiency observations (including recovery) and unknown-model catalog observations in alert history and the dashboard stream without sending a notification. Authentication failures, capacity warnings, actual stale-policy model rewrites, and cache telemetry gaps (including recovery) remain eligible. A nonempty list admits exactly the named types, including these observations. Generic webhooks retain their legacy admission and `{type, alert}` body. Discord presents the affected thing, observation, impact, action, and where to find evidence; raw messages remain in history. Persistence is not a delivery receipt: failed sends are logged, and the existing engine can record an opening that never arrived and later send its recovery.
 - **Database Integration** - SQLite (default) or PostgreSQL for persistent storage and analytics, supporting Kubernetes multi-pod deployments
@@ -62,9 +62,9 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 
 ### Install the Linux x86_64 release
 
-[Release 3.6.2](https://github.com/StartupBros/hov-router/releases/tag/v3.6.2) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
+[Release 3.7.0](https://github.com/StartupBros/hov-router/releases/tag/v3.7.0) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
 
-The public home is `StartupBros/hov-router`, renamed from `StartupBros/wstack-router` on 2026-10-21 with the same repository ID `1278801682`. Use the current download and clone URLs below. The historical 3.6.2 binary, manifest, tag, and signing identity stay unchanged; its version output is exactly `wstack Router v3.6.2`, including when invoked through `hov-router`. New source builds display `HoV Router` through all three command names.
+The public home is `StartupBros/hov-router`, renamed from `StartupBros/wstack-router` on 2026-10-21 with the same repository ID `1278801682`. Use the current download and clone URLs below. Release 3.7.0 prints `HoV Router v3.7.0` through all three command names. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints `wstack Router v3.6.2`. If you installed 3.6.2 with this guide, install 3.7.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
 
 Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, `chmod`). No GitHub CLI, Node.js, or Bun is needed.
 
@@ -75,28 +75,28 @@ Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, 
 (
   set -eu
   umask 077
-  version_dir="$HOME/.local/lib/wstack-router/3.6.2"
-  mkdir -p "$HOME/.local/lib/wstack-router"
+  version_dir="$HOME/.local/lib/hov-router/3.7.0"
+  mkdir -p "$HOME/.local/lib/hov-router"
   mkdir "$version_dir"
   cd "$version_dir"
   curl -q --fail --location --proto '=https' --proto-redir '=https' \
-    --output wstack-router https://github.com/StartupBros/hov-router/releases/download/v3.6.2/better-ccflare-linux-amd64
-  digest=b01a4989323ecf4e2d0a68394b45828741430d89eb35288f7318a28c45b4c9d7
-  printf '%s  wstack-router\n' "$digest" | sha256sum --check --strict -
-  chmod 755 wstack-router
+    --output hov-router https://github.com/StartupBros/hov-router/releases/download/v3.7.0/better-ccflare-linux-amd64
+  digest=49e3ddbc9fc683ffc68dbbacbf4350db582e4cdac417df32a8e6244c90bf2afe
+  printf '%s  hov-router\n' "$digest" | sha256sum --check --strict -
+  chmod 755 hov-router
 )
 ```
 <!-- /router-release-install -->
 
-The checksum verifies the bytes against this trusted reference; it does not independently prove who built them. Before the first run, you can also [verify signed build provenance](wstack-router-releases.md#optional-consumer-provenance-verification). That optional check retrieves a bundle from the current repository location and verifies it against the exact historical repository, source commit, tag, workflow identity, signer commit, and hosted runner.
+The checksum verifies the bytes against this trusted reference; it does not independently prove who built them. Before the first run, you can also [verify signed build provenance](wstack-router-releases.md#optional-consumer-provenance-verification). That optional check verifies the binary against the exact repository, source commit, tag, workflow identity, signer commit, and hosted runner that built it.
 
-If any command fails, stop: do not run the binary. The block refuses any existing `3.6.2` path, including a symlink, and leaves partial downloads for inspection rather than deleting or overwriting them. Inspect the error and existing files before retrying.
+If any command fails, stop: do not run the binary. The block refuses any existing `3.7.0` path, including a symlink, and leaves partial downloads for inspection rather than deleting or overwriting them. Inspect the error and existing files before retrying.
 
 **2. Run.** After the checksum (and optional provenance check) succeeds:
 
 <!-- router-release-run -->
 ```bash
-"$HOME/.local/lib/wstack-router/3.6.2/wstack-router" --help
+"$HOME/.local/lib/hov-router/3.7.0/hov-router" --help
 ```
 <!-- /router-release-run -->
 
@@ -110,7 +110,7 @@ After verification succeeds, create `hov-router`, `wstack-router`, and `better-c
 ```bash
 (
   set -eu
-  binary="$HOME/.local/lib/wstack-router/3.6.2/wstack-router"
+  binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"
   bin_dir="$HOME/.local/bin"
   test -x "$binary"
   mkdir -p "$bin_dir"
@@ -129,6 +129,44 @@ After verification succeeds, create `hov-router`, `wstack-router`, and `better-c
 
 After success, use `export PATH="$HOME/.local/bin:$PATH"` in each terminal where you want the short commands. Check `command -v hov-router`, `command -v wstack-router`, and `command -v better-ccflare`; all three should resolve there. To keep this PATH setting, add it to your shell configuration yourself. Nothing here edits shell profiles or uses `sudo`. Existing commands elsewhere remain untouched; PATH order determines which runs. If alias creation fails, inspect the error and any link already created rather than forcing replacement.
 
+#### Upgrade an earlier binary install
+
+Each release installs into its own version directory, so step 1 leaves an earlier release in place for rollback. If you created PATH aliases for an earlier release, the PATH block above refuses them; run this block instead, after step 1 succeeds. It points `hov-router`, `wstack-router`, and `better-ccflare` at the new binary. It accepts only a missing alias or a symlink to a binary this guide installed (3.6.2 under `wstack-router`, or a release under `hov-router`). It checks all three names before changing any, and replaces each symlink with a single rename.
+
+<!-- router-release-upgrade -->
+```bash
+(
+  set -eu
+  binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"
+  bin_dir="$HOME/.local/bin"
+  test -x "$binary"
+  mkdir -p "$bin_dir"
+  for name in hov-router wstack-router better-ccflare; do
+    link="$bin_dir/$name"
+    if [ -L "$link" ]; then
+      case "$(readlink "$link")" in
+        "$HOME/.local/lib/wstack-router/3.6.2/wstack-router" | "$HOME/.local/lib/hov-router/"*/hov-router) ;;
+        *) printf 'Refusing unrecognized command: %s\n' "$link" >&2; exit 1 ;;
+      esac
+    elif [ -e "$link" ]; then
+      printf 'Refusing existing command: %s\n' "$link" >&2
+      exit 1
+    fi
+    if [ -e "$bin_dir/.$name.new" ] || [ -L "$bin_dir/.$name.new" ]; then
+      printf 'Refusing leftover file: %s\n' "$bin_dir/.$name.new" >&2
+      exit 1
+    fi
+  done
+  for name in hov-router wstack-router better-ccflare; do
+    ln -sT "$binary" "$bin_dir/.$name.new"
+    mv -T "$bin_dir/.$name.new" "$bin_dir/$name"
+  done
+)
+```
+<!-- /router-release-upgrade -->
+
+Then `hov-router --version` should print `HoV Router v3.7.0`. The block does not delete the earlier version directory or change a running service. To roll back, set `binary` to the earlier release's path, such as `$HOME/.local/lib/wstack-router/3.6.2/wstack-router`, and run the block again.
+
 ### Install from source
 
 Requires Git, Node.js (used by the build), and Bun (this checkout pins Bun 1.4.2). These commands use a POSIX shell on Linux/macOS; on Windows use WSL. The public HTTPS clone below does not require a GitHub login.
@@ -145,7 +183,7 @@ The build produces `apps/cli/dist/better-ccflare`. It does not install a command
 <!-- source-install-local -->
 ```bash
 mkdir -p "$HOME/.local"
-install_dir=$(mktemp -d "$HOME/.local/wstack-router.XXXXXX")
+install_dir=$(mktemp -d "$HOME/.local/hov-router.XXXXXX")
 for name in hov-router wstack-router better-ccflare; do
   install -m 755 apps/cli/dist/better-ccflare "$install_dir/$name"
 done
@@ -162,7 +200,7 @@ The PATH change applies to this shell only. To keep it, add the printed director
 
 ### Start the local server
 
-The commands below assume you completed the optional [PATH setup](#optional-add-commands-to-path) or the source install. If you skipped PATH setup, replace `hov-router` (or either compatibility command) in these examples with `"$HOME/.local/lib/wstack-router/3.6.2/wstack-router"`.
+The commands below assume you completed the optional [PATH setup](#optional-add-commands-to-path) or the source install. If you skipped PATH setup, replace `hov-router` (or either compatibility command) in these examples with `"$HOME/.local/lib/hov-router/3.7.0/hov-router"`.
 
 For a new local setup, start the server and dashboard with:
 
@@ -1169,7 +1207,7 @@ Full documentation available in [the documentation index](index.md):
 
 ## Platform Support
 
-The historical wstack Router 3.6.2 release provides a **Linux x86_64 binary only**. No Router Linux ARM64, macOS, or native Windows binary is published. The [source-build path](#install-from-source) remains available; its acceptance check runs on Linux x86_64, not macOS or native Windows.
+HoV Router 3.7.0, like the historical 3.6.2 release, provides a **Linux x86_64 binary only**. No Router Linux ARM64, macOS, or native Windows binary is published. The [source-build path](#install-from-source) remains available; its acceptance check runs on Linux x86_64, not macOS or native Windows.
 
 The table and device list below describe the retained **upstream distribution** recipes, not HoV Router artifacts.
 
