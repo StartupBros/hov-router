@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.7.1](https://github.com/StartupBros/hov-router/compare/v3.7.0...v3.7.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **auth:** keep the router up when a key-usage write fails, and authenticate each request once ([#596](https://github.com/StartupBros/hov-router/issues/596)) ([eba1d16](https://github.com/StartupBros/hov-router/commit/eba1d16b28de2a45763a282dbc7ed81717fdea80))
+
 ## [3.7.0](https://github.com/StartupBros/hov-router/compare/v3.6.2...v3.7.0) (2026-10-25)
 
 
