@@ -336,6 +336,27 @@ Enable the next family only after the first family meets that evidence threshold
 - A Managed enable that reports `managed_route_empty` has made no mode change; correct the combo/rule/capability inputs and preview again.
 - A stale preview must be regenerated rather than force-applied.
 
+### Enabling combos on an existing install
+
+An install that already has combos configured adopts enabled on first boot,
+with a line in the startup log. It also adopts the historically permissive
+fallthrough into the normal account pool unless the config field or the legacy
+disable-fallback variable already records a choice. New installs keep both the
+opt-in routing default and the safer blocked-fallback default.
+
+### Implementation notes
+
+- **Config**: `combos_enabled` in the config file, read from the file only
+  (`Config#getCombosEnabled`)
+- **Routing**: read by the account selector — this is what makes the switch
+  real rather than cosmetic
+- **Backend**: `GET`/`POST /api/config/combos-enabled` controls routing only
+- **Dashboard**: the Combos route and navigation item are permanent
+- **Adoption**: `Config#adoptLegacyRoutingSettings` at server start; writes the
+  field once, so a later deliberate off is never undone
+- The combos API endpoints (`/api/combos`, `/api/families`, …) remain reachable
+  regardless of the switch, for programmatic access
+
 For general account priority and server operation commands, see [CLI documentation](cli.md).
 
 ## Native subscription quota waiting
