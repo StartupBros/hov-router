@@ -1170,15 +1170,15 @@ Full documentation available in [the documentation index](index.md):
 
 <table>
   <tr>
-    <td><img src="../apps/lander/src/screenshot-dashboard.png" alt="Dashboard"/></td>
-    <td><img src="../apps/lander/src/screenshot-logs.png" alt="Logs"/></td>
+    <td><img src="images/screenshot-dashboard.png" alt="Dashboard"/></td>
+    <td><img src="images/screenshot-logs.png" alt="Logs"/></td>
   </tr>
   <tr>
     <td align="center"><b>Real-time Dashboard</b></td>
     <td align="center"><b>Request Logs</b></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="../apps/lander/src/screenshot-analytics.png" alt="Analytics"/></td>
+    <td colspan="2"><img src="images/screenshot-analytics.png" alt="Analytics"/></td>
   </tr>
   <tr>
     <td colspan="2" align="center"><b>Analytics & Usage Tracking</b></td>
@@ -1232,8 +1232,7 @@ The following commands run from the repository root.
 better-ccflare/
 ├── apps/               # Application packages
 │   ├── server/        # Main proxy server
-│   ├── cli/           # CLI application
-│   └── lander/        # Landing page
+│   └── cli/           # CLI application
 ├── packages/          # Core packages
 │   ├── core/          # Core business logic
 │   ├── cli-commands/  # CLI command implementations
@@ -1265,7 +1264,6 @@ bun run dev:dashboard  # Dashboard development
 bun run build          # Build dashboard and CLI
 bun run build:dashboard # Build web dashboard
 bun run build:cli      # Build CLI
-bun run build:lander   # Build landing page
 bun run typecheck      # Check TypeScript types
 bun run lint           # Fix linting issues
 bun run format         # Format code

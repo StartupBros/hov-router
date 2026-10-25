@@ -14,7 +14,6 @@ import {
 	Menu,
 	RefreshCw,
 	Settings,
-	Shield,
 	Users,
 	X,
 	Zap,
@@ -24,6 +23,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useAlerts } from "../hooks/queries";
 import { cn } from "../lib/utils";
 import { version } from "../lib/version";
+import { BrandMark } from "./BrandMark";
 import { CopyButton } from "./CopyButton";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui/button";
@@ -230,7 +230,7 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 			{/* Mobile header */}
 			<div className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b px-4 flex items-center justify-between">
 				<div className="flex items-center gap-3">
-					<Shield className="h-6 w-6 text-primary" />
+					<BrandMark className="h-6 w-6 text-primary" />
 					<span className="font-semibold text-lg">{PRODUCT_NAME}</span>
 				</div>
 				<div className="flex items-center gap-2">
@@ -273,7 +273,7 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 					<div className="p-6 pb-4">
 						<div className="flex items-center gap-3">
 							<div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-								<Shield className="h-6 w-6 text-primary" />
+								<BrandMark className="h-6 w-6 text-primary" />
 							</div>
 							<div>
 								<h1 className="font-semibold text-lg">{PRODUCT_NAME}</h1>
