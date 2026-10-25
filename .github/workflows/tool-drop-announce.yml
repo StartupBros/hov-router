@@ -1,0 +1,31 @@
+name: Tool drops announce
+
+# Posts a card for each published HoV Router release in the House of Vibe
+# #tool-drops Discord channel within about a minute. pushbot's hourly sweep posts
+# the same card if this run fails or never fires; both lanes write the same
+# (repository, release id) record, so the card posts once.
+#
+# hov-stack's reusable workflow mints this run's GitHub OIDC token and sends the
+# announcement. pushbot accepts the token only from that workflow at a commit that
+# descends from its hardened baseline and is on hov-stack's main, and only when
+# the token's repository, owner, owner id and repository id match its product
+# registry. Re-pin `uses:` to a full hov-stack main SHA when the reusable workflow
+# changes.
+#
+# A release event runs this file from the released tag's tree, so a release
+# announces through this lane only when its tag already contains this file.
+
+on:
+  release:
+    types: [published, edited]
+
+permissions: {}
+
+jobs:
+  announce:
+    # Mirror packages/core/src/router-repository.ts; fixture tests enforce parity.
+    if: github.repository_id == '1278801682' && !github.event.release.draft && !github.event.release.prerelease
+    permissions:
+      contents: read
+      id-token: write
+    uses: StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@abf48cc44dbc79818d5005999176afe5e08123dd
