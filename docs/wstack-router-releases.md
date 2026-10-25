@@ -296,13 +296,23 @@ release tags do not replace each other's pending runs.
 
 ## Publishing announces the release
 
-The automation never announces, but publishing does. Once a published release
-becomes the repository's **Latest** release, the members site's hourly tool-drops
-sweep posts a card for it in the House of Vibe #tool-drops Discord channel. This
-applies from 3.7.1 on; earlier versions are never posted.
-The sweep posts only a full, non-draft release on a `v<major>.<minor>.<patch>` tag
-whose commit is on `main` in this repository. A later edit to the body does not
-change a card that has already posted.
+The automation never announces, but publishing does. Publishing a release posts a
+card for it in the House of Vibe #tool-drops Discord channel. Two lanes post it,
+and both write the same record, so the card posts once:
+
+- [`tool-drop-announce.yml`](../.github/workflows/tool-drop-announce.yml) runs when
+  a release is published or edited, and posts within about a minute. It calls
+  hov-stack's reusable announce workflow, pinned to a full commit SHA. A release
+  event runs this file from the released tag's tree, so this lane covers only
+  releases whose tag already contains it.
+- The members site's hourly tool-drops sweep posts the card if the workflow run
+  failed or never fired.
+
+This applies from 3.7.1 on; earlier versions are never posted. A card posts only
+for a full, non-draft release on a `v<major>.<minor>.<patch>` tag whose commit is
+on `main` in this repository, once it is the repository's **Latest** release.
+Editing the body of the Latest release re-runs the workflow, which updates the
+posted card in place instead of posting a new one.
 
 The card's "What's new" section is the first three bullets under a `## Highlights`
 heading in the release body. A body without that heading gets a card with no
