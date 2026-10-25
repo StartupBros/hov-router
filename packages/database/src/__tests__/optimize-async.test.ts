@@ -126,6 +126,48 @@ describe("DatabaseOperations.optimizeAsync", () => {
 		}
 	});
 
+	it("refreshes planner statistics once a table outgrows them", async () => {
+		// The worker's connection is fresh, so it has run no queries. A bare
+		// `PRAGMA optimize` only considers tables queried on its own
+		// connection, so it never re-analyzed anything: production planned
+		// against stats for 39k requests while the table held 2.1M.
+		const writer = new Database(dbPath);
+		try {
+			writer.exec(
+				"CREATE TABLE stats_probe (id INTEGER PRIMARY KEY, k INTEGER)",
+			);
+			writer.exec("CREATE INDEX idx_stats_probe_k ON stats_probe(k)");
+			const ins = writer.prepare("INSERT INTO stats_probe (k) VALUES (?)");
+			for (let i = 0; i < 100; i++) ins.run(i % 7);
+			writer.exec("ANALYZE stats_probe");
+			writer.exec("BEGIN");
+			for (let i = 0; i < 20_000; i++) ins.run(i % 7);
+			writer.exec("COMMIT");
+		} finally {
+			writer.close();
+		}
+		const rowEstimate = () => {
+			const reader = new Database(dbPath, { readonly: true });
+			try {
+				const row = reader
+					.query(
+						"SELECT stat FROM sqlite_stat1 WHERE idx = 'idx_stats_probe_k'",
+					)
+					.get() as { stat: string };
+				return Number(row.stat.split(" ")[0]);
+			} finally {
+				reader.close();
+			}
+		};
+		expect(rowEstimate()).toBe(100);
+
+		const result = await dbOps.optimizeAsync();
+
+		expect(result.ok).toBe(true);
+		expect(result.skipped).toBe(false);
+		expect(rowEstimate()).toBeGreaterThan(10_000);
+	});
+
 	it("does not expose the old synchronous optimize() anymore", () => {
 		// The sync method was the bug -- it must not silently come back.
 		expect(
