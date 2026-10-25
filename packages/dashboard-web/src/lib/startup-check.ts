@@ -14,9 +14,10 @@ export type StartupCheckOutcome =
 	| { kind: "unreachable"; message: string };
 
 /**
- * 401 and 403 are the router's answer about the key. Anything else (a timeout,
- * a 5xx, a network failure) means the router did not answer, for example while
- * a deploy swaps the backend and the guard holds new requests.
+ * 401 and 403 are an answer about the key; the router itself sends 401 for both
+ * a missing or invalid key and a key without dashboard access. Anything else (a
+ * timeout, a 5xx, a network failure) means the router did not answer, for
+ * example while a deploy swaps the backend and the guard holds new requests.
  */
 export function isKeyRejection(error: unknown): error is HttpError {
 	return (
@@ -32,14 +33,17 @@ export async function runStartupCheck(
 	getStats: () => Promise<unknown>,
 	hasStoredKey: () => boolean,
 ): Promise<StartupCheckOutcome> {
+	// Read before the request: a 401 clears the stored key on its way back.
+	const sentKey = hasStoredKey();
 	try {
 		await getStats();
-		return { kind: "ready", authRequired: hasStoredKey() };
+		return { kind: "ready", authRequired: sentKey };
 	} catch (error) {
 		if (isKeyRejection(error)) {
+			// Without a key, "API key required" only repeats the dialog's own text.
 			return {
 				kind: "auth_required",
-				message: error.status === 403 ? error.message : null,
+				message: sentKey ? error.message || null : null,
 			};
 		}
 		return { kind: "unreachable", message: errorText(error) };

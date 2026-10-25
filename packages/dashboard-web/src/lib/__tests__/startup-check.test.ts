@@ -25,16 +25,54 @@ describe("runStartupCheck", () => {
 		});
 	});
 
-	it("asks for a key on 401, with no error text", async () => {
+	it("asks for a key with no error text when none was sent", async () => {
 		expect(
 			await runStartupCheck(
-				failWith(new HttpError(401, "Unauthorized")),
-				() => true,
+				failWith(new HttpError(401, "API key required")),
+				() => false,
 			),
 		).toEqual({ kind: "auth_required", message: null });
 	});
 
-	it("asks for a key on 403 and shows the server's reason", async () => {
+	it("shows the router's reason when it rejects the stored key", async () => {
+		// The router answers every auth and authz failure with a 401 (router.ts).
+		expect(
+			await runStartupCheck(
+				failWith(
+					new HttpError(
+						401,
+						"Unauthorized: This API key does not have dashboard access",
+					),
+				),
+				() => true,
+			),
+		).toEqual({
+			kind: "auth_required",
+			message: "Unauthorized: This API key does not have dashboard access",
+		});
+		expect(
+			await runStartupCheck(
+				failWith(new HttpError(401, "Invalid API key")),
+				() => true,
+			),
+		).toEqual({ kind: "auth_required", message: "Invalid API key" });
+	});
+
+	it("checks for a stored key before the request, since a 401 clears it", async () => {
+		// api.request dispatches auth-required on a 401, and App's listener
+		// clears the stored key before the error reaches the startup check.
+		let stored = true;
+		const clearsKeyThenRejects = async () => {
+			stored = false;
+			throw new HttpError(401, "Invalid API key");
+		};
+		expect(await runStartupCheck(clearsKeyThenRejects, () => stored)).toEqual({
+			kind: "auth_required",
+			message: "Invalid API key",
+		});
+	});
+
+	it("asks for a key on 403 and shows the reason", async () => {
 		expect(
 			await runStartupCheck(
 				failWith(
