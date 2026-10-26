@@ -943,6 +943,7 @@ describe.skipIf(!livePgAvailable)("overlap boot PostgreSQL", () => {
 		await connection.unsafe("BEGIN");
 		const adapter = new BunSqlAdapter(
 			connection as unknown as InstanceType<typeof SQL>,
+			false,
 		);
 		try {
 			await connection.unsafe(`CREATE SCHEMA ${schema}`);
