@@ -13,6 +13,7 @@ import {
 	PAUSE_REASON_NEEDS_REAUTH,
 	TIME_CONSTANTS,
 } from "@better-ccflare/core";
+import { Logger } from "@better-ccflare/logger";
 import type {
 	Account,
 	AgentAttributionSource,
@@ -99,6 +100,11 @@ import type {
 } from "./repositories/usage-windows.repository";
 import { UsageWindowsRepository } from "./repositories/usage-windows.repository";
 import { withDatabaseRetry } from "./retry";
+import {
+	formatSlowSqlStatement,
+	SqliteStatementTimer,
+	type SqlWindowSummary,
+} from "./sqlite-statement-timing";
 
 export interface DatabaseConfig {
 	/** Enable WAL (Write-Ahead Logging) mode for better concurrency */
@@ -350,6 +356,8 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private adapter: BunSqlAdapter;
 	/** Raw bun:sqlite Database — only set in SQLite mode */
 	private sqliteDb?: Database;
+	/** Times every main-thread statement on sqliteDb (#606) */
+	private sqlTiming?: SqliteStatementTimer;
 	/** Resolved path to the SQLite DB file — used by the vacuum worker */
 	private resolvedDbPath?: string;
 	/**
@@ -554,6 +562,14 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			validateSqliteConfig(this.dbConfig);
 
 			this.sqliteDb = new Database(resolvedPath, { create: true });
+			// Time statements on the handle itself, before anything else runs on
+			// it: the adapter and every direct getDatabase() caller share it, and
+			// each of its calls blocks the event loop (#606).
+			const sqlTimingLog = new Logger("SqlTiming");
+			this.sqlTiming = new SqliteStatementTimer({
+				onSlow: (sample) => sqlTimingLog.warn(formatSlowSqlStatement(sample)),
+			});
+			this.sqlTiming.instrument(this.sqliteDb);
 
 			try {
 				// Capture the persisted auto_vacuum mode BEFORE configureSqlite's
@@ -653,6 +669,15 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			);
 		}
 		return this.sqliteDb;
+	}
+
+	/**
+	 * Main-thread SQL time since the previous call, for the event-loop stall
+	 * monitor (#606). Null in PostgreSQL mode, whose queries don't block the
+	 * loop.
+	 */
+	drainSqlTimingWindow(): SqlWindowSummary | null {
+		return this.sqlTiming?.drainWindow() ?? null;
 	}
 
 	async runQuickIntegrityCheck(): Promise<string> {

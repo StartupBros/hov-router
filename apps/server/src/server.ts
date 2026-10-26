@@ -136,6 +136,10 @@ import {
 	BodyAdmissionController,
 	withBodyAdmission,
 } from "./body-admission";
+import {
+	EventLoopStallMonitor,
+	formatEventLoopStallReport,
+} from "./event-loop-stall-monitor";
 import { createManagedIngress } from "./managed-ingress";
 import { scheduleAdaptiveVacuumAfterRetentionCleanup } from "./retention-cleanup";
 import {
@@ -673,6 +677,7 @@ let usagePollingLifecycle: UsagePollingLifecycle<NodeJS.Timeout> | null = null;
 let cacheFlightCohortSealService: CohortSealService | null = null;
 let cacheKeepaliveScheduler: CacheKeepaliveScheduler | null = null;
 let memoryMonitorInterval: Timer | null = null;
+let eventLoopStallMonitor: EventLoopStallMonitor | null = null;
 
 export const DEVICE_SETUP_RECOVERY_INTERVAL_MS = 30_000;
 
@@ -1530,6 +1535,14 @@ export default async function startServer(options?: {
 	DatabaseFactory.initialize(undefined, runtime);
 	const dbOps = await DatabaseFactory.getInstanceAsync();
 	retireBackendHeartbeat = () => dbOps.retireInstanceHeartbeat();
+	// Started before the rest of startup so a post-start freeze (#606) names
+	// how long the main thread was held and which SQL ran meanwhile.
+	const stallLog = new Logger("EventLoop");
+	eventLoopStallMonitor = new EventLoopStallMonitor({
+		drainSql: () => dbOps.drainSqlTimingWindow(),
+		report: (report) => stallLog.warn(formatEventLoopStallReport(report)),
+	});
+	eventLoopStallMonitor.start();
 	// Upgrade legacy WAL ownership before any proxy context, polling loop, or
 	// scheduler can refresh: every later production caller is generation-bound.
 	await restorePendingRotationsBeforeRuntimeRefresh(dbOps);
@@ -3295,6 +3308,8 @@ function stopPeriodicWork(): Promise<void> {
 			clearInterval(memoryMonitorInterval);
 			memoryMonitorInterval = null;
 		}
+		eventLoopStallMonitor?.stop();
+		eventLoopStallMonitor = null;
 
 		// Stop token health monitoring
 		stopGlobalTokenHealthChecks();
