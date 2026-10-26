@@ -64,7 +64,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 
 [Release 3.7.0](https://github.com/StartupBros/hov-router/releases/tag/v3.7.0) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
 
-The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 3.7.0 prints `HoV Router v3.7.0` through all three command names. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed 3.6.2 with this guide, install 3.7.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
+The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 3.7.0 prints `HoV Router v3.7.0` through every command name it is installed under. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed 3.6.2 with this guide, install 3.7.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
 
 Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, `chmod`). No GitHub CLI, Node.js, or Bun is needed.
 
