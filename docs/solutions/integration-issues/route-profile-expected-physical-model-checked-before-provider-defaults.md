@@ -1,7 +1,7 @@
 ---
 title: Route-profile expectedPhysicalModel is checked against raw account mappings, before the provider fills in its defaults
 date: 2026-09-22
-last_updated: 2026-09-26
+last_updated: 2026-10-26
 category: integration-issues
 module: model-route-profiles
 problem_type: integration_issue
@@ -45,7 +45,7 @@ The two shapes have different fixes. An accountId-pinned profile can simply drop
 
 - On 2026-09-22 at 07:09 UTC, every request on `route_profile_id = grok-primary` returned HTTP 503, recorded as `force_route_model_mapping_mismatch`, before xAI was called (session history).
   - The `grok` account's `model_mappings` had been changed from `grok-4.6` to `grok-4.7`, but the profile in `/etc/better-ccflare/model-route-profiles.env` still said `expectedPhysicalModel: "grok-4.6"`.
-  - The terminal label comes from `force_route_${error.reason}` (`packages/proxy/src/proxy.ts:953`), and the 503 comes from `forceRouteUnavailableResponse` (`packages/proxy/src/proxy.ts:237`).
+  - The terminal label comes from `force_route_${error.reason}` (`packages/proxy/src/proxy.ts:1094`), and the 503 comes from `forceRouteUnavailableResponse` (`packages/proxy/src/proxy.ts:261`).
 - The same break was about to recur that evening. The post-deploy plan for #361 was to clear the account's mapping so it would follow the derived default. The resolver predicted `model_mapping_mismatch` for that state.
 - The request that would have gone upstream was correct in both Grok cases. Only the account-selection guard rejected it.
 - **Codex, 2026-09-26.** The migration apply (routing revision 161→162) left all three Codex accounts with no `model_mappings`, `model_fallbacks` or custom-endpoint mappings. The service doesn't set `OPENAI_COMPATIBLE_MODEL_MAPPINGS`. The preview beforehand returned `routeProfileAdvisories: []`, although two capability pools pinned a model:
@@ -59,7 +59,7 @@ The two shapes have different fixes. An accountId-pinned profile can simply drop
 - **Trusting the Codex migration preview to flag affected profiles.** `routeProfileAdvisories` (`packages/http-api/src/services/codex-model-migration.ts:332-360`) skips every profile with `selection` set (line 342). It examines only exact-account profiles, so capability pools never appear, however they are pinned. Tracked as #386.
 - **Assuming an exact Codex pool keeps working until the catalog moves.** The first read after the migration was "`codex-pool-astra` still works, because opus still resolves to `gpt-6-astra`". That was wrong. Exact-policy capability admission never sees the catalog-derived model. It compares the profile's model against the raw mapping, which the migration had just removed (see Why This Works).
 - **Considered, not done: a `"provider-default"` sentinel for `expectedPhysicalModel`.** It needs a new parse branch in `packages/proxy/src/model-route-profiles.ts` and a new match branch in the guard. The config-only fix below gives the same result for an accountId-pinned profile, with no code change. For Codex pools, `physicalModelPolicy: "catalog-role"` (#384) later shipped a per-account version of the idea.
-- **Considered, not done: make the guard resolve provider defaults whenever an account has no mapping.** Capability admission uses the same guard (`matchesCapabilityRouteProfile`, `packages/proxy/src/handlers/account-selector.ts:2328`), so every Codex account with no mapping would start matching capability profiles. That is an admission change well beyond this fix.
+- **Considered, not done: make the guard resolve provider defaults whenever an account has no mapping.** Capability admission uses the same guard (`matchesCapabilityRouteProfile`, `packages/proxy/src/handlers/account-selector.ts:2620`), so every Codex account with no mapping would start matching capability profiles. That is an admission change well beyond this fix.
 
 ## Solution
 
@@ -108,7 +108,7 @@ After:
 {"id":"codex-pool-astra","displayName":"Codex pool: Opus-tier, auto-updating (all Pro accounts, 1M)","selection":"capability","expectedProvider":"codex","logicalModel":"claude-opus-5","clientContextWindowHint":"1m","physicalModelPolicy":"catalog-role"}
 ```
 
-The `id` is unchanged, so the picker ID `claude-bccf-route-codex-pool-astra[1m]` is stable. The display name and description name a role rather than a model version, since the version now changes without an edit. `pro-primary-sol` (sonnet role) was converted the same way in the same change. The profile's `description` values were rewritten too (omitted above), and must not contain an apostrophe (step 4 below).
+The `id` is unchanged, so the picker ID `claude-bccf-route-codex-pool-astra[1m]` is stable. The new display name named a role rather than a model version, since the version now changes without an edit. That label told users nothing about which model they would get. Since #617 the router writes the served model into the picker label, and `displayName` shows only while the account's catalog is cold. The model-named ids also went wrong: a catalog role is a position in OpenAI's priority order, and after OpenAI reordered its catalog `codex-pool-astra` served GPT-6.1-Sol and `pro-primary-sol` served GPT-6-Astra on 2026-10-26 (#618, `claude-code-model-picker-wrong-labels-and-frozen-discovery-cache.md`). `pro-primary-sol` (sonnet role) was converted the same way in the same change. The profile's `description` values were rewritten too (omitted above), and must not contain an apostrophe (step 4 below).
 
 Applied on 2026-09-26 with operator approval, in two phases. Phase one was read-only:
 
@@ -130,7 +130,7 @@ Phase two wrote and restarted:
 
 Observed: the file matched the running value; the parser accepted both versions, with only the two intended profiles changed. The restart began at 02:22:51Z and was healthy at 02:23:39Z, on the same build, with the running value byte-identical to the validated JSON.
 
-The info-level `Model route profiles configured: N` line (`apps/server/src/server.ts:1803`) did not appear in `journalctl -u ccflare-stack.service`. Production probably logs above info, but that wasn't checked. Don't treat the line's absence as a failure, or its presence as the check.
+The info-level `Model route profiles configured: N` line (`apps/server/src/server.ts:2057`) did not appear in `journalctl -u ccflare-stack.service`. Production probably logs above info, but that wasn't checked. Don't treat the line's absence as a failure, or its presence as the check.
 
 **Not yet proven:** no request has been served under catalog-role admission (`routed_model` equal to the catalog target). All three Codex accounts were out of weekly quota until about 2026-09-29 23:36Z. The first request on `codex-pool-astra` after the restart (02:25:07Z) returned `503 force_route_account_capacity_exhausted`. That's consistent with the fix, but not proof, because the order of the capacity check relative to catalog-role admission was not checked. `docs/solutions/workflow-issues/verify-capacity-exhausted-provider-lane-fixes-against-a-mock-upstream.md` describes how to prove such a lane without waiting for quota.
 
@@ -138,35 +138,35 @@ The info-level `Model route profiles configured: N` line (`apps/server/src/serve
 
 Two layers answer "which physical model does this account serve?" at different times:
 
-- **Account selection (the guard).** `getRouteProfileConstraintViolation` (`packages/proxy/src/handlers/account-selector.ts:198`) checks the provider first (`:225-231`). For any policy other than catalog-role, it calls `getExactPhysicalModelViolation` (`:257-283`). With no concrete model supplied, that builds candidates from `getModelList(logicalModel, account)` (`packages/core/src/model-mappings.ts:442`).
+- **Account selection (the guard).** `getRouteProfileConstraintViolation` (`packages/proxy/src/handlers/account-selector.ts:211`) delegates to `evaluateRouteProfileConstraint` (`:225`), which checks the provider first (`:238-244`). For any policy other than catalog-role, it calls `getExactPhysicalModelViolation` (`:270-296`). With no concrete model supplied, that builds candidates from `getModelList(logicalModel, account)` (`packages/core/src/model-mappings.ts:442`).
   - `getModelList` returns `null` when `hasAccountModelMappings` (`packages/core/src/model-mappings.ts:408`) finds no `model_mappings`, `model_fallbacks`, custom-endpoint mappings or `OPENAI_COMPATIBLE_MODEL_MAPPINGS`.
   - The guard then falls back to candidates `[logicalModel]`, for example `["claude-opus-5"]`, which can never equal `grok-4.7` or `gpt-6-astra`.
-  - Capability admission uses the same path. For an exact-policy pool, `matchesCapabilityRouteProfile` (`account-selector.ts:2328-2360`) calls the guard with the profile's `expectedPhysicalModel` and logical model, and no concrete model. So a Codex account following its catalog, with no mapping, fails the pool exactly as the Grok account failed its profile.
-- **Request conversion (the provider).** `XaiProvider.beforeConvert` (`packages/providers/src/providers/xai/provider.ts:239`) replaces a null mapping with `resolvedXaiModelMappings()`, the derived or factory default that actually gets sent. For Codex, the model comes from the account's own catalog. The guard runs on the raw DB row, before either, so it never sees that default.
+  - Capability admission uses the same path. For an exact-policy pool, `matchesCapabilityRouteProfile` (`account-selector.ts:2620-2674`) calls the guard with the profile's `expectedPhysicalModel` and logical model, and no concrete model. So a Codex account following its catalog, with no mapping, fails the pool exactly as the Grok account failed its profile.
+- **Request conversion (the provider).** `XaiProvider.beforeConvert` (`packages/providers/src/providers/xai/provider.ts:277`) replaces a null mapping with `resolvedXaiModelMappings()`, the derived or factory default that actually gets sent. For Codex, the model comes from the account's own catalog. The guard runs on the raw DB row, before either, so it never sees that default.
 
 Dropping the field is safe for an **accountId-pinned** profile:
 
-- **The account and provider are still pinned.** The guard still returns `provider_mismatch` when the account's provider differs from `expectedProvider` (`account-selector.ts:225-231`).
-- **The field is optional there.** `expectedPhysicalModel` is required only for `selection: "capability"` profiles, and not even there under catalog-role (`packages/proxy/src/model-route-profiles.ts:360-373`).
-- **Route-profile traffic is exempt from the ordinary stock-model fence.** `applyOrdinaryStockModelEligibility` (`account-selector.ts:2278`) returns early when `meta.routeProfileId != null` (`:2286`). So a provider-default model reaching this account through the profile is allowed.
-- **Capability pools are untouched.** Capability admission (`account-selector.ts:2328`) and implicit-codex admission (`:3091`, `:3129`) apply only to `selection: "capability"` and `"implicit-codex"` profiles, so neither sees this change.
+- **The account and provider are still pinned.** The guard still returns `provider_mismatch` when the account's provider differs from `expectedProvider` (`account-selector.ts:238-244`).
+- **The field is optional there.** `expectedPhysicalModel` is required only for `selection: "capability"` profiles, and not even there under catalog-role (`packages/proxy/src/model-route-profiles.ts:377-390`).
+- **Route-profile traffic is exempt from the ordinary stock-model fence.** `applyOrdinaryStockModelEligibility` (`account-selector.ts:2558`) returns early when `meta.routeProfileId != null` (`:2566`). So a provider-default model reaching this account through the profile is allowed.
+- **Capability pools are untouched.** Capability admission (`account-selector.ts:2620`) and implicit-codex admission (`:3550`, `:3591`) apply only to `selection: "capability"` and `"implicit-codex"` profiles, so neither sees this change.
 
 The profile's contract narrows from "this account, this provider, this exact model" to "this account, this provider". The model is then governed by the account's own mapping, or by the provider's catalog default when there is none.
 
-A side effect: xAI's `getLogicalModelCapability` reports "supported" only when `model_mappings` is null (`packages/providers/src/providers/xai/provider.ts:83`). So clearing the mapping also makes the account visible to capability checks as a provider-default account.
+A side effect: xAI's `getLogicalModelCapability` reports "supported" only when `model_mappings` is null (`packages/providers/src/providers/xai/provider.ts:115`). So clearing the mapping also makes the account visible to capability checks as a provider-default account.
 
 Catalog-role is the capability-pool equivalent:
 
-- **It names a role, not a model.** A catalog-role pool follows the model at the logical family's role in each account's own catalog. The parser requires `expectedProvider: "codex"`, forbids `expectedPhysicalModel`, `contextWindow` and `maxOutputTokens`, and requires a fable, opus, sonnet or haiku `logicalModel` (`model-route-profiles.ts:374-403`).
-- **Admission reads the catalog.** `matchesCapabilityRouteProfile` admits an account only when its catalog has a target for the role and the account's concrete model list resolves to it (`evaluateCatalogRoleConstraint`, `account-selector.ts:156-190`). A missing or different target fails closed with `catalog_role_unavailable` or `catalog_role_mismatch`, never another provider.
+- **It names a role, not a model.** A catalog-role pool follows the model at the logical family's role in each account's own catalog. The parser requires `expectedProvider: "codex"`, forbids `expectedPhysicalModel`, `contextWindow` and `maxOutputTokens`, and requires a fable, opus, sonnet or haiku `logicalModel` (`model-route-profiles.ts:391-420`).
+- **Admission reads the catalog.** `matchesCapabilityRouteProfile` admits an account only when its catalog has a target for the role and the account's concrete model list resolves to it (`evaluateCatalogRoleConstraint`, `account-selector.ts:169-203`). A missing or different target fails closed with `catalog_role_unavailable` or `catalog_role_mismatch`, never another provider.
 - **Cold catalogs are primed.** Catalogs live in memory, so every process start is cold:
-  - Catalog-role requests prime cold candidates before selection, bounded by the selection deadline (`packages/proxy/src/proxy.ts:1674-1710`). Exact-policy requests skip this.
-  - A refresh heartbeat (`packages/proxy/src/codex-model-catalog.ts:839-918`) fetches every eligible Codex account's catalog 30–120 s after start, then about every 15 minutes.
-- **A malformed profile stops startup.** `parseModelRouteProfiles` throws on a malformed non-empty value (`model-route-profiles.ts:186-206`), and the server calls it before the database, background jobs and listener start (`apps/server/src/server.ts:1332`). A healthy `/health` after a restart therefore implies the profiles parsed.
+  - Catalog-role requests prime cold candidates before selection, bounded by the selection deadline (`packages/proxy/src/proxy.ts:2016-2055`). Exact-policy requests skip this.
+  - A refresh heartbeat (`packages/proxy/src/codex-model-catalog.ts:1108-1187`) fetches every eligible Codex account's catalog 30–120 s after start, then about every 15 minutes.
+- **A malformed profile stops startup.** `parseModelRouteProfiles` throws on a malformed non-empty value (`model-route-profiles.ts:203-223`), and the server calls it before the database, background jobs and listener start (`apps/server/src/server.ts:1511`). A healthy `/health` after a restart therefore implies the profiles parsed.
 
 ## Prevention
 
-- **Before changing or clearing any account's `model_mappings`, find every profile that pins a physical model**, not only those that name the account. Capability pools have no `accountId` (the parser rejects one, `model-route-profiles.ts:271-275`), so an accountId-scoped search misses them:
+- **Before changing or clearing any account's `model_mappings`, find every profile that pins a physical model**, not only those that name the account. Capability pools have no `accountId` (the parser rejects one, `model-route-profiles.ts:288-292`), so an accountId-scoped search misses them:
 
   ```bash
   sudo cat /etc/better-ccflare/model-route-profiles.env | python3 -c '
@@ -188,7 +188,7 @@ Catalog-role is the capability-pool equivalent:
   - the profile's `expectedPhysicalModel` and `displayName`
   - the xAI context-window table, which was missed and hotfixed in #360
 
-  After #361, a new Grok release needs none of them for this profile shape. After #362, a new Anthropic release needs no code bump for same-family routing. After #384, a new Codex generation needs none for Automatic accounts behind catalog-role pools.
+  After #361, a new Grok release needs none of them for this profile shape. After #362, a new Anthropic release needs no code bump for same-family routing. After #384, a new Codex generation needs none for Automatic accounts behind catalog-role pools. After #617, no model switch needs a `displayName` edit, because the picker label names the served model.
 - **If xAI's plan can't serve a newly listed model yet (#364),** re-pin the account's `model_mappings` to the previous model. Because the profile no longer asserts a model, that pin passes the guard with no profile edit. On 2026-09-22 a mapping change made through the dashboard took effect without a restart (session history). A direct DB edit was not tested that way.
 - **Edit the profiles file with the two-phase checklist above**, not by hand. The file is root-owned, read only at start, and fails the whole service closed if malformed.
 - **Watch for the general shape of this bug.** It is an admission check reading state that a later layer fills in. #325 is the same shape for Codex capability profiles: admission read a catalog that only dispatch populated. #384 primes catalogs for catalog-role pools and adds the startup heartbeat, but exact-policy pools still get no inline priming. #325 stays open pending live confirmation.
@@ -203,6 +203,9 @@ Catalog-role is the capability-pool equivalent:
 - #370: follow current Codex provider models (open). Implemented by #384: catalog-role profiles, the pin-to-automatic migration, catalog priming and the refresh heartbeat.
 - #325: Codex capability profiles fail closed until the catalog is primed (same bug shape; narrowed by #384 for catalog-role pools; open).
 - #386: the Codex migration preview misses exact-model capability pools and the apply breaks them immediately (open).
+- #617: picker labels name the model each route serves, so `displayName` is only a cold-catalog fallback.
+- #618: alias the model-named ids that no longer match what their catalog-role pools serve (open).
+- `docs/solutions/integration-issues/claude-code-model-picker-wrong-labels-and-frozen-discovery-cache.md`: how the role-named labels and the catalog reorder showed up in the `/model` picker.
 - `docs/solutions/architecture-patterns/commit-bound-routing.md`: same function family, different bug class (over-admission ordering).
 - `docs/solutions/workflow-issues/verify-capacity-exhausted-provider-lane-fixes-against-a-mock-upstream.md`: how to prove a Codex lane fix while every account is out of quota.
 - `docs/configuration.md` (route profile fields, including `physicalModelPolicy`) and `docs/providers.md` (xAI default model mapping).
