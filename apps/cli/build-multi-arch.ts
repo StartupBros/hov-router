@@ -208,7 +208,7 @@ async function buildPlatform(platform: Platform) {
 
 	const releaseContext =
 		process.env.CCFLARE_BUILD_PRODUCER === "github-release-binary" ||
-		process.env.CCFLARE_BUILD_PRODUCER === "wstack-router-binary"
+		process.env.CCFLARE_BUILD_PRODUCER === "hov-router-binary"
 			? process.env.CCFLARE_BUILD_PRODUCER
 			: undefined;
 	const evidence = readTombiiTaggedBuildEvidence(version, releaseContext);

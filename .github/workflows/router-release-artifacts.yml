@@ -31,7 +31,7 @@ env:
 jobs:
   validate:
     # Mirror packages/core/src/router-repository.ts; fixture tests enforce parity.
-    if: (github.repository == 'StartupBros/wstack-router' || github.repository == 'StartupBros/hov-router') && github.repository_id == '1278801682'
+    if: github.repository == 'StartupBros/hov-router' && github.repository_id == '1278801682'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -64,7 +64,7 @@ jobs:
 
   build:
     needs: validate
-    if: (github.repository == 'StartupBros/wstack-router' || github.repository == 'StartupBros/hov-router') && github.repository_id == '1278801682'
+    if: github.repository == 'StartupBros/hov-router' && github.repository_id == '1278801682'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -99,7 +99,7 @@ jobs:
 
   attest:
     needs: build
-    if: (github.repository == 'StartupBros/wstack-router' || github.repository == 'StartupBros/hov-router') && github.repository_id == '1278801682'
+    if: github.repository == 'StartupBros/hov-router' && github.repository_id == '1278801682'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -121,7 +121,7 @@ jobs:
 
   stage:
     needs: [build, attest]
-    if: (github.repository == 'StartupBros/wstack-router' || github.repository == 'StartupBros/hov-router') && github.repository_id == '1278801682'
+    if: github.repository == 'StartupBros/hov-router' && github.repository_id == '1278801682'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe("documented source installer shell (synthetic artifact, not native build proof)", () => {
-	it("installs all three names from the unchanged build filename into a fresh legacy directory without overwriting commands or profiles", () => {
+	it("installs both names from the unchanged build filename into a fresh legacy directory without overwriting commands or profiles", () => {
 		const reference = readFileSync(join(root, "docs/reference.md"), "utf8");
 		expect(reference).toContain(
 			"git clone https://github.com/StartupBros/hov-router.git better-ccflare\ncd better-ccflare\n",
@@ -172,7 +172,7 @@ describe("documented source install", () => {
 		}
 	});
 
-	it("installs the built fork under all three names with identical version/source evidence and config behavior while preserving legacy storage", () => {
+	it("installs the built fork under both names with identical version/source evidence and config behavior while preserving legacy storage", () => {
 		const reference = readFileSync(join(root, "docs/reference.md"), "utf8");
 		expect(reference).toContain(
 			"git clone https://github.com/StartupBros/hov-router.git better-ccflare\ncd better-ccflare\n",

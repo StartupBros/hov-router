@@ -60,6 +60,13 @@ const historicalFixtureDigest = createHash("sha256")
 	.digest("hex");
 const historicalRun =
 	'"$HOME/.local/lib/wstack-router/3.6.2/wstack-router" --help\n';
+// Guides for 3.6.2 through 3.7.1 created all three names; new installs create
+// COMMAND_NAMES only, and upgrades repoint an existing wstack-router link.
+const earlierGuideAliases = [
+	"hov-router",
+	"wstack-router",
+	"better-ccflare",
+] as const;
 const homes: string[] = [];
 afterEach(() => {
 	for (const home of homes.splice(0))
@@ -165,7 +172,7 @@ esac
 		historicalBinary,
 		binDir,
 		// Plant the layout that earlier versions of this guide produced for 3.6.2.
-		installHistorical(aliases: readonly string[] = COMMAND_NAMES) {
+		installHistorical(aliases: readonly string[] = earlierGuideAliases) {
 			mkdirSync(dirname(historicalBinary), { recursive: true });
 			writeFileSync(historicalBinary, historicalPayload, { mode: 0o755 });
 			mkdirSync(binDir, { recursive: true });
@@ -330,11 +337,11 @@ describe("documented binary install (synthetic downloads)", () => {
 		f.installHistorical();
 		expect(f.run("router-release-install").status).toBe(0);
 		expect(readFileSync(f.historicalBinary, "utf8")).toBe(historicalPayload);
-		for (const name of COMMAND_NAMES)
+		for (const name of earlierGuideAliases)
 			expect(readlinkSync(join(f.binDir, name))).toBe(f.historicalBinary);
 	});
 
-	it("creates all three optional command aliases to the same verified binary without running it", () => {
+	it("creates both optional command aliases to the same verified binary without running it", () => {
 		const f = fixture();
 		expect(f.run("router-release-install").status).toBe(0);
 		expect(f.run("router-release-path").status).toBe(0);
@@ -343,6 +350,7 @@ describe("documented binary install (synthetic downloads)", () => {
 			expect(readFileSync(join(f.binDir, name), "utf8")).toBe(payload);
 		}
 		expect(readdirSync(f.binDir).sort()).toEqual([...COMMAND_NAMES].sort());
+		expect(() => lstatSync(join(f.binDir, "wstack-router"))).toThrow();
 		for (const profile of [".profile", ".bashrc", ".zshrc"])
 			expect(readFileSync(join(f.home, profile), "utf8")).toBe(
 				"keep profile\n",
@@ -350,7 +358,20 @@ describe("documented binary install (synthetic downloads)", () => {
 		expect(existsSync(join(f.home, "executed"))).toBe(false);
 	});
 
-	it("reports the release display and source SHA through all three installed aliases (fixture)", () => {
+	it("leaves an existing wstack-router entry alone, since new installs no longer create it", () => {
+		const f = fixture();
+		expect(f.run("router-release-install").status).toBe(0);
+		mkdirSync(f.binDir, { recursive: true });
+		const earlier = join(f.binDir, "wstack-router");
+		writeFileSync(earlier, "keep");
+		const result = f.run("router-release-path");
+		expect(result.status, result.stderr).toBe(0);
+		expect(readFileSync(earlier, "utf8")).toBe("keep");
+		for (const name of COMMAND_NAMES)
+			expect(readlinkSync(join(f.binDir, name))).toBe(f.binary);
+	});
+
+	it("reports the release display and source SHA through both installed aliases (fixture)", () => {
 		expect(reference).toContain("HoV Router v3.7.0");
 		const f = fixture();
 		expect(f.run("router-release-install").status).toBe(0);
@@ -436,9 +457,11 @@ describe("documented upgrade of an earlier binary install (synthetic)", () => {
 		const upgraded = f.run("router-release-upgrade");
 		expect(upgraded.status, upgraded.stderr).toBe(0);
 		expect(upgraded.stderr).toBe("");
-		for (const name of COMMAND_NAMES)
+		for (const name of earlierGuideAliases)
 			expect(readlinkSync(join(f.binDir, name))).toBe(f.binary);
-		expect(readdirSync(f.binDir).sort()).toEqual([...COMMAND_NAMES].sort());
+		expect(readdirSync(f.binDir).sort()).toEqual(
+			[...earlierGuideAliases].sort(),
+		);
 		expect(readFileSync(f.historicalBinary, "utf8")).toBe(historicalPayload);
 		for (const profile of [".profile", ".bashrc", ".zshrc"])
 			expect(readFileSync(join(f.home, profile), "utf8")).toBe(
@@ -448,29 +471,34 @@ describe("documented upgrade of an earlier binary install (synthetic)", () => {
 
 		const rolledBack = f.run("router-release-upgrade", toHistorical);
 		expect(rolledBack.status, rolledBack.stderr).toBe(0);
-		for (const name of COMMAND_NAMES)
+		for (const name of earlierGuideAliases)
 			expect(readlinkSync(join(f.binDir, name))).toBe(f.historicalBinary);
 
 		expect(f.run("router-release-upgrade").status).toBe(0);
-		for (const name of COMMAND_NAMES)
+		for (const name of earlierGuideAliases)
 			expect(readlinkSync(join(f.binDir, name))).toBe(f.binary);
-		expect(readdirSync(f.binDir).sort()).toEqual([...COMMAND_NAMES].sort());
+		expect(readdirSync(f.binDir).sort()).toEqual(
+			[...earlierGuideAliases].sort(),
+		);
 	});
 
-	it("creates missing aliases while repointing the rest", () => {
+	it("creates missing aliases while repointing the rest, but never creates wstack-router", () => {
 		const f = fixture();
 		f.installHistorical([COMMAND_NAMES[0]]);
 		expect(f.run("router-release-install").status).toBe(0);
-		expect(f.run("router-release-upgrade").status).toBe(0);
+		const upgraded = f.run("router-release-upgrade");
+		expect(upgraded.status, upgraded.stderr).toBe(0);
 		for (const name of COMMAND_NAMES)
 			expect(readlinkSync(join(f.binDir, name))).toBe(f.binary);
+		expect(readdirSync(f.binDir).sort()).toEqual([...COMMAND_NAMES].sort());
+		expect(() => lstatSync(join(f.binDir, "wstack-router"))).toThrow();
 	});
 
 	it("refuses before the new release is installed", () => {
 		const f = fixture();
 		f.installHistorical();
 		expect(f.run("router-release-upgrade").status).not.toBe(0);
-		for (const name of COMMAND_NAMES)
+		for (const name of earlierGuideAliases)
 			expect(readlinkSync(join(f.binDir, name))).toBe(f.historicalBinary);
 	});
 
@@ -485,11 +513,11 @@ describe("documented upgrade of an earlier binary install (synthetic)", () => {
 		expect(result.status).not.toBe(0);
 		expect(result.stderr).toContain("Refusing leftover file:");
 		expect(readFileSync(leftover, "utf8")).toBe("keep");
-		for (const name of COMMAND_NAMES)
+		for (const name of earlierGuideAliases)
 			expect(readlinkSync(join(f.binDir, name))).toBe(f.historicalBinary);
 	});
 
-	for (const name of COMMAND_NAMES) {
+	for (const name of earlierGuideAliases) {
 		it.each([
 			"file",
 			"directory",
@@ -497,7 +525,9 @@ describe("documented upgrade of an earlier binary install (synthetic)", () => {
 			"broken symlink",
 		])(`refuses a foreign ${name} (%s) before changing any alias`, (kind) => {
 			const f = fixture();
-			f.installHistorical(COMMAND_NAMES.filter((alias) => alias !== name));
+			f.installHistorical(
+				earlierGuideAliases.filter((alias) => alias !== name),
+			);
 			expect(f.run("router-release-install").status).toBe(0);
 			const collision = join(f.binDir, name);
 			// Ends in the command name but sits outside this guide's install roots.
@@ -521,7 +551,7 @@ describe("documented upgrade of an earlier binary install (synthetic)", () => {
 				expect(readlinkSync(collision)).toBe(
 					kind === "symlink elsewhere" ? elsewhere : "missing-command",
 				);
-			for (const other of COMMAND_NAMES.filter((alias) => alias !== name))
+			for (const other of earlierGuideAliases.filter((alias) => alias !== name))
 				expect(readlinkSync(join(f.binDir, other))).toBe(f.historicalBinary);
 			expect(
 				readdirSync(f.binDir).filter((entry) => entry.endsWith(".new")),

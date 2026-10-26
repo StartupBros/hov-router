@@ -8,10 +8,11 @@ The current [Linux x86_64 binary](reference.md#install-the-linux-x86_64-release)
 
 ## Install without replacing your current executable
 
-Follow the [source quickstart](reference.md#install-from-source). It builds the current fork with `bun install --frozen-lockfile` and `bun run build`, then installs the unchanged `apps/cli/dist/better-ccflare` artifact under **all three** executable names in a fresh directory:
+Follow the [source quickstart](reference.md#install-from-source). It builds the current fork with `bun install --frozen-lockfile` and `bun run build`, then installs the unchanged `apps/cli/dist/better-ccflare` artifact under **both** executable names in a fresh directory:
 
 - `hov-router` is the preferred command.
-- `wstack-router` and `better-ccflare` remain compatible commands for the same server.
+- `better-ccflare` remains a compatible command for the same server.
+- Guides for 3.6.2 through 3.7.1 also installed `wstack-router`. An existing copy or link keeps working, because every name runs the same binary; new installs no longer create it.
 
 Record the current executable location with `command -v` and the command name you use today before changing PATH. Keep that executable. The quickstart changes only the current shell's PATH unless you explicitly make it permanent; it does not replace a global package or repoint a service. Do not run multiple aliases as separate servers against the same database.
 
@@ -48,7 +49,7 @@ Branded builds do not offer an actionable upstream update. Do not install a regi
    ```
 
    If you have local changes or a diverged branch, stop and resolve them; do not reset or overwrite your work. These are manual maintainer commands, not an auto-updater.
-3. Repeat the [source installation](reference.md#install-from-source) local installation block. It creates another fresh directory instead of overwriting the previous executable. Verify all three commands' `--version` and `--git-sha` output before choosing that directory in PATH. Repointing or restarting an existing service is a separate deployment operation, not part of this installation guide.
+3. Repeat the [source installation](reference.md#install-from-source) local installation block. It creates another fresh directory instead of overwriting the previous executable. Verify both commands' `--version` and `--git-sha` output before choosing that directory in PATH. Repointing or restarting an existing service is a separate deployment operation, not part of this installation guide.
 
 ## Roll back the command choice
 

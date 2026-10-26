@@ -28,7 +28,7 @@ concurrency:
 jobs:
   guard:
     # Mirror packages/core/src/router-repository.ts; fixture tests enforce parity.
-    if: (github.repository == 'StartupBros/wstack-router' || github.repository == 'StartupBros/hov-router') && github.repository_id == '1278801682'
+    if: github.repository == 'StartupBros/hov-router' && github.repository_id == '1278801682'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -68,7 +68,7 @@ jobs:
   pull-requests:
     # Exact current main only; an explicit draft retry never touches release PRs.
     needs: guard
-    if: (github.repository == 'StartupBros/wstack-router' || github.repository == 'StartupBros/hov-router') && github.repository_id == '1278801682' && github.event_name == 'workflow_run'
+    if: github.repository == 'StartupBros/hov-router' && github.repository_id == '1278801682' && github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -111,7 +111,7 @@ jobs:
   drafts:
     # A failed PR step (for example missing App configuration) must not hide an already merged release.
     needs: [guard, pull-requests]
-    if: ${{ !cancelled() && needs.guard.result == 'success' && (github.repository == 'StartupBros/wstack-router' || github.repository == 'StartupBros/hov-router') && github.repository_id == '1278801682' }}
+    if: ${{ !cancelled() && needs.guard.result == 'success' && github.repository == 'StartupBros/hov-router' && github.repository_id == '1278801682' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

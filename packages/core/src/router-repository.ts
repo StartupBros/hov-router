@@ -1,10 +1,9 @@
 /** Release authority only. Import directly; the core runtime barrel does not need it. */
 export const ROUTER_REPOSITORY_ID = 1278801682;
 export const ROUTER_OWNER = "StartupBros";
-export const ROUTER_REPOSITORIES = [
-	"StartupBros/wstack-router",
-	"StartupBros/hov-router",
-] as const;
+// GitHub reports the current name for this ID, so the name used before the
+// 2026-10-21 rename (StartupBros/wstack-router) is not an authority.
+export const ROUTER_REPOSITORIES = ["StartupBros/hov-router"] as const;
 export type RouterRepositoryName = (typeof ROUTER_REPOSITORIES)[number];
 
 export function isRouterRepository(
@@ -24,10 +23,32 @@ export function routerRepositoryOrigins(name: string): readonly string[] {
 	];
 }
 
+/** The one release published under the former name; download verification only. */
+export const HISTORICAL_WSTACK_RELEASE = Object.freeze({
+	repository: "StartupBros/wstack-router",
+	version: "3.6.2",
+	ref: "refs/tags/v3.6.2",
+	sha: "5d7b2a888a9b61d87916332b414e46606498d896",
+} as const);
+
+export function isHistoricalWstackRelease(identity: {
+	readonly repository?: string;
+	readonly version: string;
+	readonly ref?: string;
+	readonly sha?: string;
+}): boolean {
+	return (
+		identity.repository === HISTORICAL_WSTACK_RELEASE.repository &&
+		identity.version === HISTORICAL_WSTACK_RELEASE.version &&
+		identity.ref === HISTORICAL_WSTACK_RELEASE.ref &&
+		identity.sha === HISTORICAL_WSTACK_RELEASE.sha
+	);
+}
+
 export interface RouterRepository {
 	id: typeof ROUTER_REPOSITORY_ID;
 	full_name: RouterRepositoryName;
-	name: "wstack-router" | "hov-router";
+	name: "hov-router";
 	owner: { login: typeof ROUTER_OWNER };
 }
 

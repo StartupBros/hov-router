@@ -18,8 +18,7 @@
       "version": "3.7.1",
       "bin": {
         "hov-router": "dist/better-ccflare",
-        "better-ccflare": "dist/better-ccflare",
-        "wstack-router": "dist/better-ccflare"
+        "better-ccflare": "dist/better-ccflare"
       },
       "dependencies": {
         "dotenv": "^17.4.0"
