@@ -44,7 +44,7 @@ export function createAnalyticsHandler(context: APIContext) {
 			const includeModelBreakdown = params.get("modelBreakdown") === "true";
 
 			// Consolidated query to get all analytics data in a single roundtrip
-			const consolidatedResult = await db.get<{
+			const consolidatedResult = await db.getOffThread<{
 				total_requests: number;
 				success_rate: number;
 				avg_response_time: number;
@@ -91,7 +91,7 @@ export function createAnalyticsHandler(context: APIContext) {
 			const nowMs = Date.now();
 			const sevenDayStart = nowMs - 7 * dayMs;
 			const thirtyDayStart = nowMs - 30 * dayMs;
-			const burnRateResult = await db.get<{
+			const burnRateResult = await db.getOffThread<{
 				plan_cost_7d: number;
 				api_cost_7d: number;
 				plan_cost_30d: number;
@@ -139,7 +139,7 @@ export function createAnalyticsHandler(context: APIContext) {
 				7;
 
 			// Get time series data
-			const timeSeries = await db.query<{
+			const timeSeries = await db.queryOffThread<{
 				ts: number;
 				model?: string;
 				requests: number;
@@ -177,7 +177,7 @@ export function createAnalyticsHandler(context: APIContext) {
 			);
 
 			// Get additional data (model distribution, account performance, cost by model, api key performance, account model usage)
-			const additionalData = await db.query<{
+			const additionalData = await db.queryOffThread<{
 				data_type: string;
 				name: string;
 				secondary_name: string | null;
@@ -376,7 +376,7 @@ export function createAnalyticsHandler(context: APIContext) {
 			// idx_requests_response_time (model, response_time_ms) to skip a sort
 			// and checks the timestamp of every request ever logged (~3 s on 2M
 			// rows, whatever the range) instead of reading only the window.
-			const modelPerfData = await db.query<{
+			const modelPerfData = await db.queryOffThread<{
 				model: string;
 				avg_response_time: number;
 				max_response_time: number;

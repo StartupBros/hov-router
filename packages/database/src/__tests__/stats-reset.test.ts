@@ -11,6 +11,9 @@ mock.module("../inline-incremental-vacuum-worker", () => ({
 mock.module("../inline-vacuum-worker", () => ({
 	EMBEDDED_VACUUM_WORKER_CODE: "",
 }));
+mock.module("../inline-reader-worker", () => ({
+	EMBEDDED_READER_WORKER_CODE: "",
+}));
 const { DatabaseOperations } = await import("../database-operations");
 
 const RESET_STATEMENTS = [

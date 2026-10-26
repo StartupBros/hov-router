@@ -20,6 +20,12 @@ function createContext(additionalDataRows: AdditionalDataRow[]): APIContext {
 	// Call order: 1 = timeSeries query, 2 = additionalData UNION query, 3 = modelPerfData query
 	let callCount = 0;
 	const mockDb = {
+		getOffThread() {
+			return this.get();
+		},
+		queryOffThread(sql: string) {
+			return this.query(sql);
+		},
 		get: async () => ({
 			total_requests: 0,
 			success_rate: 0,

@@ -560,7 +560,7 @@ export class ExternalUsageRepository extends BaseRepository<ExternalUsageEvent> 
 		return result;
 	}
 	async report() {
-		const rows = await this.query<{
+		const rows = await this.queryOffThread<{
 			model: string;
 			account_id: string | null;
 			rows: number;

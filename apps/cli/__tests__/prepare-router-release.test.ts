@@ -351,6 +351,7 @@ describe("native tagged release rehearsal", () => {
 			const excluded = new Set([
 				"packages/database/src/inline-vacuum-worker.ts",
 				"packages/database/src/inline-integrity-check-worker.ts",
+				"packages/database/src/inline-reader-worker.ts",
 				"packages/database/src/inline-incremental-vacuum-worker.ts",
 				"packages/proxy/src/inline-worker.ts",
 			]);

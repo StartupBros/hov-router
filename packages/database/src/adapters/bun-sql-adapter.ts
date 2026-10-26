@@ -1,5 +1,11 @@
 import type { Database } from "bun:sqlite";
 import type { SQL } from "bun";
+import { OffThreadReaderUnavailableError } from "../off-thread-reader";
+
+interface SqlReader {
+	all<R>(sql: string, params: unknown[]): Promise<R[]>;
+	get<R>(sql: string, params: unknown[]): Promise<R | null>;
+}
 
 /**
  * Convert SQLite-style `?` and `?N` placeholders to PostgreSQL-style `$N` placeholders.
@@ -133,6 +139,38 @@ function assertExpectedChanges(
  * the hood.
  */
 export class BunSqlAdapter {
+	private offThreadReader?: SqlReader;
+
+	setOffThreadReader(reader: SqlReader | undefined): void {
+		this.offThreadReader = reader;
+	}
+
+	/** SELECTs only; never use for reads of uncommitted writes in a main-thread transaction. */
+	async queryOffThread<R>(sql: string, params: unknown[] = []): Promise<R[]> {
+		if (this.isSQLite && this.offThreadReader) {
+			try {
+				return await this.offThreadReader.all<R>(sql, params);
+			} catch (error) {
+				if (!(error instanceof OffThreadReaderUnavailableError)) throw error;
+			}
+		}
+		return this.query<R>(sql, params);
+	}
+
+	/** SELECTs only; never use for reads of uncommitted writes in a main-thread transaction. */
+	async getOffThread<R>(
+		sql: string,
+		params: unknown[] = [],
+	): Promise<R | null> {
+		if (this.isSQLite && this.offThreadReader) {
+			try {
+				return await this.offThreadReader.get<R>(sql, params);
+			} catch (error) {
+				if (!(error instanceof OffThreadReaderUnavailableError)) throw error;
+			}
+		}
+		return this.get<R>(sql, params);
+	}
 	readonly isSQLite: boolean;
 
 	/** The underlying bun:sqlite Database — only set when isSQLite is true */
