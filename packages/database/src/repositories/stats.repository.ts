@@ -554,7 +554,7 @@ export class StatsRepository {
 			a.session_start,
 		]);
 
-		const rows = await this.adapter.query<{
+		const rows = await this.adapter.queryOffThread<{
 			account_used: string;
 			requests: unknown;
 			input_tokens: unknown;

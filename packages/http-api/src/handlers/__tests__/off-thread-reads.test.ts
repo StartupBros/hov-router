@@ -149,6 +149,21 @@ describe("heavy read result equivalence", () => {
 		expect(await worker.text()).toBe(await main.text());
 		expect(reader.readsServed - before).toBe(4);
 	});
+	it("returns identical accounts-page session stats through the reader", async () => {
+		const sessions = [
+			{ id: "a1", session_start: NOW - 3 * DAY },
+			{ id: "a2", session_start: NOW - 20 * DAY },
+			{ id: "a3", session_start: null },
+		];
+		const stats = db.getStatsRepository();
+		const main = [...(await stats.getSessionStats(sessions)).entries()];
+		expect(main.map(([id]) => id).sort()).toEqual(["a1", "a2"]);
+		db.getAdapter().setOffThreadReader(reader);
+		const before = reader.readsServed;
+		const worker = [...(await stats.getSessionStats(sessions)).entries()];
+		expect(JSON.stringify(worker)).toBe(JSON.stringify(main));
+		expect(reader.readsServed - before).toBe(1);
+	});
 	it("preserves token aggregates including advisor/external usage and the external report", async () => {
 		const external = new ExternalUsageRepository(db.getAdapter());
 		const main = await db.aggregateTokensByModel("a1", NOW - 35 * DAY, NOW);
