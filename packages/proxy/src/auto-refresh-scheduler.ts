@@ -23,6 +23,7 @@ import {
 } from "./auto-refresh-prompt-pool";
 import { TOKEN_SAFETY_WINDOW_MS } from "./constants";
 import { getValidAccessToken, INTERNAL_PROBE_SECRET_HEADER } from "./handlers";
+import { isBackendRetiring } from "./handlers/backend-retirement";
 import {
 	flushPendingRotation,
 	getPendingRotation,
@@ -1113,6 +1114,8 @@ export class AutoRefreshScheduler {
 					consecutive_rate_limits: 0,
 				};
 
+				// The replacement backend owns OAuth refresh during a deploy overlap.
+				if (isBackendRetiring()) continue;
 				// Use refreshAccessTokenSafe to get deduplication and backoff handling
 				const refreshPromise = provider
 					.refreshToken(account, this.proxyContext.runtime.clientId)
@@ -1325,6 +1328,8 @@ export class AutoRefreshScheduler {
 					consecutive_rate_limits: 0,
 				};
 
+				// The replacement backend owns OAuth refresh during a deploy overlap.
+				if (isBackendRetiring()) continue;
 				// Register in refreshInFlight so concurrent request-triggered refreshes join this one
 				const refreshPromise = provider
 					.refreshToken(account, this.proxyContext.runtime.clientId)

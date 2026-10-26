@@ -306,9 +306,9 @@ function ensureRoutingPolicyRevisionSchema(db: Database): void {
 			!= ${legacyMirroredCredentialShape("NEW")}`,
 		);
 	}
-	db.run("DROP TRIGGER IF EXISTS trg_routing_revision_accounts_update");
-	if (accountRevisionColumns.length > 0) {
-		db.run(`
+	const desiredSql =
+		accountRevisionColumns.length > 0
+			? `
 			CREATE TRIGGER trg_routing_revision_accounts_update
 			AFTER UPDATE OF ${accountRevisionColumns.join(", ")}
 			ON accounts
@@ -318,7 +318,19 @@ function ensureRoutingPolicyRevisionSchema(db: Database): void {
 				SET revision = revision + 1
 				WHERE scope = 'global';
 			END
-		`);
+		`.trim()
+			: null;
+	const existing =
+		db
+			.query<{ sql: string }, []>(
+				"SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_routing_revision_accounts_update'",
+			)
+			.get()
+			?.sql?.trim() ?? null;
+	if (existing !== desiredSql) {
+		if (existing !== null)
+			db.run("DROP TRIGGER trg_routing_revision_accounts_update");
+		if (desiredSql !== null) db.run(desiredSql);
 	}
 }
 

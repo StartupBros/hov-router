@@ -102,6 +102,7 @@ import {
 	lowestTierCodexModel,
 	ModelRouteSessionRegistry,
 	markAccountTokensFresh,
+	markBackendRetiring,
 	type ProxyContext,
 	parseModelRouteProfiles,
 	QualityRouteService,
@@ -1363,6 +1364,11 @@ export function formatWalCheckpointLog(
 
 // Export for programmatic use
 let serverLifecycleOwned = false;
+let quiesceHandlerInstalled = false;
+let quiesceKeepalive: ReturnType<typeof setInterval> | undefined;
+let retireBackendHeartbeat: (() => Promise<void>) | undefined;
+let stopAlertJob: (() => Promise<void>) | undefined;
+let stopExternalCodexJob: (() => void) | undefined;
 
 export default async function startServer(options?: {
 	port?: number;
@@ -1373,6 +1379,12 @@ export default async function startServer(options?: {
 	// From here on, this process owns a server lifecycle: the module-scope
 	// signal handlers below act, and the CLI's own handlers stand down.
 	serverLifecycleOwned = true;
+	if (!quiesceHandlerInstalled) {
+		process.on("SIGUSR2", () => {
+			void handleBackendQuiesce();
+		});
+		quiesceHandlerInstalled = true;
+	}
 	// Headless serve mode has no TUI to protect: route WARN/ERROR (and any
 	// enabled level) to the console so journald/terminal actually see them.
 	setConsoleLogging(true);
@@ -1517,6 +1529,7 @@ export default async function startServer(options?: {
 
 	DatabaseFactory.initialize(undefined, runtime);
 	const dbOps = await DatabaseFactory.getInstanceAsync();
+	retireBackendHeartbeat = () => dbOps.retireInstanceHeartbeat();
 	// Upgrade legacy WAL ownership before any proxy context, polling loop, or
 	// scheduler can refresh: every later production caller is generation-bound.
 	await restorePendingRotationsBeforeRuntimeRefresh(dbOps);
@@ -1601,6 +1614,7 @@ export default async function startServer(options?: {
 
 	const alertService = new AlertService(db, config);
 	alertService.start();
+	stopAlertJob = () => alertService.stop();
 	registerDisposable({ dispose: () => alertService.stop() });
 
 	// Window Value Ledger (issue #252): tracks and prices each account's
@@ -1632,6 +1646,7 @@ export default async function startServer(options?: {
 		async () =>
 			externalScanner.scan(externalSources(), await dbOps.getAllAccounts()),
 	);
+	stopExternalCodexJob = stopExternalScanner;
 	registerDisposable({ dispose: stopExternalScanner });
 
 	// Re-price closed windows stamped with an older VALUE_PRICING_VERSION. Done
@@ -1857,6 +1872,10 @@ export default async function startServer(options?: {
 					shadowOwnerOverlay: degradedOwnerShadowOverlay,
 				}),
 			getRetentionStatus,
+			getHandoff: () =>
+				quiesceHandlerInstalled
+					? { protocol: "quiesce-v1", pid: process.pid }
+					: undefined,
 			getBodyAdmissionHealth: () => bodyAdmission.snapshot(),
 			getMemorySnapshot: () => {
 				const admission = bodyAdmission.snapshot();
@@ -3089,6 +3108,12 @@ type DrainableServer = {
 type SettlementRecovery = { stop(): Promise<void> };
 const responseDrains = new WeakMap<DrainableServer, Promise<void>>();
 const serverStops = new WeakMap<DrainableServer, Promise<void>>();
+const releasedListeners = new WeakSet<DrainableServer>();
+function stopAcceptingResponses(server: DrainableServer): void {
+	if (releasedListeners.has(server)) return;
+	server.stop();
+	releasedListeners.add(server);
+}
 
 /** One response drain per listener, shared by programmatic and signal shutdown. */
 function drainServerResponses(
@@ -3101,7 +3126,7 @@ function drainServerResponses(
 	const { promise, resolve, reject } = Promise.withResolvers<void>();
 	responseDrains.set(server, promise);
 	void (async () => {
-		server.stop(); // synchronous stop-accepting behavior, even if caller ignores completion
+		stopAcceptingResponses(server); // preserve quiesced responses until the drain deadline
 		const deadline = Date.now() + drainMs;
 		const initialPending = server.pendingRequests;
 		if (initialPending > 0) {
@@ -3193,39 +3218,11 @@ export function readShutdownDrainMs(): number {
 // invocation races on the same Bun server, worker, and DB writer.
 let isShuttingDown = false;
 
-// Graceful shutdown handler
-async function handleGracefulShutdown(signal: string) {
-	if (isShuttingDown) {
-		console.log(`Ignoring ${signal} — shutdown already in progress`);
-		return;
-	}
-	isShuttingDown = true;
-	// A programmatic stop may finish while schedulers below are draining.
-	const shuttingDownServer = serverInstance;
-	const shuttingDownRecovery = activeQualityRouteService;
-	// Reject queued requests before stopping the listener. Active leases still
-	// drain with their response streams and release through the terminal wrapper.
-	activeBodyAdmission?.shutdown();
-
-	console.log(`\n👋 Received ${signal}, shutting down gracefully...`);
-
-	// Hard upper bound on shutdown duration: the drain budget plus a margin
-	// for the remaining cleanup. unref'd so it doesn't itself prevent a clean
-	// exit if everything else finishes first. Exits with 0 because the
-	// watchdog only fires on an expected SIGTERM that ran long, not on a
-	// failure — code 1 would make systemd Restart=on-failure auto-restart
-	// the unit instead of treating it as a normal stop.
-	const drainMs = readShutdownDrainMs();
-	const watchdogMs = drainMs + SHUTDOWN_WATCHDOG_MARGIN_MS;
-	const watchdog = setTimeout(() => {
-		console.error(
-			`⚠️ Shutdown watchdog (${watchdogMs}ms) expired, forcing exit`,
-		);
-		process.exit(0);
-	}, watchdogMs);
-	watchdog.unref();
-
-	try {
+let periodicStop: Promise<void> | undefined;
+function stopPeriodicWork(): Promise<void> {
+	if (periodicStop) return periodicStop;
+	periodicStop = (async () => {
+		const pending: Promise<unknown>[] = [];
 		// Unregister all server-keyed callbacks before retiring any owner. A caller
 		// racing shutdown must find no callback rather than a null/stale scheduler.
 		if (registeredServerId) {
@@ -3246,7 +3243,7 @@ async function handleGracefulShutdown(signal: string) {
 		if (stopDeviceSetupRecoveryJob) {
 			const stopDeviceSetup = stopDeviceSetupRecoveryJob;
 			stopDeviceSetupRecoveryJob = null;
-			await stopDeviceSetup();
+			pending.push(stopDeviceSetup());
 		}
 		if (stopRetentionJob) {
 			stopRetentionJob();
@@ -3305,6 +3302,100 @@ async function handleGracefulShutdown(signal: string) {
 		// Server-keyed callbacks were unregistered before stopping owners above.
 
 		// The polling lifecycle retired retry and stagger timers before shutdown.
+
+		pending.push(stopAlertJob?.() ?? Promise.resolve());
+		stopAlertJob = undefined;
+		stopExternalCodexJob?.();
+		stopExternalCodexJob = undefined;
+		// Admitted requests still route on cached usage evidence; shutdown clears
+		// it after the drain. Quality settlement recovery is not periodic work:
+		// it persists the outcomes of responses still streaming, so it stops only
+		// after their drain.
+		usageCache.stopAllPolling();
+		await Promise.all(pending);
+	})();
+	return periodicStop;
+}
+
+let isQuiesced = false;
+let quiesceCompletion: Promise<void> | undefined;
+function handleBackendQuiesce(): Promise<void> | undefined {
+	if (isShuttingDown || isQuiesced) return quiesceCompletion;
+	isQuiesced = true;
+	// A retired process remains alive even after its last response completes.
+	quiesceKeepalive = setInterval(() => {}, 60_000);
+	quiesceCompletion = (async () => {
+		const outcomes: Record<string, string> = {};
+		try {
+			await stopPeriodicWork();
+			outcomes.periodic = "stopped";
+		} catch (error) {
+			outcomes.periodic = "failed";
+			console.error("Quiesce periodic stop failed", error);
+		}
+		markBackendRetiring();
+		outcomes.tokens = "retiring";
+		try {
+			await retireBackendHeartbeat?.();
+			outcomes.heartbeat = "settled-best-effort";
+		} catch (error) {
+			outcomes.heartbeat = "failed";
+			console.error("Quiesce heartbeat retirement failed", error);
+		}
+		try {
+			if (serverInstance) stopAcceptingResponses(serverInstance);
+			outcomes.listener = "released";
+		} catch (error) {
+			outcomes.listener = "failed";
+			console.error("Quiesce listener release failed", error);
+		}
+		console.info(
+			JSON.stringify({
+				event: "backend_quiesced",
+				pid: process.pid,
+				...outcomes,
+			}),
+		);
+	})();
+	return quiesceCompletion;
+}
+
+// Graceful shutdown handler
+async function handleGracefulShutdown(signal: string) {
+	if (isShuttingDown) {
+		console.log(`Ignoring ${signal} — shutdown already in progress`);
+		return;
+	}
+	isShuttingDown = true;
+	if (quiesceKeepalive) clearInterval(quiesceKeepalive);
+	// A programmatic stop may finish while schedulers below are draining.
+	const shuttingDownServer = serverInstance;
+	const shuttingDownRecovery = activeQualityRouteService;
+	// Reject queued requests before stopping the listener. Active leases still
+	// drain with their response streams and release through the terminal wrapper.
+	activeBodyAdmission?.shutdown();
+
+	console.log(`\n👋 Received ${signal}, shutting down gracefully...`);
+
+	// Hard upper bound on shutdown duration: the drain budget plus a margin
+	// for the remaining cleanup. unref'd so it doesn't itself prevent a clean
+	// exit if everything else finishes first. Exits with 0 because the
+	// watchdog only fires on an expected SIGTERM that ran long, not on a
+	// failure — code 1 would make systemd Restart=on-failure auto-restart
+	// the unit instead of treating it as a normal stop.
+	const drainMs = readShutdownDrainMs();
+	const watchdogMs = drainMs + SHUTDOWN_WATCHDOG_MARGIN_MS;
+	const watchdog = setTimeout(() => {
+		console.error(
+			`⚠️ Shutdown watchdog (${watchdogMs}ms) expired, forcing exit`,
+		);
+		process.exit(0);
+	}, watchdogMs);
+	watchdog.unref();
+
+	try {
+		await quiesceCompletion;
+		await stopPeriodicWork();
 
 		// Share the instance-owned drain with programmatic stop, including a stop
 		// already in progress when this signal arrived.

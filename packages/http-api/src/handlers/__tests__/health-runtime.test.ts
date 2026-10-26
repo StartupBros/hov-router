@@ -1141,3 +1141,20 @@ describe("health build-time provenance", () => {
 		}
 	});
 });
+
+it("advertises handoff only with the installed-handler capability getter", async () => {
+	const db = { getAllAccounts: async () => [] } as never;
+	const config = {
+		getStrategy: () => "session",
+		getHealthDetailEnabled: () => false,
+	} as never;
+	const url = new URL("http://localhost/health");
+	const absent = await (await createHealthHandler(db, config)(url)).json();
+	expect(Object.hasOwn(absent, "handoff")).toBe(false);
+	const present = await (
+		await createHealthHandler(db, config, {
+			getHandoff: () => ({ protocol: "quiesce-v1", pid: 123 }),
+		})(url)
+	).json();
+	expect(present.handoff).toEqual({ protocol: "quiesce-v1", pid: 123 });
+});

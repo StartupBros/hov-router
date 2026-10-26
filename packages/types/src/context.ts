@@ -98,6 +98,7 @@ export interface APIContext {
 	getRetentionStatus?: () => RetentionStatus;
 	/** Restart-scoped, aggregate-only process memory and lifecycle telemetry. */
 	getMemorySnapshot?: () => MemorySnapshot;
+	getHandoff?: () => { protocol: "quiesce-v1"; pid: number } | undefined;
 	/** Aggregate-only process-local Bun request-body admission telemetry. */
 	getBodyAdmissionHealth?: () => {
 		enabled: boolean;

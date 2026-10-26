@@ -358,6 +358,7 @@ export interface MemorySnapshot {
 
 // Health check response
 export interface HealthResponse {
+	handoff?: { protocol: "quiesce-v1"; pid: number };
 	status: string;
 	accounts: number;
 	timestamp: string;

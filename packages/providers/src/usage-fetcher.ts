@@ -1220,6 +1220,31 @@ class UsageCache {
 		const registration = this.registrations.get(accountId);
 		if (!registration) return;
 
+		this.retireRegistration(registration);
+		// Clean up cache entry when polling stops to prevent memory leaks
+		this.deleteCacheEntry(accountId);
+		this.codexCreditEvidence.delete(accountId);
+		this.usageRateLimitedUntil.delete(accountId);
+		this.modelScopedDepletions.delete(accountId);
+		this.familyScopedDepletions.delete(accountId);
+		log.info(
+			`Stopped usage polling and cleared cache for account ${accountId}`,
+		);
+	}
+
+	/**
+	 * Stop every poll but keep the cached evidence: a retiring backend's
+	 * admitted requests still route on it while its replacement polls.
+	 */
+	stopAllPolling() {
+		for (const registration of [...this.registrations.values()]) {
+			this.retireRegistration(registration);
+		}
+		log.info("Stopped all usage polling; cached usage evidence retained");
+	}
+
+	private retireRegistration(registration: PollRegistration) {
+		const { accountId } = registration;
 		this.registrations.delete(accountId);
 		if (registration.timer) {
 			clearTimeout(registration.timer);
@@ -1229,20 +1254,11 @@ class UsageCache {
 		// the provider fetcher accepts a signal; the identity checks in
 		// _doFetchAndCache remain the correctness guard for fetchers that don't.
 		registration.abortController.abort();
-		// Clean up cache entry when polling stops to prevent memory leaks
-		this.deleteCacheEntry(accountId);
-		this.codexCreditEvidence.delete(accountId);
-		this.usageRateLimitedUntil.delete(accountId);
-		this.modelScopedDepletions.delete(accountId);
-		this.familyScopedDepletions.delete(accountId);
 		// Drop the in-flight entry only if it still belongs to this generation.
 		const inFlight = this.inFlightFetches.get(accountId);
 		if (inFlight?.registration === registration) {
 			this.inFlightFetches.delete(accountId);
 		}
-		log.info(
-			`Stopped usage polling and cleared cache for account ${accountId}`,
-		);
 	}
 
 	private async _doFetchAndCache(

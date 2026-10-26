@@ -219,6 +219,7 @@ export class APIRouter {
 			getRetentionStatus,
 			getBodyAdmissionHealth,
 			getMemorySnapshot,
+			getHandoff,
 			getStrategy,
 		} = this.context;
 
@@ -232,6 +233,7 @@ export class APIRouter {
 			getRoutingHealth: () => getStrategy?.()?.getRoutingHealth?.(),
 			getBodyAdmissionHealth,
 			getMemorySnapshot,
+			getHandoff,
 		});
 		const statsHandler = createStatsHandler(dbOps);
 		const recentErrorsHandler = createRecentErrorsHandler(dbOps);

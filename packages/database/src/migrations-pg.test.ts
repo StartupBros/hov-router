@@ -931,6 +931,41 @@ if (process.env.CCFLARE_REQUIRE_LIVE_PG_MIGRATIONS === "true") {
 	);
 }
 
+describe.skipIf(!livePgAvailable)("overlap boot PostgreSQL", () => {
+	it("keeps trigger OIDs and source comments stable on unchanged boot", async () => {
+		const { SQL } = await import("bun");
+		const { BunSqlAdapter } = await import("./adapters/bun-sql-adapter");
+		const databaseUrl = process.env.DATABASE_URL;
+		if (!databaseUrl) throw new Error("DATABASE_URL required");
+		const sql = new SQL({ url: databaseUrl });
+		const connection = await sql.reserve();
+		const schema = `overlap_test_${Date.now()}`;
+		await connection.unsafe("BEGIN");
+		const adapter = new BunSqlAdapter(
+			connection as unknown as InstanceType<typeof SQL>,
+		);
+		try {
+			await connection.unsafe(`CREATE SCHEMA ${schema}`);
+			await connection.unsafe(`SET LOCAL search_path TO ${schema}`);
+			await ensureSchemaPg(adapter);
+			await runMigrationsPg(adapter);
+			const query = `SELECT t.tgname, t.oid::text, obj_description(t.oid, 'pg_trigger') AS source
+    FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = current_schema() AND NOT t.tgisinternal ORDER BY t.tgname`;
+			const before = await adapter.query(query);
+			expect(before.length).toBeGreaterThan(0);
+			await ensureSchemaPg(adapter);
+			await runMigrationsPg(adapter);
+			expect(await adapter.query(query)).toEqual(before);
+		} finally {
+			await connection.unsafe("ROLLBACK");
+			connection.release();
+			await sql.close();
+		}
+	});
+});
+
 describe.skipIf(!livePgAvailable)(
 	"PostgreSQL migrations (live, requires DATABASE_URL)",
 	() => {

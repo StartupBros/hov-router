@@ -77,6 +77,7 @@ type AnthropicDegradedHealthFn = () => AnthropicDegradedRuntimeHealth;
 type RetentionStatusFn = () => RetentionStatus;
 
 export type HealthHandlerRuntimeProviders = Readonly<{
+	getHandoff?: () => HealthResponse["handoff"];
 	getAsyncWriterHealth?: AsyncWriterHealthFn;
 	getUsageWorkerHealth?: UsageWorkerHealthFn;
 	getIntegrityStatus?: IntegrityStatusFn;
@@ -198,6 +199,7 @@ export function createHealthHandler(
 		getRoutingHealth,
 		getBodyAdmissionHealth,
 		getMemorySnapshot,
+		getHandoff,
 	}: HealthHandlerRuntimeProviders = {},
 ) {
 	const normalCache = new TtlCache<HealthResponse>(2000);
@@ -260,6 +262,8 @@ export function createHealthHandler(
 			git_sha: getGitSha(),
 			pool,
 		};
+		const handoff = getHandoff?.();
+		if (handoff) response.handoff = handoff;
 		if (routing) {
 			response.routing = routing;
 		}

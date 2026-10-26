@@ -1430,3 +1430,42 @@ describe("refreshAccessTokenSafe — account-generation fence", () => {
 		expect(account.refresh_token).toBe("refresh-from-generation-a");
 	});
 });
+
+describe("backend retirement", () => {
+	it("blocks refresh but still adopts tokens rotated by the replacement", async () => {
+		const retirement = await import("../backend-retirement");
+		retirement.markBackendRetiring();
+		try {
+			const account = makeAccount("retirement-expired");
+			const { ctx, refreshToken } = makeContext({ dbAccount: account });
+			await expect(
+				refreshAccessTokenSafe(account as never, ctx as never),
+			).rejects.toBeInstanceOf(
+				(await import("@better-ccflare/core")).ServiceUnavailableError,
+			);
+			expect(refreshToken).toHaveBeenCalledTimes(0);
+			const fresh = makeAccount(account.id, {
+				access_token: "replacement-token",
+				expires_at: Date.now() + 3600000,
+			});
+			const replacement = makeContext({ dbAccount: fresh });
+			expect(
+				await refreshAccessTokenSafe(
+					account as never,
+					replacement.ctx as never,
+				),
+			).toBe("replacement-token");
+			expect(replacement.refreshToken).toHaveBeenCalledTimes(0);
+		} finally {
+			retirement.resetBackendRetirementForTests();
+		}
+	});
+	it("negative control: an active backend performs one refresh", async () => {
+		const account = makeAccount("retirement-control");
+		const { ctx, refreshToken } = makeContext({ dbAccount: account });
+		expect(await refreshAccessTokenSafe(account as never, ctx as never)).toBe(
+			"new-access-token",
+		);
+		expect(refreshToken).toHaveBeenCalledTimes(1);
+	});
+});

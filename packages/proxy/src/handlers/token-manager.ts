@@ -16,6 +16,7 @@ import {
 } from "@better-ccflare/providers";
 import type { Account } from "@better-ccflare/types";
 import { TOKEN_REFRESH_BACKOFF_MS, TOKEN_SAFETY_WINDOW_MS } from "../constants";
+import { isBackendRetiring } from "./backend-retirement";
 import {
 	clearPendingRotation,
 	getPendingRotation,
@@ -804,6 +805,12 @@ export async function refreshAccessTokenSafe(
 	if (!getRefreshInFlightForAccount(ctx, account)) {
 		const adopted = await adoptDbTokensIfFresher(account, ctx);
 		if (adopted) return adopted;
+	}
+
+	if (isBackendRetiring()) {
+		throw new ServiceUnavailableError(
+			"Backend retiring; OAuth refresh belongs to the replacement process",
+		);
 	}
 
 	// Check if a refresh is already in progress for this exact generation.
