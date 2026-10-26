@@ -610,6 +610,16 @@ Point Claude Code's Anthropic base URL and authentication at HoV Router as usual
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 ```
 
+Claude Code runs discovery only when it holds an API-key-style credential: `ANTHROPIC_AUTH_TOKEN`, an `apiKeyHelper`, or an API key. A claude.ai subscription login is none of these. A router key sent through `ANTHROPIC_CUSTOM_HEADERS` is applied after that check, so it does not count either. With that setup, discovery skips silently and `/model` keeps whatever rows are already cached in `~/.claude/cache/gateway-models.json`. An `apiKeyHelper` passes the check, but it makes every session a non-subscriber session, which turns off claude.ai connectors and the plan-usage panel.
+
+To see whether discovery ran:
+
+1. Start a fresh `claude --debug-file <path>`.
+2. Exit without sending a prompt.
+3. Look in the file for `[gatewayDiscovery] cached N models` or `[gatewayDiscovery] skipped: no credential`.
+
+Discovery runs once at startup, so new or relabelled rows appear from the next fresh `claude` process. A route without a picker row stays usable: type `/model claude-bccf-route-<id>`. This behaviour was read from Claude Code 2.1.299, and the credential check is unchanged in 2.1.310. [The picker troubleshooting learning](solutions/integration-issues/claude-code-model-picker-wrong-labels-and-frozen-discovery-cache.md) covers workarounds and their costs.
+
 When at least one route profile is configured, authenticated `GET /v1/models` requests are answered locally with one preferred public model ID and display name for each profile that can currently run.
 
 Each display name says what the route serves right now: `<served model> · <where>`. The served model is the Codex catalog's own display name for Codex rows, the Claude display name for a Claude model, and the raw model ID otherwise. `<where>` is the exact account's name, or `<provider> pool` for a `capability` profile, and a `clientContextWindowHint: "1m"` row adds `(1M)` after the model. When pool accounts disagree, every distinct model is listed. A catalog reorder, a new model generation or a remapped account therefore relabels the picker with no configuration change. The operator `displayName` appears only while the served model is unknown, for example before Codex catalogs load after a restart.
