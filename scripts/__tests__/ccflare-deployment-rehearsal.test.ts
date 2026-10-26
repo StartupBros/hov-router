@@ -416,6 +416,8 @@ test.each([
 				expiredDispatches: 0,
 			}),
 		);
+		// These fixtures advertise no quiesce capability, so the runner drains.
+		expect(logs).toContain("backend handoff mode=drain");
 		if (mode === "rss_prepared") {
 			expect(logs).toContain(
 				"prepared deployment superseded RSS recycle after listener retirement",
