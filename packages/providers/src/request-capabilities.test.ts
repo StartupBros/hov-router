@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { Account } from "@better-ccflare/types";
+import {
+	clearDerivedProviderModelDefaults,
+	setDerivedAccountModelDefaults,
+	setDerivedProviderWideModelDefaults,
+	setProviderModelDefaultOverrides,
+} from "./provider-model-defaults";
 import { AnthropicProvider } from "./providers/anthropic/provider";
 import { CodexProvider } from "./providers/codex/provider";
 import { QwenProvider } from "./providers/qwen/provider";
@@ -14,6 +20,7 @@ import {
 	estimateAnthropicRequestTokens,
 	hasDeferredCustomTool,
 	MODEL_CONTEXT_WINDOWS,
+	previewAccountPhysicalModel,
 	resolveAccountLogicalModelCapability,
 	resolveModelContextCapability,
 	setCodexAccountModelContextMetadata,
@@ -378,6 +385,102 @@ describe("managed routing capabilities", () => {
 			provenance: "undeclared",
 			reason: "unknown",
 		});
+	});
+});
+
+describe("previewAccountPhysicalModel", () => {
+	afterEach(() => {
+		clearDerivedProviderModelDefaults();
+		setProviderModelDefaultOverrides(undefined);
+	});
+
+	it("passes a natively served logical model through unchanged", () => {
+		expect(
+			previewAccountPhysicalModel(
+				routingAccount(),
+				"claude-fable-5",
+				getTestCapabilityProvider,
+			),
+		).toBe("claude-fable-5");
+	});
+
+	it("reads the first model of an explicit mapping, exact id before family", () => {
+		const mapped = routingAccount({
+			provider: "qwen",
+			model_mappings: JSON.stringify({
+				opus: ["primary-model", "fallback-model"],
+				"claude-opus-5": "exact-model",
+			}),
+		});
+		expect(
+			previewAccountPhysicalModel(
+				mapped,
+				"claude-opus-5",
+				getTestCapabilityProvider,
+			),
+		).toBe("exact-model");
+		expect(
+			previewAccountPhysicalModel(
+				mapped,
+				"claude-opus-4-8",
+				getTestCapabilityProvider,
+			),
+		).toBe("primary-model");
+	});
+
+	it("follows provider defaults in the same precedence request transforms use", () => {
+		setDerivedProviderWideModelDefaults("xai", { opus: "grok-newest" });
+		const grok = routingAccount({ id: "grok-1", provider: "xai" });
+		expect(
+			previewAccountPhysicalModel(
+				grok,
+				"claude-opus-5",
+				getTestCapabilityProvider,
+			),
+		).toBe("grok-newest");
+
+		setDerivedAccountModelDefaults("codex", "codex-own", {
+			sonnet: "gpt-own-listing",
+		});
+		expect(
+			previewAccountPhysicalModel(
+				routingAccount({ id: "codex-own", provider: "codex" }),
+				"claude-sonnet-5",
+				getTestCapabilityProvider,
+			),
+		).toBe("gpt-own-listing");
+
+		setProviderModelDefaultOverrides({ codex: { sonnet: "gpt-operator" } });
+		expect(
+			previewAccountPhysicalModel(
+				routingAccount({ id: "codex-own", provider: "codex" }),
+				"claude-sonnet-5",
+				getTestCapabilityProvider,
+			),
+		).toBe("gpt-operator");
+	});
+
+	it("returns null when support is unsupported or undeclared", () => {
+		expect(
+			previewAccountPhysicalModel(
+				routingAccount({
+					provider: "xai",
+					model_mappings: JSON.stringify({ haiku: "grok-mini" }),
+				}),
+				"claude-opus-5",
+				getTestCapabilityProvider,
+			),
+		).toBeNull();
+		expect(
+			previewAccountPhysicalModel(
+				routingAccount({
+					provider: "unknown",
+					model_mappings: JSON.stringify({ opus: "some-model" }),
+				}),
+				"claude-opus-5",
+				getTestCapabilityProvider,
+			),
+		).toBeNull();
 	});
 });
 

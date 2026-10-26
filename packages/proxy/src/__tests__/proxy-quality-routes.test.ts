@@ -1236,10 +1236,11 @@ describe("prewarmed native catalogs", () => {
 	});
 
 	it("adds enabled quality choices to local discovery without catalog or inference traffic", async () => {
+		// The route row names the model its account serves, not its operator label.
 		const local = [
 			{
 				id: "claude-bccf-route-existing",
-				display_name: "Existing",
+				display_name: "Claude Opus 5.5 · a",
 				description:
 					"One pinned account, no fallback · subagents use the same account",
 			},

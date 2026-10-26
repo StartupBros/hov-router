@@ -549,14 +549,15 @@ Two failure reasons are specific to this policy. Both follow the existing
 
 Picker IDs are chosen by the operator and stay `claude-bccf-route-<id>`, so
 role-named IDs such as `codex-opus` keep working across model generations.
-Discovery lists catalog-role profiles exactly like other profiles. Existing
+Discovery lists catalog-role profiles like other profiles, labelled with the
+model at the role in each account's own catalog. Existing
 profiles without `physicalModelPolicy` behave as `"exact"`: their parsing,
 routing, error reasons, and saved picker IDs are unchanged.
 
 | Field | Required | Contract |
 |---|---:|---|
 | `id` | yes | Unique lowercase kebab-case slug, up to 48 characters. HoV Router generates the reserved public model ID `claude-bccf-route-<id>`; clients cannot configure a different public ID |
-| `displayName` | yes | Picker label, 1–120 characters |
+| `displayName` | yes | Fallback picker label, 1–120 characters. Discovery labels each row with the model it serves (see [Claude Code `/model` setup](#claude-code-model-setup)); this label shows only while that model is unknown, for example before Codex catalogs load after a restart |
 | `description` | no | Operator-facing description, up to 500 characters. It is never returned by discovery; the picker description is generated from the profile kind instead |
 | `selection` | no | Set to `capability` for a live matching-account pool. When omitted, the profile retains legacy exact-account selection |
 | `accountId` | conditional | Required for legacy profiles; omit it for `selection: "capability"`. It is never returned by the discovery endpoint |
@@ -609,7 +610,13 @@ Point Claude Code's Anthropic base URL and authentication at HoV Router as usual
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 ```
 
-When at least one route profile is configured, authenticated `GET /v1/models` requests are answered locally with one preferred public model ID and display name for each profile. Each entry carries the ID, the display name and a generated one-line `description` of its priority flow. Profile descriptions are generated from the profile kind only, never from the operator `description`, account ID or model names: an exact profile reads `One pinned account, no fallback · subagents use the same account`; a bounded exact profile reads `One pinned account, size-capped requests, no fallback · subagents use the same account`; a `capability` pool reads `Pool of matching accounts, load-balancer order, then error · subagents fall back to normal routing`. The subagent clause describes a bound session. Pool subagents try the pool first, then ordinary same-model routing, as described for descendant agents above. A root request that carries no caller and session identity saves no binding, so its subagents route natively. Claude Code shows the description under the label, collapses whitespace, cuts it at 100 characters, and shows "From gateway" when it is absent (observed in Claude Code 2.1.288). Discovery metadata is not enforcement: it does not select an account, impose profile bounds, or contact an upstream provider. Claude Code labels these entries as gateway models in `/model`.
+When at least one route profile is configured, authenticated `GET /v1/models` requests are answered locally with one preferred public model ID and display name for each profile that can currently run.
+
+Each display name says what the route serves right now: `<served model> · <where>`. The served model is the Codex catalog's own display name for Codex rows, the Claude display name for a Claude model, and the raw model ID otherwise. `<where>` is the exact account's name, or `<provider> pool` for a `capability` profile, and a `clientContextWindowHint: "1m"` row adds `(1M)` after the model. When pool accounts disagree, every distinct model is listed. A catalog reorder, a new model generation or a remapped account therefore relabels the picker with no configuration change. The operator `displayName` appears only while the served model is unknown, for example before Codex catalogs load after a restart.
+
+A row is left out when its account is paused or missing, when the account can never pass the profile's provider and model constraints, or, for a pool, when no account remains. Rate limits and reauthentication do not hide a row. Labels come from one local account read and in-memory catalogs; discovery never refreshes a catalog or contacts a provider. If the account read fails, discovery serves the operator labels and hides nothing. An account mapped to an upstream alias, such as a LiteLLM model group named `chat`, shows the alias, because the router cannot see what the alias resolves to; map the account to the concrete model ID to show that instead.
+
+Each entry also carries a generated one-line `description` of its priority flow. Profile descriptions are generated from the profile kind only, never from the operator `description`, account ID or model names: an exact profile reads `One pinned account, no fallback · subagents use the same account`; a bounded exact profile reads `One pinned account, size-capped requests, no fallback · subagents use the same account`; a `capability` pool reads `Pool of matching accounts, load-balancer order, then error · subagents fall back to normal routing`. The subagent clause describes a bound session. Pool subagents try the pool first, then ordinary same-model routing, as described for descendant agents above. A root request that carries no caller and session identity saves no binding, so its subagents route natively. Claude Code shows the description under the label, collapses whitespace, cuts it at 100 characters, and shows "From gateway" when it is absent (observed in Claude Code 2.1.288). Discovery metadata is not enforcement: it does not select an account, impose profile bounds, or contact an upstream provider. Claude Code labels these entries as gateway models in `/model`.
 
 Every profile keeps the stable legacy ID `claude-bccf-route-<id>`. For a profile with `clientContextWindowHint: "1m"`, discovery instead emits the preferred ID `claude-bccf-route-<id>[1m]`; HoV Router accepts both exact spellings for that profile, but emits only the preferred row. Claude Code strips `[1m]` before API transport, while the router also accepts the suffixed spelling verbatim for protocol robustness. This opt-in is a Claude Code client context-classification hint, not a provider-capacity claim or admission enforcement.
 

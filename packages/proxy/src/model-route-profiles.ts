@@ -97,8 +97,9 @@ export function isBoundedModelRouteProfile(
 
 /**
  * One-line picker description of a profile's routing flow, generated from its
- * kind only. Discovery must never expose the operator description, account id,
- * logical or physical model, or the catalog-role policy, so none feed this.
+ * kind only: never the operator description, account id, models or the
+ * catalog-role policy. Display names, which do name the served model, come
+ * from model-route-discovery.ts.
  * Pool order is the global load-balancer strategy's, not account priority.
  */
 export function describeModelRouteProfileFlow(
@@ -616,6 +617,16 @@ export class ModelRouteSessionRegistry {
 		);
 	}
 
+	/** Configured profiles in configuration order. */
+	getProfiles(): readonly ModelRouteProfile[] {
+		return Array.from(this.profilesById.values());
+	}
+
+	/**
+	 * Static rows labelled with the operator's `displayName`. Discovery serves
+	 * live labels from model-route-discovery.ts and falls back to these only
+	 * when it cannot read accounts.
+	 */
 	getDiscoveryModels(): ReadonlyArray<{
 		readonly id: string;
 		readonly display_name: string;
