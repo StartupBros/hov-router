@@ -1505,8 +1505,9 @@ function upstreamResponseBody(incoming, headers) {
 // semantic inspection, with matching response headers.
 function createUpstreamTransport() {
 	const agentOptions = { keepAlive: true, maxFreeSockets: 16, timeout: 0 };
-	const httpAgent = new http.Agent(agentOptions);
-	const httpsAgent = new https.Agent(agentOptions);
+	let httpAgent = new http.Agent(agentOptions);
+	let httpsAgent = new https.Agent(agentOptions);
+	const retiredAgents = new Set();
 	return {
 		fetch(target, init) {
 			return new Promise((resolve, reject) => {
@@ -1585,9 +1586,27 @@ function createUpstreamTransport() {
 				else request.end(init.body);
 			});
 		},
+		// A quiesced backend keeps answering its in-flight requests, and their
+		// sockets would return to this pool for the replacement's traffic to
+		// reuse. Fresh pools take new work; the caller destroys the retired ones
+		// once the old generation has finished.
+		rotate() {
+			const retired = [httpAgent, httpsAgent];
+			for (const agent of retired) retiredAgents.add(agent);
+			httpAgent = new http.Agent(agentOptions);
+			httpsAgent = new https.Agent(agentOptions);
+			return () => {
+				for (const agent of retired) {
+					retiredAgents.delete(agent);
+					agent.destroy();
+				}
+			};
+		},
 		close() {
 			httpAgent.destroy();
 			httpsAgent.destroy();
+			for (const agent of retiredAgents) agent.destroy();
+			retiredAgents.clear();
 		},
 	};
 }
@@ -1836,6 +1855,8 @@ export function createGuard(options = {}) {
 		recycleQueued: 0,
 		recycleQueueFull: 0,
 		recycleForcedRequests: 0,
+		retires: 0,
+		retireForcedRequests: 0,
 		// R21: per-outcome counts for terminal upstream-driven responses logged
 		// via proxy_response/proxy_final_error (see outcomeForStatus above).
 		success: 0,
@@ -1898,7 +1919,16 @@ export function createGuard(options = {}) {
 	let replacementIdentity = null;
 	let preparedTransaction = null;
 	let lastRecycleOutcome = null;
+	// Overlap handoff: "fenced" holds new admission while the quiesced backend
+	// releases its listener and the replacement boots. The retiring record
+	// outlives the fence: that generation's dispatched requests keep running
+	// against the old process until they finish or the grace budget aborts them.
+	let fence = null;
+	let retiring = null;
+	let lastRetireOutcome = null;
 	const controlSockets = new Set();
+	const dispatchedIn = (target) =>
+		[...contexts.values()].filter((c) => c.generation === target).length;
 	const lifecycleSnapshot = () => ({
 		state: lifecycle,
 		generation,
@@ -1906,6 +1936,13 @@ export function createGuard(options = {}) {
 		dispatched: [...contexts.values()].filter((c) => c.generation != null)
 			.length,
 		lastRecycleOutcome,
+		retiring: retiring
+			? {
+					generation: retiring.generation,
+					dispatched: dispatchedIn(retiring.generation),
+				}
+			: null,
+		lastRetireOutcome,
 	});
 	function lifecycleError(code = "GUARD_RECYCLE_UNAVAILABLE") {
 		const error = new Error("upstream replacement in progress");
@@ -1923,11 +1960,64 @@ export function createGuard(options = {}) {
 		pending.resolve({ ok: true, generation, outcome });
 	}
 	function checkRecycle() {
-		if (
-			lifecycle === "draining" &&
-			![...contexts.values()].some((c) => c.generation != null)
-		)
+		// Only the current generation: a retiring one has its own budget.
+		if (lifecycle === "draining" && dispatchedIn(generation) === 0)
 			finishRecycle("natural");
+		if (retiring && dispatchedIn(retiring.generation) === 0)
+			finishRetire("natural");
+	}
+	function finishRetire(outcome) {
+		if (!retiring) return;
+		clearTimeout(retiring.timer);
+		const done = retiring;
+		retiring = null;
+		lastRetireOutcome = { generation: done.generation, outcome };
+		done.releaseTransport?.();
+		log("guard_retire_drained", lastRetireOutcome);
+		done.resolve({ ok: true, ...lastRetireOutcome });
+	}
+	function fenceReplacement(requestedGeneration) {
+		if (
+			!lifecycleEnabled ||
+			requestedGeneration !== generation ||
+			lifecycle !== "serving"
+		)
+			return { ok: false, reason: "invalid_generation_or_state" };
+		if (retiring) return { ok: false, reason: "retire_in_progress" };
+		lifecycle = "fenced";
+		fence = { generation, identity: oldIdentity };
+		counters.retires += 1;
+		let resolve;
+		const promise = new Promise((done) => {
+			resolve = done;
+		});
+		const record = {
+			generation,
+			promise,
+			resolve,
+			releaseTransport: upstreamTransport?.rotate(),
+		};
+		record.timer = setTimeout(() => {
+			for (const context of contexts.values()) {
+				if (context.generation === record.generation) {
+					counters.retireForcedRequests += 1;
+					context.abortRecycle();
+				}
+			}
+			finishRetire("forced");
+		}, shutdownGraceMs);
+		record.timer.unref?.();
+		retiring = record;
+		log("guard_fence", lifecycleSnapshot());
+		checkRecycle();
+		return { ok: true, generation };
+	}
+	function retireGeneration(requestedGeneration) {
+		if (lifecycleEnabled && retiring?.generation === requestedGeneration)
+			return retiring.promise;
+		if (lifecycleEnabled && lastRetireOutcome?.generation === requestedGeneration)
+			return Promise.resolve({ ok: true, ...lastRetireOutcome });
+		return Promise.resolve({ ok: false, reason: "invalid_generation_or_state" });
 	}
 	function beginRecycle(requestedGeneration) {
 		if (
@@ -1953,7 +2043,7 @@ export function createGuard(options = {}) {
 		// including trusted recovery sleeps. Never replay them on a replacement.
 		recycleTimer = setTimeout(() => {
 			for (const context of contexts.values()) {
-				if (context.generation != null) {
+				if (context.generation === generation) {
 					counters.recycleForcedRequests += 1;
 					context.abortRecycle();
 				}
@@ -1974,8 +2064,11 @@ export function createGuard(options = {}) {
 	function waitForServing(context) {
 		context.ensureBudget();
 		if (context.generation != null) {
+			// A retiring generation's backend has released its listener: a retry
+			// would reach whichever process owns the port next.
 			if (
 				context.generation === generation &&
+				context.generation !== retiring?.generation &&
 				["serving", "draining", "shutdown"].includes(lifecycle)
 			)
 				return Promise.resolve();
@@ -2026,6 +2119,7 @@ export function createGuard(options = {}) {
 			!/^\d+$/.test(candidate.startTime || "")
 		)
 			throw new Error("invalid identity");
+		let quiescedPid = null;
 		if (oldIdentity) {
 			let oldStart;
 			try {
@@ -2033,8 +2127,17 @@ export function createGuard(options = {}) {
 			} catch (error) {
 				if (error.code !== "ENOENT") throw error;
 			}
-			if (oldStart === oldIdentity.startTime)
-				throw new Error("previous upstream still exists");
+			if (oldStart === oldIdentity.startTime) {
+				// Only the fenced backend may outlive its replacement's start, and
+				// only once it has released the listener (checked below).
+				if (
+					lifecycle !== "fenced" ||
+					fence?.identity?.pid !== oldIdentity.pid ||
+					fence.identity.startTime !== oldIdentity.startTime
+				)
+					throw new Error("previous upstream still exists");
+				quiescedPid = oldIdentity.pid;
+			}
 		}
 		// A matching health document alone is insufficient: the verified process
 		// must actually own the pinned listener, not merely coexist with it.
@@ -2050,15 +2153,19 @@ export function createGuard(options = {}) {
 				(fields) => fields[1] === `0100007F:${portHex}` && fields[3] === "0A",
 			)
 			.map((fields) => fields[9]);
-		const ownsListener = readdirSync(`/proc/${candidate.pid}/fd`).some((fd) => {
-			try {
-				const link = readlinkSync(`/proc/${candidate.pid}/fd/${fd}`);
-				return listenerInodes.some((inode) => link === `socket:[${inode}]`);
-			} catch {
-				return false;
-			}
-		});
-		if (!ownsListener) throw new Error("replacement does not own listener");
+		const ownsListener = (pid) =>
+			readdirSync(`/proc/${pid}/fd`).some((fd) => {
+				try {
+					const link = readlinkSync(`/proc/${pid}/fd/${fd}`);
+					return listenerInodes.some((inode) => link === `socket:[${inode}]`);
+				} catch {
+					return false;
+				}
+			});
+		if (!ownsListener(candidate.pid))
+			throw new Error("replacement does not own listener");
+		if (quiescedPid != null && ownsListener(quiescedPid))
+			throw new Error("previous upstream still owns listener");
 		const artifact = processExecutableIdentity(candidate.pid, "/proc");
 		if (
 			procStartTime(candidate.pid) !== candidate.startTime ||
@@ -2162,9 +2269,13 @@ export function createGuard(options = {}) {
 		}
 	}
 	async function attachReplacement(candidate) {
+		const attachFrom = lifecycle;
 		if (
 			!lifecycleEnabled ||
-			lifecycle !== "absent" ||
+			!(
+				attachFrom === "absent" ||
+				(attachFrom === "fenced" && fence?.generation === generation)
+			) ||
 			attaching ||
 			candidate?.generation !== generation + 1 ||
 			!decodeGuardCorrelationSecret(candidate.correlationSecret)
@@ -2196,10 +2307,11 @@ export function createGuard(options = {}) {
 			const identity = await (options.verifyReplacement || verifyReplacement)(
 				candidate,
 			);
-			if (!identity || lifecycle !== "absent")
+			if (!identity || lifecycle !== attachFrom)
 				return { ok: false, reason: "verification_superseded" };
 			replacementIdentity = identity;
 			oldIdentity = identity;
+			fence = null;
 			generation = candidate.generation;
 			backendSourceSha = preparedTransaction
 				? candidate.rollback
@@ -2289,7 +2401,11 @@ export function createGuard(options = {}) {
 							? prepareReplacement(command.manifest)
 							: command.command === "begin"
 								? await beginRecycle(command.generation)
-								: command.command === "verify"
+								: command.command === "fence"
+									? fenceReplacement(command.generation)
+									: command.command === "retire"
+										? await retireGeneration(command.generation)
+										: command.command === "verify"
 									? await verifyReplacement(command)
 											.then((identity) => ({ ok: true, identity }))
 											.catch(() => ({
@@ -4073,7 +4189,12 @@ export function createGuard(options = {}) {
 		server,
 		listen,
 		shutdown,
-		recycle: { begin: beginRecycle, attach: attachReplacement },
+		recycle: {
+			begin: beginRecycle,
+			attach: attachReplacement,
+			fence: fenceReplacement,
+			retire: retireGeneration,
+		},
 		state: {
 			get lifecycle() {
 				return lifecycleSnapshot();
