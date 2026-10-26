@@ -569,9 +569,12 @@ releasing waiting requests. Already-dispatched requests are never replayed acros
 this boundary. Failed replacements remain fenced while the existing bounded
 restart circuit applies. Terminal TERM/INT still shuts the entire stack down.
 
-This handoff is intentionally limited to watchdog memory recycling. Official
-production deployments still replace the full service through
-`scripts/deploy-ccflare.sh`, including the guard, and can interrupt admission while
-draining. `RUNNER_PERSISTENT_GUARD=0` retains the legacy full-stack recycling path
+Memory recycling always drains the old upstream first. A compatible backend-only
+deployment through `scripts/deploy-ccflare.sh` also keeps the guard. When the
+running backend supports it, the deployment quiesces the old upstream instead of
+draining it: the old process releases its port and finishes its streams while the
+replacement serves (see
+[Retained-ingress backend transactions](deployment.md#retained-ingress-backend-transactions)).
+Lifecycle and schema changes still replace the full service. `RUNNER_PERSISTENT_GUARD=0` retains the legacy full-stack recycling path
 for explicit rollback. The memory threshold, swap accounting, recycle cap, response
 idle controls and request deadlines are unchanged.
