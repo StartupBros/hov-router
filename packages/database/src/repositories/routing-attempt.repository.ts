@@ -6,6 +6,7 @@ import {
 	type RoutingAttemptSummaryWindow,
 } from "@better-ccflare/types";
 import { getCleanupBatchSize } from "../adapters/bun-sql-adapter";
+import { type CleanupPacer, deleteInBatches } from "../cleanup-pacing";
 import { BaseRepository } from "./base.repository";
 
 export {
@@ -216,22 +217,25 @@ export class RoutingAttemptRepository extends BaseRepository<RoutingAttemptData>
 		};
 	}
 
-	async deleteOlderThan(cutoffTs: number): Promise<number> {
+	async deleteOlderThan(
+		cutoffTs: number,
+		pacer?: CleanupPacer,
+	): Promise<number> {
 		const batchSize = getCleanupBatchSize();
-		let total = 0;
-		let deleted: number;
-		do {
-			deleted = await this.runWithChanges(
-				`DELETE FROM routing_attempts WHERE id IN (
-					SELECT id FROM routing_attempts
-					WHERE timestamp < ?
-					ORDER BY timestamp ASC, id ASC
-					LIMIT ?
-				)`,
-				[cutoffTs, batchSize],
-			);
-			total += deleted;
-		} while (deleted === batchSize);
-		return total;
+		return deleteInBatches(
+			"routing_attempts",
+			batchSize,
+			() =>
+				this.runWithChanges(
+					`DELETE FROM routing_attempts WHERE id IN (
+						SELECT id FROM routing_attempts
+						WHERE timestamp < ?
+						ORDER BY timestamp ASC, id ASC
+						LIMIT ?
+					)`,
+					[cutoffTs, batchSize],
+				),
+			pacer,
+		);
 	}
 }

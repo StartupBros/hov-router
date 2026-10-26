@@ -17,6 +17,7 @@ import {
 	sanitizeRequestRoutingAttemptSummary,
 } from "@better-ccflare/types/request";
 import { getCleanupBatchSize } from "../adapters/bun-sql-adapter";
+import { type CleanupPacer, deleteInBatches } from "../cleanup-pacing";
 import { decryptPayload, encryptPayload } from "../payload-encryption";
 import { BaseRepository } from "./base.repository";
 
@@ -928,27 +929,30 @@ export class RequestRepository extends BaseRepository<RequestData> {
 		}));
 	}
 
-	async deleteOlderThan(cutoffTs: number): Promise<number> {
+	async deleteOlderThan(
+		cutoffTs: number,
+		pacer?: CleanupPacer,
+	): Promise<number> {
 		// The covering index idx_requests_cleanup makes each batch faster.
 		// Batch size is configurable via BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE
 		// (default 200) — lower it if rows are large and batches are timing
 		// out against statement_timeout (#412).
 		const BATCH_SIZE = getCleanupBatchSize();
-		let total = 0;
-		let deleted: number;
-		do {
-			deleted = await this.runWithChanges(
-				`DELETE FROM requests WHERE id IN (
-					SELECT id FROM requests WHERE timestamp < ? LIMIT ?
-				)`,
-				[cutoffTs, BATCH_SIZE],
-			);
-			total += deleted;
-		} while (deleted === BATCH_SIZE);
-		return total;
+		return deleteInBatches(
+			"requests",
+			BATCH_SIZE,
+			() =>
+				this.runWithChanges(
+					`DELETE FROM requests WHERE id IN (
+						SELECT id FROM requests WHERE timestamp < ? LIMIT ?
+					)`,
+					[cutoffTs, BATCH_SIZE],
+				),
+			pacer,
+		);
 	}
 
-	async deleteOrphanedPayloads(): Promise<number> {
+	async deleteOrphanedPayloads(pacer?: CleanupPacer): Promise<number> {
 		// Batched like deleteOlderThan/deletePayloadsOlderThan above — an unbounded
 		// DELETE here can exceed the PG statement_timeout once the table is large.
 		// LEFT JOIN instead of NOT IN (SELECT ...) avoids the slow anti-join plan
@@ -956,41 +960,44 @@ export class RequestRepository extends BaseRepository<RequestData> {
 		// Batch size is configurable via BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE
 		// (default 200) — lower it if rows are large (#412).
 		const BATCH_SIZE = getCleanupBatchSize();
-		let total = 0;
-		let deleted: number;
-		do {
-			deleted = await this.runWithChanges(
-				`DELETE FROM request_payloads WHERE id IN (
-					SELECT rp.id FROM request_payloads rp
-					LEFT JOIN requests r ON r.id = rp.id
-					WHERE r.id IS NULL
-					LIMIT ?
-				)`,
-				[BATCH_SIZE],
-			);
-			total += deleted;
-		} while (deleted === BATCH_SIZE);
-		return total;
+		return deleteInBatches(
+			"orphaned_payloads",
+			BATCH_SIZE,
+			() =>
+				this.runWithChanges(
+					`DELETE FROM request_payloads WHERE id IN (
+						SELECT rp.id FROM request_payloads rp
+						LEFT JOIN requests r ON r.id = rp.id
+						WHERE r.id IS NULL
+						LIMIT ?
+					)`,
+					[BATCH_SIZE],
+				),
+			pacer,
+		);
 	}
 
-	async deletePayloadsOlderThan(cutoffTs: number): Promise<number> {
+	async deletePayloadsOlderThan(
+		cutoffTs: number,
+		pacer?: CleanupPacer,
+	): Promise<number> {
 		// The covering index idx_request_payloads_cleanup makes each batch faster.
 		// Batch size is configurable via BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE
 		// (default 200) — lower it if rows are large (e.g. TOASTed payload JSON)
 		// and batches are timing out against statement_timeout (#412).
 		const BATCH_SIZE = getCleanupBatchSize();
-		let total = 0;
-		let deleted: number;
-		do {
-			// Direct timestamp-based deletion — avoids expensive subquery through requests table
-			deleted = await this.runWithChanges(
-				`DELETE FROM request_payloads WHERE id IN (
-					SELECT id FROM request_payloads WHERE timestamp IS NOT NULL AND timestamp < ? LIMIT ?
-				)`,
-				[cutoffTs, BATCH_SIZE],
-			);
-			total += deleted;
-		} while (deleted === BATCH_SIZE);
-		return total;
+		return deleteInBatches(
+			"request_payloads",
+			BATCH_SIZE,
+			() =>
+				// Direct timestamp-based deletion — avoids expensive subquery through requests table
+				this.runWithChanges(
+					`DELETE FROM request_payloads WHERE id IN (
+						SELECT id FROM request_payloads WHERE timestamp IS NOT NULL AND timestamp < ? LIMIT ?
+					)`,
+					[cutoffTs, BATCH_SIZE],
+				),
+			pacer,
+		);
 	}
 }

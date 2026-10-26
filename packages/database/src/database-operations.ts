@@ -47,6 +47,7 @@ import {
 	BunSqlAdapter,
 	PG_CLIENT_QUERY_TIMEOUT_MS,
 } from "./adapters/bun-sql-adapter";
+import type { CleanupPacer } from "./cleanup-pacing";
 import { EMBEDDED_INCREMENTAL_VACUUM_WORKER_CODE } from "./inline-incremental-vacuum-worker";
 import { EMBEDDED_VACUUM_WORKER_CODE } from "./inline-vacuum-worker";
 import {
@@ -1259,8 +1260,11 @@ OAuth tokens will need to be re-authenticated.
 		return this.usageHistory.getLatestSnapshot(accountId, windowKey);
 	}
 
-	async pruneUsageSnapshots(cutoffTs: number): Promise<number> {
-		return this.usageHistory.deleteOlderThan(cutoffTs);
+	async pruneUsageSnapshots(
+		cutoffTs: number,
+		pacer?: CleanupPacer,
+	): Promise<number> {
+		return this.usageHistory.deleteOlderThan(cutoffTs, pacer);
 	}
 
 	// Usage-windows operations delegated to repository
@@ -1872,9 +1876,11 @@ OAuth tokens will need to be re-authenticated.
 	// Cleanup operations — two explicit passes:
 	// Pass 1: delete payloads older than payloadRetentionMs (+ orphan sweep)
 	// Pass 2: delete request metadata older than requestRetentionMs
+	// A pacer is shared by every loop, so a refusal ends the whole sweep.
 	async cleanupOldRequests(
 		payloadRetentionMs: number,
 		requestRetentionMs?: number,
+		pacer?: CleanupPacer,
 	): Promise<{
 		removedRequests: number;
 		removedPayloads: number;
@@ -1884,9 +1890,11 @@ OAuth tokens will need to be re-authenticated.
 		try {
 			// Pass 1 — payloads
 			const payloadCutoff = now - payloadRetentionMs;
-			const removedPayloadsByAge =
-				await this.requests.deletePayloadsOlderThan(payloadCutoff);
-			const removedOrphans = await this.requests.deleteOrphanedPayloads();
+			const removedPayloadsByAge = await this.requests.deletePayloadsOlderThan(
+				payloadCutoff,
+				pacer,
+			);
+			const removedOrphans = await this.requests.deleteOrphanedPayloads(pacer);
 
 			// Pass 2 — request metadata
 			let removedRequests = 0;
@@ -1897,15 +1905,20 @@ OAuth tokens will need to be re-authenticated.
 			) {
 				const requestCutoff = now - requestRetentionMs;
 				try {
-					removedRequests = await this.requests.deleteOlderThan(requestCutoff);
+					removedRequests = await this.requests.deleteOlderThan(
+						requestCutoff,
+						pacer,
+					);
 				} catch (error) {
 					// Earlier deletion batches may already have committed.
 					this.notifyRequestsDeleted();
 					throw error;
 				}
 				if (removedRequests > 0) this.notifyRequestsDeleted();
-				removedRoutingAttempts =
-					await this.routingAttempts.deleteOlderThan(requestCutoff);
+				removedRoutingAttempts = await this.routingAttempts.deleteOlderThan(
+					requestCutoff,
+					pacer,
+				);
 			}
 			return {
 				removedRequests,

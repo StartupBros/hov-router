@@ -141,7 +141,12 @@ import {
 	formatEventLoopStallReport,
 } from "./event-loop-stall-monitor";
 import { createManagedIngress } from "./managed-ingress";
-import { scheduleAdaptiveVacuumAfterRetentionCleanup } from "./retention-cleanup";
+import {
+	describeRetentionSweepStop,
+	type RetentionSweepPacer,
+	RetentionSweeps,
+	scheduleAdaptiveVacuumAfterRetentionCleanup,
+} from "./retention-cleanup";
 import {
 	createUsagePollingTrackingClearer,
 	isCurrentUsagePollingAccount,
@@ -667,6 +672,7 @@ let stopRetentionJob: (() => void) | null = null;
 let stopOAuthCleanupJob: (() => void) | null = null;
 let stopRateLimitCleanupJob: (() => void) | null = null;
 let stopDataCleanupJob: (() => void) | null = null;
+let stopRetentionSweeps: (() => Promise<void>) | null = null;
 let stopWalCheckpointJob: (() => void) | null = null;
 let stopIntegritySchedulerJob: (() => void) | null = null;
 let stopModelCatalogRefreshJob: (() => void) | null = null;
@@ -1778,7 +1784,13 @@ export default async function startServer(options?: {
 	// duplicating this logic, so both the boot-time run and the hourly tick
 	// share one isRunning guard (maxConcurrent: 1) and can never race on
 	// retentionState (Greptile, PR #390).
-	const dataRetentionCleanup = async () => {
+	//
+	// Each sweep pauses between batches, stops at its time budget (the next
+	// hourly sweep continues the backlog) and ends early when the backend is
+	// quiesced or shut down (#613). A budget stop still counts as a success.
+	const retentionSweeps = new RetentionSweeps();
+	stopRetentionSweeps = () => retentionSweeps.stop();
+	const runDataRetentionSweep = async (pacer: RetentionSweepPacer) => {
 		const startTime = Date.now();
 		try {
 			const payloadDays = config.getDataRetentionDays();
@@ -1786,19 +1798,24 @@ export default async function startServer(options?: {
 			const cleanupResult = await dbOps.cleanupOldRequests(
 				payloadDays * TIME_CONSTANTS.DAY,
 				requestDays * TIME_CONSTANTS.DAY,
+				pacer,
 			);
 			// Reclaim freed pages adaptively after any retention deletion. This is
 			// intentionally fire-and-forget: every worker call is bounded and
 			// off-thread, so the cleanup callback never holds the main writer slot.
-			scheduleAdaptiveVacuumAfterRetentionCleanup(
-				cleanupResult,
-				dbOps,
-				log,
-				Date.now() - startTime,
-			);
+			// A sweep stopped for shutdown starts no worker the close would race.
+			if (pacer.stoppedBy !== "stopped") {
+				scheduleAdaptiveVacuumAfterRetentionCleanup(
+					cleanupResult,
+					dbOps,
+					log,
+					Date.now() - startTime,
+				);
+			}
 			const usageHistoryDays = config.getUsageHistoryRetentionDays();
 			const removedSnapshots = await dbOps.pruneUsageSnapshots(
 				Date.now() - usageHistoryDays * TIME_CONSTANTS.DAY,
+				pacer,
 			);
 			if (removedSnapshots > 0) {
 				log.info(`Pruned ${removedSnapshots} old usage snapshots`);
@@ -1812,8 +1829,19 @@ export default async function startServer(options?: {
 				err instanceof Error ? err.message : String(err);
 			retentionState.lastErrorAt = Date.now();
 		}
-		await cleanupCacheFlightRecorderRetention(config, dbOps, log);
 	};
+	const dataRetentionCleanup = () =>
+		retentionSweeps.run(async (pacer) => {
+			await runDataRetentionSweep(pacer);
+			// A budget stop every hour means retention is not keeping up, so it
+			// is a warning; a shutdown stop is expected.
+			const stop = describeRetentionSweepStop(pacer);
+			if (stop && pacer.stoppedBy === "budget") log.warn(stop);
+			else if (stop) log.info(stop);
+			if (pacer.stoppedBy !== "stopped") {
+				await cleanupCacheFlightRecorderRetention(config, dbOps, log);
+			}
+		});
 
 	// Periodic data retention cleanup every 1 hour (reduced from 6 hours for more aggressive cleanup).
 	// Registered with immediate: false (default) — runStartupMaintenance()
@@ -3273,6 +3301,12 @@ function stopPeriodicWork(): Promise<void> {
 		if (stopDataCleanupJob) {
 			stopDataCleanupJob();
 			stopDataCleanupJob = null;
+		}
+		// Unregistering stops future ticks; this ends a sweep already running
+		// at its next batch, before shared resources are disposed.
+		if (stopRetentionSweeps) {
+			pending.push(stopRetentionSweeps());
+			stopRetentionSweeps = null;
 		}
 		if (stopWalCheckpointJob) {
 			stopWalCheckpointJob();
