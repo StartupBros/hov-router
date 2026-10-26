@@ -2939,6 +2939,65 @@ describe("source-controlled guard", () => {
 		});
 	});
 
+	test("reserves no bytes for a request without Content-Length or Transfer-Encoding", async () => {
+		let releaseStalled: (() => void) | undefined;
+		const stalledReleased = new Promise<void>((resolve) => {
+			releaseStalled = resolve;
+		});
+		const upstreamBase = await listen(
+			http.createServer(async (req, res) => {
+				if (req.url === "/api/sessions/stalled/account") {
+					await stalledReleased;
+					res.end("stalled-ok");
+					return;
+				}
+				res.end("upstream-ok");
+			}),
+		);
+		const { baseUrl, guard } = await startGuard(upstreamBase, {
+			maxActive: 4,
+			maxQueue: 4,
+			maxBodyReaders: 4,
+			maxRequestBodyBytes: 2_048,
+			maxBufferedRequestBodyBytes: 4_096,
+			totalDeadlineMs: 5_000,
+		});
+		const guardUrl = new URL(baseUrl);
+		// RFC 9112 section 6.3: a request with neither header has no body. A slow
+		// bodyless read used to reserve 2 x maxRequestBodyBytes and block the FIFO.
+		const stalled = await openRawRequest(
+			baseUrl,
+			"GET /api/sessions/stalled/account HTTP/1.1\r\n" +
+				`Host: ${guardUrl.host}\r\n` +
+				"Connection: close\r\n\r\n",
+		);
+		await waitFor(() => guard.state.bodyReaders.active === 1);
+		expect(guard.state.bodyReaders).toMatchObject({
+			reservedBytes: 0,
+			reservedBytesPeak: 0,
+		});
+
+		const read = await fetch(`${baseUrl}/api/sessions/other/account`);
+		expect(await read.text()).toBe("upstream-ok");
+		const upload = await fetch(`${baseUrl}/v1/messages`, {
+			method: "POST",
+			headers: { "content-length": "2048" },
+			body: "x".repeat(2_048),
+		});
+		expect(await upload.text()).toBe("upstream-ok");
+		expect(guard.state.bodyReaders.reservedBytesPeak).toBe(4_096);
+		expect(guard.state.counters.bodyReaderBudgetBlocked).toBe(0);
+
+		const stalledResponse = readRawResponsesUntil(stalled, "stalled-ok");
+		releaseStalled?.();
+		expect(await stalledResponse).toContain("HTTP/1.1 200");
+		await waitFor(
+			() =>
+				guard.state.bodyReaders.active === 0 &&
+				guard.state.bodyReaders.reservedBytes === 0,
+		);
+	});
+
 	test.each([
 		{ name: "limited", path: "/v1/messages", maxActive: 2 },
 		{ name: "passthrough", path: "/v1/models", maxActive: 4 },
