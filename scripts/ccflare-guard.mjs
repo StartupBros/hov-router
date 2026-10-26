@@ -459,6 +459,12 @@ function createGuardCorrelationSigner(encodedSecret) {
 function parseDeclaredContentLength(req) {
 	const raw = req.headers?.["content-length"];
 	const transferEncoding = req.headers?.["transfer-encoding"];
+	// RFC 9112 section 6.3: a request with neither header has a zero-length
+	// body. Without this, every bodyless GET reserved 2 x maxRequestBodyBytes
+	// of the aggregate body-reader budget for its whole response (#614).
+	if (req.headers && raw === undefined && transferEncoding === undefined) {
+		return 0n;
+	}
 	if (
 		Array.isArray(raw) ||
 		Array.isArray(transferEncoding) ||
