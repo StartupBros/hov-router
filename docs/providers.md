@@ -84,7 +84,7 @@
 
 ## Overview
 
-The better-ccflare providers system is a modular architecture designed to support multiple AI service providers through a unified interface. Currently, it implements support for Anthropic's services through a single provider that can operate in two modes:
+The HoV Router providers system is a modular architecture designed to support multiple AI service providers through a unified interface. Currently, it implements support for Anthropic's services through a single provider that can operate in two modes:
 
 ### Supported Providers
 
@@ -738,7 +738,7 @@ export OPENAI_COMPATIBLE_MODEL_MAPPINGS='{
 
 ### Model Discovery
 
-Beyond the static mapping table above, better-ccflare can ask an OpenAI-compatible endpoint what models it actually serves, at two different points in an account's lifecycle:
+Beyond the static mapping table above, HoV Router can ask an OpenAI-compatible endpoint what models it actually serves, at two different points in an account's lifecycle:
 
 - **Before the account is saved** — the add-account wizard's "Discover models" step calls `POST /api/models/preview` with the credential/endpoint pair the user just typed in, before anything is persisted. This is a one-shot check: it shares no cache or state with the saved-account path below, grants no routing eligibility, and creates nothing. See [`POST /api/models/preview`](api-http.md#post-apimodelspreview).
 - **After the account is saved** — `GET /api/models?provider=openai-compatible&accountId=<id>` returns that account's own live listing, each entry tagged `source: "account"` to distinguish it from the built-in/reference model lists `GET /api/models?provider=<name>` (no `accountId`) falls back to for other providers. See [`GET /api/models`](api-http.md#get-apimodels) for the full scoped-query reference, including the equivalent `provider=codex` listing.
@@ -1016,7 +1016,7 @@ The BaseProvider abstract class provides default implementations for common func
 
 ## Account Priority System
 
-better-ccflare uses an account priority system to control request routing order:
+HoV Router uses an account priority system to control request routing order:
 
 | Priority | Value | Description |
 |----------|-------|-------------|

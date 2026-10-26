@@ -95,7 +95,7 @@ Accept: application/json
 
 ## Implementation Notes
 
-### How better-ccflare Handles API Changes
+### How HoV Router Handles API Changes
 
 The usage fetcher in `packages/providers/src/usage-fetcher.ts` is designed to be resilient to API changes:
 

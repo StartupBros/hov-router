@@ -336,7 +336,7 @@ The setting defaults to `disabled` (0) for all existing accounts to maintain bac
 
 ## Configuration
 
-better-ccflare uses a hierarchical configuration system where environment variables take precedence over configuration file settings.
+HoV Router uses a hierarchical configuration system where environment variables take precedence over configuration file settings.
 
 ### Configuration Precedence (highest to lowest)
 1. Environment variables

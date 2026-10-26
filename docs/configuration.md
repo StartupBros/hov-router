@@ -26,7 +26,7 @@ This guide covers all configuration options for HoV Router, including file-based
 
 ## Configuration Overview
 
-better-ccflare uses a flexible configuration system that supports:
+HoV Router uses a flexible configuration system that supports:
 
 - **File-based configuration**: JSON configuration file for persistent settings
 - **Environment variables**: Override configuration for deployment flexibility
@@ -196,7 +196,7 @@ The response's `driftReport` field diffs the live policy snapshot against the de
 
 | Lever | State | Permanent contract or re-entry condition |
 |---|---|---|
-| Conversation `prompt_cache_key`, exact-account/session affinity, ordinary 60-second first-chunk pacing | KEEP | Preserve on the Claude Code → better-ccflare → ChatGPT subscription path |
+| Conversation `prompt_cache_key`, exact-account/session affinity, ordinary 60-second first-chunk pacing | KEEP | Preserve on the Claude Code → HoV Router → ChatGPT subscription path |
 | `session-id`/`thread-id` affinity headers carrying the conversation `prompt_cache_key`, plus `x-codex-routing-hint` | KEEP | The subscription backend derives cache affinity from the `session-id` header (official Codex CLI contract); the body key alone stopped holding a warm machine in Sept 2026. Schema-21 traces record `affinity_session_identity` / `affinity_routing_hint` per request |
 | Bounded orchestration continuity | KEEP | Apply only after identity or exact tool-lineage admission rejects siblings and unrelated instructions |
 | Source-correct metrics and physical model/account/turn/gap/context reporting | KEEP | Durable additive usage uses `read / (uncached + read + write)`; cache-inclusive traces use `read / total_input` |
@@ -455,7 +455,7 @@ Capability profiles are evaluated against the live account catalog on every requ
 
 An explicit root selection remains exact to that capability and fails closed if the root-capable pool cannot serve it. Descendant agents are availability-oriented before dispatch: they try their requested logical model inside the root-capable pool, then the profile root model inside that pool, then the requested stock Claude model through ordinary same-model routing. A mapped provider cannot enter the global rung merely because it is available. Under `session-affinity` and sticky `session-drain-soonest`, the first successful descendant route becomes that child/model lane's process-local home and remains sticky until it is unavailable; priority edits and preferred-route recovery do not move a healthy child. The default `session` strategy and `least-used` install no child home, and neither does `session-drain-soonest-strict` except while Anthropic degraded mode `enforce` retains a native Anthropic OAuth owner for that lane: each child turn is ordered by that strategy within the same rung plan.
 
-A same-session provider-owned WebSearch helper without a child marker inherits the active capability profile and uses its exact proven server-tool route first. If that soft capability pool is unavailable before hosted dispatch, the helper may use the global proven capability lane. Exact-account, public force-routed, and bounded routes never escape their hard boundary. Once a hosted tool is dispatched, better-ccflare does not replay it through another lane within that inbound request.
+A same-session provider-owned WebSearch helper without a child marker inherits the active capability profile and uses its exact proven server-tool route first. If that soft capability pool is unavailable before hosted dispatch, the helper may use the global proven capability lane. Exact-account, public force-routed, and bounded routes never escape their hard boundary. Once a hosted tool is dispatched, HoV Router does not replay it through another lane within that inbound request.
 
 Adding a new account later therefore requires no profile edit, provided its provider and root mapping satisfy the same capability predicate. Route fallback, served model, and re-pin provenance is exposed through response metadata and authenticated request history; account and candidate identifiers remain operator-only.
 
@@ -555,7 +555,7 @@ routing, error reasons, and saved picker IDs are unchanged.
 
 | Field | Required | Contract |
 |---|---:|---|
-| `id` | yes | Unique lowercase kebab-case slug, up to 48 characters. better-ccflare generates the reserved public model ID `claude-bccf-route-<id>`; clients cannot configure a different public ID |
+| `id` | yes | Unique lowercase kebab-case slug, up to 48 characters. HoV Router generates the reserved public model ID `claude-bccf-route-<id>`; clients cannot configure a different public ID |
 | `displayName` | yes | Picker label, 1–120 characters |
 | `description` | no | Operator-facing description, up to 500 characters. It is never returned by discovery; the picker description is generated from the profile kind instead |
 | `selection` | no | Set to `capability` for a live matching-account pool. When omitted, the profile retains legacy exact-account selection |
@@ -570,13 +570,13 @@ routing, error reasons, and saved picker IDs are unchanged.
 | `maxOutputTokens` | no | Exact-account profiles only; required with `contextWindow`. Positive integer less than `contextWindow`; caps request output |
 | `clientContextWindowHint` | no | Only `"1m"` is accepted. It is a Claude Code context-classification hint and is invalid with bounded `contextWindow` or `maxOutputTokens` |
 
-At startup, better-ccflare logs only the configured profile count, never the JSON, account IDs, logical models, or physical models. Legacy profiles name exact account IDs, so keep those values in a protected environment file or service-manager credential rather than committing a real deployment value. Capability profiles contain no account IDs, but their provider/model constraints are still operational configuration and should be protected accordingly.
+At startup, HoV Router logs only the configured profile count, never the JSON, account IDs, logical models, or physical models. Legacy profiles name exact account IDs, so keep those values in a protected environment file or service-manager credential rather than committing a real deployment value. Capability profiles contain no account IDs, but their provider/model constraints are still operational configuration and should be protected accordingly.
 
 ### Bounded exact-account profiles
 
 `exclusiveAccount`, `contextWindow`, and `maxOutputTokens` are optional additions to an exact-account profile. `exclusiveAccount` defaults to `false`; it is invalid on capability profiles. When it is `true`, normal routing, combo routing, capability profiles, and public `x-better-ccflare-account-id` force routes cannot reach that account. Only an exact configured route profile that names the account can select it. Manual pause, rate-limit, and capacity checks remain authoritative, so selecting the profile does not bypass an unavailable account.
 
-`contextWindow` and `maxOutputTokens` must either both be absent or both be positive integers, and `maxOutputTokens` must be less than `contextWindow`. Their fixed input limit is derived as `contextWindow - maxOutputTokens`; it is not configured separately. For a bounded profile, better-ccflare clamps a larger client `max_tokens` value to `maxOutputTokens` (while preserving a smaller valid value), estimates the complete serialized Anthropic request envelope conservatively, and reserves the full configured output cap. A malformed or unestimable request, an input estimate above the derived limit, or a total above `contextWindow` fails closed before account selection, with no fallback. The nominal context window of a model does not override an operator's profile bound.
+`contextWindow` and `maxOutputTokens` must either both be absent or both be positive integers, and `maxOutputTokens` must be less than `contextWindow`. Their fixed input limit is derived as `contextWindow - maxOutputTokens`; it is not configured separately. For a bounded profile, HoV Router clamps a larger client `max_tokens` value to `maxOutputTokens` (while preserving a smaller valid value), estimates the complete serialized Anthropic request envelope conservatively, and reserves the full configured output cap. A malformed or unestimable request, an input estimate above the derived limit, or a total above `contextWindow` fails closed before account selection, with no fallback. The nominal context window of a model does not override an operator's profile bound.
 
 Bounded profiles reject requests using deferred custom tools. Use a native Anthropic route instead, or start a fresh non-Anthropic client with `ENABLE_TOOL_SEARCH=0`; do not reuse a client session that has already declared deferred tools.
 
@@ -603,7 +603,7 @@ This profile has a fixed 2,500-token input limit, a 4,000-token output cap, and 
 
 ### Claude Code `/model` setup
 
-Point Claude Code's Anthropic base URL and authentication at better-ccflare as usual, then enable [gateway model discovery](https://code.claude.com/docs/en/llm-gateway):
+Point Claude Code's Anthropic base URL and authentication at HoV Router as usual, then enable [gateway model discovery](https://code.claude.com/docs/en/llm-gateway):
 
 ```bash
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
@@ -611,7 +611,7 @@ CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 
 When at least one route profile is configured, authenticated `GET /v1/models` requests are answered locally with one preferred public model ID and display name for each profile. Each entry carries the ID, the display name and a generated one-line `description` of its priority flow. Profile descriptions are generated from the profile kind only, never from the operator `description`, account ID or model names: an exact profile reads `One pinned account, no fallback · subagents use the same account`; a bounded exact profile reads `One pinned account, size-capped requests, no fallback · subagents use the same account`; a `capability` pool reads `Pool of matching accounts, load-balancer order, then error · subagents fall back to normal routing`. The subagent clause describes a bound session. Pool subagents try the pool first, then ordinary same-model routing, as described for descendant agents above. A root request that carries no caller and session identity saves no binding, so its subagents route natively. Claude Code shows the description under the label, collapses whitespace, cuts it at 100 characters, and shows "From gateway" when it is absent (observed in Claude Code 2.1.288). Discovery metadata is not enforcement: it does not select an account, impose profile bounds, or contact an upstream provider. Claude Code labels these entries as gateway models in `/model`.
 
-Every profile keeps the stable legacy ID `claude-bccf-route-<id>`. For a profile with `clientContextWindowHint: "1m"`, discovery instead emits the preferred ID `claude-bccf-route-<id>[1m]`; better-ccflare accepts both exact spellings for that profile, but emits only the preferred row. Claude Code strips `[1m]` before API transport, while better-ccflare also accepts the suffixed spelling verbatim for protocol robustness. This opt-in is a Claude Code client context-classification hint, not a provider-capacity claim or admission enforcement.
+Every profile keeps the stable legacy ID `claude-bccf-route-<id>`. For a profile with `clientContextWindowHint: "1m"`, discovery instead emits the preferred ID `claude-bccf-route-<id>[1m]`; HoV Router accepts both exact spellings for that profile, but emits only the preferred row. Claude Code strips `[1m]` before API transport, while the router also accepts the suffixed spelling verbatim for protocol robustness. This opt-in is a Claude Code client context-classification hint, not a provider-capacity claim or admission enforcement.
 
 Keep `autoCompactWindow` below independently verified effective provider capacity. For the current Sol route, the configured 800,000-token compaction target is below its 828,400-token effective capacity; the raw catalog maximum is 872,000 tokens.
 
@@ -628,7 +628,7 @@ ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES=effort,xhigh_effort,max_eff
 
 Gateway discovery can list multiple profiles; Claude Code's custom-model variables describe one option. Pairing the exact same ID augments that discovered row with the declared capabilities instead of creating a different route. `xhigh` and `max` remain explicit picker/request overrides: choosing the route does not silently force `max`, and `defaultEffort` applies only when Claude Code sends no effort.
 
-Selecting a profile on a root agent pins only that authenticated caller's Claude Code session tree. Legacy profiles inherit the exact account. Capability profiles inherit the root capability predicate (provider plus root logical/physical mapping), then use each child request's own model for capacity and dispatch; children cannot broaden the pool to accounts that do not satisfy the root predicate. Other sessions continue through ordinary better-ccflare routing. Switching the same root session back to a native Claude model clears its profile binding on the next root request.
+Selecting a profile on a root agent pins only that authenticated caller's Claude Code session tree. Legacy profiles inherit the exact account. Capability profiles inherit the root capability predicate (provider plus root logical/physical mapping), then use each child request's own model for capacity and dispatch; children cannot broaden the pool to accounts that do not satisfy the root predicate. Other sessions continue through ordinary HoV Router routing. Switching the same root session back to a native Claude model clears its profile binding on the next root request.
 
 Bindings are process-local, bounded, and restart-scoped. Their TTL matches `session_duration_ms`, and a restart clears every binding. Missing, paused, unavailable, rate-limited, or quota-exhausted exact accounts fail closed; capability profiles fail closed when no matching candidate remains, without falling back outside the profile. Configured provider and physical-model guards also fail closed (including the catalog-role reasons `catalog_role_unavailable` and `catalog_role_mismatch`), as does a conflicting `x-better-ccflare-account-id` header. Matching is exact: an OpenRouter account mapped to `fusion`, for example, does not satisfy a capability profile expecting provider `codex` and physical model `gpt-5.6-sol`. See [Account Routing Architecture](./routing-architecture.md#claude-code-model-route-profiles) for the request flow and inheritance boundary.
 
@@ -763,7 +763,7 @@ Admission is FIFO: a request at the head may intentionally block smaller later b
 
 ## Outbound Proxy
 
-HoV Router can route all of its outbound HTTP(S) traffic — provider requests, OAuth flows, usage polling, and webhooks — through an explicit forward proxy using HTTP CONNECT. This is useful for enterprises that want every egress connection from better-ccflare to pass through a security/inspection proxy.
+HoV Router can route all of its outbound HTTP(S) traffic — provider requests, OAuth flows, usage polling, and webhooks — through an explicit forward proxy using HTTP CONNECT. This is useful for enterprises that want every egress connection from the router to pass through a security/inspection proxy.
 
 Configure it via the `BETTER_CCFLARE_OUTBOUND_PROXY` environment variable (or the equivalent `outbound_proxy` config file key); env var takes precedence over the config file value, matching the pattern used elsewhere in this doc. A dedicated variable is used instead of the conventional `HTTPS_PROXY`/`HTTP_PROXY` because those affect every process on the machine by convention — a dedicated variable lets operators scope the proxy to just this application (e.g. via MDM/provisioning) without redirecting traffic for every other tool.
 
@@ -855,7 +855,7 @@ Any other URL keeps the original body shape, `{ "type": "alert", "alert": { ... 
 
 ## Database Configuration
 
-better-ccflare supports two database backends:
+HoV Router supports two database backends:
 
 | Backend | When used | Environment variable |
 |---------|-----------|---------------------|
@@ -915,7 +915,7 @@ env:
 
 ## Model Catalog
 
-better-ccflare maintains a cache of the Anthropic model catalog (id, display name, creation date) used to populate model dropdowns in the dashboard (agent preferences, default agent model). It's exposed read-only via `GET /api/models` and force-refreshable via `POST /api/models/refresh` — see [api-http.md](api-http.md#model-catalog) for the endpoint reference. This is the unscoped Anthropic catalog only; per-account live discovery for Codex and OpenAI-compatible accounts (`?provider=&accountId=` and the unsaved-credential preview endpoint) is a separate mechanism — see [Model Discovery](providers.md#model-discovery).
+HoV Router maintains a cache of the Anthropic model catalog (id, display name, creation date) used to populate model dropdowns in the dashboard (agent preferences, default agent model). It's exposed read-only via `GET /api/models` and force-refreshable via `POST /api/models/refresh` — see [api-http.md](api-http.md#model-catalog) for the endpoint reference. This is the unscoped Anthropic catalog only; per-account live discovery for Codex and OpenAI-compatible accounts (`?provider=&accountId=` and the unsaved-credential preview endpoint) is a separate mechanism — see [Model Discovery](providers.md#model-discovery).
 
 ### Why this isn't fetched from every account
 
@@ -931,15 +931,15 @@ When at least one eligible account exists, the catalog refreshes automatically o
 
 ### Passive capture
 
-Any successful `GET /v1/models` response proxied through better-ccflare from a console/API-key account (a client calling the pass-through endpoint directly) is also captured into the catalog cache opportunistically, independent of the scheduled/manual refresh paths. This never triggers extra outbound calls — it only observes traffic that was going to happen anyway.
+Any successful `GET /v1/models` response proxied through HoV Router from a console/API-key account (a client calling the pass-through endpoint directly) is also captured into the catalog cache opportunistically, independent of the scheduled/manual refresh paths. This never triggers extra outbound calls — it only observes traffic that was going to happen anyway.
 
 ### Bundled fallback
 
-If no live fetch has ever succeeded (fresh install, no eligible account, or `BETTER_CCFLARE_MODELS_OFFLINE=1`), `GET /api/models` serves a static list bundled with better-ccflare (`CLAUDE_MODEL_IDS` in `packages/core/src/models.ts`). Its response reports `source: "fallback"` and a `fetchedAt` timestamp equal to the bundled list's snapshot date (`BUNDLED_MODELS_AS_OF`), not the current time — this is an intentional, honest "as of `<date>`" provenance rather than a `Date.now()` that would misleadingly imply the list was just fetched. The dashboard surfaces this distinction next to the model catalog's refresh button ("Live model list · fetched ..." vs. "Bundled model list · as of ...").
+If no live fetch has ever succeeded (fresh install, no eligible account, or `BETTER_CCFLARE_MODELS_OFFLINE=1`), `GET /api/models` serves a static list bundled with HoV Router (`CLAUDE_MODEL_IDS` in `packages/core/src/models.ts`). Its response reports `source: "fallback"` and a `fetchedAt` timestamp equal to the bundled list's snapshot date (`BUNDLED_MODELS_AS_OF`), not the current time — this is an intentional, honest "as of `<date>`" provenance rather than a `Date.now()` that would misleadingly imply the list was just fetched. The dashboard surfaces this distinction next to the model catalog's refresh button ("Live model list · fetched ..." vs. "Bundled model list · as of ...").
 
 ## Editable Provider Model Defaults
 
-When a request has no combo-slot model and no account-level model mapping, better-ccflare falls back to a per-provider, per-family default model map. For most providers that map is compiled in; for Codex it's derived live from the account's own model listing (`chatgpt.com/backend-api/codex/models`), since the compiled guess (`gpt-5.3-codex` for opus/sonnet) 400s on ChatGPT-subscription accounts that don't support it.
+When a request has no combo-slot model and no account-level model mapping, HoV Router falls back to a per-provider, per-family default model map. For most providers that map is compiled in; for Codex it's derived live from the account's own model listing (`chatgpt.com/backend-api/codex/models`), since the compiled guess (`gpt-5.3-codex` for opus/sonnet) 400s on ChatGPT-subscription accounts that don't support it.
 
 Resolution order:
 
@@ -955,7 +955,7 @@ Manage this via the dashboard (Settings → Advanced → Provider Model Defaults
 
 ## Force Account Model
 
-`force_account_model` (config file only — no environment variable, off by default) makes better-ccflare serve the model a client asked for, or nothing. With it on:
+`force_account_model` (config file only — no environment variable, off by default) makes HoV Router serve the model a client asked for, or nothing. With it on:
 
 - **Combos are skipped** — no slot model is applied.
 - **Agent model preferences are not applied** — the agent is still attributed, but the rewrite that would send a different model does not happen.
@@ -1226,7 +1226,7 @@ watch -n 5 'curl -s http://localhost:8080/api/accounts | jq ".[] | select(.autoF
 
 ### Automatic Validation
 
-better-ccflare performs validation on:
+HoV Router performs validation on:
 
 1. **Strategy names**: Must be one of the valid strategy options (validated by `isValidStrategy`)
 2. **Numeric values**: Parsed and validated as integers/floats

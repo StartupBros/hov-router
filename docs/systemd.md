@@ -151,7 +151,7 @@ systemd runs `ExecStartPre` before the main process. If a stale or invalid `BUN_
 
 ### Sourcing interactively
 
-When running better-ccflare outside systemd, source the script before starting:
+When running HoV Router outside systemd, source the script before starting:
 
 ```sh
 . /opt/better-ccflare/scripts/preflight-env.sh
@@ -304,7 +304,7 @@ Anthropic degraded mode is restart-scoped and `off` by default. Read [Configurat
 
 ### Topology gate
 
-`enforce` is supported only when all affected traffic reaches one better-ccflare server process and therefore one in-memory coordinator. The standard `ccflare-stack.service` runner starts one guard and one upstream server, which satisfies the process boundary only if no other stack, worker, pod, or replica also receives the traffic.
+`enforce` is supported only when all affected traffic reaches one HoV Router server process and therefore one in-memory coordinator. The standard `ccflare-stack.service` runner starts one guard and one upstream server, which satisfies the process boundary only if no other stack, worker, pod, or replica also receives the traffic.
 
 Before enforcement:
 

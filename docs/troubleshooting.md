@@ -49,7 +49,7 @@ This guide helps you diagnose and resolve common issues with HoV Router (formerl
 **Error Message**: `Token expired or missing for account: [name]`
 
 **Solutions**:
-1. better-ccflare automatically attempts to refresh expired tokens
+1. HoV Router automatically attempts to refresh expired tokens
 2. If automatic refresh fails, re-authenticate the account
 3. Check for refresh token stampede prevention - multiple simultaneous refresh attempts are prevented
 
@@ -91,7 +91,7 @@ This guide helps you diagnose and resolve common issues with HoV Router (formerl
 
 ### Identifying Rate Limits
 
-better-ccflare detects rate limits through response headers and HTTP status codes:
+HoV Router detects rate limits through response headers and HTTP status codes:
 
 1. **Rate Limited Responses**: 
    - HTTP 429 responses
@@ -113,7 +113,7 @@ curl http://localhost:8080/api/accounts | jq '.[] | {name, rate_limit_status, ra
 ### Recovery Strategies
 
 **When an account is rate-limited**:
-1. better-ccflare automatically rotates to the next available account
+1. HoV Router automatically rotates to the next available account
 2. Rate-limited accounts are marked with a reset timestamp
 3. Accounts automatically become available again after the reset time
 
@@ -723,7 +723,7 @@ grep "\[Server\]" /tmp/better-ccflare-logs/app.log
 **Meaning**: Another process is accessing the database
 
 **Solutions**:
-1. Ensure only one better-ccflare instance is running
+1. Ensure only one HoV Router instance is running
 2. Kill any zombie processes
 3. Wait for current operations to complete
 
@@ -900,9 +900,9 @@ Expected response:
 }
 ```
 
-### Q: Can I use better-ccflare with multiple client applications?
+### Q: Can I use HoV Router with multiple client applications?
 
-**A**: Yes, better-ccflare acts as a transparent proxy. Point any Claude API client to `http://localhost:8080` instead of `https://api.anthropic.com`.
+**A**: Yes, HoV Router acts as a transparent proxy. Point any Claude API client to `http://localhost:8080` instead of `https://api.anthropic.com`.
 
 ### Q: How do I backup my accounts?
 
@@ -945,7 +945,7 @@ Expected response:
 4. Set up alerts for rate-limited accounts
 5. Consider implementing request queuing in your application
 
-### Q: Can I use better-ccflare in production?
+### Q: Can I use HoV Router in production?
 
 **A**: Yes, with these considerations:
 1. Use environment variables for sensitive configuration
