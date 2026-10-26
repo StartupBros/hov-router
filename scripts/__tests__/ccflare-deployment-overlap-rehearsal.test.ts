@@ -64,6 +64,7 @@ test.each([
 	"overlap",
 	"port_stuck",
 	"term_mid_retire",
+	"rollback",
 ])("compiled Bun backend %s handoff keeps the old stream while its replacement binds the port", async (mode) => {
 	const dir = mkdtempSync(join(tmpdir(), "ccflare-overlap-rehearsal-")),
 		control = join(dir, "transaction"),
@@ -89,7 +90,10 @@ test.each([
 			["candidate", newSource, 400],
 		] as const) {
 			const source = join(dir, `${name}.ts`),
-				binary = join(dir, name);
+				binary = join(dir, name),
+				// A candidate reporting the wrong build fails guard verification.
+				healthSha =
+					name === "candidate" && mode === "rollback" ? oldSource : sha;
 			// The owner lock models the database owner: a replacement can open it
 			// only after the quiesced backend has released it.
 			const onQuiesce =
@@ -101,7 +105,7 @@ test.each([
 				`import {Database} from "bun:sqlite";import {openSync,closeSync,unlinkSync,appendFileSync,existsSync} from "node:fs";import {createManagedIngress} from ${JSON.stringify(join(root, "apps/server/src/managed-ingress.ts"))};
  const lock=process.env.FIXTURE_DB+".owner";const owner=openSync(lock,"wx");const db=new Database(process.env.FIXTURE_DB);db.exec("CREATE TABLE IF NOT EXISTS calls(generation INTEGER,path TEXT)");appendFileSync(process.env.FIXTURE_EVENTS,"open:"+process.pid+"\\n");
  await Bun.sleep(${delay});const ingress=createManagedIngress({enabled:true,secret:Buffer.from(process.env.CCFLARE_GUARD_CORRELATION_SECRET,"base64url"),generation:Number(process.env.CCFLARE_MANAGED_GENERATION),ingressNonce:process.env.CCFLARE_MANAGED_INGRESS_NONCE,candidateNonce:process.env.CCFLARE_MANAGED_CANDIDATE_NONCE,sourceSha:process.env.CCFLARE_SOURCE_SHA});
- let quiesced=false;const server=Bun.serve({hostname:"127.0.0.1",port:Number(process.env.PORT),fetch:r=>ingress(r,async req=>{const url=new URL(req.url);if(url.pathname==="/health")return Response.json({status:"ok",git_sha:${JSON.stringify(sha)},handoff:{protocol:"quiesce-v1",pid:process.pid}});db.query("INSERT INTO calls VALUES(?,?)").run(Number(process.env.CCFLARE_MANAGED_GENERATION),url.pathname);if(url.pathname==="/v1/slow")return new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode("first"));const timer=setInterval(()=>{if(existsSync(process.env.FIXTURE_STREAM_RELEASE)){clearInterval(timer);c.enqueue(new TextEncoder().encode("last"));c.close();}},10);}}));return new Response(${JSON.stringify(sha)});})});
+ let quiesced=false;const server=Bun.serve({hostname:"127.0.0.1",port:Number(process.env.PORT),fetch:r=>ingress(r,async req=>{const url=new URL(req.url);if(url.pathname==="/health")return Response.json({status:"ok",git_sha:${JSON.stringify(healthSha)},handoff:{protocol:"quiesce-v1",pid:process.pid}});db.query("INSERT INTO calls VALUES(?,?)").run(Number(process.env.CCFLARE_MANAGED_GENERATION),url.pathname);if(url.pathname==="/v1/slow")return new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode("first"));const timer=setInterval(()=>{if(existsSync(process.env.FIXTURE_STREAM_RELEASE)){clearInterval(timer);c.enqueue(new TextEncoder().encode("last"));c.close();}},10);}}));return new Response(${JSON.stringify(sha)});})});
  process.on("SIGUSR2",()=>{${onQuiesce}});
  process.on("SIGTERM",()=>{server.stop(true);db.close();if(!quiesced){closeSync(owner);unlinkSync(lock);}appendFileSync(process.env.FIXTURE_EVENTS,"close:"+process.pid+"\\n");process.exit(0);});`,
 			);
@@ -200,6 +204,63 @@ test.each([
 		);
 		expect(client.status).toBe(0);
 		await until(() => logs.includes("backend handoff mode=overlap"));
+		const fixtureEvents = () => readFileSync(events, "utf8").split("\n");
+
+		if (mode === "rollback") {
+			// The candidate fails verification after the old backend quiesced: the
+			// previous binary restarts beside it, and the old stream still finishes.
+			const rolled = await until(
+				() => intent().phase === "rolled_back" && intent(),
+			);
+			expect(rolled.backendPort).toBe(upstreamPort);
+			expect(
+				await (await fetch(base + "/v1/new", { method: "POST", body: "{}" })).text(),
+			).toBe(oldSource);
+			const restored = await until(() => {
+				const r = JSON.parse(readFileSync(join(control, "runtime.json"), "utf8"));
+				return r.generation === runtime.generation + 1 && r;
+			});
+			expect(restored.oldPid).not.toBe(runtime.oldPid);
+			expect(restored.oldPid).not.toBe(rolled.candidatePid);
+			expect(restored.retiring).toEqual({
+				pid: runtime.oldPid,
+				startTime: runtime.oldStartTime,
+			});
+			expect(processExists(runtime.oldPid, runtime.oldStartTime)).toBe(true);
+			expect(processExists(rolled.candidatePid, rolled.candidateStartTime)).toBe(
+				false,
+			);
+			expect(fileHash(pin)).toBe(runtime.pinHash);
+			const during = await lifecycle();
+			expect(during.state).toBe("serving");
+			expect(during.retiring).toEqual({
+				generation: runtime.generation,
+				dispatched: 1,
+			});
+			writeFileSync(streamRelease, "release\n");
+			expect(await oldBody).toBe("firstlast");
+			await until(() => logs.includes("retiring backend reaped"));
+			expect(processExists(runtime.oldPid, runtime.oldStartTime)).toBe(false);
+			expect(fixtureEvents()).toEqual([
+				`open:${runtime.oldPid}`,
+				`quiesce:${runtime.oldPid}`,
+				`open:${rolled.candidatePid}`,
+				`close:${rolled.candidatePid}`,
+				`open:${restored.oldPid}`,
+				`close:${runtime.oldPid}`,
+				"",
+			]);
+			const after = await (await fetch(base + "/_guard/health")).json();
+			expect(after.lifecycle.retiring).toBeNull();
+			expect(after.lifecycle.lastRetireOutcome).toEqual({
+				generation: runtime.generation,
+				outcome: "natural",
+			});
+			expect(after.runtime.process.guardPid).toBe(guardPid);
+			expect(after.backendSourceSha).toBe(oldSource);
+			expect(logs).not.toContain("restarting stack");
+			return;
+		}
 
 		if (mode === "port_stuck") {
 			// The old backend kept its listener: the runner drains it like a
@@ -235,7 +296,6 @@ test.each([
 			await (await fetch(base + "/v1/new", { method: "POST", body: "{}" })).text(),
 		).toBe(newSource);
 		const servedNewWorkMs = performance.now() - attachedAt;
-		const fixtureEvents = () => readFileSync(events, "utf8").split("\n");
 
 		if (mode === "port_stuck") {
 			expect(fixtureEvents()).toEqual([
