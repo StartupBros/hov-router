@@ -75,9 +75,11 @@ Release ID **423116405** and tag `refs/tags/v3.7.0` identify source commit
 For a manifest audit, download `release-manifest.json` from the v3.7.0 release,
 check its digest above, then run the same verify command with `binary` set to that
 local manifest and `digest` set to its SHA-256. The signed manifest names repository
-`StartupBros/hov-router`. Its distribution token stays
+`StartupBros/hov-router`. Its distribution token is
 `v1:startupbros-wstack-router-binary`, an operational name that predates HoV Router,
-with `actionable: false` and `updateChannel: null`.
+with `actionable: false` and `updateChannel: null`. Releases 3.6.2 through 3.7.1
+carry that token; later releases carry `v1:startupbros-hov-router-binary` with the
+same fields. Rebuilding one of the earlier releases reproduces its original token.
 
 ### Verify the historical 3.6.2 release
 
@@ -366,8 +368,9 @@ requirements are satisfied. Unattended release-PR merging is outside this increm
 ## Containment
 
 The inherited npm release, multi-architecture release and both SignPath workflows
-exclude both `StartupBros/wstack-router` and `StartupBros/hov-router`, plus
-repository ID `1278801682`, at the job level. Their triggers and other
+exclude `StartupBros/hov-router`, its former name `StartupBros/wstack-router`
+(another repository could claim that name), and repository ID `1278801682`, at the
+job level. Their triggers and other
 repositories' behavior are unchanged. Upstream's Docker publishing workflow is
 removed: this fork publishes no container image, and the [Docker guide](docker.md)
 builds one from source.

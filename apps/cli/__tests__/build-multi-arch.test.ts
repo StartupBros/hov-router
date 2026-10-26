@@ -105,17 +105,13 @@ function releaseFixtureDefines() {
 
 describe("Router build provenance", () => {
 	for (const [context, token, mode] of [
-		["wstack-router-binary", "v1:startupbros-wstack-router-binary", "binary"],
-		[
-			"wstack-router-package",
-			"v1:startupbros-wstack-router-package",
-			"package",
-		],
+		["hov-router-binary", "v1:startupbros-hov-router-binary", "binary"],
+		["hov-router-package", "v1:startupbros-hov-router-package", "package"],
 	] as const) {
 		it(`requires exact current or legacy origin clean tagged evidence for ${context}`, () => {
 			const probe =
 				(
-					origin = "https://github.com/StartupBros/wstack-router",
+					origin = "https://github.com/StartupBros/hov-router",
 					status: string | null = "",
 					head = sha,
 					tag: string | null = sha,
@@ -125,6 +121,7 @@ describe("Router build provenance", () => {
 					if (args[0] === "status") return status;
 					return args[1] === "HEAD" ? head : tag;
 				};
+			// Clones made before each repository rename keep their old origin URL.
 			for (const origin of [
 				"https://github.com/StartupBros-com/better-ccflare",
 				"https://github.com/StartupBros-com/better-ccflare.git",
@@ -186,6 +183,9 @@ describe("Router build provenance", () => {
 				` ${context}`,
 				context.toUpperCase(),
 				"unknown",
+				// Retired contexts: new builds never embed the wstack-era tokens.
+				"wstack-router-binary",
+				"wstack-router-package",
 			])
 				expect(
 					readTombiiTaggedBuildEvidence("1.2.3", invalidContext, probe()),
@@ -227,7 +227,7 @@ describe("Router build provenance", () => {
 				expect(embedded.provenance).toEqual(
 					expectedManifest(
 						{
-							repository: "StartupBros/wstack-router",
+							repository: "StartupBros/hov-router",
 							version: "1.2.3",
 							ref: "refs/tags/v1.2.3",
 							sha,

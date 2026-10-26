@@ -117,6 +117,23 @@ export interface DistributionIdentity {
 }
 
 const DISTRIBUTION_CATALOGUE = Object.freeze({
+	"v1:startupbros-hov-router-binary": {
+		schemaVersion: "v1",
+		token: "v1:startupbros-hov-router-binary",
+		producer: "startupbros",
+		artifactMode: "binary",
+		updateChannel: null,
+		actionable: false,
+	},
+	"v1:startupbros-hov-router-package": {
+		schemaVersion: "v1",
+		token: "v1:startupbros-hov-router-package",
+		producer: "startupbros",
+		artifactMode: "package",
+		updateChannel: null,
+		actionable: false,
+	},
+	// Embedded in published v3.6.2 through v3.7.1; keep recognizing them.
 	"v1:startupbros-wstack-router-binary": {
 		schemaVersion: "v1",
 		token: "v1:startupbros-wstack-router-binary",

@@ -36,7 +36,9 @@ for (const module of ["router-release.ts", "router-release-assets.ts"]) {
 	});
 }
 
-const repository = "StartupBros/wstack-router";
+const repository = "StartupBros/hov-router";
+// GitHub reports the current name for this ID; the former name is never an authority.
+const formerRepository = "StartupBros/wstack-router";
 const repositoryId = 1278801682;
 const metadata = (full_name: string = repository) => ({
 	id: repositoryId,
@@ -164,7 +166,7 @@ test("tag run identity binds actual GitHub ref and SHA, not checkout", () => {
 			assertArtifactEvent(good, { ...identity, releaseId }),
 		).toThrow();
 });
-test("event fixtures admit both exact names and reject missing IDs and mixed repository contexts", () => {
+test("event fixtures admit the exact name and reject the former name, missing IDs and mixed repository contexts", () => {
 	for (const repository of ROUTER_REPOSITORIES) {
 		const event = {
 			repository: metadata(repository),
@@ -192,9 +194,7 @@ test("event fixtures admit both exact names and reject missing IDs and mixed rep
 		expect(() =>
 			assertArtifactEvent(artifact, { ...identity, repository }),
 		).not.toThrow();
-		const other = ROUTER_REPOSITORIES.find(
-			(name) => name !== repository,
-		) as string;
+		const other = formerRepository;
 		expect(() =>
 			assertArtifactEvent(artifact, { ...identity, repository: other }),
 		).toThrow();
@@ -291,6 +291,7 @@ test("attestation verifier binds repository, exact source, signer workflow and h
 test("attestation policy fixtures preserve historical identity and bind future builds to their actual producer", () => {
 	const historical = {
 		...identity,
+		repository: formerRepository,
 		version: "3.6.2",
 		ref: "refs/tags/v3.6.2",
 		sha: "5d7b2a888a9b61d87916332b414e46606498d896",
@@ -393,7 +394,7 @@ globalThis.fetch = async (input, init) => {
  const url = String(input);
  appendFileSync(${JSON.stringify(join(root, "api-requests"))}, url + "\\n");
  let data;
- if (url === "https://api.github.com/repos/StartupBros/wstack-router" || url === "https://api.github.com/repos/StartupBros/hov-router") return Response.json(metadata);
+ if (url === "https://api.github.com/repos/StartupBros/hov-router") return Response.json(metadata);
  if (url.startsWith("https://uploads.github.com/repos/" + current + "/releases/17/assets?")) {
    if (init.method !== "POST" || init.redirect !== "error") throw new Error("Invalid upload request");
    uploaded.add(new URL(url).searchParams.get("name"));
@@ -730,7 +731,7 @@ for (const file of [
 	"signpath-release.yml",
 	"signpath-test.yml",
 ]) {
-	test(`${file}: publisher gate fixtures deny both Router names and stable ID and preserve upstream conditions`, () => {
+	test(`${file}: publisher gate fixtures deny the Router name, its former name and stable ID and preserve upstream conditions`, () => {
 		for (const job of Object.values(workflow(file).jobs)) {
 			for (const event_name of ["workflow_dispatch", "push", "workflow_run"])
 				for (const conclusion of ["success", "failure"]) {
@@ -741,7 +742,8 @@ for (const file of [
 						event: { workflow_run: { conclusion } },
 					};
 					expect(evaluate(job.if ?? "true", context)).toBe(false);
-					for (const repository of ROUTER_REPOSITORIES)
+					// The former name stays fenced: another repository could claim it.
+					for (const repository of [...ROUTER_REPOSITORIES, formerRepository])
 						for (const repository_id of [undefined, "1", String(repositoryId)])
 							expect(
 								evaluate(job.if ?? "true", {
@@ -1048,6 +1050,7 @@ test("producer gate fixtures match shared exact names and stable ID and contain 
 						evaluate(job.if ?? "true", { ...context, repository_id }),
 					).toBe(false);
 				for (const wrong of [
+					formerRepository,
 					"fork/router",
 					"other/hov-router",
 					`${repository}-extra`,

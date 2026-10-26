@@ -18,6 +18,7 @@ import {
 	COMMAND_NAMES,
 	PRODUCT_NAME,
 } from "../../packages/core/src/product-identity";
+import { isHistoricalWstackRelease } from "../../packages/core/src/router-repository";
 
 export const artifactRoot = resolve(import.meta.dir, "../..");
 export const executableFilename = "better-ccflare-linux-amd64";
@@ -46,11 +47,7 @@ export function smokeExecutable(
 	const { version, sha } = expected;
 	// Only downloaded, independently identified historical bytes use the old display.
 	// New builds pass version/SHA alone, even while the checkout is still v3.6.2.
-	const historical =
-		expected.repository === "StartupBros/wstack-router" &&
-		version === "3.6.2" &&
-		expected.ref === "refs/tags/v3.6.2" &&
-		sha === "5d7b2a888a9b61d87916332b414e46606498d896";
+	const historical = isHistoricalWstackRelease(expected);
 	const product = historical ? "wstack Router" : PRODUCT_NAME;
 	const commands = historical
 		? (["wstack-router", "better-ccflare"] as const)
@@ -162,9 +159,7 @@ export function prepareArtifacts(
 				env: {
 					...env,
 					CCFLARE_ONLY_PLATFORMS: "bun-linux-amd64",
-					...(release
-						? { CCFLARE_BUILD_PRODUCER: "wstack-router-binary" }
-						: {}),
+					...(release ? { CCFLARE_BUILD_PRODUCER: "hov-router-binary" } : {}),
 				},
 				stdio: "inherit",
 				timeout: 600_000,

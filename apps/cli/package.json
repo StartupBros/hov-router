@@ -13,8 +13,7 @@
 	},
 	"bin": {
 		"hov-router": "dist/better-ccflare",
-		"better-ccflare": "dist/better-ccflare",
-		"wstack-router": "dist/better-ccflare"
+		"better-ccflare": "dist/better-ccflare"
 	},
 	"type": "module",
 	"scripts": {

@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { COMMAND_NAMES } from "../../../packages/core/src/product-identity";
+import { releaseBuildDefines } from "../build-provenance";
 import {
 	expectedManifest,
 	validateReleaseSource,
@@ -22,7 +23,7 @@ import {
 } from "../prepare-router-release";
 
 const expected = {
-	repository: "StartupBros/wstack-router",
+	repository: "StartupBros/hov-router",
 	version: "1.2.3",
 	ref: "refs/tags/v1.2.3",
 	sha: "a".repeat(40),
@@ -32,6 +33,19 @@ const bunPin = readFileSync(
 	resolve(import.meta.dir, "../../../.bun-version"),
 	"utf8",
 ).trim();
+// Published before the rename, these releases embed the wstack-era tag.
+const wstackTokenVersions = ["3.6.2", "3.7.0", "3.7.1"];
+const historical = {
+	repository: "StartupBros/wstack-router",
+	version: "3.6.2",
+	ref: "refs/tags/v3.6.2",
+	sha: "5d7b2a888a9b61d87916332b414e46606498d896",
+};
+function tokenFor(version: string) {
+	return wstackTokenVersions.includes(version)
+		? "v1:startupbros-wstack-router-binary"
+		: "v1:startupbros-hov-router-binary";
+}
 // Independent schema example: never construct verifier input with the producer.
 function schemaExample(
 	sha: string,
@@ -49,9 +63,9 @@ function schemaExample(
 		target: "bun-linux-amd64",
 		executable: { filename: "better-ccflare-linux-amd64", size, sha256 },
 		provenance: {
-			raw: "v1:startupbros-wstack-router-binary",
+			raw: tokenFor(identity.version),
 			schemaVersion: "v1",
-			identity: "v1:startupbros-wstack-router-binary",
+			identity: tokenFor(identity.version),
 			producer: "startupbros",
 			artifactMode: "binary",
 			updateChannel: null,
@@ -84,7 +98,7 @@ function fixture(body?: string, identity = expected, product = "HoV Router") {
 }
 function probe(args: string[]) {
 	if (args[0] === "config")
-		return "https://github.com/StartupBros/wstack-router.git";
+		return "https://github.com/StartupBros/hov-router.git";
 	if (args[0] === "status") return "";
 	return expected.sha;
 }
@@ -178,7 +192,7 @@ ${mode === "config" ? 'mkdirSync(process.env.HOME + "/.config");' : ""}
 		`${guard}
 import { appendFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-if (process.env.CCFLARE_BUILD_PRODUCER !== "wstack-router-binary" || process.env.CCFLARE_ONLY_PLATFORMS !== "bun-linux-amd64") throw new Error("wrong explicit release producer/platform");
+if (process.env.CCFLARE_BUILD_PRODUCER !== "hov-router-binary" || process.env.CCFLARE_ONLY_PLATFORMS !== "bun-linux-amd64") throw new Error("wrong explicit release producer/platform");
 appendFileSync(${JSON.stringify(calls)}, "cli\\n");
 const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const body = '#!/bin/sh\\ntest -z "${shellGuard}" || exit 94\\nprintf "%s %s\\\\n" "' + '$' + '{0##*/}" "$1" >> ${calls}\\ncase "$1" in\\n--help) printf "HoV Router\\\\n";;\\n--version) printf "HoV Router v1.2.3\\\\n";;\\n--git-sha) printf "' + ${mode === "smoke" ? '"wrong-sha"' : "sha"} + '\\\\n";;\\nesac\\n';
@@ -193,7 +207,7 @@ ${mode === "dirty" ? 'appendFileSync("package.json", "\\n");' : ""}
 		"remote",
 		"add",
 		"origin",
-		"https://github.com/StartupBros/wstack-router.git",
+		"https://github.com/StartupBros/hov-router.git",
 	]);
 	git(["add", "--all"]);
 	git(["commit", "-m", "chore: synthetic release fixture"]);
@@ -381,7 +395,7 @@ describe("native tagged release rehearsal", () => {
 				"remote",
 				"add",
 				"origin",
-				"https://github.com/StartupBros/wstack-router.git",
+				"https://github.com/StartupBros/hov-router.git",
 			]);
 			run("git", ["add", "--all"]);
 			run("git", ["commit", "-m", "chore: independent native release fixture"]);
@@ -451,11 +465,8 @@ describe("native tagged release rehearsal", () => {
 });
 
 describe("release source evidence", () => {
-	it("binds each producing name to its exact offline origin forms", () => {
-		for (const repository of [
-			"StartupBros/wstack-router",
-			"StartupBros/hov-router",
-		]) {
+	it("binds the producing name to its exact offline origin forms", () => {
+		for (const repository of ["StartupBros/hov-router"]) {
 			const identity = { ...expected, repository };
 			for (const origin of [
 				`https://github.com/${repository}`,
@@ -478,7 +489,7 @@ describe("release source evidence", () => {
 				`https://github.com/${repository}/extra`,
 				`https://github.com/${repository} `,
 				"https://github.com/StartupBros-com/better-ccflare",
-				`https://github.com/${repository === expected.repository ? "StartupBros/hov-router" : expected.repository}`,
+				"https://github.com/StartupBros/wstack-router",
 			])
 				expect(() =>
 					validateReleaseSource(
@@ -496,6 +507,91 @@ describe("release source evidence", () => {
 				schemaExample(expected.sha, 123, "d".repeat(64)).provenance,
 			);
 		}
+	});
+	it("refuses the former repository name for new releases", () => {
+		const identity = { ...expected, repository: "StartupBros/wstack-router" };
+		expect(() =>
+			validateReleaseSource(
+				identity,
+				"1.2.3",
+				bunPin,
+				"linux",
+				"x64",
+				(args) =>
+					args[0] === "config"
+						? "https://github.com/StartupBros/wstack-router.git"
+						: probe(args),
+			),
+		).toThrow(/Invalid expected release/);
+		expect(() => expectedManifest(identity, 123, "d".repeat(64))).toThrow(
+			/Invalid expected release/,
+		);
+	});
+	it("expects the wstack-era tag only for the three releases published with it", () => {
+		for (const version of ["3.7.0", "3.7.1"]) {
+			const identity = {
+				...expected,
+				version,
+				ref: `refs/tags/v${version}`,
+			};
+			expect(expectedManifest(identity, 1, "d".repeat(64)).provenance.raw).toBe(
+				"v1:startupbros-wstack-router-binary",
+			);
+		}
+		expect(expectedManifest(historical, 1, "d".repeat(64)).provenance).toEqual(
+			schemaExample(historical.sha, 1, "d".repeat(64), historical).provenance,
+		);
+		for (const version of ["1.2.3", "3.6.3", "3.7.2", "3.8.0", "4.0.0"]) {
+			const identity = {
+				...expected,
+				version,
+				ref: `refs/tags/v${version}`,
+			};
+			expect(
+				expectedManifest(identity, 1, "d".repeat(64)).provenance,
+			).toMatchObject({
+				raw: "v1:startupbros-hov-router-binary",
+				identity: "v1:startupbros-hov-router-binary",
+			});
+		}
+	});
+	it("embeds the same tag the manifest expects, so rebuilding a wstack-era release reproduces it", () => {
+		for (const version of [...wstackTokenVersions, "1.2.3", "3.7.2", "4.0.0"]) {
+			const evidence = {
+				version,
+				sourceSha: expected.sha,
+				sourceRef: `refs/tags/v${version}`,
+			};
+			const defines = releaseBuildDefines(evidence, "hov-router-binary");
+			const name = "__CCFLARE_BUILD_PROVENANCE_DISTRIBUTION__=";
+			expect(
+				defines.find((define) => define.startsWith(name))?.slice(name.length),
+			).toBe(JSON.stringify(tokenFor(version)));
+			expect(
+				expectedManifest(
+					{ ...expected, version, ref: evidence.sourceRef },
+					1,
+					"d".repeat(64),
+				).provenance.raw,
+			).toBe(tokenFor(version));
+		}
+	});
+	it("verifies, but never prepares, the release published under the former name", () => {
+		expect(() =>
+			validateReleaseSource(
+				historical,
+				historical.version,
+				bunPin,
+				"linux",
+				"x64",
+				(args) =>
+					args[0] === "config"
+						? "https://github.com/StartupBros/wstack-router.git"
+						: args[0] === "status"
+							? ""
+							: historical.sha,
+			),
+		).toThrow(/current repository name/);
 	});
 	it("uses the checkout Bun pin and the literal manifest schema", () => {
 		expect(expectedManifest(expected, 123, "d".repeat(64))).toEqual(
@@ -572,38 +668,46 @@ describe("release source evidence", () => {
 });
 describe("downloaded release verification (not publisher authentication)", () => {
 	it("preserves old output only for the independently pinned historical v3.6.2 identity (fixture)", () => {
-		const historical = {
-			repository: "StartupBros/wstack-router",
-			version: "3.6.2",
-			ref: "refs/tags/v3.6.2",
-			sha: "5d7b2a888a9b61d87916332b414e46606498d896",
-		};
 		const old = fixture(undefined, historical, "wstack Router");
 		expect(verifyReleaseDirectory(old.dir, historical)).toEqual(old.manifest);
 		const renamed = fixture(undefined, historical);
 		expect(() => verifyReleaseDirectory(renamed.dir, historical)).toThrow(
 			/Unexpected/,
 		);
+		// The former name is accepted for that exact release only.
 		for (const identity of [
 			{ ...historical, sha: expected.sha },
-			{ ...historical, repository: "StartupBros/hov-router" },
 			{ ...historical, version: "3.6.3", ref: "refs/tags/v3.6.3" },
 		]) {
-			const current = fixture(undefined, identity);
-			expect(verifyReleaseDirectory(current.dir, identity)).toEqual(
-				current.manifest,
+			const { dir } = fixture(undefined, identity);
+			expect(() => verifyReleaseDirectory(dir, identity)).toThrow(
+				/Invalid expected release/,
 			);
-			const stale = fixture(undefined, identity, "wstack Router");
-			expect(() => verifyReleaseDirectory(stale.dir, identity)).toThrow(
-				/Unexpected/,
+		}
+		const identity = { ...historical, repository: "StartupBros/hov-router" };
+		const current = fixture(undefined, identity);
+		expect(verifyReleaseDirectory(current.dir, identity)).toEqual(
+			current.manifest,
+		);
+		const stale = fixture(undefined, identity, "wstack Router");
+		expect(() => verifyReleaseDirectory(stale.dir, identity)).toThrow(
+			/Unexpected/,
+		);
+	});
+	it("verifies the 3.7.x releases published with the wstack-era tag (fixture)", () => {
+		for (const version of ["3.7.0", "3.7.1"]) {
+			const identity = { ...expected, version, ref: `refs/tags/v${version}` };
+			const published = fixture(undefined, identity);
+			expect(published.manifest.provenance.raw).toBe(
+				"v1:startupbros-wstack-router-binary",
+			);
+			expect(verifyReleaseDirectory(published.dir, identity)).toEqual(
+				published.manifest,
 			);
 		}
 	});
-	it("requires current branding under both producing names for future releases (fixture)", () => {
-		for (const repository of [
-			"StartupBros/wstack-router",
-			"StartupBros/hov-router",
-		]) {
+	it("requires current branding for future releases (fixture)", () => {
+		for (const repository of ["StartupBros/hov-router"]) {
 			const identity = { ...expected, repository };
 			const current = fixture(undefined, identity);
 			expect(verifyReleaseDirectory(current.dir, identity)).toEqual(

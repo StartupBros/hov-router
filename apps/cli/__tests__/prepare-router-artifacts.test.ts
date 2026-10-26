@@ -28,13 +28,11 @@ function fixture() {
 	fixtures.push(dir);
 	return dir;
 }
-function copyProductIdentity(repo: string) {
+function copyCoreIdentity(repo: string) {
 	const core = join(repo, "packages/core/src");
 	mkdirSync(core, { recursive: true });
-	copyFileSync(
-		join(root, "packages/core/src/product-identity.ts"),
-		join(core, "product-identity.ts"),
-	);
+	for (const name of ["product-identity.ts", "router-repository.ts"])
+		copyFileSync(join(root, "packages/core/src", name), join(core, name));
 }
 afterEach(() => {
 	for (const dir of fixtures.splice(0))
@@ -146,7 +144,7 @@ describe("local Linux artifact preparation", () => {
 			mkdirSync(join(cli, "dist"), { recursive: true });
 			mkdirSync(dashboard, { recursive: true });
 			copyFileSync(entrypoint, join(cli, "prepare-router-artifacts.ts"));
-			copyProductIdentity(home);
+			copyCoreIdentity(home);
 			copyFileSync(
 				join(root, "apps/cli/router-artifacts.ts"),
 				join(cli, "router-artifacts.ts"),
@@ -194,7 +192,7 @@ describe("local Linux artifact preparation", () => {
 				mkdirSync(join(cli, "dist"), { recursive: true });
 				mkdirSync(dashboard, { recursive: true });
 				copyFileSync(entrypoint, join(cli, "prepare-router-artifacts.ts"));
-				copyProductIdentity(home);
+				copyCoreIdentity(home);
 				copyFileSync(
 					join(root, "apps/cli/router-artifacts.ts"),
 					join(cli, "router-artifacts.ts"),
@@ -328,7 +326,7 @@ writeFileSync("dist/better-ccflare-linux-amd64", "#!/bin/sh\\nprintf 'invalid sm
 			mkdirSync(join(cli, "dist"), { recursive: true });
 			mkdirSync(dashboard, { recursive: true });
 			copyFileSync(entrypoint, join(cli, "prepare-router-artifacts.ts"));
-			copyProductIdentity(home);
+			copyCoreIdentity(home);
 			copyFileSync(
 				join(root, "apps/cli/router-artifacts.ts"),
 				join(cli, "router-artifacts.ts"),
@@ -401,7 +399,7 @@ writeFileSync("dist/better-ccflare-linux-amd64", "#!/bin/sh\\nprintf 'invalid sm
 			mkdirSync(join(cli, "dist"), { recursive: true });
 			mkdirSync(dashboard, { recursive: true });
 			copyFileSync(entrypoint, join(cli, "prepare-router-artifacts.ts"));
-			copyProductIdentity(home);
+			copyCoreIdentity(home);
 			copyFileSync(
 				join(root, "apps/cli/router-artifacts.ts"),
 				join(cli, "router-artifacts.ts"),

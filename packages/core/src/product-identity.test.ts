@@ -15,14 +15,15 @@ describe("public product identity", () => {
 	it("adds compatible executable aliases without renaming distribution artifacts", () => {
 		expect(cliPackage.bin).toEqual({
 			"hov-router": "dist/better-ccflare",
-			"wstack-router": "dist/better-ccflare",
 			"better-ccflare": "dist/better-ccflare",
 		});
 		expect(rootPackage.scripts).toMatchObject({
 			"hov-router": "bun run build && bun run cli",
-			"wstack-router": "bun run build && bun run cli",
 			"better-ccflare": "bun run build && bun run cli",
 		});
+		// The interim wstack-router name is no longer installed; existing links
+		// still work because the binary ignores the name it was started under.
+		expect(rootPackage.scripts).not.toHaveProperty("wstack-router");
 	});
 
 	it("points public metadata to the HoV Router home", () => {
@@ -45,11 +46,7 @@ describe("public product identity", () => {
 		expect(identity.LEGACY_COMMAND_NAME).toBe("better-ccflare");
 	});
 
-	it("lists the preferred command and both compatibility aliases exactly once", () => {
-		expect(identity.COMMAND_NAMES).toEqual([
-			"hov-router",
-			"wstack-router",
-			"better-ccflare",
-		]);
+	it("lists the preferred command and the compatibility alias exactly once", () => {
+		expect(identity.COMMAND_NAMES).toEqual(["hov-router", "better-ccflare"]);
 	});
 });

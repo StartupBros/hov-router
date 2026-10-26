@@ -23,19 +23,19 @@ import {
 
 const root = new URL("../../", import.meta.url);
 const sha = "a".repeat(40);
-const repositoryMetadata = (full_name = "StartupBros/wstack-router") => ({
+const repositoryMetadata = (full_name = "StartupBros/hov-router") => ({
 	id: 1278801682,
 	full_name,
 	name: full_name.split("/")[1],
 	owner: { login: "StartupBros" },
 });
 const expected = {
-	repository: "StartupBros/wstack-router",
+	repository: "StartupBros/hov-router",
 	sha,
 	version: "3.5.79",
 	ref: "refs/tags/v3.5.79",
 };
-async function draftFixture(repo = "wstack-router") {
+async function draftFixture(repo = "hov-router") {
 	const { scm, files } = fixture("fix: repair routing", undefined, repo);
 	const [pr] = await (await createRouterManifest(scm)).buildPullRequests();
 	for (const update of pr.updates)
@@ -71,7 +71,7 @@ async function draftFixture(repo = "wstack-router") {
 			tagName: release.tag.toString(),
 			sha: release.sha,
 			draft: true,
-			url: "https://github.com/StartupBros/wstack-router/releases/17",
+			url: "https://github.com/StartupBros/hov-router/releases/17",
 		};
 		return draft;
 	};
@@ -105,7 +105,7 @@ test("real engine HTTP serialization creates explicit tag before draft (transpor
 	const requests: { url: string; body: Record<string, unknown> }[] = [];
 	const github = await GitHub.create({
 		owner: "StartupBros",
-		repo: "wstack-router",
+		repo: "hov-router",
 		defaultBranch: "main",
 		token: "fixture-not-a-credential",
 		fetch: async (url: string, init: RequestInit) => {
@@ -136,8 +136,8 @@ test("real engine HTTP serialization creates explicit tag before draft (transpor
 		prerelease: false,
 	});
 	expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
-		"/repos/StartupBros/wstack-router/git/refs",
-		"/repos/StartupBros/wstack-router/releases",
+		"/repos/StartupBros/hov-router/git/refs",
+		"/repos/StartupBros/hov-router/releases",
 	]);
 	expect(requests[0].body).toEqual({ ref: "refs/tags/v3.5.79", sha });
 	expect(requests[1].body).toMatchObject({
@@ -506,7 +506,7 @@ test("transport fixture: githubTransport validates compare direction and exact f
 			{ repository: { ...repositoryMetadata(), id: 1 } },
 			{ repository: { ...repositoryMetadata(), id: undefined } },
 			{ head_repository: { ...repositoryMetadata(), id: 1 } },
-			{ head_repository: repositoryMetadata("StartupBros/hov-router") },
+			{ head_repository: repositoryMetadata("StartupBros/wstack-router") },
 		]) {
 			runs = [{ ...validRun, ...patch }];
 			expect(await transport.checkFoundation(sha)).toBe(false);
@@ -607,7 +607,7 @@ test("transport fixture: metadata authority precedes SCM creation and stale alia
 		return Response.json(metadata);
 	}) as typeof fetch;
 	try {
-		for (const repository of [expected.repository, "StartupBros/hov-router"]) {
+		for (const repository of [expected.repository]) {
 			for (const invalid of [
 				{ ...repositoryMetadata(repository), id: undefined },
 				{ ...repositoryMetadata(repository), id: 1 },
@@ -637,9 +637,10 @@ test("transport fixture: metadata authority precedes SCM creation and stale alia
 			),
 		).toBe(true);
 		requests.length = 0;
-		await expect(
-			githubTransport("fixture-not-a-credential", "other/hov-router"),
-		).rejects.toThrow();
+		for (const repository of ["other/hov-router", "StartupBros/wstack-router"])
+			await expect(
+				githubTransport("fixture-not-a-credential", repository),
+			).rejects.toThrow();
 		expect(requests).toEqual([]);
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -648,7 +649,7 @@ test("transport fixture: metadata authority precedes SCM creation and stale alia
 });
 
 test("transport fixtures reject reused names, changed authority and mixed SCM identities before writes", async () => {
-	for (const repository of [expected.repository, "StartupBros/hov-router"]) {
+	for (const repository of [expected.repository]) {
 		for (const failure of [
 			"missing-id",
 			"wrong-id",
@@ -684,8 +685,8 @@ test("transport fixtures reject reused names, changed authority and mixed SCM id
 	}
 });
 
-test("transport fixtures reconcile draft-only releases under either exact current name", async () => {
-	for (const repository of [expected.repository, "StartupBros/hov-router"]) {
+test("transport fixtures reconcile draft-only releases under the exact current name", async () => {
+	for (const repository of [expected.repository]) {
 		const f = await draftFixture(repository.split("/")[1]);
 		f.transport.getRepository = async () => repositoryMetadata(repository);
 		expect(
@@ -728,7 +729,7 @@ test.each([
 	await expect(reconcileDraft(f.transport, input)).rejects.toThrow();
 	expect(f.writes).toEqual([]);
 });
-function fixture(message: string, baseline = "3.5.78", repo = "wstack-router") {
+function fixture(message: string, baseline = "3.5.78", repo = "hov-router") {
 	const files: Record<string, string> = Object.fromEntries(
 		[
 			"package.json",

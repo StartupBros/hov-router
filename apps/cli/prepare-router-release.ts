@@ -14,10 +14,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
+	isHistoricalWstackRelease,
 	isRouterRepository,
 	routerRepositoryOrigins,
 } from "../../packages/core/src/router-repository";
-import { readTombiiTaggedBuildEvidence } from "./build-provenance";
+import {
+	readTombiiTaggedBuildEvidence,
+	releaseDistributionToken,
+} from "./build-provenance";
 import {
 	artifactRoot,
 	digestFile,
@@ -42,7 +46,10 @@ const inventory = [
 ].sort();
 function validateIdentity(expected: ReleaseIdentity): void {
 	if (
-		!isRouterRepository(expected.repository) ||
+		!(
+			isRouterRepository(expected.repository) ||
+			isHistoricalWstackRelease(expected)
+		) ||
 		!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(expected.version) ||
 		expected.ref !== `refs/tags/v${expected.version}` ||
 		!/^[a-f0-9]{40}$/.test(expected.sha)
@@ -55,6 +62,7 @@ export function expectedManifest(
 	digest: string,
 ) {
 	validateIdentity(expected);
+	const token = releaseDistributionToken("hov-router-binary", expected.version);
 	return {
 		schema: 1,
 		repository: expected.repository,
@@ -65,9 +73,9 @@ export function expectedManifest(
 		target,
 		executable: { filename: executableFilename, size, sha256: digest },
 		provenance: {
-			raw: "v1:startupbros-wstack-router-binary",
+			raw: token,
 			schemaVersion: "v1",
-			identity: "v1:startupbros-wstack-router-binary",
+			identity: token,
 			producer: "startupbros",
 			artifactMode: "binary",
 			updateChannel: null,
@@ -89,6 +97,9 @@ export function validateReleaseSource(
 	git: (args: string[]) => string | null,
 ): void {
 	validateIdentity(expected);
+	// The former name identifies published bytes to verify, never a build.
+	if (!isRouterRepository(expected.repository))
+		throw new Error("Release preparation requires the current repository name");
 	if (version !== expected.version)
 		throw new Error("Release package version mismatch");
 	if (bun !== bunPin || platform !== "linux" || arch !== "x64")
@@ -98,7 +109,7 @@ export function validateReleaseSource(
 		throw new Error("Release origin does not match expected repository");
 	const evidence = readTombiiTaggedBuildEvidence(
 		version,
-		"wstack-router-binary",
+		"hov-router-binary",
 		git,
 	);
 	if (

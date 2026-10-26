@@ -64,7 +64,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 
 [Release 3.7.0](https://github.com/StartupBros/hov-router/releases/tag/v3.7.0) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
 
-The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 3.7.0 prints `HoV Router v3.7.0` through all three command names. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed 3.6.2 with this guide, install 3.7.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
+The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 3.7.0 prints `HoV Router v3.7.0` through every command name it is installed under. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed 3.6.2 with this guide, install 3.7.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
 
 Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, `chmod`). No GitHub CLI, Node.js, or Bun is needed.
 
@@ -104,7 +104,7 @@ Continue at [Start the local server](#start-the-local-server), or add the option
 
 #### Optional: add commands to PATH
 
-After verification succeeds, create `hov-router`, `wstack-router`, and `better-ccflare` in `$HOME/.local/bin`, all pointing to the same verified binary. This checks all three names before creating any and refuses existing files, directories, or symlinks, including broken ones.
+After verification succeeds, create `hov-router` and `better-ccflare` in `$HOME/.local/bin`, both pointing to the same verified binary. This checks both names before creating either and refuses existing files, directories, or symlinks, including broken ones.
 
 <!-- router-release-path -->
 ```bash
@@ -114,24 +114,24 @@ After verification succeeds, create `hov-router`, `wstack-router`, and `better-c
   bin_dir="$HOME/.local/bin"
   test -x "$binary"
   mkdir -p "$bin_dir"
-  for name in hov-router wstack-router better-ccflare; do
+  for name in hov-router better-ccflare; do
     if [ -e "$bin_dir/$name" ] || [ -L "$bin_dir/$name" ]; then
       printf 'Refusing existing command: %s\n' "$bin_dir/$name" >&2
       exit 1
     fi
   done
-  for name in hov-router wstack-router better-ccflare; do
+  for name in hov-router better-ccflare; do
     ln -sT "$binary" "$bin_dir/$name"
   done
 )
 ```
 <!-- /router-release-path -->
 
-After success, use `export PATH="$HOME/.local/bin:$PATH"` in each terminal where you want the short commands. Check `command -v hov-router`, `command -v wstack-router`, and `command -v better-ccflare`; all three should resolve there. To keep this PATH setting, add it to your shell configuration yourself. Nothing here edits shell profiles or uses `sudo`. Existing commands elsewhere remain untouched; PATH order determines which runs. If alias creation fails, inspect the error and any link already created rather than forcing replacement.
+After success, use `export PATH="$HOME/.local/bin:$PATH"` in each terminal where you want the short commands. Check `command -v hov-router` and `command -v better-ccflare`; both should resolve there. Guides for 3.6.2 through 3.7.1 also created `wstack-router`; this block leaves that name alone, and the upgrade block below keeps an existing one pointed at the new release. To keep this PATH setting, add it to your shell configuration yourself. Nothing here edits shell profiles or uses `sudo`. Existing commands elsewhere remain untouched; PATH order determines which runs. If alias creation fails, inspect the error and any link already created rather than forcing replacement.
 
 #### Upgrade an earlier binary install
 
-Each release installs into its own version directory, so step 1 leaves an earlier release in place for rollback. If you created PATH aliases for an earlier release, the PATH block above refuses them; run this block instead, after step 1 succeeds. It points `hov-router`, `wstack-router`, and `better-ccflare` at the new binary. It accepts only a missing alias or a symlink to a binary this guide installed (3.6.2 under `wstack-router`, or a release under `hov-router`). It checks all three names before changing any, and replaces each symlink with a single rename.
+Each release installs into its own version directory, so step 1 leaves an earlier release in place for rollback. If you created PATH aliases for an earlier release, the PATH block above refuses them; run this block instead, after step 1 succeeds. It points `hov-router` and `better-ccflare` at the new binary, plus `wstack-router` if an earlier guide created it. It accepts only a missing alias or a symlink to a binary this guide installed (3.6.2 under `wstack-router`, or a release under `hov-router`). It checks every name before changing any, and replaces each symlink with a single rename.
 
 <!-- router-release-upgrade -->
 ```bash
@@ -141,7 +141,11 @@ Each release installs into its own version directory, so step 1 leaves an earlie
   bin_dir="$HOME/.local/bin"
   test -x "$binary"
   mkdir -p "$bin_dir"
-  for name in hov-router wstack-router better-ccflare; do
+  names="hov-router better-ccflare"
+  if [ -e "$bin_dir/wstack-router" ] || [ -L "$bin_dir/wstack-router" ]; then
+    names="$names wstack-router"
+  fi
+  for name in $names; do
     link="$bin_dir/$name"
     if [ -L "$link" ]; then
       case "$(readlink "$link")" in
@@ -157,7 +161,7 @@ Each release installs into its own version directory, so step 1 leaves an earlie
       exit 1
     fi
   done
-  for name in hov-router wstack-router better-ccflare; do
+  for name in $names; do
     ln -sT "$binary" "$bin_dir/.$name.new"
     mv -T "$bin_dir/.$name.new" "$bin_dir/$name"
   done
@@ -178,29 +182,28 @@ bun install --frozen-lockfile
 bun run build
 ```
 
-The build produces `apps/cli/dist/better-ccflare`. It does not install a command on your PATH. From the checkout root, copy that same artifact under all three names into a fresh user-owned directory. Each name runs the same version with the same provenance and configuration. The clone directory, build filename, `better-ccflare` configuration/database paths, and environment variables retain their existing names. This deliberately leaves any previous installation untouched.
+The build produces `apps/cli/dist/better-ccflare`. It does not install a command on your PATH. From the checkout root, copy that same artifact under both names into a fresh user-owned directory. Each name runs the same version with the same provenance and configuration. The clone directory, build filename, `better-ccflare` configuration/database paths, and environment variables retain their existing names. This deliberately leaves any previous installation untouched.
 
 <!-- source-install-local -->
 ```bash
 mkdir -p "$HOME/.local"
 install_dir=$(mktemp -d "$HOME/.local/hov-router.XXXXXX")
-for name in hov-router wstack-router better-ccflare; do
+for name in hov-router better-ccflare; do
   install -m 755 apps/cli/dist/better-ccflare "$install_dir/$name"
 done
 export PATH="$install_dir:$PATH"
 hov-router --version
-wstack-router --version
 better-ccflare --version
 hov-router --help
 printf 'Installed commands in %s\n' "$install_dir"
 ```
 <!-- /source-install-local -->
 
-The PATH change applies to this shell only. To keep it, add the printed directory (its literal path, not `$install_dir`) to your shell's PATH configuration, ahead of older installations. Use `command -v hov-router`, `command -v wstack-router`, and `command -v better-ccflare` to confirm which commands will run. Keep the prior executable and its location for rollback; do not overwrite a global install or change an existing service as part of this quickstart.
+The PATH change applies to this shell only. To keep it, add the printed directory (its literal path, not `$install_dir`) to your shell's PATH configuration, ahead of older installations. Use `command -v hov-router` and `command -v better-ccflare` to confirm which commands will run. Keep the prior executable and its location for rollback; do not overwrite a global install or change an existing service as part of this quickstart.
 
 ### Start the local server
 
-The commands below assume you completed the optional [PATH setup](#optional-add-commands-to-path) or the source install. If you skipped PATH setup, replace `hov-router` (or either compatibility command) in these examples with `"$HOME/.local/lib/hov-router/3.7.0/hov-router"`.
+The commands below assume you completed the optional [PATH setup](#optional-add-commands-to-path) or the source install. If you skipped PATH setup, replace `hov-router` (or the `better-ccflare` compatibility command) in these examples with `"$HOME/.local/lib/hov-router/3.7.0/hov-router"`.
 
 For a new local setup, start the server and dashboard with:
 

@@ -12,12 +12,12 @@ Instructions for any agent working on **HoV Router** (`hov-router`): a load bala
 
 The product is HoV Router, but these operational names predate it and existing installs depend on them. A "consistency" rename breaks configuration, credentials, clients or deployments. Change them only in a separately approved migration.
 
-- **Commands:** `hov-router` is preferred; `wstack-router` and `better-ccflare` must keep working (`COMMAND_NAMES` in `packages/core/src/product-identity.ts`).
+- **Commands:** `hov-router` is preferred; `better-ccflare` must keep working (`COMMAND_NAMES` in `packages/core/src/product-identity.ts`). New installs no longer create `wstack-router`, but existing `wstack-router` links run the same binary and the upgrade block in `docs/reference.md` keeps them current.
 - **Storage:** config directory `~/.config/better-ccflare` (or `$XDG_CONFIG_HOME/better-ccflare`; Windows `better-ccflare` under `LOCALAPPDATA`/`APPDATA`), `better-ccflare.json`, `better-ccflare.db`.
 - **Environment variables:** `BETTER_CCFLARE_*`, `CCFLARE_*`, and the legacy `ccflare_*` fallbacks. **Headers:** `x-better-ccflare-*`.
 - **Packages and artifacts:** npm package name `better-ccflare`, internal `@better-ccflare/*` workspaces, `apps/cli/dist/better-ccflare`, release asset `better-ccflare-linux-amd64`.
 - **Ports and services:** default `8080`; production guard `:8788` → binary `:8789`; `ccflare-stack.service`.
-- **Release identity:** distribution/provenance tokens such as `v1:startupbros-wstack-router-binary`, and published v3.6.2 bytes and signer identity (historical; never rewrite).
+- **Release identity:** the `v1:startupbros-wstack-router-*` provenance tokens embedded in published v3.6.2 through v3.7.1 (later builds embed `v1:startupbros-hov-router-*`; the verifier and runtime catalogue recognize both), and published v3.6.2 bytes and signer identity (historical; never rewrite).
 - **Upstream recognition and credit:** `tombii` distribution contexts in build provenance and the version checker exist to classify upstream builds; LICENSE, `docs/acknowledgements.md`, `UPSTREAM.md` and historical citations stay.
 
 Display text uses the constants instead of hard-coded names: `PRODUCT_NAME` / `COMMAND_NAME` from `@better-ccflare/core/product-identity`. Import that subpath directly, not the core barrel, which the dashboard cannot load. Reference: [docs/hov-router-migration.md](docs/hov-router-migration.md#what-stays-the-same).

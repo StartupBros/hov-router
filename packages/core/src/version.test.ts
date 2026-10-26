@@ -181,6 +181,9 @@ describe("HoV Router distribution identity", () => {
 	});
 
 	for (const [token, mode] of [
+		["v1:startupbros-hov-router-binary", "binary"],
+		["v1:startupbros-hov-router-package", "package"],
+		// Embedded in published v3.6.2 through v3.7.1.
 		["v1:startupbros-wstack-router-binary", "binary"],
 		["v1:startupbros-wstack-router-package", "package"],
 	] as const) {

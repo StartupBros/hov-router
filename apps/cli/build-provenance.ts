@@ -20,14 +20,27 @@ const STARTUPBROS_REPOSITORY_URLS = new Set([
 	"https://github.com/StartupBros-com/better-ccflare.git",
 	"git@github.com:StartupBros-com/better-ccflare.git",
 	"ssh://git@github.com/StartupBros-com/better-ccflare.git",
+	// Clones made before the 2026-10-21 rename keep this origin URL.
+	"https://github.com/StartupBros/wstack-router",
+	"https://github.com/StartupBros/wstack-router.git",
+	"git@github.com:StartupBros/wstack-router.git",
+	"ssh://git@github.com/StartupBros/wstack-router.git",
 	...ROUTER_REPOSITORIES.flatMap(routerRepositoryOrigins),
+]);
+
+// Published before the rename, these releases embed the wstack-era tokens, so a
+// rebuild of one reproduces its published provenance.
+const WSTACK_TOKEN_RELEASES: ReadonlySet<string> = new Set([
+	"3.6.2",
+	"3.7.0",
+	"3.7.1",
 ]);
 
 export type ReleaseBuildContext =
 	| "github-release-binary"
 	| "npm-package"
-	| "wstack-router-binary"
-	| "wstack-router-package";
+	| "hov-router-binary"
+	| "hov-router-package";
 
 export interface ReleaseBuildEvidence {
 	readonly version: string;
@@ -54,15 +67,17 @@ const RELEASE_CONTEXTS = {
 		updateChannel: "npm",
 		origins: TOMBI_REPOSITORY_URLS,
 	},
-	"wstack-router-binary": {
-		token: "v1:startupbros-wstack-router-binary",
+	"hov-router-binary": {
+		token: "v1:startupbros-hov-router-binary",
+		wstackToken: "v1:startupbros-wstack-router-binary",
 		producer: "startupbros",
 		artifactMode: "binary",
 		updateChannel: null,
 		origins: STARTUPBROS_REPOSITORY_URLS,
 	},
-	"wstack-router-package": {
-		token: "v1:startupbros-wstack-router-package",
+	"hov-router-package": {
+		token: "v1:startupbros-hov-router-package",
+		wstackToken: "v1:startupbros-wstack-router-package",
 		producer: "startupbros",
 		artifactMode: "package",
 		updateChannel: null,
@@ -72,6 +87,7 @@ const RELEASE_CONTEXTS = {
 	ReleaseBuildContext,
 	{
 		token: string;
+		wstackToken?: string;
 		producer: string;
 		artifactMode: string;
 		updateChannel: string | null;
@@ -89,6 +105,19 @@ export function parseReleaseBuildContext(
 
 function distributionFor(context: ReleaseBuildContext) {
 	return RELEASE_CONTEXTS[context];
+}
+
+/** The distribution token a build of this release version embeds. */
+export function releaseDistributionToken(
+	context: ReleaseBuildContext,
+	version: string,
+): string {
+	const distribution: { token: string; wstackToken?: string } =
+		distributionFor(context);
+	return distribution.wstackToken !== undefined &&
+		WSTACK_TOKEN_RELEASES.has(version)
+		? distribution.wstackToken
+		: distribution.token;
 }
 
 function validEvidence(
@@ -116,7 +145,10 @@ export function releaseBuildDefines(
 	return [
 		...define("__BETTER_CCFLARE_GIT_SHA__", evidence.sourceSha),
 		...define("__CCFLARE_BUILD_PROVENANCE_VERSION__", evidence.version),
-		...define("__CCFLARE_BUILD_PROVENANCE_DISTRIBUTION__", distribution.token),
+		...define(
+			"__CCFLARE_BUILD_PROVENANCE_DISTRIBUTION__",
+			releaseDistributionToken(context, evidence.version),
+		),
 		...define("__CCFLARE_BUILD_PROVENANCE_PRODUCER__", distribution.producer),
 		...define(
 			"__CCFLARE_BUILD_PROVENANCE_ARTIFACT_MODE__",

@@ -10,6 +10,7 @@ jobs:
   build:
     name: Build Multi-Architecture Binaries
     # Router publishes only through the draft-only HoV Router release workflows.
+    # The former name stays fenced: another repository could claim it.
     if: github.repository != 'StartupBros/wstack-router' && github.repository != 'StartupBros/hov-router' && github.repository_id != '1278801682'
     permissions:
       contents: write
