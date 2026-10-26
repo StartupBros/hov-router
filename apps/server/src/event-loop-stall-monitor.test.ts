@@ -5,6 +5,7 @@ import {
 	type EventLoopStallReport,
 	formatEventLoopStallReport,
 } from "./event-loop-stall-monitor";
+import type { HostCounters } from "./host-counters";
 
 const EMPTY_SQL: SqlWindowSummary = { count: 0, totalMs: 0, top: [] };
 
@@ -85,6 +86,7 @@ describe("EventLoopStallMonitor", () => {
 				uptimeAtStartSec: 60,
 				stalled: true,
 				sql,
+				host: null,
 			},
 		]);
 	});
@@ -167,6 +169,71 @@ describe("EventLoopStallMonitor", () => {
 			[2_000, null],
 		]);
 	});
+
+	it("reports how much the main-thread and host counters grew over the stalled tick", () => {
+		let t = 0;
+		const samples: Array<HostCounters | null> = [
+			{ threadCpuMs: 1_000, threadMajorFaults: 10, ioSomeMs: 5_000 },
+			{ threadCpuMs: 1_400, threadMajorFaults: 12, ioSomeMs: 5_010 },
+			{ threadCpuMs: 3_500, threadMajorFaults: 1_212, ioSomeMs: 35_010 },
+		];
+		const reports: EventLoopStallReport[] = [];
+		const monitor = new EventLoopStallMonitor({
+			intervalMs: 1000,
+			now: () => t,
+			uptimeMs: () => t,
+			drainSql: () => EMPTY_SQL,
+			sampleHost: () => samples.shift() ?? null,
+			report: (report) => reports.push(report),
+		});
+		monitor.start();
+		// An on-time tick still advances the baseline the stall is measured from.
+		t += 1_000;
+		monitor.tick();
+		t += 31_000;
+		monitor.tick();
+		monitor.stop();
+		expect(reports).toHaveLength(1);
+		expect(reports[0]?.host).toEqual({
+			threadCpuMs: 2_100,
+			threadMajorFaults: 1_200,
+			ioSomeMs: 30_000,
+		});
+	});
+
+	it("reports no host figures when the sampler is missing, empty or throws", () => {
+		let t = 0;
+		let calls = 0;
+		const reports: EventLoopStallReport[] = [];
+		const monitor = new EventLoopStallMonitor({
+			intervalMs: 1000,
+			now: () => t,
+			uptimeMs: () => t,
+			drainSql: () => EMPTY_SQL,
+			sampleHost: () => {
+				calls++;
+				if (calls === 2) throw new Error("procfs gone");
+				if (calls === 3) return null;
+				return { threadCpuMs: calls * 100 };
+			},
+			report: (report) => reports.push(report),
+		});
+		monitor.start();
+		for (let i = 0; i < 3; i++) {
+			t += 2_000;
+			monitor.tick();
+		}
+		monitor.stop();
+		// Each tick needs a sample at both ends; a failed one blanks two windows.
+		expect(reports.map((report) => report.host)).toEqual([null, null, null]);
+
+		const h = harness([EMPTY_SQL]);
+		h.monitor.start();
+		h.advance(2_000);
+		h.monitor.tick();
+		h.monitor.stop();
+		expect(h.reports[0]?.host).toBeNull();
+	});
 });
 
 describe("formatEventLoopStallReport", () => {
@@ -177,6 +244,7 @@ describe("formatEventLoopStallReport", () => {
 				tickMs: 23_140.4,
 				uptimeAtStartSec: 31.24,
 				stalled: true,
+				host: null,
 				sql: {
 					count: 412,
 					totalMs: 21_877.2,
@@ -212,6 +280,7 @@ describe("formatEventLoopStallReport", () => {
 				uptimeAtStartSec: 100,
 				stalled: false,
 				sql: { count: 60, totalMs: 640, top: [] },
+				host: null,
 			}),
 		).toBe(
 			"Main-thread SQL saturation: 10ms late (tick took 1010ms, began 100.0s after process start); " +
@@ -224,9 +293,69 @@ describe("formatEventLoopStallReport", () => {
 				uptimeAtStartSec: 5,
 				stalled: true,
 				sql: null,
+				host: null,
 			}),
 		).toBe(
 			"Event loop stall: 1000ms late (tick took 2000ms, began 5.0s after process start); main-thread SQL not measured",
+		);
+	});
+
+	it("says where the main thread's time went and what the host was stalled on", () => {
+		expect(
+			formatEventLoopStallReport({
+				lagMs: 33_140,
+				tickMs: 34_140,
+				uptimeAtStartSec: 1_234.5,
+				stalled: true,
+				sql: { count: 1, totalMs: 31_410, top: [] },
+				host: {
+					threadCpuMs: 2_100.4,
+					threadWaitMs: 30,
+					threadMajorFaults: 1_200,
+					cpuSomeMs: 5.2,
+					memorySomeMs: 300,
+					memoryFullMs: 280,
+					ioSomeMs: 900,
+					ioFullMs: 850,
+				},
+			}),
+		).toBe(
+			"Event loop stall: 33140ms late (tick took 34140ms, began 1234.5s after process start); " +
+				"main-thread SQL in that tick: 1 statements, 31410ms; " +
+				"main thread: 2100ms on CPU, 30ms waiting for a CPU, 32010ms off CPU, 1200 major faults; " +
+				"host stalled on io 900ms (all tasks 850ms), memory 300ms (all tasks 280ms), cpu 5ms",
+		);
+	});
+
+	it("prints only the host figures it has", () => {
+		const base = {
+			lagMs: 1_000,
+			tickMs: 2_000,
+			uptimeAtStartSec: 5,
+			stalled: true,
+			sql: null,
+		};
+		expect(
+			formatEventLoopStallReport({
+				...base,
+				host: { ioSomeMs: 1_500, memorySomeMs: 0 },
+			}),
+		).toBe(
+			"Event loop stall: 1000ms late (tick took 2000ms, began 5.0s after process start); " +
+				"main-thread SQL not measured; host stalled on io 1500ms, memory 0ms",
+		);
+		expect(
+			formatEventLoopStallReport({
+				...base,
+				host: { threadCpuMs: 1_900, threadMajorFaults: 0 },
+			}),
+		).toBe(
+			"Event loop stall: 1000ms late (tick took 2000ms, began 5.0s after process start); " +
+				"main-thread SQL not measured; main thread: 1900ms on CPU, 0 major faults",
+		);
+		expect(formatEventLoopStallReport({ ...base, host: {} })).toBe(
+			"Event loop stall: 1000ms late (tick took 2000ms, began 5.0s after process start); " +
+				"main-thread SQL not measured",
 		);
 	});
 });
