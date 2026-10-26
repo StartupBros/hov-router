@@ -21,6 +21,12 @@ turns automatic stops satisfying one. A pinned profile meant to follow a provide
 should assert only the provider; a capability profile meant to follow it names a catalog role
 instead of a physical model.
 
+What the client is shown follows routing, not configuration. Each offered profile is labelled
+with the model it currently serves, so a profile that follows a catalog role is relabelled when
+the provider re-ranks its catalog. A profile whose accounts are all paused, or can never satisfy
+its assertions, is not offered. The operator's configured name shows only while the served model
+is still unknown.
+
 ### Force route
 
 A request's demand that one exact account serve it, carried by the account header or by a
@@ -514,6 +520,10 @@ refusal message calls these instructions the *host template*.
 - *Catalog* names both the bundled model catalog compiled into the proxy and a provider's live
   catalog for an account, which a catalog role reads. These are distinct: a model can appear in
   a live catalog while the bundled one still lacks it.
+- *Discovery* names both the model list the router offers Claude Code's model picker, which
+  lists route profiles, and the fetch of a provider's live catalog for one account. These are
+  distinct: the picker list never fetches a provider catalog, and the client refreshes its copy
+  of that list only when its own discovery runs.
 
 ## Retained ingress and cold backend handoff
 
