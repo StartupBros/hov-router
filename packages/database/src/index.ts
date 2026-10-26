@@ -133,4 +133,8 @@ export {
 	type RoutingAttemptReason,
 	type RoutingAttemptScope,
 } from "./routing-attempt-taxonomy";
+export type {
+	SlowSqlStatement,
+	SqlWindowSummary,
+} from "./sqlite-statement-timing";
 export { DatabaseOperations };
