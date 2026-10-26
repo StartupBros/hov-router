@@ -109,6 +109,7 @@ mock.module("@better-ccflare/proxy", () => {
 		ModelRouteSessionRegistry: class {},
 		QualityRouteService: class {},
 		parseModelRouteProfiles: () => [],
+		markBackendRetiring: () => {},
 		recordCodexUsageSnapshot: async () => {},
 		refreshModelCatalog: async () => ({ success: true }),
 		registerAutoRefreshTrackingClearer: () => {},

@@ -30,6 +30,7 @@ GUARD_SHUTDOWN_CUSHION_MS=${GUARD_SHUTDOWN_CUSHION_MS:-5000}
 CCFLARE_SERVER_DRAIN_MS=${CCFLARE_SERVER_DRAIN_MS:-60000}
 UPSTREAM_STOP_BUDGET_MS=$((CCFLARE_SERVER_DRAIN_MS + 20000))
 RUNNER_FAILURE_STOP_BUDGET_MS=${RUNNER_FAILURE_STOP_BUDGET_MS:-30000}
+RUNNER_QUIESCE_PORT_TIMEOUT_MS=${RUNNER_QUIESCE_PORT_TIMEOUT_MS:-10000}
 STOP_POLL_INTERVAL_MS=200
 RUNNER_HEALTH_POLL_INTERVAL_MS=${RUNNER_HEALTH_POLL_INTERVAL_MS:-1000}
 RUNNER_HEALTH_MAX_ATTEMPTS=${RUNNER_HEALTH_MAX_ATTEMPTS:-60}
@@ -71,6 +72,13 @@ TRANSACTION_DIR=${CCFLARE_TRANSACTION_DIR:-$HOME/.config/better-ccflare/handoff}
 deployment_pid=""
 pending_deployment=0
 pending_rollback=0
+handoff_phase=old_reaped
+# An overlap handoff leaves the quiesced backend finishing its streams after
+# its replacement attached; the reaper stops it once the guard retires them.
+retiring_pid=""
+retiring_start=""
+retiring_generation=""
+reaper_pid=""
 transaction_enabled=0
 if [[ "${CCFLARE_SCHEMA_DIGEST:-}" =~ ^[0-9a-f]{64}$ && -n "${CCFLARE_PIN_PATH:-}" && -f "$TRANSACTION_MODULE" ]]; then transaction_enabled=1; fi
 if ((transaction_enabled)); then "$NODE_BIN" "$TRANSACTION_MODULE" recover "$TRANSACTION_DIR" >/dev/null || { printf "unfinished backend transaction requires operator recovery\n" >&2; exit 70; }; fi
@@ -126,6 +134,7 @@ validate_bounded_ms GUARD_MAX_RECOVERY_WAITS "$GUARD_MAX_RECOVERY_WAITS" 1 10000
 validate_bounded_ms GUARD_SHUTDOWN_GRACE_MS "$GUARD_SHUTDOWN_GRACE_MS" 0 2147483647
 validate_bounded_ms GUARD_SHUTDOWN_CUSHION_MS "$GUARD_SHUTDOWN_CUSHION_MS" 0 60000
 validate_bounded_ms RUNNER_FAILURE_STOP_BUDGET_MS "$RUNNER_FAILURE_STOP_BUDGET_MS" 1 120000
+validate_bounded_ms RUNNER_QUIESCE_PORT_TIMEOUT_MS "$RUNNER_QUIESCE_PORT_TIMEOUT_MS" 100 120000
 validate_bounded_ms RUNNER_HEALTH_POLL_INTERVAL_MS "$RUNNER_HEALTH_POLL_INTERVAL_MS" 1 60000
 validate_bounded_int RUNNER_HEALTH_MAX_ATTEMPTS "$RUNNER_HEALTH_MAX_ATTEMPTS" 1 1000000
 validate_bounded_ms RUNNER_HEALTH_STABILITY_DELAY_MS "$RUNNER_HEALTH_STABILITY_DELAY_MS" 0 60000
@@ -246,20 +255,25 @@ transaction_advance() { "$NODE_BIN" "$TRANSACTION_MODULE" advance "$TRANSACTION_
 start_deployment_listener() {
  local initial="$TRANSACTION_DIR/runtime-input.json"
  mkdir -p "$TRANSACTION_DIR"; chmod 700 "$TRANSACTION_DIR"
- CCFLARE_ACTIVE_PID="$upstream_pid" CCFLARE_ACTIVE_START="$(proc_start_time "$upstream_pid" /proc)" CCFLARE_ACTIVE_GENERATION="$upstream_generation" CCFLARE_ACTIVE_CONTROL="$control_dir" CCFLARE_ACTIVE_BIN="$CCFLARE_BIN" CCFLARE_ACTIVE_RUNNER="${BASH_SOURCE[0]}" CCFLARE_ACTIVE_GUARD="$GUARD_SCRIPT" "$NODE_BIN" - "$initial" <<'NODE'
-const fs=require("node:fs"),crypto=require("node:crypto"),path=require("node:path");const e=process.env;const hash=p=>crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");const r={generation:Number(e.CCFLARE_ACTIVE_GENERATION),oldPid:Number(e.CCFLARE_ACTIVE_PID),oldStartTime:e.CCFLARE_ACTIVE_START,binary:fs.realpathSync(e.CCFLARE_ACTIVE_BIN),binaryHash:hash(e.CCFLARE_ACTIVE_BIN),backendSourceSha:e.CCFLARE_SOURCE_SHA,schemaDigest:e.CCFLARE_SCHEMA_DIGEST,ingress:{runner:hash(e.CCFLARE_ACTIVE_RUNNER),guard:hash(e.CCFLARE_ACTIVE_GUARD),policy:hash(path.join(path.dirname(e.CCFLARE_ACTIVE_GUARD),"ccflare-guard-policy.mjs")),timing:hash(path.join(path.dirname(e.CCFLARE_ACTIVE_GUARD),"ccflare-managed-timing.mjs")),transaction:hash(path.join(path.dirname(e.CCFLARE_ACTIVE_RUNNER),"ccflare-deployment-transaction.mjs"))},pinPath:e.CCFLARE_PIN_PATH,pinHash:hash(e.CCFLARE_PIN_PATH),controlDir:e.CCFLARE_ACTIVE_CONTROL};fs.writeFileSync(process.argv[2],JSON.stringify(r),{mode:0o600});
+ CCFLARE_ACTIVE_PID="$upstream_pid" CCFLARE_ACTIVE_START="$(proc_start_time "$upstream_pid" /proc)" CCFLARE_ACTIVE_GENERATION="$upstream_generation" CCFLARE_ACTIVE_CONTROL="$control_dir" CCFLARE_ACTIVE_BIN="$CCFLARE_BIN" CCFLARE_ACTIVE_RUNNER="${BASH_SOURCE[0]}" CCFLARE_ACTIVE_GUARD="$GUARD_SCRIPT" CCFLARE_RETIRING_PID="$retiring_pid" CCFLARE_RETIRING_START="$retiring_start" "$NODE_BIN" - "$initial" <<'NODE'
+const fs=require("node:fs"),crypto=require("node:crypto"),path=require("node:path");const e=process.env;const hash=p=>crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");const r={generation:Number(e.CCFLARE_ACTIVE_GENERATION),oldPid:Number(e.CCFLARE_ACTIVE_PID),oldStartTime:e.CCFLARE_ACTIVE_START,binary:fs.realpathSync(e.CCFLARE_ACTIVE_BIN),binaryHash:hash(e.CCFLARE_ACTIVE_BIN),backendSourceSha:e.CCFLARE_SOURCE_SHA,schemaDigest:e.CCFLARE_SCHEMA_DIGEST,ingress:{runner:hash(e.CCFLARE_ACTIVE_RUNNER),guard:hash(e.CCFLARE_ACTIVE_GUARD),policy:hash(path.join(path.dirname(e.CCFLARE_ACTIVE_GUARD),"ccflare-guard-policy.mjs")),timing:hash(path.join(path.dirname(e.CCFLARE_ACTIVE_GUARD),"ccflare-managed-timing.mjs")),transaction:hash(path.join(path.dirname(e.CCFLARE_ACTIVE_RUNNER),"ccflare-deployment-transaction.mjs"))},pinPath:e.CCFLARE_PIN_PATH,pinHash:hash(e.CCFLARE_PIN_PATH),controlDir:e.CCFLARE_ACTIVE_CONTROL,...(e.CCFLARE_RETIRING_PID?{retiring:{pid:Number(e.CCFLARE_RETIRING_PID),startTime:e.CCFLARE_RETIRING_START}}:{})};fs.writeFileSync(process.argv[2],JSON.stringify(r),{mode:0o600});
 NODE
  "$NODE_BIN" "$TRANSACTION_MODULE" serve "$TRANSACTION_DIR" "$initial" &
  deployment_pid=$!
 }
 stop_stack_children() {
  if [[ -n "$deployment_pid" ]]; then kill "$deployment_pid" 2>/dev/null || true; wait "$deployment_pid" 2>/dev/null || true; deployment_pid=""; fi
+ if [[ -n "$reaper_pid" ]]; then kill "$reaper_pid" 2>/dev/null || true; wait "$reaper_pid" 2>/dev/null || true; reaper_pid=""; fi
+	# A retiring backend serves the guard's retiring generation, so it stops
+	# only after the guard drained, alongside the current backend.
 	if (($# == 0)); then
 		# Intentional TERM/INT keeps the full guard drain grace and the existing
 		# short child budgets. It is deliberately not an aggregate deadline.
 		log "stopping stack children; cleanup_budget_ms=${GUARD_STOP_BUDGET_MS}; mode=intentional"
 		stop_child "ccflare guard" "$guard_pid" "$GUARD_STOP_BUDGET_MS"
+		signal_retiring_backend
 		stop_child "better-ccflare upstream" "$upstream_pid" "$UPSTREAM_STOP_BUDGET_MS"
+		await_backend_identity "retiring better-ccflare upstream" "$retiring_pid" "$retiring_start" "$UPSTREAM_STOP_BUDGET_MS"
 		stop_child "ai-gateway ssh tunnel" "$ai_gateway_tunnel_pid" 5000
 	else
 		# Unexpected failures use one aggregate deadline so a stubborn child
@@ -270,13 +284,20 @@ stop_stack_children() {
 		log "stopping stack children; cleanup_budget_ms=${total_budget_ms}; mode=failure"
 		remaining_ms="$(remaining_stop_budget "$deadline_ms")"
 		stop_child "ccflare guard" "$guard_pid" "$remaining_ms"
+		signal_retiring_backend
 		remaining_ms="$(remaining_stop_budget "$deadline_ms")"
 		stop_child "better-ccflare upstream" "$upstream_pid" "$remaining_ms"
+		remaining_ms="$(remaining_stop_budget "$deadline_ms")"
+		await_backend_identity "retiring better-ccflare upstream" "$retiring_pid" "$retiring_start" "$remaining_ms"
 		remaining_ms="$(remaining_stop_budget "$deadline_ms")"
 		stop_child "ai-gateway ssh tunnel" "$ai_gateway_tunnel_pid" "$remaining_ms"
 	fi
 	wait "${guard_pid:-0}" 2>/dev/null || true
 	wait "${upstream_pid:-0}" 2>/dev/null || true
+	if [[ -n "$retiring_pid" ]]; then wait "$retiring_pid" 2>/dev/null || true; fi
+	retiring_pid=""
+	retiring_start=""
+	retiring_generation=""
 	wait "${ai_gateway_tunnel_pid:-0}" 2>/dev/null || true
 	if [[ -n "$watchdog_pid" ]]; then
 		kill "$watchdog_pid" 2>/dev/null || true
@@ -295,6 +316,46 @@ proc_start_time() {
 	set -- $rest
 	[[ "${20}" =~ ^[0-9]+$ ]] || return 1
 	printf '%s\n' "${20}"
+}
+
+# A retiring backend outlives the cycle that started it, so it is stopped by
+# identity: a reused pid is not it, and a zombie awaiting this runner's reap
+# has already stopped.
+proc_identity_running() {
+	local start="$2" line rest
+	[[ -n "$1" ]] || return 1
+	IFS= read -r line 2>/dev/null <"/proc/$1/stat" || return 1
+	rest="${line##*) }"
+	set -- $rest
+	[[ "$1" != Z && "${20}" == "$start" ]]
+}
+
+signal_retiring_backend() {
+	if proc_identity_running "$retiring_pid" "$retiring_start"; then
+		log "stopping retiring better-ccflare upstream pid=${retiring_pid}"
+		kill -TERM "$retiring_pid" 2>/dev/null || true
+	fi
+}
+
+await_backend_identity() {
+	local name="$1" pid="$2" start="$3" stop_budget_ms="$4" started_ms
+	started_ms="$(epoch_ms)"
+	while proc_identity_running "$pid" "$start"; do
+		if (($(epoch_ms) - started_ms >= stop_budget_ms)); then
+			log "${name} pid=${pid} did not stop after ${stop_budget_ms}ms; sending SIGKILL"
+			kill -KILL "$pid" 2>/dev/null || true
+			return 0
+		fi
+		sleep "$(printf '%d.%03d' "$((STOP_POLL_INTERVAL_MS / 1000))" "$((STOP_POLL_INTERVAL_MS % 1000))")" || true
+	done
+}
+
+stop_backend_identity() {
+	local name="$1" pid="$2" start="$3"
+	proc_identity_running "$pid" "$start" || return 0
+	log "stopping ${name} pid=${pid}"
+	kill -TERM "$pid" 2>/dev/null || true
+	await_backend_identity "$@"
 }
 
 # Total committed anonymous memory for a pid: VmRSS + VmSwap, in bytes.
@@ -620,18 +681,107 @@ NODE
 	return "$status"
 }
 
+# Only a backend that advertises the quiesce protocol handles SIGUSR2; Bun
+# terminates on an unhandled one.
+backend_quiesce_capable() {
+	"$NODE_BIN" - "$UPSTREAM_PORT" "$upstream_pid" 2>/dev/null <<'NODE'
+const [port, pid] = process.argv.slice(2);
+fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) })
+	.then((r) => r.json())
+	.then((h) => process.exit(h?.handoff?.protocol === "quiesce-v1" && h.handoff.pid === Number(pid) ? 0 : 1))
+	.catch(() => process.exit(1));
+NODE
+}
+
+# Overlap handoff: the guard fences new admission, the old backend releases
+# its listener and keeps streaming, and the replacement boots on the same port.
+# A backend still listening at the timeout is drained and reaped instead.
+quiesce_backend_for_deployment() {
+	local old_start deadline_ms
+	log "backend handoff mode=overlap; old_pid=${upstream_pid}"
+	transaction_advance prepared quiescing || return 1
+	guard_control fence "$upstream_generation" || return 1
+	old_start="$(deployment_field previous.oldStartTime)" || return 1
+	[[ "$(proc_start_time "$upstream_pid" /proc)" == "$old_start" ]] || return 1
+	kill -USR2 "$upstream_pid" 2>/dev/null || true
+	deadline_ms=$(($(epoch_ms) + RUNNER_QUIESCE_PORT_TIMEOUT_MS))
+	until transaction_advance quiescing old_quiesced "{\"backendPort\":${UPSTREAM_PORT}}" 2>/dev/null; do
+		if (($(epoch_ms) >= deadline_ms)); then
+			log "backend still listens on ${UPSTREAM_PORT} after ${RUNNER_QUIESCE_PORT_TIMEOUT_MS}ms; falling back to drain"
+			guard_control retire "$upstream_generation" || return 1
+			stop_child "better-ccflare upstream" "$upstream_pid" "$UPSTREAM_STOP_BUDGET_MS"
+			wait "$upstream_pid" 2>/dev/null || true
+			transaction_advance quiescing old_reaped || return 1
+			handoff_phase=old_reaped
+			return 0
+		fi
+		sleep_ms 50
+	done
+	retiring_pid=$upstream_pid
+	retiring_start=$old_start
+	retiring_generation=$upstream_generation
+	handoff_phase=old_quiesced
+	log "backend quiesced; port ${UPSTREAM_PORT} released; retiring_pid=${retiring_pid}"
+}
+
+# Background: the guard retires the old generation (its requests finish, or
+# are aborted at the guard grace), then the quiesced backend is stopped.
+reap_retiring_backend() {
+	trap 'kill "$control_pid" 2>/dev/null; exit 143' TERM
+	if ! guard_control retire "$retiring_generation"; then
+		log "guard retire unavailable; generation=${retiring_generation}; stopping retiring backend under its own drain"
+	fi
+	stop_backend_identity "retiring better-ccflare upstream" "$retiring_pid" "$retiring_start" "$UPSTREAM_STOP_BUDGET_MS"
+}
+
+start_retiring_reaper() {
+	if [[ -z "$retiring_pid" || -n "$reaper_pid" ]]; then return 0; fi
+	reap_retiring_backend &
+	reaper_pid=$!
+	log "retiring backend reaper started; retiring_pid=${retiring_pid}; generation=${retiring_generation}"
+}
+
+finish_retiring_reaper() {
+	# A reaper that died early leaves its backend to this bounded stop.
+	stop_backend_identity "retiring better-ccflare upstream" "$retiring_pid" "$retiring_start" "$UPSTREAM_STOP_BUDGET_MS"
+	wait "$retiring_pid" 2>/dev/null || true
+	log "retiring backend reaped; pid=${retiring_pid}; generation=${retiring_generation}; reaper_status=$1"
+	retiring_pid=""
+	retiring_start=""
+	retiring_generation=""
+	reaper_pid=""
+}
+
+# The transaction refuses to quiesce or drain while the previous handoff's
+# backend is still retiring.
+await_retiring_backend() {
+	local status=0
+	[[ -n "$retiring_pid" ]] || return 0
+	start_retiring_reaper
+	log "backend deployment waiting for the previous handoff's retiring backend; pid=${retiring_pid}"
+	wait "$reaper_pid" || status=$?
+	finish_retiring_reaper "$status"
+}
+
 begin_backend_deployment() {
  deployment_pid=""
+ await_retiring_backend
  export CCFLARE_DEPLOYMENT_ROLLBACK=0
  export CCFLARE_DEPLOYMENT_TRANSACTION_ID="$(deployment_field manifest.transactionId)"
  export CCFLARE_MANAGED_CANDIDATE_NONCE="$(deployment_field manifest.candidateNonce)"
  guard_control prepare "$upstream_generation" || return 1
- transaction_advance prepared draining || return 1
- guard_control begin "$upstream_generation" || return 1
- [[ "$(proc_start_time "$upstream_pid" /proc)" == "$(deployment_field previous.oldStartTime)" ]] || return 1
- stop_child "better-ccflare upstream" "$upstream_pid" "$UPSTREAM_STOP_BUDGET_MS"
- wait "$upstream_pid" 2>/dev/null || true
- transaction_advance draining old_reaped || return 1
+ if backend_quiesce_capable; then
+  quiesce_backend_for_deployment || return 1
+ else
+  log "backend handoff mode=drain; old_pid=${upstream_pid}"
+  transaction_advance prepared draining || return 1
+  guard_control begin "$upstream_generation" || return 1
+  [[ "$(proc_start_time "$upstream_pid" /proc)" == "$(deployment_field previous.oldStartTime)" ]] || return 1
+  stop_child "better-ccflare upstream" "$upstream_pid" "$UPSTREAM_STOP_BUDGET_MS"
+  wait "$upstream_pid" 2>/dev/null || true
+  transaction_advance draining old_reaped || return 1
+  handoff_phase=old_reaped
+ fi
  upstream_pid=""
  if [[ -n "$watchdog_pid" ]]; then kill "$watchdog_pid" 2>/dev/null || true; wait "$watchdog_pid" 2>/dev/null || true; watchdog_pid=""; fi
  CCFLARE_BIN="$(deployment_field manifest.candidateBinary)"
@@ -758,12 +908,12 @@ run_stack_once() {
 	if ((transaction_enabled)); then
 		local candidate_start
 		if ! candidate_start="$(proc_start_time "$upstream_pid" /proc)"; then
-			if ((pending_deployment)); then transaction_advance old_reaped held '{"reason":"candidate_start_identity_unavailable"}' || true; fi
+			if ((pending_deployment)); then transaction_advance "$handoff_phase" held '{"reason":"candidate_start_identity_unavailable"}' || true; fi
 			log "backend start held: candidate_start_identity_unavailable"
 			return 1
 		fi
 		"$NODE_BIN" "$TRANSACTION_MODULE" owner-started "$TRANSACTION_DIR" "$upstream_pid" "$candidate_start" || return 1
-		if ((pending_deployment)); then transaction_advance old_reaped candidate_started "{\"candidatePid\":$upstream_pid,\"candidateStartTime\":\"$candidate_start\"}" || return 1; fi
+		if ((pending_deployment)); then transaction_advance "$handoff_phase" candidate_started "{\"candidatePid\":$upstream_pid,\"candidateStartTime\":\"$candidate_start\"}" || return 1; fi
 	fi
 	if ! wait_for_url better-ccflare "http://127.0.0.1:${UPSTREAM_PORT}/health" "$upstream_pid"; then
 		if [[ -z "$child_exit_name" ]]; then
@@ -783,6 +933,7 @@ run_stack_once() {
 		pending_replacement=0
 		if ((pending_deployment)); then transaction_advance committed attached; pending_deployment=0; unset CCFLARE_DEPLOYMENT_TRANSACTION_ID; fi
 		if ((pending_rollback)); then pending_rollback=0; unset CCFLARE_DEPLOYMENT_TRANSACTION_ID CCFLARE_DEPLOYMENT_ROLLBACK; fi
+		start_retiring_reaper
 	else
 	log "starting ccflare guard on 127.0.0.1:${GUARD_PORT} -> 127.0.0.1:${UPSTREAM_PORT}; failure_cleanup_budget_ms=${RUNNER_FAILURE_STOP_BUDGET_MS}; intentional_stop_budget_ms=${GUARD_STOP_BUDGET_MS}"
 	HOME="$HOME" \
@@ -841,10 +992,18 @@ run_stack_once() {
 		child_pids+=("$watchdog_pid")
 	fi
 	local exited_pid=""
-	set +e
-	wait -n -p exited_pid "${child_pids[@]}"
-	child_exit_status=$?
-	set -e
+	local -a waited_pids
+	while :; do
+		waited_pids=("${child_pids[@]}")
+		if [[ -n "$reaper_pid" ]]; then waited_pids+=("$reaper_pid"); fi
+		set +e
+		wait -n -p exited_pid "${waited_pids[@]}"
+		child_exit_status=$?
+		set -e
+		if [[ -z "$reaper_pid" || "$exited_pid" != "$reaper_pid" ]]; then break; fi
+		# The previous handoff's backend is retired; the stack keeps running.
+		finish_retiring_reaper "$child_exit_status"
+	done
 	if [[ -n "$deployment_pid" && "$exited_pid" == "$deployment_pid" && "$child_exit_status" == "67" ]]; then
 		child_exit_name="backend deployment"; child_exit_class="deployment"
 	elif [[ -n "$watchdog_pid" && "$exited_pid" == "$watchdog_pid" && "$child_exit_status" == "66" ]]; then

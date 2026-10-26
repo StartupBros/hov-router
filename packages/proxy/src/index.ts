@@ -158,6 +158,7 @@ export {
 	unregisterPollingRestarter,
 	unregisterRefreshClearer,
 } from "./handlers";
+export { markBackendRetiring } from "./handlers/backend-retirement";
 export {
 	clearPendingRotationForDeletedAccount,
 	configurePendingRotationPersistence,

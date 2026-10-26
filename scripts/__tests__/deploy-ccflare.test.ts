@@ -2298,7 +2298,8 @@ describe("source-controlled stack runner", () => {
 		expect(source).toContain("GUARD_MAX_INSPECTION_BYTES=65536");
 		expect(source).toContain("start_ai_gateway_tunnel");
 		expect(source).toContain('GUARD_UPSTREAM_PID="${upstream_pid}"');
-		expect(source).toContain('wait -n -p exited_pid "${child_pids[@]}"');
+		expect(source).toContain('waited_pids=("${child_pids[@]}")');
+		expect(source).toContain('wait -n -p exited_pid "${waited_pids[@]}"');
 		expect(source).toContain(
 			'stop_child "better-ccflare upstream" "$upstream_pid" "$UPSTREAM_STOP_BUDGET_MS"',
 		);

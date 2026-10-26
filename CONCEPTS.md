@@ -428,6 +428,19 @@ on its own is recorded distinctly from one that hit its deadline and was forced,
 are never collapsed into one outcome, because a forced drain means clients saw errors while a
 natural one means they did not.
 
+### Quiesced backend
+
+An old upstream that a backend-only deployment has told to stop being the owner while it
+finishes work it already accepted. It has released its listening port, stopped its schedulers
+and refreshes no tokens. It keeps its database connection and in-flight responses until the
+guard retires its generation, and is then stopped.
+
+Quiescing lets the replacement boot on the same port while old streams run, so new requests
+wait for one boot instead of for the longest old stream. It is not blue/green. At any moment
+exactly one process admits requests, and at most one quiesced process only finishes. A backend
+that cannot prove it quiesced, because it lacks the capability or still holds the port, is
+drained instead.
+
 ### Managed pin
 
 The deploy-owned block of service configuration binding a running deployment to one exact

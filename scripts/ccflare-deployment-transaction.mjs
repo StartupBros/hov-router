@@ -72,6 +72,43 @@ export function durableWrite(path, value) {
 		closeSync(dir);
 	}
 }
+// A listener on any local address blocks a same-port bind, so the port is
+// free only when neither table has a LISTEN entry for it.
+export function portListening(port, read = readFileSync) {
+	if (!Number.isSafeInteger(port) || port < 1 || port > 65535)
+		throw new Error("invalid backend port");
+	const portHex = port.toString(16).toUpperCase().padStart(4, "0");
+	for (const table of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+		let text;
+		try {
+			text = read(table, "utf8");
+		} catch (error) {
+			if (error.code === "ENOENT") continue;
+			throw error;
+		}
+		for (const line of text.split("\n").slice(1)) {
+			const fields = line.trim().split(/\s+/);
+			if (fields[3] === "0A" && fields[1]?.endsWith(`:${portHex}`)) return true;
+		}
+	}
+	return false;
+}
+// The backend a previous overlap handoff left draining. Absent is null;
+// anything malformed is ambiguity, never absence.
+function retiringIdentity(r) {
+	if (r.retiring === undefined) return null;
+	const x = r.retiring;
+	if (
+		!x ||
+		typeof x !== "object" ||
+		!Number.isSafeInteger(x.pid) ||
+		x.pid < 1 ||
+		typeof x.startTime !== "string" ||
+		!/^(0|[1-9]\d{0,19})$/.test(x.startTime)
+	)
+		throw new Error("ambiguous retiring backend identity");
+	return x;
+}
 function readIntent(dir) {
 	return JSON.parse(readFileSync(join(dir, "intent.json"), "utf8"));
 }
@@ -96,7 +133,8 @@ function validManifest(m, r) {
 		realpathSync(m.candidateBinary) === m.candidateBinary &&
 		statSync(m.candidateBinary).isFile() &&
 		(statSync(m.candidateBinary).mode & 0o222) === 0 &&
-		fileHash(m.candidateBinary) === m.candidateHash
+		fileHash(m.candidateBinary) === m.candidateHash &&
+		(retiringIdentity(r), true)
 	);
 }
 export function prepareTransaction(dir, m, r) {
@@ -119,9 +157,14 @@ export function prepareTransaction(dir, m, r) {
 	durableWrite(join(dir, "intent.json"), intent);
 	return intent;
 }
+// Legacy handoff: draining -> old_reaped. Overlap handoff: quiescing ->
+// old_quiesced, where the old backend keeps finishing its streams after it
+// releases the port; quiescing -> old_reaped is its fallback.
 const next = {
-	prepared: ["draining", "held"],
+	prepared: ["draining", "quiescing", "held"],
 	draining: ["old_reaped", "held"],
+	quiescing: ["old_quiesced", "old_reaped", "held"],
+	old_quiesced: ["candidate_started", "held"],
 	old_reaped: ["candidate_started", "held"],
 	candidate_started: ["candidate_verified", "rolled_back", "held"],
 	candidate_verified: ["committed", "rolled_back", "held"],
@@ -133,10 +176,28 @@ export function advanceTransaction(
 	phase,
 	evidence = {},
 	exists = processExists,
+	listening = portListening,
 ) {
 	const transaction = readIntent(dir);
 	if (transaction.phase !== expected || !next[expected]?.includes(phase))
 		throw new Error("stale transaction phase");
+	const retiring = retiringIdentity(transaction.previous);
+	if (
+		["draining", "quiescing"].includes(phase) &&
+		retiring &&
+		exists(retiring.pid, retiring.startTime)
+	)
+		throw new Error("previous handoff is still retiring");
+	if (phase === "old_quiesced") {
+		if (
+			!Number.isSafeInteger(evidence.backendPort) ||
+			evidence.backendPort < 1 ||
+			evidence.backendPort > 65535
+		)
+			throw new Error("backend port evidence missing");
+		if (listening(evidence.backendPort))
+			throw new Error("previous backend still listens");
+	}
 	if (
 		phase === "old_reaped" &&
 		exists(transaction.previous.oldPid, transaction.previous.oldStartTime)
@@ -239,9 +300,11 @@ export function recoverTransaction(dir, exists = processExists, configured) {
 		const bootstrapPath = join(dir, "bootstrap.json");
 		const intentPath = join(dir, "intent.json");
 		const transaction = existsSync(intentPath) ? readIntent(dir) : null;
+		const retiring = transaction && retiringIdentity(transaction.previous);
 		if (
 			transaction &&
-			(exists(transaction.previous.oldPid, transaction.previous.oldStartTime) ||
+			((retiring && exists(retiring.pid, retiring.startTime)) ||
+				exists(transaction.previous.oldPid, transaction.previous.oldStartTime) ||
 				(transaction.candidatePid &&
 					exists(transaction.candidatePid, transaction.candidateStartTime)))
 		)

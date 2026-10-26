@@ -271,4 +271,40 @@ describe.serial("UsageCache polling generations", () => {
 		expect(observedSignal?.aborted).toBe(true);
 		pending.resolve(codexResponse(10));
 	});
+
+	it.serial(
+		"stopAllPolling ends every poll but keeps the evidence admitted requests route on",
+		async () => {
+			const ACCOUNT_ID = accountId();
+			const pending = deferred<Response>();
+			let fetchCount = 0;
+			let observedSignal: AbortSignal | null = null;
+			globalThis.fetch = ((_input, init) => {
+				fetchCount++;
+				if (fetchCount === 1) return Promise.resolve(codexResponse(20));
+				observedSignal = init?.signal ?? null;
+				return pending.promise;
+			}) as unknown as typeof fetch;
+
+			usageCache.startPolling(ACCOUNT_ID, "token", "codex", 60_000);
+			await waitForMicrotasks();
+			expect(usageCache.get(ACCOUNT_ID)).toMatchObject({
+				five_hour: { utilization: 20 },
+			});
+			const refresh = usageCache.refreshNow(ACCOUNT_ID);
+			await waitForMicrotasks();
+			expect(fetchCount).toBe(2);
+
+			usageCache.stopAllPolling();
+
+			expect(observedSignal?.aborted).toBe(true);
+			pending.resolve(codexResponse(90));
+			expect(await refresh).toBe(false);
+			expect(usageCache.get(ACCOUNT_ID)).toMatchObject({
+				five_hour: { utilization: 20 },
+			});
+			expect(await usageCache.refreshNow(ACCOUNT_ID)).toBe(false);
+			expect(fetchCount).toBe(2);
+		},
+	);
 });

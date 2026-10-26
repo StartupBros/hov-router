@@ -2014,6 +2014,30 @@ OAuth tokens will need to be re-authenticated.
 		return this.closePromise;
 	}
 
+	/** Retire only this process's heartbeat without closing the serving database. */
+	async retireInstanceHeartbeat(): Promise<void> {
+		const stop = this.heartbeatStop;
+		this.heartbeatStop = null;
+		if (!stop) return;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				Promise.resolve().then(stop),
+				new Promise<never>((_, reject) => {
+					timeout = setTimeout(
+						() =>
+							reject(new Error("heartbeat retirement settlement timed out")),
+						1000,
+					);
+				}),
+			]);
+		} catch (error) {
+			console.warn("Backend heartbeat retirement failed", error);
+		} finally {
+			if (timeout !== undefined) clearTimeout(timeout);
+		}
+	}
+
 	private async closeOwnedResources(): Promise<void> {
 		// Close-time writes/checkpoint are best-effort: an unrelated writer must
 		// not park the main event loop in the serving connection's busy handler.

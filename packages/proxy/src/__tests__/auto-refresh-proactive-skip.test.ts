@@ -164,4 +164,29 @@ describe("AutoRefreshScheduler — proactive refresh must not be skipped", () =>
 
 		expect(refreshTokenMock).toHaveBeenCalledTimes(1);
 	});
+
+	it("retiring backend skips the direct proactive Codex refresh", async () => {
+		const retirement = await import("../handlers/backend-retirement");
+		const { AutoRefreshScheduler } = await import("../auto-refresh-scheduler");
+		refreshTokenMock.mockClear();
+		retirement.markBackendRetiring();
+		try {
+			const scheduler = new AutoRefreshScheduler(
+				makeDb() as never,
+				makeProxyContext() as never,
+			);
+			(
+				scheduler as unknown as { lastRefreshResetTime: Map<string, number> }
+			).lastRefreshResetTime.set(
+				ANTHROPIC_ACCOUNT_ROW.id,
+				ANTHROPIC_ACCOUNT_ROW.rate_limit_reset,
+			);
+			await (
+				scheduler as unknown as { checkAndRefresh(): Promise<void> }
+			).checkAndRefresh();
+			expect(refreshTokenMock).toHaveBeenCalledTimes(0);
+		} finally {
+			retirement.resetBackendRetirementForTests();
+		}
+	});
 });

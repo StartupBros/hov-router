@@ -232,13 +232,25 @@ export async function scanHeartbeats(
  * Delete this instance's heartbeat row. Called on graceful shutdown.
  * Idempotent; safe to call multiple times.
  */
-export async function clearHeartbeat(adapter: BunSqlAdapter): Promise<void> {
+export async function clearHeartbeat(
+	adapter: BunSqlAdapter,
+	nonblocking = false,
+): Promise<void> {
 	if (adapter.isSQLite) {
-		adapter
-			.getSQLiteDb()
-			.run("DELETE FROM instance_heartbeats WHERE instance_id = ?", [
+		const db = adapter.getSQLiteDb();
+		// A Promise timeout cannot interrupt SQLite's synchronous busy handler.
+		// Only the retirement DELETE is nonblocking; serving requests retain their timeout.
+		const previous = nonblocking
+			? db.query<{ timeout: number }, []>("PRAGMA busy_timeout").get()?.timeout
+			: undefined;
+		try {
+			if (nonblocking) db.run("PRAGMA busy_timeout = 0");
+			db.run("DELETE FROM instance_heartbeats WHERE instance_id = ?", [
 				THIS_INSTANCE_ID,
 			]);
+		} finally {
+			if (previous !== undefined) db.run(`PRAGMA busy_timeout = ${previous}`);
+		}
 	} else {
 		await adapter.run("DELETE FROM instance_heartbeats WHERE instance_id = ?", [
 			THIS_INSTANCE_ID,
@@ -474,7 +486,7 @@ export function startHeartbeatLoop(
 			// A pending cleanup also holds adapter close; an ordinary settled failure
 			// is best-effort and the stale row expires naturally.
 			await settle(
-				clearHeartbeat(adapter).catch((err) => {
+				clearHeartbeat(adapter, true).catch((err) => {
 					log.warn(`heartbeat cleanup failed: ${(err as Error).message}`);
 				}),
 			);

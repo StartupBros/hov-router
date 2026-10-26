@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Logger } from "@better-ccflare/logger";
 import type { BunSqlAdapter } from "./adapters/bun-sql-adapter";
 import { CACHE_HEALTH_STATE_SCHEMA } from "./cache-health-schema";
@@ -393,6 +394,30 @@ const ROUTING_REVISION_API_KEY_PROVIDERS = [
 	"meta",
 ] as const;
 
+/** Fingerprint our exact source; only changed definitions require table DDL. */
+async function ensureRoutingTriggerPg(
+	adapter: BunSqlAdapter,
+	table: string,
+	trigger: string,
+	source: string,
+): Promise<void> {
+	const fingerprint =
+		"hov-router:trigger:" +
+		createHash("sha256").update(source.trim()).digest("hex");
+	const existing = await adapter.get<{ source: string | null }>(
+		`SELECT obj_description(t.oid, 'pg_trigger') AS source FROM pg_trigger t
+   JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = current_schema() AND c.relname = ? AND t.tgname = ? AND NOT t.tgisinternal`,
+		[table, trigger],
+	);
+	if (existing?.source === fingerprint) return;
+	await adapter.unsafe(`DROP TRIGGER IF EXISTS ${trigger} ON ${table}`);
+	await adapter.unsafe(source);
+	await adapter.unsafe(
+		`COMMENT ON TRIGGER ${trigger} ON ${table} IS '${fingerprint}'`,
+	);
+}
+
 /** PostgreSQL mirror of SQLite's managed-routing revision clock. */
 async function ensureRoutingPolicyRevisionSchemaPg(
 	adapter: BunSqlAdapter,
@@ -412,43 +437,51 @@ async function ensureRoutingPolicyRevisionSchemaPg(
 		VALUES ('global', 0)
 		ON CONFLICT (scope) DO NOTHING
 	`);
-	await adapter.unsafe(`
-		CREATE OR REPLACE FUNCTION bump_routing_policy_revision()
-		RETURNS trigger
-		LANGUAGE plpgsql
-		AS $$
-		BEGIN
-			UPDATE routing_policy_revision
-			SET revision = revision + 1
-			WHERE scope = 'global';
-			RETURN NULL;
-		END;
-		$$
-	`);
+	const functionBody = `
+  BEGIN
+   UPDATE routing_policy_revision SET revision = revision + 1 WHERE scope = 'global';
+   RETURN NULL;
+  END;
+ `;
+	const existingFunction = await adapter.get<{ prosrc: string }>(
+		`SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = current_schema() AND p.proname = 'bump_routing_policy_revision' AND p.pronargs = 0`,
+	);
+	if (existingFunction?.prosrc?.trim() !== functionBody.trim()) {
+		await adapter.unsafe(`CREATE OR REPLACE FUNCTION bump_routing_policy_revision()
+   RETURNS trigger LANGUAGE plpgsql AS $$${functionBody}$$`);
+	}
 
 	for (const table of ROUTING_REVISION_POLICY_TABLES) {
 		const trigger = `trg_routing_revision_${table}`;
-		await adapter.unsafe(`DROP TRIGGER IF EXISTS ${trigger} ON ${table}`);
-		await adapter.unsafe(`
+		await ensureRoutingTriggerPg(
+			adapter,
+			table,
+			trigger,
+			`
 			CREATE TRIGGER ${trigger}
 			AFTER INSERT OR UPDATE OR DELETE ON ${table}
 			FOR EACH ROW EXECUTE FUNCTION bump_routing_policy_revision()
-		`);
+		`,
+		);
 	}
 
-	await adapter.unsafe(
-		"DROP TRIGGER IF EXISTS trg_routing_revision_accounts_insert_delete ON accounts",
-	);
-	await adapter.unsafe(`
+	await ensureRoutingTriggerPg(
+		adapter,
+		"accounts",
+		"trg_routing_revision_accounts_insert_delete",
+		`
 		CREATE TRIGGER trg_routing_revision_accounts_insert_delete
 		AFTER INSERT OR DELETE ON accounts
 		FOR EACH ROW EXECUTE FUNCTION bump_routing_policy_revision()
-	`);
+	`,
+	);
 	if (options.installAccountUpdateTrigger !== false) {
-		await adapter.unsafe(
-			"DROP TRIGGER IF EXISTS trg_routing_revision_accounts_update ON accounts",
-		);
-		await adapter.unsafe(`
+		await ensureRoutingTriggerPg(
+			adapter,
+			"accounts",
+			"trg_routing_revision_accounts_update",
+			`
 			CREATE TRIGGER trg_routing_revision_accounts_update
 			AFTER UPDATE OF id, provider, priority, billing_type, model_mappings,
 				model_fallbacks, custom_endpoint, api_key, refresh_token, access_token
@@ -481,7 +514,8 @@ async function ensureRoutingPolicyRevisionSchemaPg(
 					AND NEW.refresh_token = NEW.api_key
 					AND NEW.access_token = NEW.api_key))
 			EXECUTE FUNCTION bump_routing_policy_revision()
-		`);
+		`,
+		);
 	}
 }
 
@@ -2382,10 +2416,15 @@ export async function runMigrationsPg(adapter: BunSqlAdapter): Promise<void> {
 
 	// Make refresh_token nullable if it currently has NOT NULL constraint
 	try {
-		await adapter.unsafe(
-			`ALTER TABLE accounts ALTER COLUMN refresh_token DROP NOT NULL`,
+		const column = await adapter.get<{ is_nullable: string }>(
+			"SELECT is_nullable FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'accounts' AND column_name = 'refresh_token'",
 		);
-		log.info("Made refresh_token nullable in accounts table");
+		if (column?.is_nullable === "NO") {
+			await adapter.unsafe(
+				`ALTER TABLE accounts ALTER COLUMN refresh_token DROP NOT NULL`,
+			);
+			log.info("Made refresh_token nullable in accounts table");
+		}
 	} catch (_error) {
 		// Already nullable or column doesn't exist — ignore
 	}
