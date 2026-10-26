@@ -972,7 +972,7 @@ graph TB
 
 ## Agent System Architecture
 
-The agent system allows better-ccflare to automatically detect and apply model preferences based on the agent being used:
+The agent system allows HoV Router to automatically detect and apply model preferences based on the agent being used:
 
 ```mermaid
 graph TB
@@ -1168,7 +1168,7 @@ stateDiagram-v2
 
 ### Streaming Architecture
 
-better-ccflare implements sophisticated streaming support for handling large language model responses:
+HoV Router implements sophisticated streaming support for handling large language model responses:
 
 ```mermaid
 graph TB

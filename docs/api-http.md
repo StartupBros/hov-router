@@ -43,7 +43,7 @@ All API responses are in JSON format with `Content-Type: application/json`.
 
 #### GET /health
 
-Check the health status of the better-ccflare service.
+Check the health status of the HoV Router service.
 
 **HTTP status codes:**
 - `200` — `status: "ok"` (routable accounts available)
@@ -133,19 +133,19 @@ Proxy requests to Claude API. All requests to paths starting with `/v1/` are for
 - Any other Claude API v1 endpoint
 
 **Codex CLI as a Client:**
-Codex CLI (and other OpenAI Responses API clients) can target better-ccflare directly. Requests to `/v1/responses` and `/v1/responses/compact` are intercepted before the normal proxy and translated to Anthropic `/v1/messages` internally, then routed through the account pool like any other request. See the [client reference](reference.md#codex-cli-as-a-client) for configuration details.
+Codex CLI (and other OpenAI Responses API clients) can target HoV Router directly. Requests to `/v1/responses` and `/v1/responses/compact` are intercepted before the normal proxy and translated to Anthropic `/v1/messages` internally, then routed through the account pool like any other request. See the [client reference](reference.md#codex-cli-as-a-client) for configuration details.
 
 Note: this is distinct from the `codex` *provider*, which routes requests outbound to OpenAI's Codex endpoint.
 
 **Known Limitations (`/v1/responses`):**
-- `previous_response_id` is accepted but ignored — better-ccflare is stateless and does not store prior responses. Codex uses this field only over WebSocket (which better-ccflare does not implement); for regular HTTP requests Codex always sends the full conversation history in `input`, so this field has no effect.
+- `previous_response_id` is accepted but ignored — HoV Router is stateless and does not store prior responses. Codex uses this field only over WebSocket (which the router does not implement); for regular HTTP requests Codex always sends the full conversation history in `input`, so this field has no effect.
 - Built-in tool types (`web_search_preview`, `code_interpreter`, `file_search`) are silently skipped; only `type: "function"` tools are forwarded to Anthropic.
 
-**Note:** `GET /v1/models` is proxied through to Claude like any other `/v1/*` request. A successful response (from a console/API-key account) is also passively captured into better-ccflare's own model catalog cache — see [Model Catalog](#model-catalog) below for the read endpoint (`GET /api/models`) and how the catalog is kept up to date.
+**Note:** `GET /v1/models` is proxied through to Claude like any other `/v1/*` request. A successful response (from a console/API-key account) is also passively captured into HoV Router's own model catalog cache — see [Model Catalog](#model-catalog) below for the read endpoint (`GET /api/models`) and how the catalog is kept up to date.
 
 **Headers:**
 - All standard Claude API headers are supported
-- `Authorization` header is managed by better-ccflare (no need to provide)
+- `Authorization` header is managed by HoV Router (no need to provide)
 
 **Request Body:**
 Same as Claude API requirements for the specific endpoint.
@@ -154,7 +154,7 @@ Same as Claude API requirements for the specific endpoint.
 Proxied response from Claude API, including streaming responses.
 
 **Automatic Failover:**
-If a request fails or an account is rate limited, better-ccflare automatically retries with the next available account according to the configured load balancing strategy. This ensures high availability and reliability.
+If a request fails or an account is rate limited, HoV Router automatically retries with the next available account according to the configured load balancing strategy. This ensures high availability and reliability.
 
 **Example:**
 ```bash
@@ -210,7 +210,7 @@ curl http://localhost:8080/api/accounts
 
 #### GET /api/sessions/:sessionId/account
 
-Return the better-ccflare account that most recently served a given Claude Code
+Return the HoV Router account that most recently served a given Claude Code
 session, along with its usage-toward-limit and rate-limit/paused/throttled state.
 This is the read endpoint the local status-line script polls to render a per-chat
 account badge.
@@ -490,7 +490,7 @@ curl -X POST http://localhost:8080/api/accounts/uuid-here/auto-fallback \
 
 #### POST /api/accounts/:accountId/codex-credit-drain
 
-Enable or disable credit drain for a Codex account. When enabled, ccflare keeps routing to the account after its five-hour or weekly subscription window reaches 100%, so OpenAI serves the requests from purchased credits. **This spends real credits.** The default is off.
+Enable or disable credit drain for a Codex account. When enabled, HoV Router keeps routing to the account after its five-hour or weekly subscription window reaches 100%, so OpenAI serves the requests from purchased credits. **This spends real credits.** The default is off.
 
 Routing honors the flag only while fresh, poll-verified credit evidence exists (the usage poll reports `has_credits` or `unlimited`; a bare balance does not count). With no fresh evidence the account behaves as if the flag were off. Codex accounts only; other providers get `400`, unknown accounts `404`.
 
@@ -1297,12 +1297,12 @@ curl http://localhost:8080/api/models
 
 ##### Scoped queries: `?provider=` and `&accountId=`
 
-Without a `provider`/`accountId` query, `GET /api/models` returns exactly the unscoped Anthropic catalog above, unchanged for existing callers. Adding either query switches to an entitlement-aware response tagged with where each model id came from (`ModelListingSource`: `builtin` — ccflare's own compiled table for that provider; `catalog` — the live Anthropic catalog; `reference` — the public models.dev listing, which proves a model exists but not that a given account's plan may call it; `account` — the account's own live listing, the only source that distinguishes an entitled model from one the plan does not reach).
+Without a `provider`/`accountId` query, `GET /api/models` returns exactly the unscoped Anthropic catalog above, unchanged for existing callers. Adding either query switches to an entitlement-aware response tagged with where each model id came from (`ModelListingSource`: `builtin` — HoV Router's own compiled table for that provider; `catalog` — the live Anthropic catalog; `reference` — the public models.dev listing, which proves a model exists but not that a given account's plan may call it; `account` — the account's own live listing, the only source that distinguishes an entitled model from one the plan does not reach).
 
 - **`?provider=codex&accountId=<id>`** — the Codex account's own model listing (`chatgpt.com/backend-api/codex/models`), each entry additionally carrying `description`, `contextWindow`, `maxContextWindow`, `effectiveContextPercent`, and `supersededBy`. If the account cannot read its own listing, the response falls back to another account of the same provider and sets `source: "shared"` with a `warning` explaining that accounts on different plans can differ.
 - **`?provider=openai-compatible&accountId=<id>`** — the saved OpenAI-compatible account's own live model listing (see [Model Discovery](providers.md#model-discovery) in the provider guide).
 - **`?accountId=<id>`** alone, or an `accountId`/`provider` combination with no account-specific discovery path, returns `{"models": [], "source": "unavailable", "warning": "..."}` rather than erroring.
-- **Any other `provider=<name>`** (no `accountId`) returns the union of ccflare's built-in model list for that provider and the public models.dev catalogue, deduplicated by id with the stronger (`builtin`) marking winning; a failed or unavailable catalogue fetch degrades to the builtin list plus a `warning` rather than failing the request.
+- **Any other `provider=<name>`** (no `accountId`) returns the union of HoV Router's built-in model list for that provider and the public models.dev catalogue, deduplicated by id with the stronger (`builtin`) marking winning; a failed or unavailable catalogue fetch degrades to the builtin list plus a `warning` rather than failing the request.
 
 **Example:**
 ```bash
@@ -1429,7 +1429,7 @@ All API errors follow a consistent format:
 
 ### Rate Limiting
 
-When an account hits rate limits, better-ccflare automatically fails over to the next available account. If all accounts are rate limited, a 503 error is returned.
+When an account hits rate limits, HoV Router automatically fails over to the next available account. If all accounts are rate limited, a 503 error is returned.
 
 Rate limit information is included in account responses:
 - `rateLimitStatus` - Current status (e.g., "allowed", "allowed_warning", "rate_limited")
@@ -1447,7 +1447,7 @@ The proxy endpoints support streaming responses for compatible Claude API calls.
 3. Each chunk is delivered as a Server-Sent Event
 
 **Streaming Response Capture:**
-better-ccflare automatically captures streaming response bodies for analytics and debugging purposes:
+HoV Router automatically captures streaming response bodies for analytics and debugging purposes:
 - Captured data is limited to `CF_STREAM_BODY_MAX_BYTES` (default: 256KB)
 - The capture process doesn't interfere with the client's stream
 - Captured bodies are stored base64-encoded in the request history
@@ -1489,7 +1489,7 @@ The dashboard provides a visual interface for:
 
 ### Environment Variables
 
-better-ccflare can be configured using the following environment variables:
+HoV Router can be configured using the following environment variables:
 
 - `PORT` - Server port (default: 8080)
 - `LB_STRATEGY` - Load balancing strategy (default: session)
@@ -1506,7 +1506,7 @@ better-ccflare can be configured using the following environment variables:
 
 ### Configuration File
 
-In addition to environment variables, better-ccflare supports configuration through a JSON file. The config file location varies by platform:
+In addition to environment variables, HoV Router supports configuration through a JSON file. The config file location varies by platform:
 - macOS: `~/Library/Application Support/better-ccflare/config.json`
 - Linux: `~/.config/better-ccflare/config.json`
 - Windows: `%APPDATA%\better-ccflare\config.json`
@@ -1539,9 +1539,9 @@ For Anthropic OAuth accounts, prefer a session-based strategy (`session`, `sessi
 
 ## Notes
 
-1. **No Authentication**: The API endpoints do not require authentication. better-ccflare manages the OAuth tokens internally for proxying to Claude.
+1. **No Authentication**: The API endpoints do not require authentication. HoV Router manages the OAuth tokens internally for proxying to Claude.
 
-2. **Automatic Failover**: When a request fails or an account is rate limited, better-ccflare automatically tries the next available account. If no accounts are available, requests are forwarded without authentication as a fallback.
+2. **Automatic Failover**: When a request fails or an account is rate limited, HoV Router automatically tries the next available account. If no accounts are available, requests are forwarded without authentication as a fallback.
 
 3. **Token Refresh**: Access tokens are automatically refreshed when they expire.
 
