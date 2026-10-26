@@ -140,6 +140,7 @@ import {
 	EventLoopStallMonitor,
 	formatEventLoopStallReport,
 } from "./event-loop-stall-monitor";
+import { createHostCounterReader } from "./host-counters";
 import { createManagedIngress } from "./managed-ingress";
 import {
 	describeRetentionSweepStop,
@@ -1546,6 +1547,7 @@ export default async function startServer(options?: {
 	const stallLog = new Logger("EventLoop");
 	eventLoopStallMonitor = new EventLoopStallMonitor({
 		drainSql: () => dbOps.drainSqlTimingWindow(),
+		sampleHost: createHostCounterReader(),
 		report: (report) => stallLog.warn(formatEventLoopStallReport(report)),
 	});
 	eventLoopStallMonitor.start();
