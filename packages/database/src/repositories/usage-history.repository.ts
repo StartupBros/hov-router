@@ -4,6 +4,7 @@ import type {
 	UsageSnapshotRow,
 } from "@better-ccflare/types";
 import { getCleanupBatchSize } from "../adapters/bun-sql-adapter";
+import { type CleanupPacer, deleteInBatches } from "../cleanup-pacing";
 import { BaseRepository } from "./base.repository";
 
 interface SnapshotDbRow {
@@ -480,7 +481,10 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 		};
 	}
 
-	async deleteOlderThan(cutoffTs: number): Promise<number> {
+	async deleteOlderThan(
+		cutoffTs: number,
+		pacer?: CleanupPacer,
+	): Promise<number> {
 		// Batched like RequestRepository.deleteOlderThan/deletePayloadsOlderThan —
 		// an unbounded DELETE here can exceed the PG statement_timeout once the
 		// table is large, which previously caused retention cleanup to fail
@@ -500,16 +504,12 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 		const appendOrderSql = `DELETE FROM usage_snapshots WHERE append_order IN (
 			SELECT append_order FROM usage_snapshots WHERE timestamp < ? LIMIT ?
 		)`;
-		let total = 0;
-		let deleted: number;
-		do {
-			deleted = await this.runWithChanges(appendOrderSql, [
-				cutoffTs,
-				BATCH_SIZE,
-			]);
-			total += deleted;
-		} while (deleted === BATCH_SIZE);
-		return total;
+		return deleteInBatches(
+			"usage_snapshots",
+			BATCH_SIZE,
+			() => this.runWithChanges(appendOrderSql, [cutoffTs, BATCH_SIZE]),
+			pacer,
+		);
 	}
 }
 
