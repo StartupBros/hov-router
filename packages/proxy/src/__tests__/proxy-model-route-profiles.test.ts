@@ -780,12 +780,17 @@ describe("Claude Code gateway model route profiles", () => {
 		});
 	});
 
-	it("discovers only the hinted Sol picker locally without leaking route metadata", async () => {
+	it("discovers only the hinted Sol picker locally, labelled with the model it serves", async () => {
+		const account = makeAccount();
+		account.name = "pro-primary";
+		account.model_mappings = JSON.stringify({ opus: "gpt-5.6-sol" });
 		const harness = makeContext(
 			makeRegistry({
-				expectedPhysicalModel: "physical-model-secret",
+				displayName: "Operator label",
+				expectedPhysicalModel: "gpt-5.6-sol",
 				clientContextWindowHint: "1m",
 			}),
+			{ accounts: [account] },
 		);
 		const { fetchMock } = installJsonUpstream();
 		const request = new Request(
@@ -806,7 +811,7 @@ describe("Claude Code gateway model route profiles", () => {
 			data: [
 				{
 					id: PROFILE_MODEL_1M,
-					display_name: "GPT-5.6 Sol · pro-primary",
+					display_name: "gpt-5.6-sol (1M) · pro-primary",
 					description:
 						"One pinned account, no fallback · subagents use the same account",
 				},
@@ -815,14 +820,15 @@ describe("Claude Code gateway model route profiles", () => {
 		});
 		for (const secret of [
 			"must not leak",
+			"Operator label",
 			ROUTE_ACCOUNT_ID,
 			LOGICAL_MODEL,
-			"physical-model-secret",
 		]) {
 			expect(raw).not.toContain(secret);
 		}
 		expect(harness.providerCanHandle).toHaveBeenCalledTimes(0);
-		expect(harness.getAllAccounts).toHaveBeenCalledTimes(0);
+		// One local account read; never a provider or catalog fetch.
+		expect(harness.getAllAccounts).toHaveBeenCalledTimes(1);
 		expect(harness.getActiveComboForFamily).toHaveBeenCalledTimes(0);
 		expect(harness.getAgentPreference).toHaveBeenCalledTimes(0);
 		expect(harness.strategySelect).toHaveBeenCalledTimes(0);
@@ -3595,7 +3601,59 @@ describe("catalog-role Codex route profiles", () => {
 		}
 	});
 
-	it("discovers role pickers like any other profile without leaking route metadata", async () => {
+	it("relabels role pickers from each account's own catalog, following a reorder", async () => {
+		const account = makeRoleAccount();
+		account.name = "codex-role";
+		const harness = makeRoleContext([account]);
+		const upstream = installCodexRoleUpstream();
+		const labels = async () => {
+			const request = new Request("https://proxy.local/v1/models");
+			const response = await handleProxy(
+				request,
+				new URL(request.url),
+				harness.ctx,
+				"key-1",
+			);
+			const body = (await response.json()) as {
+				data: Array<{ id: string; display_name: string }>;
+			};
+			return body.data.map((model) => model.display_name);
+		};
+
+		await publish(upstream, account, harness.ctx, NEXT_GENERATION);
+		expect(await labels()).toEqual([
+			"gpt-7-nova · codex-role",
+			"gpt-7-nova · codex pool",
+		]);
+
+		// OpenAI reordering its priorities moves the opus role to another model;
+		// the picker follows with no config edit.
+		await publish(upstream, account, harness.ctx, REORDERED);
+		expect(await labels()).toEqual([
+			"gpt-7-sol · codex-role",
+			"gpt-7-sol · codex pool",
+		]);
+		const catalogReads = upstream.catalogReads.length;
+		await labels();
+		expect(upstream.catalogReads).toHaveLength(catalogReads);
+	});
+
+	it("hides a role picker whose account is paused", async () => {
+		const account = makeRoleAccount();
+		account.paused = true;
+		const harness = makeRoleContext([account]);
+		installCodexRoleUpstream();
+		const request = new Request("https://proxy.local/v1/models");
+		const response = await handleProxy(
+			request,
+			new URL(request.url),
+			harness.ctx,
+			"key-1",
+		);
+		expect(await response.json()).toEqual({ data: [], has_more: false });
+	});
+
+	it("discovers cold role pickers by their operator labels without leaking route metadata", async () => {
 		const harness = makeRoleContext([makeRoleAccount()]);
 		const { fetchMock } = installCodexRoleUpstream();
 		const request = new Request("https://proxy.local/v1/models");
@@ -3635,7 +3693,7 @@ describe("catalog-role Codex route profiles", () => {
 			expect(raw).not.toContain(secret);
 		}
 		expect(fetchMock).not.toHaveBeenCalled();
-		expect(harness.getAllAccounts).not.toHaveBeenCalled();
+		expect(harness.getAllAccounts).toHaveBeenCalledTimes(1);
 	});
 
 	describe("request-time priming of cold own catalogs", () => {

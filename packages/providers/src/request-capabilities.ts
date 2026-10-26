@@ -1,4 +1,7 @@
-import { getConfiguredModelMapping } from "@better-ccflare/core";
+import {
+	getConfiguredModelMapping,
+	getModelFamily,
+} from "@better-ccflare/core";
 import {
 	isGpt56SolModel,
 	type ReasoningEffort,
@@ -10,6 +13,7 @@ import type {
 	LogicalModelCapability,
 } from "@better-ccflare/types";
 import { PROVIDER_NAMES } from "@better-ccflare/types";
+import { resolveProviderModelDefault } from "./provider-model-defaults";
 import { getCapabilityProvider } from "./registry";
 
 const OAUTH_SUBSCRIPTION_PROVIDERS = new Set<string>([
@@ -181,6 +185,42 @@ export function resolveAccountLogicalModelCapability(
 		provider.getLogicalModelCapability?.(logicalModel, account) ??
 		UNKNOWN_LOGICAL_MODEL_CAPABILITY
 	);
+}
+
+/**
+ * The physical model this account would be sent for a logical model, read from
+ * the same provenance {@link resolveAccountLogicalModelCapability} reports and
+ * without provider I/O. A mapping's first entry is the model routing tries
+ * first; later entries are fallbacks. Null when support is not declared.
+ */
+export function previewAccountPhysicalModel(
+	account: Account,
+	logicalModel: string,
+	capabilityProviderLookup: typeof getCapabilityProvider = getCapabilityProvider,
+): string | null {
+	const capability = resolveAccountLogicalModelCapability(
+		account,
+		logicalModel,
+		capabilityProviderLookup,
+	);
+	if (capability.status !== "supported") return null;
+	switch (capability.provenance) {
+		case "explicit_account_mapping": {
+			const first = getConfiguredModelMapping(logicalModel, account)?.models[0];
+			return typeof first === "string" && first.trim() ? first.trim() : null;
+		}
+		case "native_passthrough":
+			return logicalModel.trim() || null;
+		case "provider_default": {
+			const family = getModelFamily(logicalModel);
+			return family
+				? (resolveProviderModelDefault(account.provider, family, account.id) ??
+						null)
+				: null;
+		}
+		default:
+			return null;
+	}
 }
 
 export interface ModelContextCapability {

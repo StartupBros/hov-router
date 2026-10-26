@@ -174,6 +174,7 @@ import {
 	getAutomaticAccountCooldownUntil,
 } from "./handlers/routing-terminal";
 import { consumeInternalAutoRefreshAuth } from "./internal-probe-auth";
+import { listModelRouteDiscoveryModels } from "./model-route-discovery";
 import {
 	isBoundedModelRouteProfile,
 	MODEL_ROUTE_PROFILE_MODEL_PREFIX,
@@ -923,7 +924,8 @@ async function handleProxyCoreImpl(
 
 	// handleProxy is entered only after the server's authentication layer. These
 	// choices describe intent, not live candidate availability; admission remains
-	// authoritative. Discovery must never refresh catalogs or query providers.
+	// authoritative. Discovery must never refresh catalogs or query providers:
+	// route labels come from one local account read plus in-memory catalogs.
 	const qualityChoices =
 		req.method === "GET" &&
 		url.pathname === "/v1/models" &&
@@ -937,10 +939,15 @@ async function handleProxyCoreImpl(
 		url.pathname === "/v1/models" &&
 		(ctx.modelRouteSessionRegistry?.hasProfiles || qualityChoices.length > 0)
 	) {
+		const routeModels = ctx.modelRouteSessionRegistry?.hasProfiles
+			? await listModelRouteDiscoveryModels(ctx.modelRouteSessionRegistry, () =>
+					ctx.dbOps.getAllAccounts(),
+				)
+			: [];
 		return new Response(
 			JSON.stringify({
 				data: [
-					...(ctx.modelRouteSessionRegistry?.getDiscoveryModels() ?? []),
+					...routeModels,
 					...qualityChoices.map((choice) => ({
 						id: choice.publicModelId,
 						display_name: choice.displayName,
