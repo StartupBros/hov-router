@@ -505,8 +505,39 @@ request carrying neither is forwarded unchanged, so a release that renamed both 
 no grant and no error. The refusal happens before routing and leaves no request history. The
 refusal message calls these instructions the *host template*.
 
+## Stream liveness
+
+### Semantic commit
+
+The moment the router releases a held streaming response to the client. It buffers the first
+events of an attempt and commits only when one carries content, ends the message, reports an
+error, or is of a type it does not recognize. Before commit the router can still abandon the
+attempt and try another route without the client seeing anything; after commit the client has
+output on screen and the attempt is final.
+
+### Protocol activity and meaningful progress
+
+Protocol activity is any well-formed stream event, including keepalive pings, lifecycle events
+and integrity signatures; meaningful progress is narrower, an event that carries non-empty
+text, thinking or tool-call input. Idle deadlines that ask whether the stream is still talking
+are refreshed by protocol activity, while the commitment deadline that asks whether the model
+has produced anything is met only by meaningful progress, which triggers the *Semantic
+commit*. A stream that only pings can therefore pass the first kind and still fail the second.
+
+### Synthesized keepalive
+
+A ping the router emits itself, from a local timer, so the client's and the guard's idle timers
+stay satisfied while the upstream is silent, as opposed to a ping the upstream sent. It proves
+only that the client connection is alive, never that the upstream is, so it must not count as
+*Protocol activity* toward any deadline that judges the upstream. Every ping on a stream the
+router translates from another provider's format into Anthropic's is of this kind.
+
 ## Flagged ambiguities
 
+- *Idle timeout* names several unrelated clocks: the client's own stream watchdog, the guard's
+  response-body idle cut, the router's pre-commit protocol-idle deadline, its post-commit
+  liveness check, and the usage recorder's inactivity eviction. They are reset by different
+  events (see *Synthesized keepalive*), so name the clock rather than "the idle timeout".
 - *Active* on a usage window means "currently binding" only in the shapes that report an
   explicit array of limits; in every other shape it is just the default and carries no
   information. A fixture for the limits-array shape that marks every entry active
@@ -535,4 +566,4 @@ refusal message calls these instructions the *host template*.
 
 A **committed backend generation** has verified executable/source, PID/start, listener, nonce, timing/compatibility identity and a durable exact pin before it receives new work. **Admission continuity** measures listener acceptance separately from dispatch availability, stream completion and forced retirement. Ingress source identity may differ from backend source identity after a compatible handoff.
 
-The **accepted request deadline** is the trusted first-header work limit shared across managed ingress and backend. It differs from response-start, stream-idle and meaningful-progress limits. Its **cleanup reserve** bounds settlement after the primary terminal; cleanup failure is secondary evidence and cannot renew work or change the first terminal cause.
+The **accepted request deadline** is the trusted first-header work limit shared across managed ingress and backend. It differs from response-start, stream-idle and meaningful-progress limits (see *Protocol activity and meaningful progress*). Its **cleanup reserve** bounds settlement after the primary terminal; cleanup failure is secondary evidence and cannot renew work or change the first terminal cause.
