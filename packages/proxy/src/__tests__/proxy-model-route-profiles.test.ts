@@ -813,7 +813,7 @@ describe("Claude Code gateway model route profiles", () => {
 					id: PROFILE_MODEL_1M,
 					display_name: "gpt-5.6-sol (1M) · pro-primary",
 					description:
-						"One pinned account, no fallback · subagents use the same account",
+						"One account only. Fails instead of switching. Subagents use it too.",
 				},
 			],
 			has_more: false,
@@ -3780,13 +3780,13 @@ describe("catalog-role Codex route profiles", () => {
 					id: ROLE_PICKER,
 					display_name: "Codex · opus",
 					description:
-						"One pinned account, no fallback · subagents use the same account",
+						"One account only. Fails instead of switching. Subagents use it too.",
 				},
 				{
 					id: ROLE_POOL_PICKER,
 					display_name: "Codex pool · opus",
 					description:
-						"Pool of matching accounts, load-balancer order, then error · subagents fall back to normal routing",
+						"This model on any pool account. Fails instead of switching. Subagents try the pool first.",
 				},
 			],
 			has_more: false,

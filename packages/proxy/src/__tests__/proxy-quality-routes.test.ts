@@ -1242,12 +1242,12 @@ describe("prewarmed native catalogs", () => {
 				id: "claude-bccf-route-existing",
 				display_name: "Claude Opus 5.5 · a",
 				description:
-					"One pinned account, no fallback · subagents use the same account",
+					"One account only. Fails instead of switching. Subagents use it too.",
 			},
 		];
 		// Fixture enrolls only the Fable, Opus, Sonnet and Haiku lines, no grants.
 		const flowTail =
-			", then error · keeps last working model · subscription only";
+			". Uses the first with quota and stays on it. Never costs extra.";
 		ctx.modelRouteSessionRegistry = new ModelRouteSessionRegistry([
 			{
 				id: "existing",
@@ -1274,17 +1274,17 @@ describe("prewarmed native catalogs", () => {
 			...local,
 			{
 				id: "claude-bccf-quality-auto",
-				display_name: "Auto",
+				display_name: "Auto (recommended)",
 				description: `Fable → Opus${flowTail}`,
 			},
 			{
 				id: "claude-bccf-quality-astra",
-				display_name: "Astra-preferred",
+				display_name: "GPT Astra first",
 				description: `Opus${flowTail}`,
 			},
 			{
 				id: "claude-bccf-quality-opus",
-				display_name: "Opus-latest",
+				display_name: "Claude Opus first",
 				description: `Opus${flowTail}`,
 			},
 		]);

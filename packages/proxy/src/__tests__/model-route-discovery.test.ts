@@ -12,9 +12,9 @@ import {
 } from "../model-route-profiles";
 
 const EXACT_FLOW =
-	"One pinned account, no fallback · subagents use the same account";
+	"One account only. Fails instead of switching. Subagents use it too.";
 const POOL_FLOW =
-	"Pool of matching accounts, load-balancer order, then error · subagents fall back to normal routing";
+	"This model on any pool account. Fails instead of switching. Subagents try the pool first.";
 
 const route = (id: string) => `${MODEL_ROUTE_PROFILE_MODEL_PREFIX}${id}`;
 
