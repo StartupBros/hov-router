@@ -64,8 +64,8 @@ graph TB
 
 ```bash
 # Clone the repository
-git clone https://github.com/StartupBros/hov-router.git better-ccflare
-cd better-ccflare
+git clone https://github.com/StartupBros/hov-router.git
+cd hov-router
 
 # Install dependencies
 bun install
@@ -1027,7 +1027,7 @@ sqlite3 ~/.config/better-ccflare/better-ccflare.db "ANALYZE;"
 hov-router --clear-history
 
 # Quarterly: Update dependencies (if running from source)
-cd /path/to/better-ccflare
+cd /path/to/hov-router
 bun update
 ```
 

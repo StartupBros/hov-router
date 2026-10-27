@@ -1,6 +1,6 @@
 # HoV Router release automation (draft-only)
 
-For the current published release, 3.7.0 (Linux x86_64), follow the technical
+For the current published release, 3.7.1 (Linux x86_64), follow the technical
 reference's [consumer installation and verification instructions](reference.md#install-the-linux-x86_64-release).
 
 This is the operator guide for HoV Router release automation at
@@ -28,22 +28,22 @@ Attestation lookup may require your existing GitHub CLI authentication. If a too
 flag, authentication, or verification step fails, stop and resolve it; do not treat
 an incomplete provenance check as successful.
 
-Release 3.7.0 was built and signed in this repository under its current name, so
+Release 3.7.1 was built and signed in this repository under its current name, so
 it is retrieved from and verified against the same repository, `StartupBros/hov-router`.
 
 <!-- router-release-provenance -->
 ```bash
 (
   set -eu
-  binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"
-  source_sha=79a957526bd1994cb3c52b6a110de3c70c1e5c6f
-  digest=49e3ddbc9fc683ffc68dbbacbf4350db582e4cdac417df32a8e6244c90bf2afe
+  binary="$HOME/.local/lib/hov-router/3.7.1/hov-router"
+  source_sha=6b88f789e30c3a86ee918d35a6673e7be12f9243
+  digest=f6e6ee137d0766eb6df9d6c76d264603e9696c12797e1570b8ad6b9648d0b12c
   printf '%s  %s\n' "$digest" "$binary" | sha256sum --check --strict -
   gh attestation verify "$binary" \
     --repo StartupBros/hov-router \
     --source-digest "$source_sha" \
-    --source-ref refs/tags/v3.7.0 \
-    --cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.0 \
+    --source-ref refs/tags/v3.7.1 \
+    --cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.1 \
     --signer-digest "$source_sha" \
     --deny-self-hosted-runners
 )
@@ -62,17 +62,17 @@ release auditing; neither is required by the consumer install above. The operato
 pipeline below still verifies the complete inventory and both attestations before
 executing release smoke checks. Its strict verification policy is unchanged.
 
-Release ID **423116405** and tag `refs/tags/v3.7.0` identify source commit
-`79a957526bd1994cb3c52b6a110de3c70c1e5c6f`. The exact certificate is
-`https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.0`.
+Release ID **423574844** and tag `refs/tags/v3.7.1` identify source commit
+`6b88f789e30c3a86ee918d35a6673e7be12f9243`. The exact certificate is
+`https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.1`.
 
-| 3.7.0 asset | Asset ID | Size (bytes) | SHA-256 |
+| 3.7.1 asset | Asset ID | Size (bytes) | SHA-256 |
 | --- | --- | --- | --- |
-| `better-ccflare-linux-amd64` | 674050273 | 97965536 | `49e3ddbc9fc683ffc68dbbacbf4350db582e4cdac417df32a8e6244c90bf2afe` |
-| `release-manifest.json` | 674050665 | 811 | `48c84581f5640e698d743670d67637990e3242bb1f98c22c5328e9a4a8eb8940` |
-| `SHA256SUMS` | 674050062 | 93 | `df8114cb8aa7da5c4ba673ed910c61fd199041dd3da99f6d6ed708e0b81edec4` |
+| `better-ccflare-linux-amd64` | 675765162 | 97969632 | `f6e6ee137d0766eb6df9d6c76d264603e9696c12797e1570b8ad6b9648d0b12c` |
+| `release-manifest.json` | 675765600 | 811 | `5e88ab1d8376fe783da736003c40f34a0207db4c71be5f6a5c328d1c30881d0c` |
+| `SHA256SUMS` | 675764852 | 93 | `923d6041201ba6ade61ff3dcd2ec200970475076ae7b9af261058211394545e5` |
 
-For a manifest audit, download `release-manifest.json` from the v3.7.0 release,
+For a manifest audit, download `release-manifest.json` from the v3.7.1 release,
 check its digest above, then run the same verify command with `binary` set to that
 local manifest and `digest` set to its SHA-256. The signed manifest names repository
 `StartupBros/hov-router`. Its distribution token is
