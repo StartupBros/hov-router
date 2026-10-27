@@ -161,12 +161,21 @@ import {
 	sessionIdForObservation,
 } from "../session-account-observer";
 import { combineChunks } from "../stream-tee";
+import {
+	claimWebSearchHelperDispatch,
+	createWebSearchHelperCandidateMeta,
+	getWebSearchHelperScope,
+	hasWebSearchHelperDispatched,
+	isFreshWebSearchHelper,
+	observeWebSearchHelperRouting,
+} from "../websearch-helper-policy";
 import { isModelRewrite } from "../worker-messages";
 import {
 	ForceRouteUnavailableError,
 	getConcreteCodexModelList,
 	getRouteProfileConstraintViolation,
 	getXaiConvId,
+	isWebSearchHelperCandidateAdmitted,
 } from "./account-selector";
 import { cancelDiscardedResponseBody } from "./discard-body-cancel";
 import { forwardObservedUpstream } from "./observed-upstream";
@@ -337,8 +346,8 @@ class HostedDispatchTerminalError extends Error {
 	}
 }
 
-function createHostedDispatchTerminalResponse(
-	error: HostedDispatchTerminalError,
+export function createHostedDispatchTerminalResponse(
+	error = new HostedDispatchTerminalError("ambiguous_transport"),
 ): Response {
 	return new Response(
 		JSON.stringify({
@@ -355,6 +364,17 @@ function createHostedDispatchTerminalResponse(
 			status: 502,
 			headers: { "content-type": "application/json" },
 		},
+	);
+}
+
+function refuseWebSearchHelperAdmission(
+	requestMeta: RequestMeta,
+	accountId: string,
+): never {
+	observeWebSearchHelperRouting(requestMeta, "admission_changed", accountId);
+	throw new ForceRouteUnavailableError(
+		accountId,
+		"helper_admission_unavailable",
 	);
 }
 
@@ -2459,6 +2479,13 @@ export async function proxyUnauthenticated(
 	anthropicPreCommitRescue?: AnthropicPreCommitRescueRouteContext,
 	routingAttemptLedger?: RoutingAttemptLedger,
 ): Promise<Response> {
+	const helperScope = getWebSearchHelperScope(requestMeta);
+	if (helperScope) {
+		throw new ForceRouteUnavailableError(
+			helperScope.profile.accountId ?? helperScope.profile.id,
+			"helper_admission_unavailable",
+		);
+	}
 	if (url.pathname === "/v1/messages/count_tokens") {
 		if (
 			getProviderPathCapability(ctx.provider, url.pathname).support ===
@@ -2677,6 +2704,18 @@ export async function proxyWithAccount(
 	/** Refresh credential snapshot carried into the bounded same-account retry. */
 	staleTokenRefreshTokenAtStart?: string | null,
 ): Promise<ProxyWithAccountResult> {
+	const helperScope = getWebSearchHelperScope(requestMeta);
+	if (hasWebSearchHelperDispatched(requestMeta)) {
+		return createHostedDispatchTerminalResponse(
+			new HostedDispatchTerminalError("already_dispatched"),
+		);
+	}
+	if (helperScope) {
+		if (!isWebSearchHelperCandidateAdmitted(requestMeta, ctx, account))
+			refuseWebSearchHelperAdmission(requestMeta, account.id);
+		// Candidate-local model choice; never reuse the source account's chat pin.
+		modelOverride = helperScope.profile.logicalModel;
+	}
 	// Dispatch backstop (KTD7): only api.anthropic.com executes the advisor tool,
 	// so a native-Anthropic requirement never leaves a first-party account. Every
 	// caller (main loop, deferred routes, native-quota queue, fallback waves,
@@ -2851,13 +2890,24 @@ export async function proxyWithAccount(
 						signal: attemptSignal,
 					},
 					async (markObservedDispatch) => {
-						const optionalResponse = await optionalOutboundTransport?.(
-							attemptSignal,
-							markDispatched,
-							markObservedDispatch,
-						);
+						const optionalResponse =
+							!helperScope &&
+							(await optionalOutboundTransport?.(
+								attemptSignal,
+								markDispatched,
+								markObservedDispatch,
+							));
 						if (optionalResponse) return optionalResponse;
 						if (qualityPrepare) await qualityPrepare();
+						let helperAccount: Account | null = null;
+						let helperBody: Record<string, unknown> | null = null;
+						if (helperScope) {
+							helperBody = (await request.clone().json()) as Record<
+								string,
+								unknown
+							>;
+							helperAccount = await ctx.dbOps.getAccount(account.id);
+						}
 						// This attempt owns disposable transport headers. Use the original
 						// client's parent, never a previous retry's stamped child span.
 						applyPrivateAiTraceContext(
@@ -2868,10 +2918,47 @@ export async function proxyWithAccount(
 							req.headers,
 						);
 						modelFallbackPolicy?.qualityAttempt?.assertDispatch();
+						if (helperScope) {
+							const target = new URL(request.url);
+							const bearer = request.headers.get("authorization");
+							if (
+								!helperAccount ||
+								helperAccount.created_at !== account.created_at ||
+								target.origin !== "https://api.anthropic.com" ||
+								target.pathname !== "/v1/messages" ||
+								request.headers.has("x-api-key") ||
+								!bearer?.startsWith("Bearer ") ||
+								!isFreshWebSearchHelper(helperBody) ||
+								typeof helperBody?.model !== "string" ||
+								!isWebSearchHelperCandidateAdmitted(
+									requestMeta,
+									ctx,
+									helperAccount,
+									helperBody.model,
+									bearer.slice(7),
+								)
+							)
+								refuseWebSearchHelperAdmission(requestMeta, account.id);
+						}
 						// No await after the final authoritative gates. Observation is
 						// fail-open and cannot make an expired attempt dispatchable.
+						if (helperScope) {
+							attemptSignal.throwIfAborted();
+							if (hasWebSearchHelperDispatched(requestMeta)) {
+								throw new HostedDispatchTerminalError("already_dispatched");
+							}
+						}
 						assertManagedWorkAvailable(req);
 						onHttpDispatch?.();
+						if (helperScope) {
+							if (!claimWebSearchHelperDispatch(requestMeta))
+								throw new HostedDispatchTerminalError("already_dispatched");
+							observeWebSearchHelperRouting(
+								requestMeta,
+								"subscription_admitted",
+								account.id,
+							);
+						}
 						markDispatched();
 						const pendingHttp = makeProxyRequest(
 							request,
@@ -3450,7 +3537,7 @@ export async function proxyWithAccount(
 							routeProfileLogicalModel: null,
 							routeCatalogRoleTargetByAccountId: null,
 						}
-					: requestMeta;
+					: createWebSearchHelperCandidateMeta(requestMeta);
 			const constraintViolation = getRouteProfileConstraintViolation(
 				account,
 				routeConstraintMeta,
@@ -3511,7 +3598,8 @@ export async function proxyWithAccount(
 				throw candidateCapabilityError("proof_drift");
 			}
 		};
-		const hostedDispatchCommitted = (): boolean =>
+		const irreversibleSearchDispatchCommitted = (): boolean =>
+			hasWebSearchHelperDispatched(requestMeta) ||
 			routingAttemptLedger?.hostedDispatchState === "hosted_dispatched";
 		const transformWithCurrentAttemptPlan = async (
 			plan: ProviderAttemptPlan,
@@ -4867,7 +4955,7 @@ export async function proxyWithAccount(
 		): Promise<ProxyWithAccountResult | undefined> => {
 			if (
 				failedResponse.status !== 401 ||
-				hostedDispatchCommitted() ||
+				irreversibleSearchDispatchCommitted() ||
 				wasProtectedLifecycleForLatestResponse()
 			) {
 				return undefined;
@@ -5254,7 +5342,7 @@ export async function proxyWithAccount(
 		// runs (and peeks) exactly once per physical attempt with no extra
 		// bookkeeping needed to prevent a double peek.
 		if (
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			!isSyntheticInternal &&
 			!wasProtectedLifecycleForLatestResponse() &&
 			account.provider === "zai" &&
@@ -5353,7 +5441,7 @@ export async function proxyWithAccount(
 		// attribute (unknown owner): upstream rejects them with a 400. Drop every
 		// advisor result and replay once on the same account.
 		if (
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			isFirstPartyAnthropicAccount(account) &&
 			(await isAdvisorResultUnprocessableError(
 				rawResponse,
@@ -5420,7 +5508,7 @@ export async function proxyWithAccount(
 
 		// Check if this is a Claude provider and we got an invalid thinking signature error
 		if (
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			isClaudeProvider &&
 			(await isInvalidThinkingSignatureError(rawResponse, readAttemptBoundJson))
 		) {
@@ -5481,7 +5569,7 @@ export async function proxyWithAccount(
 		// proxy-minted retention blocks and replay this physical route once so a
 		// single rejected history item cannot permanently wedge the conversation.
 		if (
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			attemptPlan.providerName === "codex" &&
 			(await isCodexReasoningVerificationError(
 				rawResponse,
@@ -5541,7 +5629,7 @@ export async function proxyWithAccount(
 		// turn, so the session stays wedged unless the edit is dropped. Retry
 		// once with the offending edits removed; everything else is preserved.
 		if (
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			isClaudeProvider &&
 			(await isClearThinkingRequiresThinkingError(
 				rawResponse,
@@ -5608,7 +5696,7 @@ export async function proxyWithAccount(
 				transformedRequestHadExplicitBreakpoint,
 				readAttemptBoundJson,
 			));
-		if (explicitBreakpointRejection && !hostedDispatchCommitted()) {
+		if (explicitBreakpointRejection && !irreversibleSearchDispatchCommitted()) {
 			suppressCodexExplicitCacheBreakpoint(
 				account.id,
 				transformedModel,
@@ -5669,7 +5757,7 @@ export async function proxyWithAccount(
 		// Retry without cache_control if provider rejected it (e.g. GLM-5.1 strict validation).
 		// Mark (accountId, model) so subsequent requests skip cache_control immediately.
 		if (
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			(await isCacheControlRejectionError(rawResponse, readAttemptBoundJson))
 		) {
 			const rejectorKey = cacheControlRejectorKey(account.id, transformedModel);
@@ -5762,7 +5850,7 @@ export async function proxyWithAccount(
 		// in the first place), or a second rejection on an already-suppressed
 		// lane all correctly perform no repair.
 		if (
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			attemptPlan.providerName === "codex" &&
 			(await isCodexResponseIdRejectionError(
 				rawResponse,
@@ -6546,7 +6634,7 @@ export async function proxyWithAccount(
 		// model fallback, cooldown failover, or body drain can consume it.
 		if (
 			!wasProtectedLifecycleForLatestResponse() &&
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			// Quality owns replay and settlement. Legacy raw-failure paths may
 			// consume a response and return null, losing its terminal observation.
 			!modelFallbackPolicy?.qualityAttempt
@@ -7342,7 +7430,7 @@ export async function proxyWithAccount(
 		}
 
 		if (
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			(await handleProcessedCodexContextOverflow(response))
 		) {
 			return null;
@@ -7353,7 +7441,7 @@ export async function proxyWithAccount(
 		// lifecycles remain terminal and are intentionally untouched.
 		if (
 			response.status === 401 &&
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			!modelFallbackPolicy?.qualityAttempt
 		) {
 			const authResult = await handleUpstreamAuthFailure(
@@ -7370,7 +7458,7 @@ export async function proxyWithAccount(
 		if (
 			response.status === 529 &&
 			!modelFallbackPolicy?.qualityAttempt &&
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			!isSyntheticInternal &&
 			!wasProtectedLifecycleForLatestResponse()
 		) {
@@ -7595,7 +7683,7 @@ export async function proxyWithAccount(
 		// prevents a revoked credential from being sent again on later requests.
 		if (
 			response.status === 401 &&
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			!modelFallbackPolicy?.qualityAttempt
 		) {
 			const authResult = await handleUpstreamAuthFailure(
@@ -7620,7 +7708,7 @@ export async function proxyWithAccount(
 		// pre-commit stall wait indefinitely. In Bun, merely reading Response.body
 		// before a later classification clone can also disturb the retained branch.
 		const officialCodexPrecommitSseRetryRouteEligible =
-			!hostedDispatchCommitted() &&
+			!irreversibleSearchDispatchCommitted() &&
 			attemptPlan.providerName === "codex" &&
 			account.provider === "codex" &&
 			url.pathname === "/v1/messages" &&
@@ -7714,7 +7802,7 @@ export async function proxyWithAccount(
 					? undefined
 					: attemptCommitmentDeadlineAt - cacheLaneRescueReserveMs;
 			const codexAuthoritativeContextOverflowCanBeHandled =
-				!hostedDispatchCommitted() &&
+				!irreversibleSearchDispatchCommitted() &&
 				attemptPlan.providerName === "codex" &&
 				account.provider === "codex";
 			try {
@@ -8285,7 +8373,7 @@ export async function proxyWithAccount(
 					},
 					attemptProxyContext(),
 				);
-			if (hostedDispatchCommitted()) {
+			if (irreversibleSearchDispatchCommitted()) {
 				await enqueueObservedRateLimitAttempt(false, false);
 				// The first hosted provider response is authoritative for this inbound
 				// request. Preserve it exactly; converting it into an account miss would
@@ -8463,7 +8551,10 @@ export async function proxyWithAccount(
 		const forwardContext = attemptProxyContext();
 		if (modelFallbackPolicy?.prepareFinalResponse !== true) {
 			const forwardedResponse = forwardToClient(forwardOptions, forwardContext);
-			if (responseLifecycle?.enforced || hostedDispatchCommitted()) {
+			if (
+				responseLifecycle?.enforced ||
+				irreversibleSearchDispatchCommitted()
+			) {
 				return await forwardedResponse;
 			}
 			return forwardedResponse;
@@ -8580,6 +8671,7 @@ export async function proxyWithAccount(
 		}
 		if (
 			err instanceof HostedDispatchTerminalError ||
+			hasWebSearchHelperDispatched(requestMeta) ||
 			routingAttemptLedger?.hostedDispatchState === "hosted_dispatched"
 		) {
 			const terminalError =

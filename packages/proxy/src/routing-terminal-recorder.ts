@@ -4,6 +4,7 @@ import type { RequestMeta, RouteProvenance } from "@better-ccflare/types";
 import { sanitizeQualityDecision } from "@better-ccflare/types/request";
 import type { RoutingAttemptLedger } from "./handlers/routing-attempt-ledger";
 import { captureRoutingDecision } from "./handlers/routing-selection-diagnostics";
+import { getWebSearchHelperRoutingSummary } from "./websearch-helper-policy";
 import {
 	type EndMessage,
 	isModelRewrite,
@@ -48,6 +49,7 @@ interface RequestLifecycleStartOptions {
  * behind promises so a losing terminal can never race back in or affect delivery.
  */
 export class RequestLifecycleCoordinator {
+	constructor(private readonly requestMeta?: RequestMeta) {}
 	state: RequestLifecycleState = "unclaimed";
 
 	private collector: RoutingTerminalCollector | null = null;
@@ -137,6 +139,9 @@ export class RequestLifecycleCoordinator {
 							: message.error,
 					nativeStatus: this.nativeStatus,
 					wireStatus: this.observation.wireStatus(this.nativeStatus),
+					webSearchHelper: this.requestMeta
+						? getWebSearchHelperRoutingSummary(this.requestMeta)
+						: null,
 				});
 				if (routingAttemptSummary)
 					message = {
@@ -177,7 +182,7 @@ export function getRequestLifecycleCoordinator(
 ): RequestLifecycleCoordinator {
 	let coordinator = requestLifecycles.get(requestMeta);
 	if (!coordinator) {
-		coordinator = new RequestLifecycleCoordinator();
+		coordinator = new RequestLifecycleCoordinator(requestMeta);
 		requestLifecycles.set(requestMeta, coordinator);
 	}
 	return coordinator;

@@ -133,6 +133,25 @@ function registry(profiles: readonly object[] = PROFILES) {
 }
 
 describe("buildModelRouteDiscoveryModels", () => {
+	it("discloses search egress in live and fallback discovery without leaking the allowlist", () => {
+		const configured = registry([
+			{
+				...PROFILES[4],
+				webSearchHelper: { accountIds: ["private-search-account"] },
+			},
+		]);
+		for (const rows of [
+			configured.getDiscoveryModels(),
+			buildModelRouteDiscoveryModels(configured, accounts(), deps()),
+		]) {
+			expect(rows[0]?.id).toBe(route("glm-5-3-flash"));
+			expect(rows[0]?.description).toContain(
+				"Search helpers may use approved accounts",
+			);
+			expect(rows[0]?.description).not.toContain("One account only");
+			expect(JSON.stringify(rows)).not.toContain("private-search-account");
+		}
+	});
 	it("names the model each route serves and hides routes that cannot run", () => {
 		expect(
 			buildModelRouteDiscoveryModels(registry(), accounts(), deps()),

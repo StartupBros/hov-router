@@ -21,6 +21,7 @@ import {
 	CountTokensUnsupportedError,
 	canonicalizeBetaSignature,
 	deriveComboRouteClass,
+	getProvider,
 	getProviderPathCapability,
 	isNativeWebSearchPassthroughEligible,
 	materializeProviderServerToolCapabilityDecision,
@@ -64,6 +65,11 @@ import {
 	ServerToolRoutingError,
 	type ServerToolRoutingErrorReason,
 } from "../server-tool-routing-errors";
+import {
+	createWebSearchHelperCandidateMeta,
+	getWebSearchHelperAffinityLane,
+	getWebSearchHelperScope,
+} from "../websearch-helper-policy";
 import { buildComboMembershipDiagnostics } from "./managed-routing-diagnostics";
 import {
 	evaluateNativeQuotaPolicy,
@@ -88,6 +94,7 @@ import {
 	evaluateHardCapacity,
 	getWeeklyQuotaPressure,
 	type HardCapacityExclusion,
+	isAnthropicSubscriptionHelperAdmitted,
 	isCodexCreditDrainActive,
 } from "./usage-throttling";
 
@@ -725,6 +732,35 @@ function evaluateCandidateServerToolCapability(input: {
 	}
 }
 
+/** The built-in compatible adapter only converts to Chat Completions function tools.
+ * This is a local adapter limitation, not an inference about an unknown endpoint.
+ * Do not generalize missing proofs/resolvers to structural incompatibility.
+ */
+function isStructurallyIncapablePinnedCandidate(
+	account: Account,
+	routing: RoutingCandidateMetadata,
+	meta: RequestMeta,
+	ctx: ProxyContext,
+): boolean {
+	if (routing.serverToolCapability?.decision === "unsupported") return true;
+	const requirements = meta.serverToolRequirements;
+	if (
+		account.provider !== "openai-compatible" ||
+		!requirements ||
+		requirements.replay.input.length !== 0 ||
+		!isNativeWebSearchPassthroughEligible(requirements, true)
+	)
+		return false;
+	const provider = resolveProviderForAccount(account.provider, ctx.provider);
+	return (
+		provider !== undefined &&
+		provider === getProvider("openai-compatible") &&
+		routing.serverToolCapability?.reason === "tuple_unavailable" &&
+		provider.createServerToolCapabilityTuple === undefined &&
+		provider.resolveServerToolCapability === undefined
+	);
+}
+
 function isServerToolCandidateSemanticallyEligible(
 	candidate: RoutingCandidateMetadata,
 ): boolean {
@@ -845,6 +881,7 @@ export type ForceRouteUnavailableReason =
 	| "catalog_role_unavailable"
 	| "conflicting_force_route"
 	| "lookup_failed"
+	| "helper_admission_unavailable"
 	| "model_capacity_exhausted"
 	| "model_mapping_mismatch"
 	| "not_found"
@@ -1299,6 +1336,8 @@ export function deriveAffinityLaneKey(
 	meta: RequestMeta,
 	effectiveModel: string | null,
 ): string | null {
+	const helperLane = getWebSearchHelperAffinityLane(meta);
+	if (helperLane) return helperLane;
 	const session = meta.clientSessionId?.trim();
 	const model = effectiveModel?.trim().toLowerCase();
 	if (!session || !model) return null;
@@ -3310,6 +3349,45 @@ export async function getOrderedAccounts(
 	}
 }
 
+/** Shared selection / last-moment dispatch predicate; never accepts a public helper bit. */
+export function isWebSearchHelperCandidateAdmitted(
+	meta: RequestMeta,
+	ctx: ProxyContext,
+	account: Account,
+	physicalModel?: string | null,
+	accessToken = account.access_token ?? "",
+): boolean {
+	const scope = getWebSearchHelperScope(meta);
+	if (
+		!scope ||
+		!ctx.modelRouteSessionRegistry?.isPublicModelIdForProfile(
+			scope.profile.publicModelId,
+			scope.profile,
+		) ||
+		meta.headers?.has("x-better-ccflare-account-id") ||
+		!scope.accountIds.includes(account.id) ||
+		!isAccountAvailable(account) ||
+		!isFirstPartyAnthropicAccount(account) ||
+		!isAccountEligibleForRouteIntent(account, meta, ctx) ||
+		isProviderExcludedForRequest(account, getExcludedProviders(meta, false)) ||
+		!isNativeWebSearchPassthroughEligible(meta.serverToolRequirements, true)
+	)
+		return false;
+	const provider = resolveProviderForAccount(account.provider, ctx.provider);
+	const model =
+		provider &&
+		previewCandidatePhysicalModel(
+			account,
+			scope.profile.logicalModel,
+			provider,
+		);
+	return (
+		!!model &&
+		(physicalModel === undefined || physicalModel === model) &&
+		isAnthropicSubscriptionHelperAdmitted(account, model, accessToken)
+	);
+}
+
 /**
  * Selects accounts for a request based on the load balancing strategy.
  * When an active combo exists for the request's model family, returns
@@ -3377,6 +3455,37 @@ async function selectAccountsForRequestInternal(
 			serverForcedAccountId,
 			"conflicting_force_route",
 		);
+	}
+	const helperScope = getWebSearchHelperScope(meta);
+	if (helperScope && !publicForcedAccountId) {
+		const accounts = await loadRoutingInventory(meta, () =>
+			ctx.dbOps.getAllAccounts(),
+		);
+		const candidateMeta = createWebSearchHelperCandidateMeta(meta);
+		const eligible = accounts.filter((account) =>
+			isWebSearchHelperCandidateAdmitted(meta, ctx, account),
+		);
+		// An empty subscription pool is not evidence of a structural tool gap.
+		const selected = eligible.length
+			? await getOrderedAccounts(
+					candidateMeta,
+					ctx,
+					helperScope.profile.logicalModel,
+					false,
+					eligible,
+				)
+			: [];
+		meta.routingCandidateCatalog = candidateMeta.routingCandidateCatalog;
+		meta.routingCandidates = candidateMeta.routingCandidates;
+		meta.serverToolCapabilitySummary =
+			candidateMeta.serverToolCapabilitySummary;
+		const admitted = selected.filter((account) =>
+			isWebSearchHelperCandidateAdmitted(meta, ctx, account),
+		);
+		// Profile routes never disclose the source or approved account ids.
+		if (!admitted.length)
+			throw new ServerToolRoutingError({ reason: "temporary_unavailable" });
+		return admitted;
 	}
 	const forcedAccountId = serverForcedAccountId || publicForcedAccountId;
 	if (capabilityProfileRoute && forcedAccountId) {
@@ -3490,7 +3599,14 @@ async function selectAccountsForRequestInternal(
 						? "invalid_requirement"
 						: meta.serverToolRequirements.unsupported?.length
 							? "unsupported_requirement"
-							: "forced_incapable";
+							: isStructurallyIncapablePinnedCandidate(
+										forcedAccount,
+										forcedRouting,
+										meta,
+										ctx,
+									)
+								? "forced_structurally_incapable"
+								: "forced_incapable";
 					throw new ServerToolRoutingError({
 						reason,
 						accountId: getClientVisibleServerToolAccountId(

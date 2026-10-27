@@ -303,6 +303,7 @@ export class RoutingAttemptLedger {
 		error?: string;
 		nativeStatus: number;
 		wireStatus: number;
+		webSearchHelper?: RequestRoutingAttemptSummary["webSearchHelper"];
 	}): RequestRoutingAttemptSummary | null {
 		const last = this.latestObservation;
 		const selectedCause =
@@ -326,6 +327,9 @@ export class RoutingAttemptLedger {
 						: "failed",
 			);
 		return sanitizeRequestRoutingAttemptSummary({
+			...(input.webSearchHelper
+				? { webSearchHelper: input.webSearchHelper }
+				: {}),
 			version: 1,
 			...(this.routingDecisionObservation
 				? {

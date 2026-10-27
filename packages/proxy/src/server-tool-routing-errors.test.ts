@@ -110,6 +110,20 @@ describe("server-tool routing errors", () => {
 		expect(body.error.message).toContain("permanent capability gap");
 	});
 
+	it("marks only structural forced incapability permanent with the stable force code", async () => {
+		const response = createServerToolRoutingErrorResponse(
+			new ServerToolRoutingError({ reason: "forced_structurally_incapable" }),
+		);
+		expect(response.status).toBe(400);
+		expect(response.headers.get("x-should-retry")).toBe("false");
+		expect(response.headers.get("x-better-ccflare-force-route")).toBe(
+			"unavailable",
+		);
+		expect(await response.json()).toMatchObject({
+			error: { code: "server_tool_force_route_unavailable" },
+		});
+	});
+
 	it("preserves a forced incapable tuple without exposing a substitute route", async () => {
 		const error = new ServerToolRoutingError({
 			reason: "forced_incapable",
@@ -118,6 +132,7 @@ describe("server-tool routing errors", () => {
 		});
 		const response = createServerToolRoutingErrorResponse(error);
 
+		expect(response.headers.has("x-should-retry")).toBe(false);
 		expect(error.reason).toBe("forced_incapable");
 		expect(error.accountId).toBe("forced-account");
 		expect(response.status).toBe(503);

@@ -75,6 +75,61 @@ function resolveRequest(
 	return registry.resolve(input, rootIntentGeneration);
 }
 
+describe("webSearchHelper profile policy", () => {
+	const parse = (fields: Record<string, unknown>) => {
+		const configured = parseModelRouteProfiles(
+			JSON.stringify([{ ...JSON.parse(PROFILE_JSON)[0], ...fields }]),
+		)[0];
+		if (!configured) throw new Error("Expected configured profile");
+		return configured;
+	};
+
+	it("adds an immutable opt-in without changing the exact route", () => {
+		const configured = parse({
+			webSearchHelper: { accountIds: ["native-a", "native-b"] },
+		});
+		expect(configured.accountId).toBe(profile().accountId);
+		expect(configured.webSearchHelper?.accountIds).toEqual([
+			"native-a",
+			"native-b",
+		]);
+		expect(Object.isFrozen(configured)).toBe(true);
+		expect(Object.isFrozen(configured.webSearchHelper)).toBe(true);
+		expect(Object.isFrozen(configured.webSearchHelper?.accountIds)).toBe(true);
+		expect(describeModelRouteProfileFlow(configured)).toContain(
+			"Search helpers may use approved accounts",
+		);
+		expect(describeModelRouteProfileFlow(configured)).not.toContain(
+			"One account only",
+		);
+		expect(profile().webSearchHelper).toBeUndefined();
+	});
+
+	it.each([
+		null,
+		{},
+		{ accountIds: [] },
+		{ accountIds: [""] },
+		{ accountIds: [7] },
+		{ accountIds: ["a", "a"] },
+		{ accountIds: ["a", " a "] },
+		{ accountIds: ["a"], unknown: true },
+	])("rejects malformed helper policy %j", (webSearchHelper) => {
+		expect(() => parse({ webSearchHelper })).toThrow("webSearchHelper");
+	});
+
+	it("rejects helper policy on capability and bounded profiles", () => {
+		for (const fields of [
+			{ selection: "capability", accountId: undefined },
+			{ contextWindow: 1000, maxOutputTokens: 100 },
+		]) {
+			expect(() =>
+				parse({ ...fields, webSearchHelper: { accountIds: ["native-a"] } }),
+			).toThrow("webSearchHelper");
+		}
+	});
+});
+
 describe("parseModelRouteProfiles", () => {
 	it("rejects the reserved implicit-codex namespace with a specific error", () => {
 		const base = JSON.parse(PROFILE_JSON)[0];

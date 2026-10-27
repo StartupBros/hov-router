@@ -1,7 +1,7 @@
 ---
 title: Claude Code WebSearch was refused locally as no_implementation although first-party Anthropic accounts run it
 date: 2026-10-04
-last_updated: 2026-10-06
+last_updated: 2026-10-27
 category: integration-issues
 module: server-tool-routing
 problem_type: integration_issue
@@ -60,7 +60,8 @@ web_search has two lanes: the proven hosted lane (Codex, unchanged and fail-clos
 - If the replay bind fails, a native-eligible request continues native-only (`serverToolReplayBound = false`). Hosted-only pools keep `replay_unavailable`.
 - `search_profile` is accepted (1 to 64 printable ASCII characters) and forwarded on the native lane. The Codex tuple builder refuses a declaration carrying it.
 - Route-profile sessions (PR #447, `ceef6bf0`): a helper-shaped request gets helper lineage whatever its model id or child headers say, and under a soft capability profile it can fall to the native lane. A request is helper-shaped only when it has a declared hosted server tool (valid or not), no client functions, and no unrecognized typed tool (`isHelperShapedServerToolPreview` in `proxy.ts`). A client function is an untyped tool with a `name` and an `input_schema`. A client tool labelled `type: "custom"` is not one: the classifier files it as an unrecognized typed tool (`unsupported`), so it disqualifies the shape. A helper-shaped request withdraws its own root-intent reservation at classification and takes the profile's `logicalModel` but never its `defaultEffort`. Details and the two remaining limits are in [routing-architecture.md, "Claude Code Model Route Profiles"](../../routing-architecture.md#claude-code-model-route-profiles).
-- Fail-closed outcomes when no lane can take a helper. `capabilityPoolErrorReason` in `account-selector.ts` counts proven candidates across both lanes, native and hosted. No proven candidate in either lane (no first-party Anthropic account and no hosted-proven candidate): 400 `server_tool_capability_unavailable`. A missing first-party account alone is not enough: a hosted-proven candidate serves the helper, or the request gets a 503 when that candidate is unavailable. Candidates prove it but none is available for this request: 503 `route_unavailable`. An exact-account profile whose account cannot serve it: 503 `server_tool_force_route_unavailable` (codes in `packages/proxy/src/server-tool-routing-errors.ts`).
+- Fail-closed outcomes when no lane can take a helper. `capabilityPoolErrorReason` in `account-selector.ts` counts proven candidates across both lanes, native and hosted. No proven candidate in either lane (no first-party Anthropic account and no hosted-proven candidate): 400 `server_tool_capability_unavailable`. A missing first-party account alone is not enough: a hosted-proven candidate serves the helper, or the request gets a 503 when that candidate is unavailable. Candidates prove it but none is available for this request: 503 `route_unavailable`. An exact-account profile whose account cannot serve it: `server_tool_force_route_unavailable` (codes in `packages/proxy/src/server-tool-routing-errors.ts`). Since #644 that is a permanent 400 with `x-should-retry: false` (reason `forced_structurally_incapable`) when the pinned account uses the built-in function-only OpenAI-compatible adapter or holds a validated `unsupported` proof; unknown capability and proof drift stay a transient 503 `forced_incapable`.
+- Exact local profiles (#644): `webSearchHelper.accountIds` on an exact, unbounded profile sends only fresh standalone helpers to listed first-party Anthropic OAuth accounts, and only with router-owned usage evidence under 180 seconds old showing allowance left and extra usage disabled. Inference stays on the profile account, there is no paid fallback, and a started send is never retried or rescued. Configuration and limits: [configuration.md, "Subscription WebSearch helper opt-in"](../../configuration.md#subscription-websearch-helper-opt-in).
 
 ### Findings behind the design
 
@@ -72,7 +73,7 @@ web_search has two lanes: the proven hosted lane (Codex, unchanged and fail-clos
 
 No scripted request may reach a real Anthropic account (`AGENTS.md`). Tests use fake upstreams only (`websearch-native-passthrough.integration.test.ts`). After deploy, the operator runs one interactive WebSearch in Claude Code, then checks it read-only.
 
-**Served helpers carry no marker in `requests`.** Only a refusal records the routing decision (`routing_attempt_summary.decision.origin = "trusted_helper"`). A served helper stores the plain attempt summary, and production stores no request payloads. Do not count served helpers by token shape either: "large uncached input, no cache, one attempt" also matches WebFetch's summarizer requests. Start from the transcript instead:
+**Served helpers carry no marker in `requests`**, except helpers of a profile with `webSearchHelper`: those record `routing_attempt_summary.webSearchHelper` (source profile, explicit or inherited, selected account, admission reason) whether served or refused. Admission is not proof that a search ran, so still check the transcript. Otherwise only a refusal records the routing decision (`routing_attempt_summary.decision.origin = "trusted_helper"`). A served helper stores the plain attempt summary, and production stores no request payloads. Do not count served helpers by token shape either: "large uncached input, no cache, one attempt" also matches WebFetch's summarizer requests. Start from the transcript instead:
 
 1. Find the WebSearch `tool_use` in the session transcript (`~/.claude/projects/<project>/<session>.jsonl`, plus `<session>/subagents/**/agent-*.jsonl` for subagents and workflow agents).
 2. Its `tool_result` shows `Web search results for query: ...` with links when served, or `API Error: 400 No configured provider route implements the requested server-tool semantics` when refused.
@@ -109,5 +110,6 @@ GROUP BY 1,2,3 ORDER BY 1 DESC LIMIT 20;
 - #441: the native passthrough lane on first-party Anthropic accounts (`023a82f2`).
 - #447: route-profile helpers reach the native lane under a soft profile (`ceef6bf0`).
 - #452: pricing `web_search_requests` for API-key accounts.
+- #644: subscription-only WebSearch helpers for exact local profiles, and the permanent structural refusal.
 - #431: long conversations past the replay-scan caps may be refused with `server_tool_no_implementation`; out of scope here.
 - #432: advisor native passthrough, the pattern this reuses. See [Claude Code /advisor was refused as an unsupported server tool](./claude-code-advisor-refused-as-unsupported-server-tool.md).

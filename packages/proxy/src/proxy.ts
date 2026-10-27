@@ -147,6 +147,7 @@ import {
 	createAnthropicDegradedNoAccountDenial,
 	createBoundedModelRouteAdmissionResponse,
 	createCountTokensUnsupportedResponse,
+	createHostedDispatchTerminalResponse,
 	discardUpstreamBody,
 	isAnthropicDegradedSendDenied,
 	type ProxyWithAccountResult,
@@ -213,6 +214,12 @@ import {
 	tryGetUsageCollector,
 	type UsageCollectorHealth,
 } from "./usage-collector";
+import {
+	authorizeWebSearchHelper,
+	getWebSearchHelperScope,
+	hasWebSearchHelperDispatched,
+	isFreshWebSearchHelper,
+} from "./websearch-helper-policy";
 
 export type { ProxyContext } from "./handlers";
 
@@ -1004,6 +1011,9 @@ async function handleProxyCoreImpl(
 	}
 	const requestBodyContext = new RequestBodyContext(requestBodyBuffer);
 	const originalParsedBody = requestBodyContext.getParsedJson();
+	// Capture before interception: removing history/tools cannot manufacture authority.
+	const originalWebSearchHelperEligible =
+		isFreshWebSearchHelper(originalParsedBody);
 	let qualityRequirements = ctx.qualityRouteService
 		? captureAutoRequestRequirements(originalParsedBody)
 		: undefined;
@@ -1094,6 +1104,14 @@ async function handleProxyCoreImpl(
 	const createRecordedForceRouteResponse = (
 		error: ForceRouteUnavailableError,
 	): Response => {
+		if (error.reason === "helper_admission_unavailable") {
+			return recordLocalRoutingTerminal(
+				createServerToolRoutingErrorResponse(
+					new ServerToolRoutingError({ reason: "temporary_unavailable" }),
+				),
+				"server_tool_temporary_unavailable",
+			);
+		}
 		// Every terminal force-route failure passes through here, so this is
 		// the one place a catalog-role profile's fail-closed is reported.
 		reportCatalogRoleRouteFailClosed(requestMeta.routeProfileId, error);
@@ -1867,6 +1885,14 @@ async function handleProxyCoreImpl(
 		}
 	}
 	const finalParsedBody = finalRequestBodyContext.getParsedJson();
+	if (!isCountHelper) {
+		authorizeWebSearchHelper(requestMeta, {
+			originalEligible: originalWebSearchHelperEligible,
+			body: finalParsedBody,
+			resolution: modelRouteResolution,
+			publicForceAccount: req.headers.has("x-better-ccflare-account-id"),
+		});
+	}
 	const potentialAnthropicCohortFacts =
 		derivePotentialAnthropicOAuthCohortFacts({
 			ctx,
@@ -3285,7 +3311,8 @@ async function handleProxyCoreImpl(
 		return {
 			routeCandidateId: candidateId,
 			prepareFinalResponse: true,
-			implicitFallbacksEnabled: nativeContext === null,
+			implicitFallbacksEnabled:
+				nativeContext === null && !getWebSearchHelperScope(requestMeta),
 			nativeQuotaAdmission: nativeContext
 				? nativeAdmissionFor(
 						account,
@@ -3303,14 +3330,15 @@ async function handleProxyCoreImpl(
 			// account/model-specific implicit-fallback discovery state immediately
 			// before each real fetch and semantic gate.
 			isFinalSemanticAttempt: () =>
-				currentlyFinalSemanticRoute && deferredModelRoutes.length === 0,
+				!!getWebSearchHelperScope(requestMeta) ||
+				(currentlyFinalSemanticRoute && deferredModelRoutes.length === 0),
 			canReplayContextOverflow: () =>
 				!currentlyFinalSemanticRoute ||
 				deferredModelRoutes.length > 0 ||
 				(comboName !== null && !isComboFallbackDisabled(ctx, requestMeta)),
 			anthropicPreCommitRescue: activeAnthropicPreCommitRescue,
 			deferImplicitFallback: (model, fallbackRank) => {
-				if (nativeContext) return;
+				if (nativeContext || getWebSearchHelperScope(requestMeta)) return;
 				deferModelRoute(
 					account,
 					model,
@@ -3431,6 +3459,7 @@ async function handleProxyCoreImpl(
 		account: Account,
 		candidateId: string,
 	): void => {
+		if (getWebSearchHelperScope(requestMeta)) return;
 		requestMeta.routeHomeAction =
 			ctx.strategy.commitDescendantAffinityOwner?.(requestMeta, {
 				candidateId,
@@ -4026,6 +4055,10 @@ async function handleProxyCoreImpl(
 				}
 				return finishPacing(pacingSlot, settled.response);
 			}
+		}
+		if (hasWebSearchHelperDispatched(requestMeta)) {
+			await routingAttemptLedger.discardTerminalResponse();
+			return finishPacing(pacingSlot, createHostedDispatchTerminalResponse());
 		}
 		const preferredResponse = await attemptPreferredContextOverflowRoute(
 			accounts
