@@ -1162,7 +1162,10 @@ describe("selectAccountsForRequest — profile-only account eligibility", () => 
 
 		await expect(
 			selectAccountsForRequest(meta, ctx, "claude-fable-5"),
-		).rejects.toMatchObject({ reason: "model_mapping_mismatch" });
+		).rejects.toMatchObject({
+			reason: "model_mapping_mismatch",
+			retryable: false,
+		});
 		expect(ctx.strategy.select).not.toHaveBeenCalled();
 	});
 
@@ -1313,6 +1316,8 @@ describe("selectAccountsForRequest — implicit Codex route", () => {
 		).rejects.toMatchObject({
 			name: "ForceRouteUnavailableError",
 			reason: "model_mapping_mismatch",
+			// Implicit admission rests on catalog evidence a later request can load.
+			retryable: true,
 		});
 		expect(ctx.strategy.select).not.toHaveBeenCalled();
 	});
@@ -1333,6 +1338,7 @@ describe("selectAccountsForRequest — implicit Codex route", () => {
 		).rejects.toMatchObject({
 			name: "ForceRouteUnavailableError",
 			reason: "paused",
+			retryable: true,
 		});
 	});
 
@@ -1356,6 +1362,7 @@ describe("selectAccountsForRequest — implicit Codex route", () => {
 			).rejects.toMatchObject({
 				name: "ForceRouteUnavailableError",
 				reason: "model_mapping_mismatch",
+				retryable: true,
 			});
 			expect(ctx.strategy.select).not.toHaveBeenCalled();
 			expect(ctx.dbOps.getComboRoutingPolicy).not.toHaveBeenCalled();

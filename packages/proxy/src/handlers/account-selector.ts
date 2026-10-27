@@ -9,6 +9,7 @@ import {
 	isAccountAvailable,
 	isFirstPartyAnthropicAccount,
 	isOfficialXaiEndpoint,
+	PAUSE_REASON_NEEDS_REAUTH,
 	providerAcceptsClientModel,
 	resolveEffectiveComboMembership,
 } from "@better-ccflare/core";
@@ -814,16 +815,52 @@ export type ForceRouteUnavailableReason =
 	| "provider_mismatch"
 	| "rate_limited_or_unavailable";
 
+/**
+ * Reasons that hold for every retry of the same request: only an operator
+ * editing the route, the account, or the request's headers clears them.
+ * Capacity, rate limits, a cold catalog and a failed lookup can clear between
+ * retries.
+ */
+const CONFIGURATION_FORCE_ROUTE_REASONS: ReadonlySet<ForceRouteUnavailableReason> =
+	new Set([
+		"catalog_role_mismatch",
+		"conflicting_force_route",
+		"model_mapping_mismatch",
+		"not_found",
+		"provider_excluded",
+		"provider_mismatch",
+	]);
+
+/**
+ * True when the account stays unavailable until an operator resumes or
+ * reauthenticates it. Overage, failure-threshold, peak-hours and
+ * rate-limit-window pauses (and an unattributed one) clear on their own.
+ */
+function needsOperatorToResume(account: Account): boolean {
+	return (
+		account.pause_reason === PAUSE_REASON_NEEDS_REAUTH ||
+		(account.paused && account.pause_reason === "manual")
+	);
+}
+
 /** Thrown when an explicit one-account route cannot use its target. */
 export class ForceRouteUnavailableError extends Error {
 	readonly accountId: string;
 	readonly reason: ForceRouteUnavailableReason;
+	/** False when retrying the same request cannot succeed until an operator acts. */
+	readonly retryable: boolean;
 
-	constructor(accountId: string, reason: ForceRouteUnavailableReason) {
+	constructor(
+		accountId: string,
+		reason: ForceRouteUnavailableReason,
+		options: { readonly retryable?: boolean } = {},
+	) {
 		super(`Force-routed account unavailable: ${reason}`);
 		this.name = "ForceRouteUnavailableError";
 		this.accountId = accountId;
 		this.reason = reason;
+		this.retryable =
+			options.retryable ?? !CONFIGURATION_FORCE_ROUTE_REASONS.has(reason);
 	}
 }
 
@@ -2715,15 +2752,22 @@ function recordCatalogRoleAdmission(
  */
 function catalogRolePoolViolation(
 	meta: RequestMeta,
+	accountId: string,
 	poolAccounts: readonly Account[],
-): "catalog_role_mismatch" | "catalog_role_unavailable" {
-	return poolAccounts.some(
-		(account) =>
-			evaluateRootCatalogRoleConstraint(account, meta).violation ===
-			"catalog_role_mismatch",
-	)
-		? "catalog_role_mismatch"
-		: "catalog_role_unavailable";
+): ForceRouteUnavailableError {
+	const violations = poolAccounts.map(
+		(account) => evaluateRootCatalogRoleConstraint(account, meta).violation,
+	);
+	if (!violations.includes("catalog_role_mismatch")) {
+		return new ForceRouteUnavailableError(
+			accountId,
+			"catalog_role_unavailable",
+		);
+	}
+	// A candidate whose own catalog has not loaded may admit a later retry.
+	return new ForceRouteUnavailableError(accountId, "catalog_role_mismatch", {
+		retryable: violations.includes("catalog_role_unavailable"),
+	});
 }
 
 function capabilityRouteUnavailable(
@@ -2733,16 +2777,22 @@ function capabilityRouteUnavailable(
 ): ForceRouteUnavailableError {
 	const accountId = meta.routeProfileId?.trim() || "capability-route";
 	if (matchingAccounts.length === 0) {
-		return new ForceRouteUnavailableError(
-			accountId,
+		if (
 			poolAccounts !== undefined &&
-				meta.routeProfilePhysicalModelPolicy === "catalog-role"
-				? catalogRolePoolViolation(meta, poolAccounts)
-				: "model_mapping_mismatch",
-		);
+			meta.routeProfilePhysicalModelPolicy === "catalog-role"
+		) {
+			return catalogRolePoolViolation(meta, accountId, poolAccounts);
+		}
+		// An implicit Codex route proves support from catalog evidence, which a
+		// failed request-time read can leave missing until a later request.
+		return new ForceRouteUnavailableError(accountId, "model_mapping_mismatch", {
+			retryable: meta.routeProfileSelection === "implicit-codex",
+		});
 	}
 	if (matchingAccounts.every((account) => account.paused)) {
-		return new ForceRouteUnavailableError(accountId, "paused");
+		return new ForceRouteUnavailableError(accountId, "paused", {
+			retryable: !matchingAccounts.every(needsOperatorToResume),
+		});
 	}
 	if (
 		meta.hardExcludedAccountIds &&
@@ -3448,6 +3498,7 @@ async function selectAccountsForRequestInternal(
 					throw new ForceRouteUnavailableError(
 						forcedAccountId,
 						forcedAccount.paused ? "paused" : "rate_limited_or_unavailable",
+						{ retryable: !needsOperatorToResume(forcedAccount) },
 					);
 				}
 

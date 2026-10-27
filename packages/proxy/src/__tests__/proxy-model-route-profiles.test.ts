@@ -2382,6 +2382,8 @@ describe("Claude Code gateway model route profiles", () => {
 			type: "force_route_unavailable",
 			reason: "not_found",
 		});
+		expect(response.headers.get("x-should-retry")).toBe("false");
+		expect(payload.error.message).toContain("choose another model with /model");
 		expect(payload.error).not.toHaveProperty("account_id");
 		expect(JSON.stringify(payload)).not.toContain(ROUTE_ACCOUNT_ID);
 		expect(harness.strategySelect).toHaveBeenCalledTimes(0);
@@ -2409,10 +2411,80 @@ describe("Claude Code gateway model route profiles", () => {
 			type: "force_route_unavailable",
 			reason: "conflicting_force_route",
 		});
+		expect(response.headers.get("x-should-retry")).toBe("false");
 		expect(payload.error).not.toHaveProperty("account_id");
 		expect(JSON.stringify(payload)).not.toContain(ROUTE_ACCOUNT_ID);
 		expect(harness.getAllAccounts).toHaveBeenCalledTimes(0);
 		expect(harness.strategySelect).toHaveBeenCalledTimes(0);
+		expect(fetchMock).toHaveBeenCalledTimes(0);
+	});
+
+	it.each([
+		["manual", "manual", "false"],
+		["needs-reauthentication", "oauth_invalid_grant", "false"],
+		["overage", "overage", null],
+		["failure-threshold", "failure_threshold", null],
+		["peak-hours", "peak_hours", null],
+	] as const)("tells the client whether a %s pause on an exact route is worth retrying", async (_label, pauseReason, shouldRetry) => {
+		const routed = makeAccount();
+		routed.paused = true;
+		routed.pause_reason = pauseReason;
+		const harness = makeContext(makeRegistry(), { accounts: [routed] });
+		const { fetchMock } = installJsonUpstream();
+		const request = apiRequest("/v1/messages", PROFILE_MODEL);
+
+		const response = await handleProxy(
+			request,
+			new URL(request.url),
+			harness.ctx,
+			"key-1",
+		);
+
+		expect(response.status).toBe(503);
+		expect(response.headers.get("x-should-retry")).toBe(shouldRetry);
+		const payload = (await response.json()) as {
+			error: Record<string, unknown>;
+		};
+		expect(payload.error).toMatchObject({
+			type: "force_route_unavailable",
+			reason: "paused",
+		});
+		expect(String(payload.error.message).includes("/model")).toBe(
+			shouldRetry === "false",
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(0);
+	});
+
+	it.each([
+		["every candidate is paused by an operator", ["manual", "manual"], "false"],
+		["one candidate's pause clears on its own", ["manual", "overage"], null],
+	] as const)("tells the client whether a capability pool is worth retrying when %s", async (_label, pauseReasons, shouldRetry) => {
+		const accounts = pauseReasons.map((pauseReason, index) => {
+			const account = makeAccount(`paused-capability-${index}`);
+			account.paused = true;
+			account.pause_reason = pauseReason;
+			account.model_mappings = JSON.stringify({ opus: "gpt-5.6-sol" });
+			return account;
+		});
+		const harness = makeContext(makeCapabilityRegistry(), { accounts });
+		harness.strategySelect.mockImplementation(
+			(candidates: Account[]) => candidates,
+		);
+		const { fetchMock } = installJsonUpstream();
+		const request = apiRequest("/v1/messages", CAPABILITY_PROFILE_MODEL);
+
+		const response = await handleProxy(
+			request,
+			new URL(request.url),
+			harness.ctx,
+			"key-1",
+		);
+
+		expect(response.status).toBe(503);
+		expect(await response.json()).toMatchObject({
+			error: { type: "force_route_unavailable", reason: "paused" },
+		});
+		expect(response.headers.get("x-should-retry")).toBe(shouldRetry);
 		expect(fetchMock).toHaveBeenCalledTimes(0);
 	});
 
@@ -2535,6 +2607,7 @@ describe("Claude Code gateway model route profiles", () => {
 		);
 
 		expect(response.status).toBe(503);
+		expect(response.headers.get("x-should-retry")).toBe("false");
 		expect(await response.json()).toMatchObject({
 			error: { reason: "model_mapping_mismatch" },
 		});
@@ -3485,18 +3558,23 @@ describe("catalog-role Codex route profiles", () => {
 	it.each([
 		{
 			reason: "catalog_role_mismatch",
+			// The account's own mapping disagrees with its catalog: configuration.
+			shouldRetry: "false",
 			arrange: (account: Account) => {
 				account.model_mappings = JSON.stringify({ opus: "gpt-7-luna" });
 			},
 		},
 		{
 			reason: "catalog_role_unavailable",
+			// A cold catalog loads on a later request.
+			shouldRetry: null,
 			arrange: (account: Account) => {
 				codexModelCatalogModule.clearCodexModelCacheForAccount(account.id);
 			},
 		},
 	] as const)("fails an exact role route closed with force_route_$reason", async ({
 		reason,
+		shouldRetry,
 		arrange,
 	}) => {
 		const account = makeRoleAccount();
@@ -3514,6 +3592,7 @@ describe("catalog-role Codex route profiles", () => {
 		expect(failed.response.headers.get("x-better-ccflare-force-route")).toBe(
 			"unavailable",
 		);
+		expect(failed.response.headers.get("x-should-retry")).toBe(shouldRetry);
 		const payload = JSON.parse(failed.text) as {
 			error: Record<string, unknown>;
 		};
@@ -3556,6 +3635,34 @@ describe("catalog-role Codex route profiles", () => {
 		expect(usageHandleEnd.mock.calls.at(-1)?.[0]).toMatchObject({
 			error: "force_route_catalog_role_unavailable",
 		});
+	});
+
+	it.each([
+		["every candidate's mapping disagrees with its catalog", false, "false"],
+		["another candidate's own catalog has not loaded", true, null],
+	] as const)("tells the client whether a role pool mismatch is worth retrying when %s", async (_label, withColdCandidate, shouldRetry) => {
+		const pinnedAway = makeRoleAccount("role-pool-retry-pinned-away");
+		pinnedAway.model_mappings = JSON.stringify({ opus: "gpt-7-luna" });
+		const cold = makeRoleAccount("role-pool-retry-cold");
+		const harness = makeRoleContext(
+			withColdCandidate ? [pinnedAway, cold] : [pinnedAway],
+		);
+		const upstream = installCodexRoleUpstream();
+		await publish(upstream, pinnedAway, harness.ctx, NEXT_GENERATION);
+		// The cold candidate's request-time read of its own listing fails.
+		upstream.failCatalog("rejects");
+
+		const failed = await send(harness.ctx, ROLE_POOL_PICKER);
+
+		expect(failed.response.status).toBe(503);
+		expect(JSON.parse(failed.text)).toMatchObject({
+			error: {
+				type: "force_route_unavailable",
+				reason: "catalog_role_mismatch",
+			},
+		});
+		expect(failed.response.headers.get("x-should-retry")).toBe(shouldRetry);
+		expect(upstream.responses).toHaveLength(0);
 	});
 
 	it("reports each catalog-role fail-closed route on the Codex catalog event bus", async () => {
