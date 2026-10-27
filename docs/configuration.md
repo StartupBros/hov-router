@@ -604,9 +604,9 @@ CCFLARE_MODEL_ROUTE_PROFILES_JSON='[
 Line profiles reuse the catalog-role failure reasons.
 `catalog_role_unavailable` means no candidate has read its own catalog yet,
 and a retry may succeed. `catalog_role_mismatch` means every own catalog that
-has loaded lists no supported model of the line; the 503 then carries
-`x-should-retry: false`, and discovery hides the row until a catalog lists the
-line again.
+has loaded lists no supported model of the line. Once every candidate's own
+catalog has loaded, that 503 carries `x-should-retry: false`, and discovery
+hides the row until a catalog lists the line again.
 
 Picker IDs are chosen by the operator and stay `claude-bccf-route-<id>`, so
 role-named IDs such as `codex-opus` keep working across model generations.
