@@ -77,6 +77,14 @@ afterAll(() => {
 
 const { UsageCollector } = await import("../usage-collector");
 type UsageCollectorInstance = InstanceType<typeof UsageCollector>;
+const {
+	ANTHROPIC_POST_COMMIT_MEANINGFUL_PROGRESS_TIMEOUT_ENV,
+	ANTHROPIC_PRE_COMMIT_TIMEOUT_ENV,
+	getAnthropicStreamRuntimeConfig,
+} = await import("../anthropic-semantic-preflight");
+const { DEFAULT_GUARD_RESPONSE_IDLE_TIMEOUT_MS } = await import(
+	"../../../../scripts/ccflare-guard.mjs"
+);
 
 const INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -131,6 +139,7 @@ interface TestableCollector {
 	missingStateWarnings: Set<string>;
 	pricingTimeoutMs: number;
 	requests: Map<string, TestRequestState>;
+	timeoutMs: number;
 }
 
 function makeStartMessage(
@@ -4839,6 +4848,169 @@ describe("UsageCollector request lifecycle", () => {
 		// The buffer never grows past its cap; the 1025th distinct ID is lost
 		// (logged, not thrown) rather than allowed to write unboundedly.
 		expect(markedIncomplete.length).toBeLessThanOrEqual(1024);
+	});
+
+	describe("default usage-state inactivity bound (#634)", () => {
+		// The suite pins a short override; these run on the shipped default,
+		// which must outlast every timer that can still end a live stream.
+		beforeEach(() => {
+			delete process.env.CF_STREAM_TIMEOUT_MS;
+		});
+
+		const encoder = new TextEncoder();
+		const finishChunk = () =>
+			encoder.encode(
+				'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n',
+			);
+
+		// Advance the clock with a sweep every 30 s, as the cleanup interval does.
+		function idle(collector: UsageCollectorInstance, ms: number): void {
+			for (let elapsed = 0; elapsed < ms; ) {
+				const step = Math.min(30_000, ms - elapsed);
+				now += step;
+				elapsed += step;
+				testable(collector).cleanupStaleRequests();
+			}
+		}
+
+		it("records a stream that pauses past a minute and then completes", async () => {
+			const { collector, saveRequestIds, savedUsages } = harness();
+			collector.handleStart(makeStartMessage("paused-stream"));
+			collector.handleChunk("paused-stream", modelBearingChunk());
+
+			idle(collector, 100_000);
+			expect(testable(collector).requests.has("paused-stream")).toBe(true);
+
+			collector.handleChunk("paused-stream", finishChunk());
+			await collector.handleEnd({
+				type: "end",
+				requestId: "paused-stream",
+				success: true,
+				streamTerminalState: "complete",
+			});
+			await collector.drain();
+
+			expect(saveRequestIds).toEqual(["paused-stream"]);
+			expect(savedUsages.get("paused-stream")).toMatchObject({
+				inputTokens: 5,
+				outputTokens: 7,
+			});
+		});
+
+		it("records a non-streaming response whose body takes past a minute", async () => {
+			const { collector, saveRequestIds, savedUsages } = harness();
+			collector.handleStart(
+				makeStartMessage("slow-nonstream", {
+					isStream: false,
+					responseHeaders: { "content-type": "application/json" },
+				}),
+			);
+
+			idle(collector, 100_000);
+
+			await collector.handleEnd({
+				type: "end",
+				requestId: "slow-nonstream",
+				success: true,
+				responseBody: Buffer.from(
+					JSON.stringify({
+						model: "claude-sonnet-4-5-20250929",
+						content: [{ type: "text", text: "ok" }],
+						usage: { input_tokens: 5, output_tokens: 7 },
+					}),
+				).toString("base64"),
+			});
+			await collector.drain();
+
+			expect(saveRequestIds).toEqual(["slow-nonstream"]);
+			expect(savedUsages.get("slow-nonstream")).toMatchObject({
+				inputTokens: 5,
+				outputTokens: 7,
+			});
+		});
+
+		it("records a silent stream that an idle cut ends", async () => {
+			const { collector, saveRequestIds, summaries } = harness();
+			collector.handleStart(makeStartMessage("idle-cut-stream"));
+			collector.handleChunk("idle-cut-stream", modelBearingChunk());
+
+			idle(collector, DEFAULT_GUARD_RESPONSE_IDLE_TIMEOUT_MS + 10_000);
+
+			await collector.handleEnd({
+				type: "end",
+				requestId: "idle-cut-stream",
+				success: false,
+				error: "downstream_cancelled",
+				streamTerminalState: "client_cancelled",
+			});
+			await collector.drain();
+
+			expect(saveRequestIds).toEqual(["idle-cut-stream"]);
+			expect(summaries).toEqual(["idle-cut-stream"]);
+		});
+
+		it("still frees abandoned state once it passes the default", async () => {
+			const { collector, markedIncomplete, recorderWrites } = harness();
+			expect(testable(collector).timeoutMs).toBe(
+				actualCore.TIME_CONSTANTS.STREAM_TIMEOUT_DEFAULT,
+			);
+			collector.handleStart(
+				makeStartMessage("abandoned-stream", {
+					accountId: "xai-account",
+					providerName: "xai",
+					xaiCacheOfficialEndpoint: true,
+					cacheFlightRecorderConversationId: "cfr_abandoned0000000000000000000",
+					cacheFlightRecorderEligible: true,
+				}),
+			);
+
+			now += actualCore.TIME_CONSTANTS.STREAM_TIMEOUT_DEFAULT;
+			testable(collector).cleanupStaleRequests();
+			expect(testable(collector).requests.has("abandoned-stream")).toBe(true);
+
+			now += 1;
+			testable(collector).cleanupStaleRequests();
+			await collector.drain();
+
+			expect(testable(collector).requests.has("abandoned-stream")).toBe(false);
+			expect(recorderWrites).toEqual([]);
+			expect(markedIncomplete).toEqual([
+				{
+					id: "cfr_abandoned0000000000000000000",
+					dropped: true,
+					droppedCount: 1,
+				},
+			]);
+		});
+
+		it("outlasts every timer that can still end a live stream", () => {
+			const previous = [
+				ANTHROPIC_PRE_COMMIT_TIMEOUT_ENV,
+				ANTHROPIC_POST_COMMIT_MEANINGFUL_PROGRESS_TIMEOUT_ENV,
+			].map((name) => [name, process.env[name]] as const);
+			try {
+				// Oversized values clamp to each timer's hard maximum.
+				for (const [name] of previous) {
+					process.env[name] = String(Number.MAX_SAFE_INTEGER);
+				}
+				const config = getAnthropicStreamRuntimeConfig();
+				const bound = actualCore.TIME_CONSTANTS.STREAM_TIMEOUT_DEFAULT;
+
+				expect(bound).toBeGreaterThan(config.semanticTimeoutMs);
+				expect(bound).toBeGreaterThan(
+					config.postCommitMeaningfulProgressTimeoutMs ?? 0,
+				);
+				expect(bound).toBeGreaterThan(
+					actualCore.NETWORK.IDLE_TIMEOUT_MAX * 1000,
+				);
+				expect(bound).toBeGreaterThan(DEFAULT_GUARD_RESPONSE_IDLE_TIMEOUT_MS);
+			} finally {
+				for (const [name, value] of previous) {
+					if (value === undefined) delete process.env[name];
+					else process.env[name] = value;
+				}
+			}
+		});
 	});
 
 	it("retains the capacity safeguard and frees the oldest evicted state", () => {
