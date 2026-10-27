@@ -1,7 +1,8 @@
 import { getModelDisplayName, getModelFamily } from "@better-ccflare/core";
 import { previewAccountPhysicalModel } from "@better-ccflare/providers";
-import type { Account } from "@better-ccflare/types";
+import type { Account, QualityApprovedLine } from "@better-ccflare/types";
 import {
+	getCodexCatalogLineTarget,
 	getCodexCatalogRoleTarget,
 	getKnownCodexModels,
 } from "./codex-model-catalog";
@@ -26,6 +27,10 @@ export interface ModelRouteDiscoveryDeps {
 		accountId: string,
 		family: NonNullable<ReturnType<typeof getModelFamily>>,
 	) => string | null;
+	readonly catalogLineTarget: (
+		accountId: string,
+		line: QualityApprovedLine,
+	) => string | null;
 	readonly codexModelDisplayName: (
 		accountId: string,
 		model: string,
@@ -38,6 +43,7 @@ export interface ModelRouteDiscoveryDeps {
 
 const DEFAULT_DEPS: ModelRouteDiscoveryDeps = {
 	catalogRoleTarget: getCodexCatalogRoleTarget,
+	catalogLineTarget: getCodexCatalogLineTarget,
 	codexModelDisplayName: (accountId, model) =>
 		getKnownCodexModels(accountId)?.models.find((entry) => entry.id === model)
 			?.displayName ?? null,
@@ -72,6 +78,7 @@ function admits(profile: ModelRouteProfile, account: Account): boolean {
 			routeExpectedPhysicalModel: profile.expectedPhysicalModel ?? null,
 			routeProfileExpectedPhysicalModel: profile.expectedPhysicalModel ?? null,
 			routePhysicalModelPolicy: profile.physicalModelPolicy ?? null,
+			routeProfileLine: profile.line ?? null,
 			routeCatalogRoleTargetByAccountId: null,
 		},
 		profile.logicalModel,
@@ -87,6 +94,11 @@ function servedModel(
 	if (profile.physicalModelPolicy === "catalog-role") {
 		const family = getModelFamily(profile.logicalModel);
 		return family ? deps.catalogRoleTarget(account.id, family) : null;
+	}
+	if (profile.physicalModelPolicy === "line") {
+		return profile.line
+			? deps.catalogLineTarget(account.id, profile.line)
+			: null;
 	}
 	return (
 		profile.expectedPhysicalModel ??

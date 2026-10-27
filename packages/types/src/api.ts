@@ -184,9 +184,10 @@ export interface RoutingSelectionDiagnostics {
  * How a route profile constrains the physical model. "exact" (the default when
  * a profile omits the policy) compares against a configured model string;
  * "catalog-role" follows the model at the logical family's role in a Codex
- * account's own catalog.
+ * account's own catalog; "line" follows the newest supported model of one
+ * quality line (such as gpt-sol) in that catalog, wherever it is ranked.
  */
-export type RoutePhysicalModelPolicy = "exact" | "catalog-role";
+export type RoutePhysicalModelPolicy = "exact" | "catalog-role" | "line";
 
 export interface RequestMeta {
 	/** Observational original intent captured before routing rewrites. */
@@ -237,6 +238,8 @@ export interface RequestMeta {
 	 * for the family of routeProfileLogicalModel.
 	 */
 	routeProfilePhysicalModelPolicy?: RoutePhysicalModelPolicy | null;
+	/** Quality line a "line" policy follows; null for every other policy. */
+	routeProfileLine?: import("./quality-routing").QualityApprovedLine | null;
 	/** Optional provider invariant for a route profile; mismatches fail closed. */
 	routeExpectedProvider?: string | null;
 	/** Optional first physical-model invariant for a route profile; mismatches fail closed. */

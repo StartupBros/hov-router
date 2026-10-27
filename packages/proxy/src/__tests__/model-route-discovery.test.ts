@@ -117,6 +117,7 @@ function deps(
 	return {
 		catalogRoleTarget: (accountId, family) =>
 			ROLE_TARGETS[accountId]?.[family] ?? null,
+		catalogLineTarget: () => null,
 		codexModelDisplayName: (_accountId, model) =>
 			CODEX_DISPLAY_NAMES[model] ?? null,
 		previewPhysicalModel: (candidate) =>

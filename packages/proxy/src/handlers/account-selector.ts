@@ -54,6 +54,7 @@ import type {
 } from "../anthropic-degraded-mode";
 import { accountServesPhysicalModel } from "../codex-implicit-route";
 import {
+	getCodexCatalogLineTarget,
 	getCodexCatalogRoleTarget,
 	getKnownCodexModels,
 } from "../codex-model-catalog";
@@ -128,6 +129,7 @@ type RouteProfileConstraintMeta = Pick<
 	| "routeProfileExpectedPhysicalModel"
 	| "routePhysicalModelPolicy"
 	| "routeProfileLogicalModel"
+	| "routeProfileLine"
 	| "routeCatalogRoleTargetByAccountId"
 >;
 
@@ -161,12 +163,24 @@ function catalogRoleFamily(
 	);
 }
 
+/** Whether a policy takes its target from each account's own Codex catalog. */
+function followsOwnCatalog(
+	policy: RequestMeta["routePhysicalModelPolicy"],
+): policy is "catalog-role" | "line" {
+	return policy === "catalog-role" || policy === "line";
+}
+
 /**
  * The catalog-role policy replaces a fixed expected model with the model at
- * the logical family's role in this Codex account's own catalog. An attempt
- * that carries its admission-time target is judged against that target, never
- * a catalog published after admission; selection passes no carried target and
- * so reads the live own-catalog evidence.
+ * the logical family's role in this Codex account's own catalog; the line
+ * policy with the newest supported model of the profile's line in it. An
+ * attempt that carries its admission-time target is judged against that
+ * target, never a catalog published after admission; selection passes no
+ * carried target and so reads the live own-catalog evidence.
+ *
+ * A line names its model outright, so selection admits on the target alone and
+ * the attempt sends it in place of the account's mapping. A catalog-role target
+ * is only a slot, so the account's effective mapping must already agree.
  */
 function evaluateCatalogRoleConstraint(
 	account: Account,
@@ -182,10 +196,33 @@ function evaluateCatalogRoleConstraint(
 	if (account.provider.trim().toLowerCase() !== "codex") {
 		return { violation: "provider_mismatch", target: null };
 	}
+	const carried = meta.routeCatalogRoleTargetByAccountId?.get(account.id);
+	if (meta.routePhysicalModelPolicy === "line") {
+		const target =
+			carried ??
+			(meta.routeProfileLine
+				? getCodexCatalogLineTarget(account.id, meta.routeProfileLine)
+				: null);
+		if (!target) {
+			// A loaded own catalog without the line will not gain it on retry;
+			// one not loaded yet might.
+			return {
+				violation: getKnownCodexModels(account.id)
+					? "catalog_role_mismatch"
+					: "catalog_role_unavailable",
+				target: null,
+			};
+		}
+		if (concretePhysicalModel === undefined) {
+			return { violation: null, target };
+		}
+		return concretePhysicalModel?.trim() === target
+			? { violation: null, target }
+			: { violation: "catalog_role_mismatch", target };
+	}
 	const family = catalogRoleFamily(logicalModel, meta);
 	const target =
-		meta.routeCatalogRoleTargetByAccountId?.get(account.id) ??
-		(family ? getCodexCatalogRoleTarget(account.id, family) : null);
+		carried ?? (family ? getCodexCatalogRoleTarget(account.id, family) : null);
 	if (!target) return { violation: "catalog_role_unavailable", target: null };
 	const candidates =
 		concretePhysicalModel !== undefined
@@ -245,7 +282,7 @@ function evaluateRouteProfileConstraint(
 		return { violation: "provider_mismatch", catalogRoleTarget: null };
 	}
 
-	if (meta.routePhysicalModelPolicy === "catalog-role") {
+	if (followsOwnCatalog(meta.routePhysicalModelPolicy)) {
 		const evaluation = evaluateCatalogRoleConstraint(
 			account,
 			meta,
@@ -2661,7 +2698,7 @@ function matchesCapabilityRouteProfile(
 ): boolean {
 	const expectedProvider = meta.routeExpectedProvider?.trim().toLowerCase();
 	const logicalModel = meta.routeProfileLogicalModel?.trim();
-	if (meta.routeProfilePhysicalModelPolicy === "catalog-role") {
+	if (followsOwnCatalog(meta.routeProfilePhysicalModelPolicy)) {
 		if (!expectedProvider || !logicalModel) {
 			observeRoutingSelectionCandidate(
 				meta,
@@ -2712,9 +2749,10 @@ function matchesCapabilityRouteProfile(
 }
 
 /**
- * Evaluate the profile's root catalog-role predicate against live own-catalog
- * evidence. Selection never reuses a target carried from an earlier admission,
- * so a re-check after strategy ordering sees any publication in between.
+ * Evaluate the profile's root catalog-role or line predicate against live
+ * own-catalog evidence. Selection never reuses a target carried from an
+ * earlier admission, so a re-check after strategy ordering sees any
+ * publication in between.
  */
 function evaluateRootCatalogRoleConstraint(
 	account: Account,
@@ -2724,7 +2762,7 @@ function evaluateRootCatalogRoleConstraint(
 		account,
 		{
 			...meta,
-			routePhysicalModelPolicy: "catalog-role",
+			routePhysicalModelPolicy: meta.routeProfilePhysicalModelPolicy,
 			routeExpectedPhysicalModel: null,
 			routeCatalogRoleTargetByAccountId: null,
 		},
@@ -2748,8 +2786,9 @@ function recordCatalogRoleAdmission(
 }
 
 /**
- * Why a catalog-role pool admitted nobody: some candidate had its own role
- * target but its effective mapping differs, or no candidate had one at all.
+ * Why a catalog-role or line pool admitted nobody: some candidate's own catalog
+ * had loaded but its mapping differs from the role target (or it lists no
+ * model of the line), or no candidate had a usable own catalog at all.
  */
 function catalogRolePoolViolation(
 	meta: RequestMeta,
@@ -2780,7 +2819,7 @@ function capabilityRouteUnavailable(
 	if (matchingAccounts.length === 0) {
 		if (
 			poolAccounts !== undefined &&
-			meta.routeProfilePhysicalModelPolicy === "catalog-role"
+			followsOwnCatalog(meta.routeProfilePhysicalModelPolicy)
 		) {
 			return catalogRolePoolViolation(meta, accountId, poolAccounts);
 		}

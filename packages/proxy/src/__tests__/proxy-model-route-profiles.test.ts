@@ -3803,6 +3803,159 @@ describe("catalog-role Codex route profiles", () => {
 		expect(harness.getAllAccounts).toHaveBeenCalledTimes(1);
 	});
 
+	describe("line pools", () => {
+		// Real identities: a line follows only curated supported models. Sol tops
+		// the listing, so the sonnet slot (index 1) holds Astra.
+		const SOL_FIRST = ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-mini"] as const;
+		const LINE_PICKER = "claude-bccf-route-pro-primary-sol";
+
+		function makeLineContext(accounts: Account[]) {
+			const registry = new ModelRouteSessionRegistry(
+				parseModelRouteProfiles(
+					JSON.stringify([
+						{
+							id: "pro-primary-sol",
+							displayName: "Sol pool",
+							selection: "capability",
+							logicalModel: "claude-sonnet-5",
+							expectedProvider: "codex",
+							physicalModelPolicy: "line",
+							line: "gpt-sol",
+						},
+					]),
+				),
+			);
+			const harness = makeContext(registry, { accounts });
+			harness.strategySelect.mockImplementation(
+				(candidates: Account[]) => candidates,
+			);
+			harness.ctx.dbOps.getAccount = mock(
+				async (id: string) =>
+					accounts.find((account) => account.id === id) ?? null,
+			);
+			return harness;
+		}
+
+		it.each([
+			{ admission: "off" },
+			{ admission: "on" },
+		] as const)("sends the line's model, not the sonnet slot, with context admission $admission", async ({
+			admission,
+		}) => {
+			const previous = process.env.CCFLARE_CONTEXT_ADMISSION;
+			if (admission === "on") process.env.CCFLARE_CONTEXT_ADMISSION = "1";
+			else delete process.env.CCFLARE_CONTEXT_ADMISSION;
+			try {
+				const account = makeRoleAccount(`line-pool-admission-${admission}`);
+				const harness = makeLineContext([account]);
+				const upstream = installCodexRoleUpstream();
+				await publish(upstream, account, harness.ctx, SOL_FIRST);
+				expect(
+					codexModelCatalogModule.getCodexCatalogRoleTarget(
+						account.id,
+						"sonnet",
+					),
+				).toBe("gpt-6-astra");
+
+				const routed = await send(harness.ctx, LINE_PICKER);
+
+				expect(routed.response.status, routed.text).toBe(200);
+				expect(await upstreamModels(upstream.responses)).toEqual([
+					"gpt-6.1-sol",
+				]);
+			} finally {
+				if (previous === undefined)
+					delete process.env.CCFLARE_CONTEXT_ADMISSION;
+				else process.env.CCFLARE_CONTEXT_ADMISSION = previous;
+			}
+		});
+
+		it("primes a cold own catalog and sends the line's model on the first request", async () => {
+			const account = makeRoleAccount("line-pool-cold");
+			account.access_token = "token-line-pool-cold";
+			const harness = makeLineContext([account]);
+			const upstream = installCodexRoleUpstream(SOL_FIRST);
+			expect(codexModelCatalogModule.getKnownCodexModels(account.id)).toBe(
+				null,
+			);
+
+			const first = await send(harness.ctx, LINE_PICKER);
+
+			expect(first.response.status, first.text).toBe(200);
+			expect(upstream.catalogReads).toEqual([`Bearer ${account.access_token}`]);
+			expect(await upstreamModels(upstream.responses)).toEqual(["gpt-6.1-sol"]);
+		});
+
+		it("keeps a same-family native child on the line's model", async () => {
+			const account = makeRoleAccount("line-pool-child");
+			const harness = makeLineContext([account]);
+			const upstream = installCodexRoleUpstream();
+			await publish(upstream, account, harness.ctx, SOL_FIRST);
+			const session = { "x-claude-code-session-id": "line-pool-lineage" };
+
+			const root = await send(harness.ctx, LINE_PICKER, session);
+			expect(root.response.status, root.text).toBe(200);
+			const child = await send(harness.ctx, CHILD_MODEL, {
+				...session,
+				"x-claude-code-agent-id": "line-pool-native-child",
+			});
+			expect(child.response.status, child.text).toBe(200);
+
+			expect(await upstreamModels(upstream.responses)).toEqual([
+				"gpt-6.1-sol",
+				"gpt-6.1-sol",
+			]);
+		});
+
+		it("fails closed without a retry hint when no own catalog lists the line", async () => {
+			const account = makeRoleAccount("line-pool-lacking");
+			const harness = makeLineContext([account]);
+			const upstream = installCodexRoleUpstream();
+			await publish(upstream, account, harness.ctx, [
+				"gpt-6-astra",
+				"gpt-5.6-mini",
+			]);
+
+			const failed = await send(harness.ctx, LINE_PICKER);
+
+			expect(failed.response.status).toBe(503);
+			expect(failed.response.headers.get("x-should-retry")).toBe("false");
+			expect(JSON.parse(failed.text).error).toMatchObject({
+				type: "force_route_unavailable",
+				reason: "catalog_role_mismatch",
+			});
+			expect(upstream.responses).toHaveLength(0);
+		});
+
+		it("labels the picker with the line's model and hides it once no catalog lists the line", async () => {
+			const account = makeRoleAccount("line-pool-label");
+			const harness = makeLineContext([account]);
+			const upstream = installCodexRoleUpstream();
+			const labels = async () => {
+				const request = new Request("https://proxy.local/v1/models");
+				const response = await handleProxy(
+					request,
+					new URL(request.url),
+					harness.ctx,
+					"key-1",
+				);
+				const body = (await response.json()) as {
+					data: Array<{ id: string; display_name: string }>;
+				};
+				return body.data.map((model) => model.display_name);
+			};
+
+			await publish(upstream, account, harness.ctx, SOL_FIRST);
+			expect(await labels()).toEqual(["gpt-6.1-sol · codex pool"]);
+
+			await publish(upstream, account, harness.ctx, [
+				"gpt-6-astra",
+				"gpt-5.6-mini",
+			]);
+			expect(await labels()).toEqual([]);
+		});
+	});
+
 	describe("request-time priming of cold own catalogs", () => {
 		// Own listings live in memory only, so every process start is cold. No
 		// test here starts the refresh heartbeat: the request itself must prime.

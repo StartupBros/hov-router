@@ -3058,12 +3058,14 @@ export async function proxyWithAccount(
 			account.provider === "codex"
 				? provider.captureAttemptIdentity?.(account, catalogContextSnapshot)
 				: undefined;
-		// A catalog-role profile rung in the root profile's family, for the root
-		// request or a descendant, binds this attempt to the role target that
-		// admitted the account during selection. A catalog published since then
-		// governs the next request or attempt, never this one. Only a rung whose
-		// routePhysicalModelPolicy is catalog-role also re-checks the bound model
-		// at materialization; descendants stay pool-restricted, not model-bound.
+		// A catalog-role or line profile rung in the root profile's family, for
+		// the root request or a descendant, binds this attempt to the target that
+		// admitted the account during selection, for both context admission and
+		// the physical model: a line target can differ from the account's own
+		// mapping. A catalog published since then governs the next request or
+		// attempt, never this one. Only a rung whose routePhysicalModelPolicy
+		// follows the catalog also re-checks the bound model at materialization;
+		// descendants stay pool-restricted, not model-bound.
 		const requestedRoleFamily = requestedModelBeforeAdmission
 			? getModelFamily(requestedModelBeforeAdmission)
 			: null;
@@ -3071,7 +3073,9 @@ export async function proxyWithAccount(
 			account.provider === "codex" &&
 			requestMeta.routeProfileId != null &&
 			(requestMeta.routePhysicalModelPolicy === "catalog-role" ||
-				requestMeta.routeProfilePhysicalModelPolicy === "catalog-role") &&
+				requestMeta.routePhysicalModelPolicy === "line" ||
+				requestMeta.routeProfilePhysicalModelPolicy === "catalog-role" ||
+				requestMeta.routeProfilePhysicalModelPolicy === "line") &&
 			routeCandidateMetadata?.routeConstraintMode !== "ordinary" &&
 			requestedRoleFamily !== null &&
 			requestedRoleFamily ===

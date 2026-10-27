@@ -54,7 +54,7 @@ export type CodexRouteRoleFailureReason =
 	| "catalog_role_unavailable"
 	| "catalog_role_mismatch";
 
-/** A catalog-role route profile failed closed. */
+/** A catalog-role or line route profile failed closed. */
 export interface CodexRouteRoleUnavailableEvt {
 	type: "route_role_unavailable";
 	profileId: string;
