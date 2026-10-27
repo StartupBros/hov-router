@@ -13,6 +13,7 @@ import {
 	providerAcceptsClientModel,
 	resolveEffectiveComboMembership,
 } from "@better-ccflare/core";
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import { Logger } from "@better-ccflare/logger";
 import type { Provider } from "@better-ccflare/providers";
 import {
@@ -3103,7 +3104,7 @@ function reportAccountDatabaseError(error: unknown, nativeOwned = false): void {
 	console.error("The database encountered an error while loading accounts.");
 	console.error("This may indicate database corruption or integrity issues.\n");
 	console.error("To diagnose and repair the database, run:");
-	console.error("  bun run cli --repair-db\n");
+	console.error(`  ${COMMAND_NAME} --repair-db\n`);
 	console.error(
 		nativeOwned
 			? "The native combo request will fail closed without upstream transport."
@@ -3588,7 +3589,7 @@ async function selectAccountsForRequestInternal(
 				"This may indicate database corruption or integrity issues.\n",
 			);
 			console.error("To diagnose and repair the database, run:");
-			console.error("  bun run cli --repair-db\n");
+			console.error(`  ${COMMAND_NAME} --repair-db\n`);
 			console.error("The explicit route will fail closed.");
 			console.error(`${"═".repeat(50)}\n`);
 			// biome-ignore lint/nursery/useErrorCause: Routing failures expose a fixed reason, not raw database errors or query details.

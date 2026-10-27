@@ -13,6 +13,10 @@ import {
 	PAUSE_REASON_NEEDS_REAUTH,
 	TIME_CONSTANTS,
 } from "@better-ccflare/core";
+import {
+	COMMAND_NAME,
+	PRODUCT_NAME,
+} from "@better-ccflare/core/product-identity";
 import { Logger } from "@better-ccflare/logger";
 import type {
 	Account,
@@ -1025,7 +1029,8 @@ DATABASE RECOVERY INSTRUCTIONS
 If your database is corrupted, follow these steps:
 
 1. STOP THE SERVER
-   bun run cli --stop
+   Stop every running ${PRODUCT_NAME} server: press Ctrl+C where it runs,
+   or stop the service that runs it.
 
 2. BACKUP CORRUPTED DATABASE
    cp ${dbPath} ${dbPath}.corrupted.backup
@@ -1041,10 +1046,10 @@ If your database is corrupted, follow these steps:
 4. START FRESH (if recovery fails)
    rm ${dbPath} ${dbPath}-wal ${dbPath}-shm
    # Restart server - it will create a new empty database
-   bun start
+   ${COMMAND_NAME} --serve
 
 5. RE-ADD ACCOUNTS
-   bun run cli --add-account <name> --mode <mode> --priority <number>
+   ${COMMAND_NAME} --add-account <name> --mode <mode> --priority <number>
 
 NOTE: You will lose all historical request data and account configurations.
 OAuth tokens will need to be re-authenticated.

@@ -14,6 +14,7 @@ import {
 	ServiceUnavailableError,
 	trackClientVersion,
 } from "@better-ccflare/core";
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import { DatabaseFactory } from "@better-ccflare/database";
 import { sanitizeRequestHeaders } from "@better-ccflare/http-common";
 import { Logger } from "@better-ccflare/logger";
@@ -5128,7 +5129,7 @@ async function handleProxyCoreImpl(
 		const reauthCommands = needsReauth
 			.map(
 				(acc) =>
-					`bun run cli --reauthenticate "${acc.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
+					`${COMMAND_NAME} --reauthenticate "${acc.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
 			)
 			.join("\n  ");
 		cacheBodyStore.discardStaged(requestMeta.id);

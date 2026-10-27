@@ -750,25 +750,25 @@ function parseArgs(args: string[]): ParsedArgs {
 
 					console.error("\nExamples:");
 					console.error(
-						"  bun run cli --add-account my-account --mode claude-oauth --priority 0",
+						`  ${COMMAND_NAME} --add-account my-account --mode claude-oauth --priority 0`,
 					);
 					console.error(
-						"  bun run cli --add-account api-key-account --mode console --priority 10",
+						`  ${COMMAND_NAME} --add-account api-key-account --mode console --priority 10`,
 					);
 					console.error(
-						"  bun run cli --add-account zai-account --mode zai --priority 20",
+						`  ${COMMAND_NAME} --add-account zai-account --mode zai --priority 20`,
 					);
 					console.error(
-						"  bun run cli --add-account minimax-account --mode minimax --priority 30",
+						`  ${COMMAND_NAME} --add-account minimax-account --mode minimax --priority 30`,
 					);
 					console.error(
-						"  bun run cli --add-account openai-account --mode openai-compatible --priority 40",
+						`  ${COMMAND_NAME} --add-account openai-account --mode openai-compatible --priority 40`,
 					);
 					console.error(
-						"  bun run cli --add-account anthropic-account --mode anthropic-compatible --priority 50",
+						`  ${COMMAND_NAME} --add-account anthropic-account --mode anthropic-compatible --priority 50`,
 					);
 					console.error(
-						"  bun run cli --add-account bedrock-account --mode bedrock --profile default",
+						`  ${COMMAND_NAME} --add-account bedrock-account --mode bedrock --profile default`,
 					);
 
 					fastExit(1);
@@ -1669,7 +1669,7 @@ async function main() {
 				if (!parsed.profile) {
 					console.error("❌ --profile flag is required for bedrock mode");
 					console.error(
-						"Example: bun run cli --add-account my-bedrock --mode bedrock --profile default",
+						`Example: ${COMMAND_NAME} --add-account my-bedrock --mode bedrock --profile default`,
 					);
 					await exitGracefully(1);
 				}
