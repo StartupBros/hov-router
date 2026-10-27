@@ -23,7 +23,12 @@ export const TIME_CONSTANTS = {
 	SESSION_DURATION_DEFAULT: 5 * 60 * 60 * 1000, // 5 hours - kept for backward compatibility - new code should use ANTHROPIC_SESSION_DURATION_DEFAULT
 
 	// Timeouts
-	STREAM_TIMEOUT_DEFAULT: 1000 * 60 * 1, // 1 minute
+	// 15 minutes. Usage state with no activity for this long is dropped as
+	// abandoned, so it must outlast every timer that can still end a live
+	// stream (guard response idle cut, Anthropic post-commit liveness max of
+	// 10 minutes, Bun idleTimeout); otherwise their ends find no state and the
+	// request row is lost (#634).
+	STREAM_TIMEOUT_DEFAULT: 1000 * 60 * 15,
 	STREAM_READ_TIMEOUT_MS: 60000, // 60 seconds - overall timeout for stream reads
 	STREAM_OPERATION_TIMEOUT_MS: 30000, // 30 seconds - timeout per read operation
 

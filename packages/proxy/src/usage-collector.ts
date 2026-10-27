@@ -2442,6 +2442,8 @@ export class UsageCollector {
 		// 1. Remove inactive requests (orphaned). A stream may legitimately run
 		// for much longer than the inactivity timeout, so lifecycle age alone must
 		// never evict it while chunks (including provider pings) are still arriving.
+		// The default timeout outlasts every timer that can end a silent live
+		// stream, so this frees only state whose end will never come (#634).
 		for (const [id, state] of this.requests) {
 			const inactivity = now - state.lastActivity;
 			if (inactivity > this.timeoutMs) {
