@@ -147,6 +147,7 @@ import {
 	createAnthropicDegradedNoAccountDenial,
 	createBoundedModelRouteAdmissionResponse,
 	createCountTokensUnsupportedResponse,
+	createHostedDispatchTerminalResponse,
 	discardUpstreamBody,
 	isAnthropicDegradedSendDenied,
 	type ProxyWithAccountResult,
@@ -215,6 +216,8 @@ import {
 } from "./usage-collector";
 import {
 	authorizeWebSearchHelper,
+	getWebSearchHelperScope,
+	hasWebSearchHelperDispatched,
 	isFreshWebSearchHelper,
 } from "./websearch-helper-policy";
 
@@ -3300,7 +3303,8 @@ async function handleProxyCoreImpl(
 		return {
 			routeCandidateId: candidateId,
 			prepareFinalResponse: true,
-			implicitFallbacksEnabled: nativeContext === null,
+			implicitFallbacksEnabled:
+				nativeContext === null && !getWebSearchHelperScope(requestMeta),
 			nativeQuotaAdmission: nativeContext
 				? nativeAdmissionFor(
 						account,
@@ -3318,14 +3322,15 @@ async function handleProxyCoreImpl(
 			// account/model-specific implicit-fallback discovery state immediately
 			// before each real fetch and semantic gate.
 			isFinalSemanticAttempt: () =>
-				currentlyFinalSemanticRoute && deferredModelRoutes.length === 0,
+				!!getWebSearchHelperScope(requestMeta) ||
+				(currentlyFinalSemanticRoute && deferredModelRoutes.length === 0),
 			canReplayContextOverflow: () =>
 				!currentlyFinalSemanticRoute ||
 				deferredModelRoutes.length > 0 ||
 				(comboName !== null && !isComboFallbackDisabled(ctx, requestMeta)),
 			anthropicPreCommitRescue: activeAnthropicPreCommitRescue,
 			deferImplicitFallback: (model, fallbackRank) => {
-				if (nativeContext) return;
+				if (nativeContext || getWebSearchHelperScope(requestMeta)) return;
 				deferModelRoute(
 					account,
 					model,
@@ -3446,6 +3451,7 @@ async function handleProxyCoreImpl(
 		account: Account,
 		candidateId: string,
 	): void => {
+		if (getWebSearchHelperScope(requestMeta)) return;
 		requestMeta.routeHomeAction =
 			ctx.strategy.commitDescendantAffinityOwner?.(requestMeta, {
 				candidateId,
@@ -4041,6 +4047,10 @@ async function handleProxyCoreImpl(
 				}
 				return finishPacing(pacingSlot, settled.response);
 			}
+		}
+		if (hasWebSearchHelperDispatched(requestMeta)) {
+			await routingAttemptLedger.discardTerminalResponse();
+			return finishPacing(pacingSlot, createHostedDispatchTerminalResponse());
 		}
 		const preferredResponse = await attemptPreferredContextOverflowRoute(
 			accounts

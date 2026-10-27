@@ -11,6 +11,7 @@ beforeEach(() => {
 });
 afterEach(() => collectorSpy.mockRestore());
 
+import { SessionAffinityStrategy } from "@better-ccflare/load-balancer";
 import {
 	deriveServerToolRequirement,
 	getProvider,
@@ -21,8 +22,15 @@ import {
 	ModelRouteSessionRegistry,
 	parseModelRouteProfiles,
 } from "../../model-route-profiles";
-import { authorizeWebSearchHelper } from "../../websearch-helper-policy";
-import { selectAccountsForRequest } from "../account-selector";
+import { handleProxy } from "../../proxy";
+import {
+	authorizeWebSearchHelper,
+	createWebSearchHelperCandidateMeta,
+} from "../../websearch-helper-policy";
+import {
+	deriveAffinityLaneKey,
+	selectAccountsForRequest,
+} from "../account-selector";
 import { proxyUnauthenticated, proxyWithAccount } from "../proxy-operations";
 import type { ProxyContext } from "../proxy-types";
 
@@ -80,7 +88,7 @@ function account(): Account {
 		consecutive_rate_limits: 0,
 	} as Account;
 }
-function fixture(native = account()) {
+function fixture(native = account(), accountIds = [id]) {
 	const profiles = parseModelRouteProfiles(
 		JSON.stringify([
 			{
@@ -90,7 +98,7 @@ function fixture(native = account()) {
 				logicalModel: body.model,
 				expectedProvider: "openai-compatible",
 				expectedPhysicalModel: "chat",
-				webSearchHelper: { accountIds: [id] },
+				webSearchHelper: { accountIds },
 			},
 		]),
 	);
@@ -115,13 +123,21 @@ function fixture(native = account()) {
 		publicForceAccount: false,
 	});
 	const ctx = {
-		config: { getStorePayloads: () => false },
+		config: {
+			getStorePayloads: () => false,
+			getSystemPromptCacheTtl1h: () => false,
+			getAgentFrontmatterModelFallback: () => false,
+			getUsageThrottlingFiveHourEnabled: () => false,
+			getUsageThrottlingWeeklyEnabled: () => false,
+		},
 		runtime: { port: 8081, clientId: "offline-test" },
 		serverToolReplay: { status: "disabled" },
 		provider: getProvider("anthropic"),
 		modelRouteSessionRegistry: new ModelRouteSessionRegistry(profiles),
 		strategy: { select: (accounts: Account[]) => accounts },
 		dbOps: {
+			getActiveComboForFamily: async () => null,
+			getAgentPreference: async () => null,
 			getAllAccounts: async () => [native],
 			getAccount: async () => native,
 		},
@@ -130,7 +146,11 @@ function fixture(native = account()) {
 	} as unknown as ProxyContext;
 	return { meta, ctx, native };
 }
-async function poll(spend: unknown = { enabled: false }, extra?: unknown) {
+async function poll(
+	spend: unknown = { enabled: false },
+	extra?: unknown,
+	pollId = id,
+) {
 	globalThis.fetch = (async () =>
 		Response.json({
 			five_hour: {
@@ -140,12 +160,14 @@ async function poll(spend: unknown = { enabled: false }, extra?: unknown) {
 			spend,
 			extra_usage: extra,
 		})) as typeof fetch;
-	usageCache.startPolling(id, token, "anthropic", 60_000);
-	expect(await usageCache.refreshNow(id)).toBe(true);
+	usageCache.startPolling(pollId, token, "anthropic", 60_000);
+	expect(await usageCache.refreshNow(pollId)).toBe(true);
 }
 afterEach(() => {
 	usageCache.stopPolling(id);
 	usageCache.delete(id);
+	usageCache.stopPolling("helper-sibling");
+	usageCache.delete("helper-sibling");
 	globalThis.fetch = originalFetch;
 });
 async function dispatch(meta: RequestMeta, ctx: ProxyContext, native: Account) {
@@ -168,7 +190,508 @@ async function dispatch(meta: RequestMeta, ctx: ProxyContext, native: Account) {
 		ctx,
 	);
 }
+function helperRequest(
+	options: {
+		stream?: boolean;
+		signal?: AbortSignal;
+		messages?: unknown[];
+	} = {},
+) {
+	return new Request("http://proxy.local/v1/messages", {
+		method: "POST",
+		signal: options.signal,
+		headers: {
+			"content-type": "application/json",
+			"x-claude-code-session-id": "helper-session",
+		},
+		body: JSON.stringify({
+			...body,
+			model: "claude-bccf-route-local",
+			metadata: { user_id: "helper-session" },
+			stream: options.stream ?? false,
+			messages: options.messages ?? body.messages,
+		}),
+	});
+}
+async function wholeHelper(
+	ctx: ProxyContext,
+	options: Parameters<typeof helperRequest>[0] = {},
+) {
+	const req = helperRequest(options);
+	return handleProxy(req, new URL(req.url), ctx, "key-1");
+}
+async function twoCandidates() {
+	await poll();
+	await poll({ enabled: false }, undefined, "helper-sibling");
+	const { ctx, native, meta } = fixture(account(), [id, "helper-sibling"]);
+	const sibling = { ...native, id: "helper-sibling", name: "helper-sibling" };
+	ctx.dbOps.getAllAccounts = async () => [native, sibling];
+	ctx.dbOps.getAccount = async (accountId) =>
+		accountId === id ? native : sibling;
+	return { ctx, native, sibling, meta };
+}
+
 describe("explicit subscription WebSearch helper selection", () => {
+	it.each([
+		"throw",
+		"timeout",
+		"cancel",
+		"401",
+		"429",
+		"500",
+		"529",
+		"empty-json",
+		"truncated-json",
+		"empty-sse",
+		"truncated-sse",
+	])("whole proxy sends at most once after %s", async (outcome) => {
+		const { ctx } = await twoCandidates();
+		const controller = new AbortController();
+		let sends = 0;
+		globalThis.fetch = (async () => {
+			sends++;
+			if (outcome === "throw") throw new Error("offline transport failure");
+			if (outcome === "timeout")
+				throw new DOMException("offline timeout", "TimeoutError");
+			if (outcome === "cancel") {
+				controller.abort();
+				throw new DOMException("offline cancellation", "AbortError");
+			}
+			if (/^\d+$/.test(outcome))
+				return Response.json(
+					{
+						type: "error",
+						error: { type: "overloaded_error", message: "offline failure" },
+					},
+					{ status: Number(outcome) },
+				);
+			if (outcome.endsWith("sse"))
+				return new Response(
+					outcome === "empty-sse"
+						? ""
+						: 'event: message_start\ndata: {"type":"message_start","message":{"id":"fake","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-5","usage":{"input_tokens":1,"output_tokens":0}}}\n\nevent: content_block_delta\ndata: {',
+					{ headers: { "content-type": "text/event-stream" } },
+				);
+			return new Response(
+				outcome === "empty-json" ? "" : '{"type":"message",',
+				{ headers: { "content-type": "application/json" } },
+			);
+		}) as typeof fetch;
+		const response = await wholeHelper(ctx, {
+			stream: outcome.endsWith("sse"),
+			signal: controller.signal,
+		});
+		await response.text();
+		expect(sends).toBe(1);
+		if (outcome === "cancel") expect(response.status).toBe(499);
+	});
+
+	it("advances only to an approved sibling when the first candidate is revoked before send", async () => {
+		const { ctx, native, sibling } = await twoCandidates();
+		const checkedAccounts: string[] = [];
+		ctx.dbOps.getAccount = async (accountId) => {
+			checkedAccounts.push(accountId);
+			return accountId === id ? { ...native, paused: true } : sibling;
+		};
+		const bearers: string[] = [];
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			bearers.push((input as Request).headers.get("authorization") ?? "");
+			return Response.json({
+				type: "message",
+				content: [{ type: "text", text: "fixture" }],
+				stop_reason: "end_turn",
+			});
+		}) as typeof fetch;
+		const response = await wholeHelper(ctx);
+		expect(response.status).toBe(200);
+		await response.text();
+		expect(bearers).toHaveLength(1);
+		expect(checkedAccounts).toEqual([native.id, sibling.id]);
+	});
+
+	it("never spills into ordinary inventory when every approved candidate is revoked before send", async () => {
+		const { ctx, native, sibling } = await twoCandidates();
+		const outside = { ...native, id: "outside", name: "outside" };
+		ctx.dbOps.getAllAccounts = async () => [native, sibling, outside];
+		ctx.dbOps.getAccount = async (accountId) => ({
+			...(accountId === id ? native : sibling),
+			paused: true,
+		});
+		let sends = 0;
+		globalThis.fetch = (async () => {
+			sends++;
+			return Response.json({});
+		}) as typeof fetch;
+		const response = await wholeHelper(ctx);
+		expect(response.ok).toBe(false);
+		expect(sends).toBe(0);
+	});
+
+	it("claims one send atomically across simultaneous candidate clones", async () => {
+		await poll();
+		const { ctx, meta, native } = fixture();
+		let sends = 0;
+		globalThis.fetch = (async () => {
+			sends++;
+			return Response.json({
+				type: "message",
+				content: [{ type: "text", text: "fixture" }],
+				stop_reason: "end_turn",
+			});
+		}) as typeof fetch;
+		const responses = await Promise.all([
+			dispatch(meta, ctx, native),
+			dispatch(createWebSearchHelperCandidateMeta(meta), ctx, native),
+		]);
+		for (const response of responses) {
+			if (!(response instanceof Response)) throw new Error("missing response");
+			await response.text();
+		}
+		expect(sends).toBe(1);
+	});
+
+	it.each([
+		"out-of-list",
+		"paused",
+	])("refilters malicious strategy output (%s)", async (kind) => {
+		await poll();
+		const { ctx, meta, native } = fixture();
+		ctx.strategy.select = async () => [
+			kind === "out-of-list"
+				? { ...native, id: "unapproved" }
+				: { ...native, paused: true },
+		];
+		await expect(
+			selectAccountsForRequest(meta, ctx, body.model),
+		).rejects.toThrow();
+	});
+
+	it("refuses an empty approved pool even with ordinary passthrough enabled", async () => {
+		const previous = process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL;
+		process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = "true";
+		let sends = 0;
+		globalThis.fetch = (async () => {
+			sends++;
+			return Response.json({});
+		}) as typeof fetch;
+		try {
+			const { ctx } = fixture();
+			const response = await wholeHelper(ctx);
+			expect(response.status).toBe(503);
+			expect(sends).toBe(0);
+		} finally {
+			if (previous === undefined)
+				delete process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL;
+			else process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = previous;
+		}
+	});
+
+	it("does not grant a fresh exception to subsequent assistant history", async () => {
+		await poll();
+		const { ctx } = fixture();
+		let sends = 0;
+		globalThis.fetch = (async () => {
+			sends++;
+			return Response.json({});
+		}) as typeof fetch;
+		const response = await wholeHelper(ctx, {
+			messages: [
+				...body.messages,
+				{ role: "assistant", content: "prior response" },
+				{ role: "user", content: "continue" },
+			],
+		});
+		expect(response.ok).toBe(false);
+		expect(sends).toBe(0);
+	});
+
+	it.each([
+		["root-first", "success"],
+		["helper-first", "success"],
+		["root-first", "failure"],
+		["helper-first", "failure"],
+		["root-first", "cancel"],
+		["helper-first", "cancel"],
+	])("preserves root binding and child home with concurrent completion (%s, %s)", async (order, outcome) => {
+		await poll();
+		const { ctx, native } = fixture();
+		const local = {
+			...native,
+			id: "local-account",
+			name: "local-account",
+			provider: "openai-compatible",
+			api_key: "fake-local",
+			refresh_token: null,
+			custom_endpoint: "https://local.invalid",
+			model_mappings: JSON.stringify({ sonnet: "chat" }),
+		};
+		ctx.dbOps.getAllAccounts = async () => [local, native];
+		ctx.dbOps.getAccount = async (accountId) =>
+			accountId === id ? native : local;
+		const strategy = new SessionAffinityStrategy();
+		strategy.initialize({
+			resetAccountSession() {},
+			async resumeAccount() {
+				return { resumed: false, pauseReason: null };
+			},
+			getAccountUtilization() {
+				return 0;
+			},
+		});
+		ctx.strategy = strategy;
+		const sentHosts: string[] = [];
+		const helperAbort = new AbortController();
+		let releaseRoot = () => {};
+		let releaseHelper = () => {};
+		let arrivedRoot = () => {};
+		let arrivedHelper = () => {};
+		const rootGate = new Promise<void>((resolve) => {
+			releaseRoot = resolve;
+		});
+		const helperGate = new Promise<void>((resolve) => {
+			releaseHelper = resolve;
+		});
+		const rootArrived = new Promise<void>((resolve) => {
+			arrivedRoot = resolve;
+		});
+		const helperArrived = new Promise<void>((resolve) => {
+			arrivedHelper = resolve;
+		});
+		let gate = false;
+		let rootInventoryHeld = false;
+		ctx.dbOps.getAllAccounts = async () => {
+			if (gate && !rootInventoryHeld) {
+				rootInventoryHeld = true;
+				arrivedRoot();
+				await rootGate;
+			}
+			return [local, native];
+		};
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			const host = new URL((input as Request).url).hostname;
+			sentHosts.push(host);
+			if (host === "local.invalid") {
+				return Response.json({
+					id: "local",
+					object: "chat.completion",
+					model: "chat",
+					choices: [
+						{
+							index: 0,
+							message: { role: "assistant", content: "local fixture" },
+							finish_reason: "stop",
+						},
+					],
+					usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+				});
+			}
+			if (gate) {
+				arrivedHelper();
+				await helperGate;
+				if (outcome === "failure") throw new Error("offline helper failed");
+				if (outcome === "cancel") {
+					helperAbort.abort();
+					throw new DOMException("offline cancellation", "AbortError");
+				}
+			}
+			return Response.json({
+				type: "message",
+				content: [{ type: "text", text: "fixture" }],
+				stop_reason: "end_turn",
+			});
+		}) as typeof fetch;
+		const inference = async (child = false) => {
+			const request = new Request("http://proxy.local/v1/messages", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-claude-code-session-id": "helper-session",
+					...(child ? { "x-claude-code-agent-id": "child" } : {}),
+				},
+				body: JSON.stringify({
+					model: child ? body.model : "claude-bccf-route-local",
+					max_tokens: 32,
+					messages: body.messages,
+					metadata: { user_id: "helper-session" },
+				}),
+			});
+			const response = await handleProxy(
+				request,
+				new URL(request.url),
+				ctx,
+				"key-1",
+			);
+			expect(response.status).toBe(200);
+			await response.text();
+		};
+		await inference();
+		await inference(true);
+		// Exact pins bypass ordinary strategy selection. Seed historical ordinary
+		// owners explicitly so this checks state preservation, not an empty map.
+		const rootMeta = {
+			...fixture().meta,
+			clientSessionId: "helper-session",
+			routeLineage: { kind: "root", childHomeKey: null },
+		} as RequestMeta;
+		rootMeta.affinityLaneKey = deriveAffinityLaneKey(rootMeta, body.model);
+		const childMeta = {
+			...rootMeta,
+			routeLineage: { kind: "descendant", childHomeKey: "child-home" },
+		} as RequestMeta;
+		childMeta.affinityLaneKey = deriveAffinityLaneKey(childMeta, body.model);
+		expect(
+			strategy.commitAffinityOwner(rootMeta, {
+				candidateId: "account:local-account",
+				accountId: "local-account",
+			}),
+		).toBe(true);
+		expect(
+			strategy.commitAffinityOwner(childMeta, {
+				candidateId: "account:local-account",
+				accountId: "local-account",
+			}),
+		).toBe(true);
+		const affinity = structuredClone(
+			(strategy as unknown as { affinity: Map<string, unknown> }).affinity,
+		);
+		expect(affinity.size).toBeGreaterThan(0);
+		const registry = ctx.modelRouteSessionRegistry;
+		if (!registry) throw new Error("missing route registry");
+		const bindingInput = {
+			callerIdentity: "api-key-id:key-1",
+			sessionId: "helper-session",
+			requestModel: body.model,
+			isSubagent: true,
+		};
+		const binding = registry.resolve(bindingInput, null, {
+			touchInheritedBinding: false,
+		});
+		expect(binding.kind).toBe("route");
+		gate = true;
+		const root = inference();
+		await rootArrived;
+		const helper = wholeHelper(ctx, { signal: helperAbort.signal }).then(
+			async (response) => {
+				expect(response.status).toBe(
+					outcome === "success" ? 200 : outcome === "cancel" ? 499 : 502,
+				);
+				await response.text();
+			},
+		);
+		await helperArrived;
+		if (order === "root-first") {
+			releaseRoot();
+			await root;
+			releaseHelper();
+			await helper;
+		} else {
+			releaseHelper();
+			await helper;
+			releaseRoot();
+			await root;
+		}
+		for (const [key, value] of affinity)
+			expect(
+				(
+					strategy as unknown as { affinity: Map<string, unknown> }
+				).affinity.get(key),
+			).toEqual(value);
+		expect(
+			registry.resolve(bindingInput, null, { touchInheritedBinding: false }),
+		).toEqual(binding);
+		gate = false;
+		sentHosts.length = 0;
+		await inference();
+		await inference(true);
+		expect(sentHosts).toEqual(["local.invalid", "local.invalid"]);
+	});
+
+	it("shares one physical send budget with legitimate candidate clones", async () => {
+		await poll();
+		const { meta, ctx, native } = fixture();
+		let sends = 0;
+		globalThis.fetch = (async () => {
+			sends++;
+			return Response.json({
+				type: "message",
+				content: [{ type: "text", text: "fixture" }],
+				stop_reason: "pause_turn",
+			});
+		}) as typeof fetch;
+		const first = await dispatch(meta, ctx, native);
+		if (!(first instanceof Response)) throw new Error("missing response");
+		expect((await first.json()).stop_reason).toBe("pause_turn");
+		await dispatch(createWebSearchHelperCandidateMeta(meta), ctx, native);
+		expect(sends).toBe(1);
+	});
+
+	it("keeps primed root and child affinity unchanged after whole-proxy helper success", async () => {
+		await poll();
+		const { meta, ctx } = fixture();
+		const strategy = new SessionAffinityStrategy();
+		strategy.initialize({
+			resetAccountSession() {},
+			async resumeAccount() {
+				return { resumed: false, pauseReason: null };
+			},
+			getAccountUtilization() {
+				return 0;
+			},
+		});
+		ctx.strategy = strategy;
+		const root = {
+			...meta,
+			clientSessionId: "helper-session",
+			routeLineage: { kind: "root", childHomeKey: null },
+		} as RequestMeta;
+		root.affinityLaneKey = deriveAffinityLaneKey(root, body.model);
+		const child = {
+			...root,
+			routeLineage: { kind: "descendant", childHomeKey: "child-home" },
+		} as RequestMeta;
+		child.affinityLaneKey = deriveAffinityLaneKey(child, body.model);
+		strategy.commitAffinityOwner(root, {
+			candidateId: "account:local-account",
+			accountId: "local-account",
+		});
+		strategy.commitAffinityOwner(child, {
+			candidateId: "account:local-account",
+			accountId: "local-account",
+		});
+		const beforeRoot = strategy.snapshotAffinityOwner(root);
+		const beforeChild = strategy.snapshotAffinityOwner(child);
+		expect(beforeRoot?.accountId).toBe("local-account");
+		expect(beforeChild?.accountId).toBe("local-account");
+		globalThis.fetch = (async () =>
+			Response.json({
+				type: "message",
+				content: [{ type: "text", text: "fixture" }],
+				stop_reason: "end_turn",
+			})) as typeof fetch;
+		const request = new Request("http://proxy.local/v1/messages", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-claude-code-session-id": "helper-session",
+			},
+			body: JSON.stringify({
+				...body,
+				model: "claude-bccf-route-local",
+				metadata: { user_id: "helper-session" },
+			}),
+		});
+		const response = await handleProxy(
+			request,
+			new URL(request.url),
+			ctx,
+			"key-1",
+		);
+		expect(response.status).toBe(200);
+		await response.text();
+		expect(strategy.snapshotAffinityOwner(root)).toEqual(beforeRoot);
+		expect(strategy.snapshotAffinityOwner(child)).toEqual(beforeChild);
+	});
+
 	it("dispatches through native preparation with the logical model, not the local chat pin", async () => {
 		await poll();
 		const { meta, ctx } = fixture();

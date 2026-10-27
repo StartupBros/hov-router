@@ -66,6 +66,7 @@ import {
 } from "../server-tool-routing-errors";
 import {
 	createWebSearchHelperCandidateMeta,
+	getWebSearchHelperAffinityLane,
 	getWebSearchHelperScope,
 } from "../websearch-helper-policy";
 import { buildComboMembershipDiagnostics } from "./managed-routing-diagnostics";
@@ -1304,6 +1305,8 @@ export function deriveAffinityLaneKey(
 	meta: RequestMeta,
 	effectiveModel: string | null,
 ): string | null {
+	const helperLane = getWebSearchHelperAffinityLane(meta);
+	if (helperLane) return helperLane;
 	const session = meta.clientSessionId?.trim();
 	const model = effectiveModel?.trim().toLowerCase();
 	if (!session || !model) return null;

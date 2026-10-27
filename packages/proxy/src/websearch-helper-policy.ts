@@ -13,6 +13,33 @@ export interface WebSearchHelperScope {
 }
 
 const scopes = new WeakMap<RequestMeta, WebSearchHelperScope>();
+// Keyed by private authority identity, not request ids or serializable metadata.
+// Legitimate candidate clones share this state; independent inbound requests do not.
+const execution = new WeakMap<
+	WebSearchHelperScope,
+	{ lane: string; sent: boolean }
+>();
+
+export function getWebSearchHelperAffinityLane(
+	meta: RequestMeta,
+): string | undefined {
+	const scope = scopes.get(meta);
+	return scope ? execution.get(scope)?.lane : undefined;
+}
+
+export function hasWebSearchHelperDispatched(meta: RequestMeta): boolean {
+	const scope = scopes.get(meta);
+	return scope ? execution.get(scope)?.sent === true : false;
+}
+
+/** Synchronous claim immediately before native fetch; never reset after failure. */
+export function claimWebSearchHelperDispatch(meta: RequestMeta): boolean {
+	const scope = scopes.get(meta);
+	const state = scope && execution.get(scope);
+	if (!state || state.sent) return false;
+	state.sent = true;
+	return true;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -99,14 +126,16 @@ export function authorizeWebSearchHelper(
 		!profile.accountId
 	)
 		return;
-	scopes.set(
-		meta,
-		Object.freeze({
-			profile,
-			source: resolution.source,
-			accountIds: profile.webSearchHelper.accountIds,
-		}),
-	);
+	const scope = Object.freeze({
+		profile,
+		source: resolution.source,
+		accountIds: profile.webSearchHelper.accountIds,
+	});
+	scopes.set(meta, scope);
+	execution.set(scope, {
+		lane: `websearch-helper:${crypto.randomUUID()}`,
+		sent: false,
+	});
 }
 
 /** Internal preparation retains private authority without changing source constraints. */
