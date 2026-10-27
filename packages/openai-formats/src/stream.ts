@@ -9,8 +9,57 @@ const SAFE_STREAM_ERROR_TYPE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const SAFE_STREAM_ERROR_CODE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MAX_STREAM_ERROR_MESSAGE_LENGTH = 1_024;
 
+/**
+ * Downstream silence after which a translated stream sends an Anthropic
+ * `ping`. Tool-call arguments are buffered until [DONE], and some upstreams
+ * (oMLX behind LiteLLM) send nothing while a tool call is generated, so a
+ * long tool call would otherwise leave the client with no bytes until the
+ * guard's 120 s body-idle watchdog cuts the stream (#633). Matches the
+ * precommit-rescue ping cadence. Claude Code honours at most 30 consecutive
+ * pings before its 300 s idle floor applies, so 25 s covers ~17.5 min.
+ */
+export const DEFAULT_KEEPALIVE_INTERVAL_MS = 25_000;
+
+/**
+ * Pings stop once the upstream body has been silent this long, so a hung
+ * upstream still trips the guard's idle watchdog. 32k output tokens at
+ * ~44 tok/s is ~12 min; LiteLLM's chat lane stream_timeout is 960 s.
+ */
+export const DEFAULT_KEEPALIVE_MAX_UPSTREAM_SILENCE_MS = 15 * 60_000;
+
+export interface KeepaliveScheduler {
+	now(): number;
+	setInterval(callback: () => void, intervalMs: number): unknown;
+	clearInterval(handle: unknown): void;
+}
+
+const defaultKeepaliveScheduler: KeepaliveScheduler = {
+	now: () => performance.now(),
+	setInterval(callback, intervalMs) {
+		const timer = setInterval(callback, intervalMs);
+		(timer as { unref?: () => void }).unref?.();
+		return timer;
+	},
+	clearInterval(handle) {
+		clearInterval(handle as ReturnType<typeof setInterval>);
+	},
+};
+
+/**
+ * Bun calls the WHATWG transformer `cancel` callback when the readable side
+ * is cancelled or the writable side aborts, but neither lib.dom nor bun-types
+ * declares it yet.
+ */
+type CancellableTransformer<I, O> = Transformer<I, O> & {
+	cancel?: (reason: unknown) => void | PromiseLike<void>;
+};
+
 export interface TransformStreamingResponseOptions {
 	contextWindowForModel?: (model: string) => number | undefined;
+	/** Non-positive disables the keepalive ping. */
+	keepaliveIntervalMs?: number;
+	keepaliveMaxUpstreamSilenceMs?: number;
+	keepaliveScheduler?: KeepaliveScheduler;
 }
 
 /**
@@ -204,9 +253,38 @@ function emitMessageStart(
 	controller.enqueue(
 		encoder.encode(`data: ${JSON.stringify(messageStart)}\n\n`),
 	);
+	emitPing(controller, encoder);
+}
+
+function emitPing(
+	controller: TransformStreamDefaultController,
+	encoder: TextEncoder,
+): void {
 	const ping = { type: "ping" };
 	controller.enqueue(encoder.encode(`event: ping\n`));
 	controller.enqueue(encoder.encode(`data: ${JSON.stringify(ping)}\n\n`));
+}
+
+/** Record each downstream write so the keepalive pings only into silence. */
+function trackDownstreamWrites(
+	controller: TransformStreamDefaultController<Uint8Array>,
+	onWrite: () => void,
+): TransformStreamDefaultController<Uint8Array> {
+	return {
+		get desiredSize() {
+			return controller.desiredSize;
+		},
+		enqueue(chunk) {
+			onWrite();
+			controller.enqueue(chunk);
+		},
+		error(reason) {
+			controller.error(reason);
+		},
+		terminate() {
+			controller.terminate();
+		},
+	};
 }
 
 function emitContentBlockStop(
@@ -436,9 +514,52 @@ export function transformStreamingResponse(
 	// handler object) so it can be fully typed without `any` — the DOM lib's
 	// Transformer callbacks don't allow attaching arbitrary properties to `this`.
 	let streamContext: TransformStreamContext | null = null;
+
+	const scheduler = options.keepaliveScheduler ?? defaultKeepaliveScheduler;
+	const keepaliveIntervalMs =
+		options.keepaliveIntervalMs ?? DEFAULT_KEEPALIVE_INTERVAL_MS;
+	const keepaliveMaxUpstreamSilenceMs =
+		options.keepaliveMaxUpstreamSilenceMs ??
+		DEFAULT_KEEPALIVE_MAX_UPSTREAM_SILENCE_MS;
+	let keepaliveTimer: unknown;
+	let lastUpstreamChunkAt = 0;
+	let lastDownstreamWriteAt = 0;
+	let downstream: TransformStreamDefaultController<Uint8Array> | null = null;
+	const stopKeepalive = () => {
+		if (keepaliveTimer === undefined) return;
+		scheduler.clearInterval(keepaliveTimer);
+		keepaliveTimer = undefined;
+	};
+	const sendKeepalivePing = () => {
+		const context = streamContext;
+		if (!downstream || !context?.hasSentStart || context.terminalErrorSeen) {
+			return;
+		}
+		const now = scheduler.now();
+		if (now - lastDownstreamWriteAt < keepaliveIntervalMs) return;
+		if (now - lastUpstreamChunkAt > keepaliveMaxUpstreamSilenceMs) return;
+		try {
+			emitPing(downstream, encoder);
+		} catch {
+			// The readable side is closed or errored; nothing can be sent.
+			stopKeepalive();
+		}
+	};
+
 	const transformedBody = response.body.pipeThrough(
 		new TransformStream<Uint8Array, Uint8Array>({
-			start(_controller) {
+			start(rawController) {
+				downstream = trackDownstreamWrites(rawController, () => {
+					lastDownstreamWriteAt = scheduler.now();
+				});
+				lastUpstreamChunkAt = scheduler.now();
+				lastDownstreamWriteAt = lastUpstreamChunkAt;
+				if (Number.isFinite(keepaliveIntervalMs) && keepaliveIntervalMs > 0) {
+					keepaliveTimer = scheduler.setInterval(
+						sendKeepalivePing,
+						keepaliveIntervalMs,
+					);
+				}
 				// Initialize context object for streaming state
 				streamContext = {
 					buffer: "",
@@ -459,7 +580,9 @@ export function transformStreamingResponse(
 					maxToolCallIndex: 100,
 				};
 			},
-			transform(chunk, controller) {
+			transform(chunk, rawController) {
+				lastUpstreamChunkAt = scheduler.now();
+				const controller = downstream ?? rawController;
 				try {
 					if (!streamContext) {
 						log.error("TransformStream context not initialized");
@@ -485,6 +608,7 @@ export function transformStreamingResponse(
 
 						// Handle [DONE] marker
 						if (dataStr === "[DONE]") {
+							stopKeepalive();
 							if (context.terminalErrorSeen) {
 								streamContext = null;
 								continue;
@@ -548,6 +672,7 @@ export function transformStreamingResponse(
 							// terminal error instead of manufacturing a normal completion.
 							if (data.error !== null && typeof data.error === "object") {
 								emitStreamError(controller, encoder, context, data.error);
+								stopKeepalive();
 								continue;
 							}
 
@@ -679,6 +804,7 @@ export function transformStreamingResponse(
 				}
 			},
 			flush(controller) {
+				stopKeepalive();
 				if (!streamContext) return;
 				// Bind to a non-null local so TypeScript's null-narrowing holds for
 				// the rest of this call (see `transform` above for why).
@@ -731,7 +857,10 @@ export function transformStreamingResponse(
 
 				streamContext = null;
 			},
-		}),
+			cancel() {
+				stopKeepalive();
+			},
+		} as CancellableTransformer<Uint8Array, Uint8Array>),
 	);
 
 	return new Response(transformedBody, {
