@@ -106,10 +106,10 @@ export function describeModelRouteProfileFlow(
 	profile: ModelRouteProfile,
 ): string {
 	if (profile.selection === "capability")
-		return "Pool of matching accounts, load-balancer order, then error · subagents fall back to normal routing";
+		return "This model on any pool account. Fails instead of switching. Subagents try the pool first.";
 	if (isBoundedModelRouteProfile(profile))
-		return "One pinned account, size-capped requests, no fallback · subagents use the same account";
-	return "One pinned account, no fallback · subagents use the same account";
+		return "One account only, size-capped requests. Fails instead of switching. Subagents use it too.";
+	return "One account only. Fails instead of switching. Subagents use it too.";
 }
 
 function configError(message: string): Error {

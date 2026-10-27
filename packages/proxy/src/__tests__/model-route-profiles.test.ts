@@ -20,11 +20,11 @@ const PROFILE_JSON = JSON.stringify([
 ]);
 
 const EXACT_FLOW =
-	"One pinned account, no fallback · subagents use the same account";
+	"One account only. Fails instead of switching. Subagents use it too.";
 const BOUNDED_FLOW =
-	"One pinned account, size-capped requests, no fallback · subagents use the same account";
+	"One account only, size-capped requests. Fails instead of switching. Subagents use it too.";
 const POOL_FLOW =
-	"Pool of matching accounts, load-balancer order, then error · subagents fall back to normal routing";
+	"This model on any pool account. Fails instead of switching. Subagents try the pool first.";
 
 function profile() {
 	const [configured] = parseModelRouteProfiles(PROFILE_JSON);

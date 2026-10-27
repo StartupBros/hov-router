@@ -35,9 +35,9 @@ const LANES: readonly QualityLane[] = [
 
 const LINE_LABELS: Readonly<Record<QualityApprovedLine, string>> = {
 	"claude-fable": "Fable",
-	"gpt-astra": "Astra",
+	"gpt-astra": "GPT Astra",
 	"claude-opus": "Opus",
-	"gpt-sol": "Sol",
+	"gpt-sol": "GPT Sol",
 	"claude-sonnet": "Sonnet",
 	"claude-haiku": "Haiku",
 };
@@ -53,7 +53,8 @@ const MAIN_LADDERS: Readonly<
 /**
  * One-line picker description of a main choice's flow, built from the compiled
  * policy only (never account ids). Claude Code cuts descriptions at 100 chars;
- * the worst case (four steps plus the spend note) is 96.
+ * the worst case (four steps, no spend grant) is 97. GPT lines carry their
+ * vendor so a Claude-named choice that can end on GPT says so.
  */
 function describeMainLadder(
 	policy: Pick<QualityRoutingPolicy, "lanes" | "accounts" | "spendGrants">,
@@ -64,10 +65,10 @@ function describeMainLadder(
 		.flatMap((laneName) => policy.lanes[laneName])
 		.filter((approved) => enrolled.has(approved));
 	if (steps.length === 0)
-		return "No enrolled account on this ladder · requests fail";
+		return "No account is set up for this choice, so requests fail.";
 	const paid = policy.spendGrants.some((grant) => steps.includes(grant.line));
-	const spend = paid ? "paid use only where approved" : "subscription only";
-	return `${steps.map((step) => LINE_LABELS[step]).join(" → ")}, then error · keeps last working model · ${spend}`;
+	const spend = paid ? "Can cost extra." : "Never costs extra.";
+	return `${steps.map((step) => LINE_LABELS[step]).join(" → ")}. Uses the first with quota and stays on it. ${spend}`;
 }
 
 function invalid(path: string, message: string): never {
@@ -364,28 +365,28 @@ export function compileQualityRoutingPolicy(
 					{
 						preference: "auto",
 						publicModelId: "claude-bccf-quality-auto",
-						displayName: "Auto",
+						displayName: "Auto (recommended)",
 						description: flow("auto"),
 						listed: true,
 					},
 					{
 						preference: "fable",
 						publicModelId: "claude-bccf-quality-fable",
-						displayName: "Fable-preferred",
+						displayName: "Claude Fable first",
 						description: flow("fable"),
 						listed: false,
 					},
 					{
 						preference: "astra",
 						publicModelId: "claude-bccf-quality-astra",
-						displayName: "Astra-preferred",
+						displayName: "GPT Astra first",
 						description: flow("astra"),
 						listed: true,
 					},
 					{
 						preference: "opus",
 						publicModelId: "claude-bccf-quality-opus",
-						displayName: "Opus-latest",
+						displayName: "Claude Opus first",
 						description: flow("opus"),
 						listed: true,
 					},

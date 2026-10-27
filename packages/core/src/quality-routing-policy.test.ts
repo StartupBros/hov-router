@@ -386,32 +386,46 @@ describe("approved quality policy", () => {
 				]),
 			);
 		}
-		const tail = ", then error · keeps last working model · ";
+		const tail = ". Uses the first with quota and stays on it. ";
+		const free = `${tail}Never costs extra.`;
+		const paid = `${tail}Can cost extra.`;
 
 		it("describes each ladder from enrolled lines in assignment-priority order", () => {
 			expect(descriptions(approvedInput())).toEqual({
-				auto: `Fable → Astra → Opus → Sol${tail}subscription only`,
-				fable: `Fable → Astra → Opus → Sol${tail}subscription only`,
-				astra: `Astra → Opus → Sol${tail}subscription only`,
-				opus: `Opus → Sol${tail}subscription only`,
+				auto: `Fable → GPT Astra → Opus → GPT Sol${free}`,
+				fable: `Fable → GPT Astra → Opus → GPT Sol${free}`,
+				astra: `GPT Astra → Opus → GPT Sol${free}`,
+				opus: `Opus → GPT Sol${free}`,
 			});
+		});
+
+		it("names each choice by its first model and vendor", () => {
+			const policy = compileQualityRoutingPolicy(approvedInput());
+			expect(
+				policy?.choices.map((choice) => [
+					choice.publicModelId,
+					choice.displayName,
+					choice.listed,
+				]),
+			).toEqual([
+				["claude-bccf-quality-auto", "Auto (recommended)", true],
+				["claude-bccf-quality-fable", "Claude Fable first", false],
+				["claude-bccf-quality-astra", "GPT Astra first", true],
+				["claude-bccf-quality-opus", "Claude Opus first", true],
+			]);
 		});
 
 		it("orders the opus lane by assignment priority", () => {
 			const input = approvedInput();
 			input.assignments[2] = { ...input.assignments[2], priority: 1 };
 			input.assignments[3] = { ...input.assignments[3], priority: 0 };
-			expect(descriptions(input).opus).toBe(
-				`Sol → Opus${tail}subscription only`,
-			);
+			expect(descriptions(input).opus).toBe(`GPT Sol → Opus${free}`);
 		});
 
 		it("omits lines with no enrolled account", () => {
 			const input = approvedInput();
 			input.accounts[1] = { ...input.accounts[1], lines: ["gpt-sol"] };
-			expect(descriptions(input).auto).toBe(
-				`Fable → Opus → Sol${tail}subscription only`,
-			);
+			expect(descriptions(input).auto).toBe(`Fable → Opus → GPT Sol${free}`);
 		});
 
 		it("says requests fail when nothing on the ladder is enrolled", () => {
@@ -425,32 +439,32 @@ describe("approved quality policy", () => {
 				},
 			];
 			const text = descriptions(input);
-			expect(text.fable).toBe(`Fable${tail}subscription only`);
+			expect(text.fable).toBe(`Fable${free}`);
 			expect(text.astra).toBe(
-				"No enrolled account on this ladder · requests fail",
+				"No account is set up for this choice, so requests fail.",
 			);
 			expect(text.opus).toBe(
-				"No enrolled account on this ladder · requests fail",
+				"No account is set up for this choice, so requests fail.",
 			);
 		});
 
-		it("mentions paid use only for choices whose ladder has a granted line", () => {
+		it("mentions extra cost only for choices whose ladder has a granted line", () => {
 			const input = approvedInput();
 			const fableOnly = {
 				...input,
 				spendGrants: [grant("native", "claude-fable")],
 			};
 			const a = descriptions(fableOnly as typeof input);
-			expect(a.auto).toEndWith("paid use only where approved");
-			expect(a.astra).toEndWith("subscription only");
-			expect(a.opus).toEndWith("subscription only");
+			expect(a.auto).toEndWith(paid);
+			expect(a.astra).toEndWith(free);
+			expect(a.opus).toEndWith(free);
 			const solGrant = {
 				...input,
 				spendGrants: [grant("alternate", "gpt-sol")],
 			};
 			const b = descriptions(solGrant as typeof input);
-			expect(b.opus).toEndWith("paid use only where approved");
-			expect(b.astra).toEndWith("paid use only where approved");
+			expect(b.opus).toEndWith(paid);
+			expect(b.astra).toEndWith(paid);
 		});
 
 		it("stays one short clean line even in the worst case", () => {
@@ -464,13 +478,19 @@ describe("approved quality policy", () => {
 					grant("alternate", "gpt-sol"),
 				],
 			};
-			for (const text of Object.values(descriptions(all as typeof input))) {
+			const texts = [
+				...Object.values(descriptions(input)),
+				...Object.values(descriptions(all as typeof input)),
+			];
+			for (const text of texts) {
 				expect(text.length).toBeLessThanOrEqual(100);
 				expect(text).not.toMatch(/[\r\n<]/);
 				expect(text).not.toContain("native");
 				expect(text).not.toContain("alternate");
 			}
-			expect(descriptions(all as typeof input).auto).toHaveLength(96);
+			// Every line enrolled and no grant is the longest text.
+			expect(Math.max(...texts.map((text) => text.length))).toBe(97);
+			expect(descriptions(input).auto).toHaveLength(97);
 		});
 	});
 
