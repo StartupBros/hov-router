@@ -59,6 +59,27 @@ const SUPPORTED_IDENTITIES: Readonly<
 	},
 };
 
+/** Approved lines whose supported identities `provider` serves. */
+export function getSupportedLines(
+	provider: QualityProvider,
+): QualityApprovedLine[] {
+	return (Object.keys(SUPPORTED_IDENTITIES) as QualityApprovedLine[]).filter(
+		(line) => SUPPORTED_IDENTITIES[line].provider === provider,
+	);
+}
+
+/** The newest supported identity of `line` among `modelIds`, or null. */
+export function newestSupportedLineModel(
+	line: QualityApprovedLine,
+	modelIds: readonly string[],
+): string | null {
+	return (
+		[...SUPPORTED_IDENTITIES[line].models]
+			.reverse()
+			.find((id) => modelIds.includes(id)) ?? null
+	);
+}
+
 export interface AutoCatalogModel {
 	readonly id: string;
 	readonly capabilities?: AutoModelCapabilities;
@@ -202,11 +223,12 @@ export function resolveAutoModelTargets(
 			capabilities: model.capabilities ?? null,
 		});
 	};
-	const currentId = [...support.models]
-		.reverse()
-		.find((id) => catalog.models.some((model) => model.id === id));
+	const currentId = newestSupportedLineModel(
+		line,
+		catalog.models.map((model) => model.id),
+	);
 	return Object.freeze({
-		current: target(currentId),
+		current: target(currentId ?? undefined),
 		stored: target(storedModel),
 	});
 }

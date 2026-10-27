@@ -58,7 +58,7 @@ export type AlertType =
 	/** warning: an account's own Codex catalog is old and its latest refresh
 	 * failed, so routing is still serving the last-good catalog. */
 	| "codex_catalog_stale"
-	/** warning: a catalog-role route profile failed closed. */
+	/** warning: a catalog-role or line route profile failed closed. */
 	| "codex_route_role_unavailable"
 	/** warning: a configured verified Codex CLI version record is stale or
 	 * unreadable — the managed updater has stalled. */

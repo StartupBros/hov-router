@@ -547,6 +547,67 @@ Two failure reasons are specific to this policy. Both follow the existing
 | `catalog_role_unavailable` | The account (or, for a pool, every candidate) has no role target from its own catalog |
 | `catalog_role_mismatch` | The account has a role target, but a mapping, fallback, environment mapping, or provider override would send a different model |
 
+### Line Codex profiles
+
+A catalog-role pool follows a position in the catalog, and OpenAI's ordering
+can put a different model line in that position. A reorder that listed Sol
+first moved Astra into the sonnet slot, so a sonnet catalog-role pool built to
+serve Sol started serving Astra with no config change. Set
+`physicalModelPolicy: "line"` and a `line` to follow a named model line
+instead:
+
+```bash
+CCFLARE_MODEL_ROUTE_PROFILES_JSON='[
+  {
+    "id": "codex-sol",
+    "displayName": "Sol pool",
+    "selection": "capability",
+    "logicalModel": "claude-sonnet-5",
+    "expectedProvider": "codex",
+    "physicalModelPolicy": "line",
+    "line": "gpt-sol"
+  },
+  {
+    "id": "codex-astra",
+    "displayName": "Astra pool",
+    "selection": "capability",
+    "logicalModel": "claude-opus-5",
+    "expectedProvider": "codex",
+    "physicalModelPolicy": "line",
+    "line": "gpt-astra"
+  }
+]'
+```
+
+- **`line` names the model, not a position.** It is `gpt-sol` or `gpt-astra`.
+  Each account sends the newest supported model of that line that its own
+  catalog lists, wherever OpenAI ranks it. The own-catalog rules above apply
+  unchanged: borrowed listings never count, a cold account is primed once at
+  request time, and an attempt keeps the model it was admitted with.
+- **Mappings are not consulted.** The profile names the model, so an account
+  whose `model_mappings` pin the family elsewhere is still admitted and sent
+  the line's model on this route. Its other routes keep using the pin.
+- **Pools only.** `line` requires `selection: "capability"`, because the pool is
+  what keeps same-family Claude Code subagents on the line's model. It also
+  requires `expectedProvider: "codex"`, a `logicalModel` in the fable, opus,
+  sonnet or haiku family, and no `expectedPhysicalModel`, `contextWindow` or
+  `maxOutputTokens`. The family in `logicalModel` only decides which subagent
+  requests stay on the route; it does not choose the model.
+- **A new generation needs one line of code.** "Supported" means the curated
+  `SUPPORTED_IDENTITIES` list in
+  `packages/providers/src/auto-model-capabilities.ts`. A new Sol such as a
+  future `gpt-6.2-sol` is followed only after it is added there and HoV Router
+  is redeployed; until then the route keeps sending the newest Sol on the
+  list, and no alert reports the newer one. Catalog-role needs no code change
+  for a new generation, but it follows a position rather than a line.
+
+Line profiles reuse the catalog-role failure reasons.
+`catalog_role_unavailable` means no candidate has read its own catalog yet,
+and a retry may succeed. `catalog_role_mismatch` means every own catalog that
+has loaded lists no supported model of the line. Once every candidate's own
+catalog has loaded, that 503 carries `x-should-retry: false`, and discovery
+hides the row until a catalog lists the line again.
+
 Picker IDs are chosen by the operator and stay `claude-bccf-route-<id>`, so
 role-named IDs such as `codex-opus` keep working across model generations.
 Discovery lists catalog-role profiles like other profiles, labelled with the
@@ -564,8 +625,9 @@ routing, error reasons, and saved picker IDs are unchanged.
 | `logicalModel` | yes | Claude request model written on an explicit root selection before the account's normal model mapping is applied |
 | `defaultEffort` | no | Default used only when the request omits effort. Accepted values: `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; an explicit client effort always wins |
 | `expectedProvider` | capability: yes; legacy: no | Lowercase provider guard. Capability profiles use it to build the candidate pool; legacy profiles fail closed if the pinned account differs |
-| `physicalModelPolicy` | no | `exact` (the default when omitted) or `catalog-role`. `catalog-role` requires `expectedProvider: "codex"`, a `logicalModel` in the fable, opus, sonnet or haiku family, and no `expectedPhysicalModel`, `contextWindow` or `maxOutputTokens`; see [Catalog-role Codex profiles](#catalog-role-codex-profiles) |
-| `expectedPhysicalModel` | capability: yes, unless `physicalModelPolicy` is `catalog-role` (then forbidden); legacy: no | Guard for the first physical model produced by the account's mapping for `logicalModel`. Capability profiles use it as the pool predicate; legacy profiles fail closed if the pinned account differs. The guard reads the account's own configured `model_mappings`, not a provider default filled in later (for example xAI's catalog-derived default). Changing or clearing a pinned account's mapping without updating this field therefore fails every request on the profile. Omit it on a legacy profile that should follow the provider's newest model; see `docs/solutions/integration-issues/route-profile-expected-physical-model-checked-before-provider-defaults.md` |
+| `physicalModelPolicy` | no | `exact` (the default when omitted), `catalog-role` or `line`. Both non-exact policies require `expectedProvider: "codex"`, a `logicalModel` in the fable, opus, sonnet or haiku family, and no `expectedPhysicalModel`, `contextWindow` or `maxOutputTokens`; `line` also requires `selection: "capability"` and a `line`. See [Catalog-role Codex profiles](#catalog-role-codex-profiles) and [Line Codex profiles](#line-codex-profiles) |
+| `line` | with `physicalModelPolicy: "line"` only | `gpt-sol` or `gpt-astra`: the model line the pool follows in each account's own catalog |
+| `expectedPhysicalModel` | capability: yes, unless `physicalModelPolicy` is `catalog-role` or `line` (then forbidden); legacy: no | Guard for the first physical model produced by the account's mapping for `logicalModel`. Capability profiles use it as the pool predicate; legacy profiles fail closed if the pinned account differs. The guard reads the account's own configured `model_mappings`, not a provider default filled in later (for example xAI's catalog-derived default). Changing or clearing a pinned account's mapping without updating this field therefore fails every request on the profile. Omit it on a legacy profile that should follow the provider's newest model; see `docs/solutions/integration-issues/route-profile-expected-physical-model-checked-before-provider-defaults.md` |
 | `exclusiveAccount` | no | Exact-account profiles only; defaults to `false`. When `true`, reserves the named account for exact configured route profiles that name it |
 | `contextWindow` | no | Exact-account profiles only; required with `maxOutputTokens`. Positive integer total context bound |
 | `maxOutputTokens` | no | Exact-account profiles only; required with `contextWindow`. Positive integer less than `contextWindow`; caps request output |
@@ -847,7 +909,7 @@ History persistence is not a delivery receipt. Webhooks remain best effort, with
 
 ### Codex catalog alerts
 
-Six alert types report on each Codex account's own model catalog, its family pins (fable, opus, sonnet, haiku), [catalog-role route profiles](#catalog-role-codex-profiles), and the verified Codex CLI version record. Messages carry account names, family names, route-profile ids, and model slugs; never credentials, file paths, or emails.
+Six alert types report on each Codex account's own model catalog, its family pins (fable, opus, sonnet, haiku), [catalog-role](#catalog-role-codex-profiles) and [line](#line-codex-profiles) route profiles, and the verified Codex CLI version record. Messages carry account names, family names, route-profile ids, and model slugs; never credentials, file paths, or emails.
 
 | Type | Severity | Fires when | Dedup | Empty allowlist delivers |
 |------|----------|------------|-------|--------------------------|
@@ -855,7 +917,7 @@ Six alert types report on each Codex account's own model catalog, its family pin
 | `codex_pin_superseded` | `info` | A family pinned on the account names a model the account's own fresh catalog still offers but no longer puts at that role | Content-addressed: once per account, family, pin, and role target | No (opt-in) |
 | `codex_pin_unavailable` | `warning` | A family pinned on the account names a model absent from the account's own fresh catalog; that family's requests on the account may fail until the pin changes | Content-addressed: once per account, family, and pin | Yes |
 | `codex_catalog_stale` | `warning` | The account's last successful own catalog is older than four refresh intervals (one hour at the 15-minute cadence) **and** its latest refresh attempt failed. Routing keeps serving the last-good catalog. An account that never loaded a catalog of its own is not reported. Checked once per refresh cycle | Cooldown bucket per account | Yes |
-| `codex_route_role_unavailable` | `warning` | A catalog-role route profile failed closed and refused the request: no own-catalog role target exists yet (`catalog_role_unavailable`), or the account's effective mapping pins a different model than the role target (`catalog_role_mismatch`) | At most one report per minute per profile, account, and reason, then a cooldown bucket per that scope | Yes |
+| `codex_route_role_unavailable` | `warning` | A catalog-role or line route profile failed closed and refused the request: no own-catalog target exists yet (`catalog_role_unavailable`), or the account's effective mapping pins a different model than the role target, or no own catalog lists the line (`catalog_role_mismatch`) | At most one report per minute per profile, account, and reason, then a cooldown bucket per that scope | Yes |
 | `codex_identity_record_stale` | `warning` | Only when `CCFLARE_CODEX_VERIFIED_VERSION_FILE` is set: the record is older than its 30-day freshness window, missing, unreadable, or the configured path is not absolute, meaning the managed updater has stalled. A valid explicit `CCFLARE_CODEX_CLIENT_VERSION` takes precedence over the record and suppresses this alert. Checked once per refresh cycle | Cooldown bucket per failure kind | Yes |
 
 Content-addressed alerts derive their id from the state itself, so a standing condition is recorded and delivered once rather than on every 15-minute republication; only a change in the fields its Dedup cell lists produces a new alert. An intentional pin is never an error just because a newer model exists: a superseded pin is `info`, and only a pin the catalog no longer offers is a `warning`.

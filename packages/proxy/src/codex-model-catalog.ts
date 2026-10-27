@@ -18,13 +18,14 @@ import {
 	hasDerivedProviderModelDefaults,
 	isAutoCatalogEvidenceCurrent,
 	isCodexSubscriptionEndpoint,
+	newestSupportedLineModel,
 	normalizeAutoModelCapabilities,
 	resolveCodexClientIdentity,
 	setCodexAccountModelContextMetadata,
 	setDerivedAccountModelDefaults,
 	setDerivedProviderModelDefaults,
 } from "@better-ccflare/providers";
-import type { Account } from "@better-ccflare/types";
+import type { Account, QualityApprovedLine } from "@better-ccflare/types";
 import type { ProxyContext } from "./handlers/proxy-types";
 import { getValidAccessToken } from "./handlers/token-manager";
 
@@ -828,6 +829,24 @@ export function getCodexCatalogRoleTarget(
 	if (!own) return null;
 	const defaults = deriveFamilyDefaults(own.models);
 	return Object.hasOwn(defaults, family) ? (defaults[family] ?? null) : null;
+}
+
+/**
+ * The newest supported model of a quality line in this account's OWN catalog,
+ * or null. Position in the listing plays no part, so a priority reorder cannot
+ * swap lines the way it swaps {@link getCodexCatalogRoleTarget}'s slots. The
+ * same first-hand rule applies: a borrowed listing never names a target.
+ */
+export function getCodexCatalogLineTarget(
+	accountId: string,
+	line: QualityApprovedLine,
+): string | null {
+	const own = getKnownCodexModels(accountId);
+	if (!own) return null;
+	return newestSupportedLineModel(
+		line,
+		own.models.map((model) => model.id),
+	);
 }
 
 /**
