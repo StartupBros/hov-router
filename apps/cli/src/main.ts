@@ -1562,6 +1562,16 @@ async function main() {
 	// through the configured forward proxy, same as the server process.
 	installOutboundProxy(() => cliConfig.getOutboundProxy());
 
+	// The server opens the database itself with its runtime config, so --serve
+	// must start before the CLI opens it unconfigured below (#606).
+	if (parsed.serve) {
+		const config = new Config();
+		await startServerWithConfig(parsed, config);
+		// Keep process alive
+		await new Promise(() => {});
+		return;
+	}
+
 	// Initialize database factory with minimal configuration for CLI commands
 	// CLI commands don't need expensive integrity checks
 	DatabaseFactory.initialize(undefined, undefined, false);
@@ -1595,13 +1605,6 @@ async function main() {
 			`${JSON.stringify({ summary, models: rows, exclusions: ["Pre-tracking usage has no subscription window", "Unattributed rows are reported but excluded from Window Value", "Credit-paid usage is not separated"] }, null, parsed.json ? undefined : 2)}\n`,
 		);
 		await exitGracefully(0);
-		return;
-	}
-	if (parsed.serve) {
-		const config = new Config();
-		await startServerWithConfig(parsed, config);
-		// Keep process alive
-		await new Promise(() => {});
 		return;
 	}
 

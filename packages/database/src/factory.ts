@@ -29,6 +29,17 @@ export function initialize(
 		throw new Error(
 			"Database owner retiring; await closeAll() before initializing",
 		);
+	// The open database keeps the path and runtime config it was built with,
+	// so new ones here would be silently ignored. The CLI's --serve path once
+	// opened it before the server passed its config, and production ran
+	// synchronous=FULL with mmap off instead of the configured values (#606).
+	if (
+		instance &&
+		(dbPathParam !== dbPath || runtimeConfigParam !== runtimeConfig)
+	)
+		throw new Error(
+			"Database already open with a different path or runtime config; initialize before the first getInstance()",
+		);
 	dbPath = dbPathParam;
 	runtimeConfig = runtimeConfigParam;
 }

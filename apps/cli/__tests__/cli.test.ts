@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -618,6 +625,66 @@ describe("CLI Integration Tests", () => {
 			expect(output).toContain("SSL file path validation failed");
 			expect(output).toContain("Path outside allowed directories");
 		});
+	});
+
+	describe("Serve startup", () => {
+		// --serve once opened the database before the server passed its runtime
+		// config, so production ran synchronous=FULL with mmap off (#606). The
+		// factory now refuses that order, so a regression fails startup here.
+		it("opens the database with the server's runtime config", async () => {
+			const dir = mkdtempSync(join(tmpdir(), "ccflare-cli-serve-"));
+			const dbPath = join(dir, "serve.db");
+			const port = 20000 + (process.pid % 20000);
+			const proc = spawn(
+				"bun",
+				["run", CLI_PATH, "--serve", "--port", `${port}`],
+				{
+					env: {
+						...process.env,
+						NODE_ENV: "test",
+						BETTER_CCFLARE_DB_PATH: dbPath,
+						XDG_CONFIG_HOME: dir,
+					},
+				},
+			);
+			let output = "";
+			proc.stdout?.on("data", (data) => {
+				output += data.toString();
+			});
+			proc.stderr?.on("data", (data) => {
+				output += data.toString();
+			});
+			let exited = false;
+			proc.on("close", () => {
+				exited = true;
+			});
+			try {
+				// Any answer means startup finished; with no accounts it is a 503.
+				let answered = false;
+				for (let i = 0; i < 150 && !exited && !answered; i++) {
+					await Bun.sleep(100);
+					answered = await fetch(`http://127.0.0.1:${port}/health`)
+						.then(() => true)
+						.catch(() => false);
+				}
+				expect({ answered, output: answered ? "" : output }).toEqual({
+					answered: true,
+					output: "",
+				});
+				// mmap is on only when the configured connection opened the file.
+				// Match the file itself, not its always-mapped -shm sibling.
+				if (process.platform === "linux") {
+					const mapped = readFileSync(`/proc/${proc.pid}/maps`, "utf8")
+						.split("\n")
+						.some((line) => line.endsWith(` ${dbPath}`));
+					expect(mapped).toBe(true);
+				}
+			} finally {
+				proc.kill();
+				if (!exited) await new Promise((resolve) => proc.on("close", resolve));
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}, 30000);
 	});
 
 	describe("Add Account Command", () => {
