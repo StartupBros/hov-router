@@ -201,6 +201,21 @@ export function isProtocolIdleExemptProvider(provider: string): boolean {
 	return provider === "openai-compatible";
 }
 
+const TRANSLATED_SSE_PROVIDERS: ReadonlySet<string> = new Set([
+	"openai-compatible",
+	"kilo",
+	"qwen",
+	"xai",
+]);
+
+/**
+ * Providers whose downstream SSE the openai-formats translator synthesizes. Its
+ * pings come from a local timer, so they are not evidence of a live upstream.
+ */
+export function isTranslatedSseProvider(provider: string): boolean {
+	return TRANSLATED_SSE_PROVIDERS.has(provider);
+}
+
 /** Native-provider refinement for raw-response header/cooldown policy only. */
 export function isNativeAnthropicMessagesSse(
 	input: NativeAnthropicMessagesSseInput,
@@ -356,6 +371,12 @@ export interface AnthropicSemanticPreflightOptions {
 	 * write. The absolute commitment deadline remains mandatory and finite.
 	 */
 	disableProtocolIdleTimeout?: boolean;
+	/**
+	 * Count `ping` frames as protocol activity (default true). Pass false when a
+	 * local translator synthesizes the pings, so they cannot hold a silent
+	 * upstream past the protocol-idle boundary.
+	 */
+	keepaliveIsProtocolActivity?: boolean;
 	/** Per-call progress cap for standalone gates without a shared deadline. */
 	meaningfulProgressTimeoutMs?: number;
 	/** Absolute request-wide commitment boundary shared across serial routes. */
@@ -533,6 +554,8 @@ export async function gateAnthropicSsePreCommit(
 	const startedAt = Date.now();
 	const protocolIdleTimeoutEnabled =
 		options.disableProtocolIdleTimeout !== true;
+	const keepaliveIsProtocolActivity =
+		options.keepaliveIsProtocolActivity !== false;
 	let protocolIdleDeadline = protocolIdleTimeoutEnabled
 		? startedAt + semanticTimeoutMs
 		: Number.POSITIVE_INFINITY;
@@ -685,7 +708,10 @@ export async function gateAnthropicSsePreCommit(
 		framesSeen = Math.min(Number.MAX_SAFE_INTEGER, framesSeen + 1);
 		const classification = classifyAnthropicSseFrame(frame);
 		incrementAnthropicSseFrameKindCount(frameKindCounts, classification.kind);
-		if (classification.validProtocolActivity) {
+		if (
+			classification.validProtocolActivity &&
+			(keepaliveIsProtocolActivity || classification.kind !== "keepalive")
+		) {
 			validProtocolFramesSeen = Math.min(
 				Number.MAX_SAFE_INTEGER,
 				validProtocolFramesSeen + 1,

@@ -10,6 +10,7 @@ import {
 import { ANTHROPIC_DEGRADED_MODE_DEFAULTS } from "@better-ccflare/config";
 import { SessionAffinityStrategy } from "@better-ccflare/load-balancer";
 import { logBus } from "@better-ccflare/logger";
+import { transformStreamingResponse } from "@better-ccflare/openai-formats";
 import type {
 	Account,
 	ComboWithSlots,
@@ -107,8 +108,10 @@ const usageCollectorModule = await import("../usage-collector");
 const {
 	clearDerivedProviderModelDefaults,
 	getProvider,
+	registerProvider,
 	setDerivedProviderModelDefaults,
 	usageCache,
+	XaiProvider,
 } = await import("@better-ccflare/providers");
 const { clearCodexModelCacheForTests } = await import("../codex-model-catalog");
 const { alignRouteCandidateIds, handleProxy } = await import("../proxy");
@@ -6592,6 +6595,138 @@ describe("downstream Anthropic Messages SSE routing", () => {
 			// yet well short of an unbounded hang.
 			expect(elapsedMs).toBeGreaterThanOrEqual(150);
 			expect(elapsedMs).toBeLessThan(1500);
+		});
+	});
+
+	describe("translated keepalive pings (issue #638)", () => {
+		// The translator pings during upstream silence and the gate holds those
+		// pings precommit. On a translated provider that keeps the protocol-idle
+		// deadline, they must not stand in for upstream activity.
+		const stallEvents: Array<{ reason: unknown; keepalives: unknown }> = [];
+		const captureStall = (event: { msg: string; data?: unknown }) => {
+			if (event.msg !== "anthropic_precommit_stall") return;
+			const data = event.data as
+				| { reason?: unknown; frameKindCounts?: { keepalive?: unknown } }
+				| undefined;
+			stallEvents.push({
+				reason: data?.reason,
+				keepalives: data?.frameKindCounts?.keepalive,
+			});
+		};
+
+		// Production pings every 25 s; 10 ms keeps the real translator in the
+		// path without a 25 s test.
+		class FastKeepaliveXaiProvider extends XaiProvider {
+			override async processResponse(response: Response): Promise<Response> {
+				return transformStreamingResponse(response, {
+					keepaliveIntervalMs: 10,
+				});
+			}
+		}
+
+		let previousXai: ReturnType<typeof getProvider>;
+		beforeEach(() => {
+			stallEvents.length = 0;
+			logBus.on("log", captureStall);
+			previousXai = getProvider("xai");
+			registerProvider(new FastKeepaliveXaiProvider());
+		});
+		afterEach(() => {
+			logBus.off("log", captureStall);
+			if (previousXai) registerProvider(previousXai);
+		});
+
+		// Emits `first`, then repeats `tick` every `tickMs` (or stays silent when
+		// `tick` is null) until the gate cancels it.
+		function heldOpenStream(
+			first: string,
+			tick: string | null,
+			tickMs: number,
+			onCancel: () => void,
+		): ReadableStream<Uint8Array> {
+			let timer: ReturnType<typeof setInterval> | undefined;
+			return new ReadableStream({
+				start(controller) {
+					controller.enqueue(encoder.encode(first));
+					if (tick === null) return;
+					timer = setInterval(() => {
+						try {
+							controller.enqueue(encoder.encode(tick));
+						} catch {
+							// Already cancelled by the gate.
+						}
+					}, tickMs);
+				},
+				cancel() {
+					if (timer !== undefined) clearInterval(timer);
+					onCancel();
+				},
+			});
+		}
+
+		it("times out a silent xai upstream while translated pings keep flowing", async () => {
+			process.env[TIMEOUT_ENV] = "80";
+			process.env[MEANINGFUL_PROGRESS_ENV] = "1000";
+			const account = makeXaiAccount("xai-silent-after-start");
+			const { ctx } = makeContext([account]);
+			let cancelCount = 0;
+			globalThis.fetch = mock(async () =>
+				sseResponse(
+					heldOpenStream(
+						`data: ${OPENAI_STRUCTURAL_CHUNK}\n\n`,
+						null,
+						0,
+						() => cancelCount++,
+					),
+				),
+			) as unknown as typeof fetch;
+
+			const startedAt = Date.now();
+			const request = makeRequest(undefined, account.id);
+			const response = await handleProxy(request, new URL(request.url), ctx);
+			await response.text();
+			const elapsedMs = Date.now() - startedAt;
+
+			expect(stallEvents.map((event) => event.reason)).toEqual([
+				"semantic_timeout",
+			]);
+			// The message_start ping plus at least two timer pings were held.
+			expect(stallEvents[0]?.keepalives).toBeGreaterThanOrEqual(3);
+			expect(cancelCount).toBe(1);
+			expect(elapsedMs).toBeLessThan(600);
+		});
+
+		it("still lets real upstream pings hold a native anthropic stream open", async () => {
+			process.env[TIMEOUT_ENV] = "80";
+			process.env[MEANINGFUL_PROGRESS_ENV] = "400";
+			const account = makeAccount("native-pinging-upstream");
+			const { ctx } = makeContext([account]);
+			let cancelCount = 0;
+			globalThis.fetch = mock(async () =>
+				sseResponse(
+					heldOpenStream(
+						PRELUDE,
+						'event: ping\ndata: {"type":"ping"}\n\n',
+						10,
+						() => cancelCount++,
+					),
+				),
+			) as unknown as typeof fetch;
+
+			const startedAt = Date.now();
+			const request = makeRequest(undefined, account.id);
+			const response = await handleProxy(request, new URL(request.url), ctx);
+			await response.text();
+			const elapsedMs = Date.now() - startedAt;
+
+			// The progress cap, not the 80 ms idle window, ends this stream. The
+			// gate and the attempt deadline can race at that instant, so the gate
+			// may not log at all; it must never log an idle stall.
+			expect(
+				stallEvents.filter((event) => event.reason === "semantic_timeout"),
+			).toEqual([]);
+			expect(cancelCount).toBe(1);
+			expect(elapsedMs).toBeGreaterThanOrEqual(300);
 		});
 	});
 });
