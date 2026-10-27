@@ -877,6 +877,64 @@ describe("explicit subscription WebSearch helper selection", () => {
 		expect(strategy.snapshotAffinityOwner(child)).toEqual(beforeChild);
 	});
 
+	it("keeps one private helper affinity lane per client session", async () => {
+		await poll();
+		const { ctx } = fixture();
+		const strategy = new SessionAffinityStrategy();
+		strategy.initialize({
+			resetAccountSession() {},
+			async resumeAccount() {
+				return { resumed: false, pauseReason: null };
+			},
+			getAccountUtilization() {
+				return 0;
+			},
+		});
+		ctx.strategy = strategy;
+		const affinity = (strategy as unknown as { affinity: Map<string, unknown> })
+			.affinity;
+		globalThis.fetch = (async () =>
+			Response.json({
+				type: "message",
+				content: [{ type: "text", text: "fixture" }],
+				stop_reason: "end_turn",
+			})) as typeof fetch;
+		const helperIn = async (sessionId?: string) => {
+			const request = new Request("http://proxy.local/v1/messages", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					...(sessionId ? { "x-claude-code-session-id": sessionId } : {}),
+				},
+				body: JSON.stringify({
+					...body,
+					model: "claude-bccf-route-local",
+					...(sessionId ? { metadata: { user_id: sessionId } } : {}),
+				}),
+			});
+			const response = await handleProxy(
+				request,
+				new URL(request.url),
+				ctx,
+				"key-1",
+			);
+			expect(response.status).toBe(200);
+			await response.text();
+		};
+		// Per-request lanes would add one shared-map entry per search and evict
+		// ordinary session homes long before their TTL.
+		for (let search = 0; search < 3; search++) await helperIn("helper-session");
+		const sessionLanes = [...affinity.keys()];
+		expect(sessionLanes).toHaveLength(1);
+		expect(sessionLanes[0]).not.toContain("helper-session");
+		await helperIn("other-session");
+		expect(affinity.size).toBe(2);
+		// Like any sessionless request, a sessionless helper has no lane to keep.
+		await helperIn();
+		await helperIn();
+		expect(affinity.size).toBe(2);
+	});
+
 	it("dispatches through native preparation with the logical model, not the local chat pin", async () => {
 		await poll();
 		const { meta, ctx } = fixture();

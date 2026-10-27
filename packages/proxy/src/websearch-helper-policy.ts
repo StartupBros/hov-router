@@ -8,6 +8,7 @@ import type {
 	ModelRouteProfile,
 	ModelRouteResolution,
 } from "./model-route-profiles";
+import { opaqueRuntimeId } from "./opaque-runtime-id";
 
 export interface WebSearchHelperScope {
 	/** Original profile constraints remain intact; never an ordinary-route grant. */
@@ -48,16 +49,25 @@ export function getWebSearchHelperRoutingSummary(
 }
 // Keyed by private authority identity, not request ids or serializable metadata.
 // Legitimate candidate clones share this state; independent inbound requests do not.
-const execution = new WeakMap<
-	WebSearchHelperScope,
-	{ lane: string; sent: boolean }
->();
+const execution = new WeakMap<WebSearchHelperScope, { sent: boolean }>();
 
+/**
+ * One private lane per profile and client session keeps the shared affinity map
+ * bounded by sessions, not searches. A sessionless helper has no lane, like any
+ * sessionless request. The lane only orders candidates; every request still
+ * passes helper admission.
+ */
 export function getWebSearchHelperAffinityLane(
 	meta: RequestMeta,
 ): string | undefined {
 	const scope = scopes.get(meta);
-	return scope ? execution.get(scope)?.lane : undefined;
+	return scope && meta.clientSessionId != null
+		? opaqueRuntimeId(
+				"websearch-helper-lane",
+				scope.profile.id,
+				meta.clientSessionId,
+			)
+		: undefined;
 }
 
 export function hasWebSearchHelperDispatched(meta: RequestMeta): boolean {
@@ -166,10 +176,7 @@ export function authorizeWebSearchHelper(
 	});
 	scopes.set(meta, scope);
 	observeWebSearchHelperRouting(meta, "subscription_unavailable");
-	execution.set(scope, {
-		lane: `websearch-helper:${crypto.randomUUID()}`,
-		sent: false,
-	});
+	execution.set(scope, { sent: false });
 }
 
 /** Internal preparation retains private authority without changing source constraints. */
