@@ -29,10 +29,10 @@ const migrationGuide = readFileSync(
 	"utf8",
 );
 const releaseDigest =
-	"49e3ddbc9fc683ffc68dbbacbf4350db582e4cdac417df32a8e6244c90bf2afe";
+	"f6e6ee137d0766eb6df9d6c76d264603e9696c12797e1570b8ad6b9648d0b12c";
 const releaseUrl =
-	"https://github.com/StartupBros/hov-router/releases/download/v3.7.0/better-ccflare-linux-amd64";
-const sourceSha = "79a957526bd1994cb3c52b6a110de3c70c1e5c6f";
+	"https://github.com/StartupBros/hov-router/releases/download/v3.7.1/better-ccflare-linux-amd64";
+const sourceSha = "6b88f789e30c3a86ee918d35a6673e7be12f9243";
 const historicalDigest =
 	"b01a4989323ecf4e2d0a68394b45828741430d89eb35288f7318a28c45b4c9d7";
 const historicalSha = "5d7b2a888a9b61d87916332b414e46606498d896";
@@ -48,11 +48,17 @@ case "$1" in
 esac
 `;
 }
-const payload = syntheticBinary("HoV Router", "3.7.0", sourceSha);
+const payload = syntheticBinary("HoV Router", "3.7.1", sourceSha);
 const historicalPayload = syntheticBinary(
 	"wstack Router",
 	"3.6.2",
 	historicalSha,
+);
+// The earlier HoV Router release; its guide installed under hov-router/3.7.0.
+const previousPayload = syntheticBinary(
+	"HoV Router",
+	"3.7.0",
+	"79a957526bd1994cb3c52b6a110de3c70c1e5c6f",
 );
 const fixtureDigest = createHash("sha256").update(payload).digest("hex");
 const historicalFixtureDigest = createHash("sha256")
@@ -124,7 +130,7 @@ esac
 		`#!/bin/bash
 set -eu
 printf '%s\\n' "$*" >> "$HOME/attestations"
-binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"
+binary="$HOME/.local/lib/hov-router/3.7.1/hov-router"
 historical="$HOME/.local/lib/wstack-router/3.6.2/wstack-router"
 bundle="$PWD/sha256:${historicalFixtureDigest}.jsonl"
 case "$1 $2" in
@@ -138,8 +144,8 @@ case "$1 $2" in
     if [ "$3" = "$binary" ]; then
       [ "$DOWNLOAD_MODE" != attestation-fail ] || exit 1
       expected=(attestation verify "$binary" --repo StartupBros/hov-router
-        --source-digest ${sourceSha} --source-ref refs/tags/v3.7.0
-        --cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.0
+        --source-digest ${sourceSha} --source-ref refs/tags/v3.7.1
+        --cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.1
         --signer-digest ${sourceSha} --deny-self-hosted-runners)
       [ "$#" -eq "\${#expected[@]}" ] || exit 92
       for arg in "\${expected[@]}"; do [ "$1" = "$arg" ] || exit 92; shift; done
@@ -165,11 +171,13 @@ esac
 		home,
 		".local/lib/wstack-router/3.6.2/wstack-router",
 	);
+	const previousBinary = join(home, ".local/lib/hov-router/3.7.0/hov-router");
 	return {
 		home,
-		binary: join(home, ".local/lib/hov-router/3.7.0/hov-router"),
-		versionDir: join(home, ".local/lib/hov-router/3.7.0"),
+		binary: join(home, ".local/lib/hov-router/3.7.1/hov-router"),
+		versionDir: join(home, ".local/lib/hov-router/3.7.1"),
 		historicalBinary,
+		previousBinary,
 		binDir,
 		// Plant the layout that earlier versions of this guide produced for 3.6.2.
 		installHistorical(aliases: readonly string[] = earlierGuideAliases) {
@@ -178,6 +186,14 @@ esac
 			mkdirSync(binDir, { recursive: true });
 			for (const name of aliases)
 				symlinkSync(historicalBinary, join(binDir, name));
+		},
+		// Plant the layout that the 3.7.0 version of this guide produced.
+		installPrevious(aliases: readonly string[] = earlierGuideAliases) {
+			mkdirSync(dirname(previousBinary), { recursive: true });
+			writeFileSync(previousBinary, previousPayload, { mode: 0o755 });
+			mkdirSync(binDir, { recursive: true });
+			for (const name of aliases)
+				symlinkSync(previousBinary, join(binDir, name));
 		},
 		run(
 			marker: string,
@@ -225,14 +241,14 @@ describe("documented binary install (synthetic downloads)", () => {
 		const policy = block("router-release-provenance");
 		// This checks documented policy, not live GitHub signatures or authenticity.
 		for (const pin of [
-			'binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"',
+			'binary="$HOME/.local/lib/hov-router/3.7.1/hov-router"',
 			`source_sha=${sourceSha}`,
 			`digest=${releaseDigest}`,
 			'gh attestation verify "$binary"',
 			"--repo StartupBros/hov-router",
 			'--source-digest "$source_sha"',
-			"--source-ref refs/tags/v3.7.0",
-			"--cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.0",
+			"--source-ref refs/tags/v3.7.1",
+			"--cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.1",
 			'--signer-digest "$source_sha"',
 			"--deny-self-hosted-runners",
 		])
@@ -372,13 +388,13 @@ describe("documented binary install (synthetic downloads)", () => {
 	});
 
 	it("reports the release display and source SHA through both installed aliases (fixture)", () => {
-		expect(reference).toContain("HoV Router v3.7.0");
+		expect(reference).toContain("HoV Router v3.7.1");
 		const f = fixture();
 		expect(f.run("router-release-install").status).toBe(0);
 		expect(f.run("router-release-path").status).toBe(0);
 		for (const name of COMMAND_NAMES) {
 			for (const [flag, output] of [
-				["--version", "HoV Router v3.7.0\n"],
+				["--version", "HoV Router v3.7.1\n"],
 				["--git-sha", `${sourceSha}\n`],
 			]) {
 				const result = spawnSync(join(f.binDir, name), [flag], {
@@ -434,17 +450,22 @@ describe("documented binary install (synthetic downloads)", () => {
 });
 
 describe("documented upgrade of an earlier binary install (synthetic)", () => {
+	const currentBinaryLine =
+		'binary="$HOME/.local/lib/hov-router/3.7.1/hov-router"';
 	const toHistorical = (script: string) =>
 		script.replace(
-			'binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"',
+			currentBinaryLine,
 			'binary="$HOME/.local/lib/wstack-router/3.6.2/wstack-router"',
+		);
+	const toPrevious = (script: string) =>
+		script.replace(
+			currentBinaryLine,
+			'binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"',
 		);
 
 	it("only links, renames, and checks; it never deletes or forces", () => {
 		const commands = block("router-release-upgrade");
-		expect(commands).toContain(
-			'binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"',
-		);
+		expect(commands).toContain(currentBinaryLine);
 		expect(commands).not.toMatch(/\b(rm|gh|node|bun|sudo)\b/);
 		expect(commands).not.toMatch(/\b(ln|mv) -[A-Za-z]*f/);
 		expect(toHistorical(commands)).not.toBe(commands);
@@ -480,6 +501,27 @@ describe("documented upgrade of an earlier binary install (synthetic)", () => {
 		expect(readdirSync(f.binDir).sort()).toEqual(
 			[...earlierGuideAliases].sort(),
 		);
+	});
+
+	it("repoints 3.7.0 aliases to the verified release, keeps 3.7.0, and rolls back", () => {
+		const f = fixture();
+		f.installPrevious();
+		expect(f.run("router-release-install").status).toBe(0);
+		const upgraded = f.run("router-release-upgrade");
+		expect(upgraded.status, upgraded.stderr).toBe(0);
+		expect(upgraded.stderr).toBe("");
+		for (const name of earlierGuideAliases)
+			expect(readlinkSync(join(f.binDir, name))).toBe(f.binary);
+		expect(readdirSync(f.binDir).sort()).toEqual(
+			[...earlierGuideAliases].sort(),
+		);
+		expect(readFileSync(f.previousBinary, "utf8")).toBe(previousPayload);
+		expect(existsSync(join(f.home, "executed"))).toBe(false);
+
+		const rolledBack = f.run("router-release-upgrade", toPrevious);
+		expect(rolledBack.status, rolledBack.stderr).toBe(0);
+		for (const name of earlierGuideAliases)
+			expect(readlinkSync(join(f.binDir, name))).toBe(f.previousBinary);
 	});
 
 	it("creates missing aliases while repointing the rest, but never creates wstack-router", () => {
@@ -531,7 +573,7 @@ describe("documented upgrade of an earlier binary install (synthetic)", () => {
 			expect(f.run("router-release-install").status).toBe(0);
 			const collision = join(f.binDir, name);
 			// Ends in the command name but sits outside this guide's install roots.
-			const elsewhere = join(f.home, ".local/lib/other/3.7.0/hov-router");
+			const elsewhere = join(f.home, ".local/lib/other/3.7.1/hov-router");
 			if (kind === "file") writeFileSync(collision, "keep");
 			else if (kind === "directory") {
 				mkdirSync(collision);
@@ -576,8 +618,8 @@ describe("documented provenance (synthetic policy fixture, not cryptographic pro
 				`attestation verify ${f.binary}`,
 				"--repo StartupBros/hov-router",
 				`--source-digest ${sourceSha}`,
-				"--source-ref refs/tags/v3.7.0",
-				"--cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.0",
+				"--source-ref refs/tags/v3.7.1",
+				"--cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.1",
 				`--signer-digest ${sourceSha}`,
 				"--deny-self-hosted-runners",
 			].join(" "),
@@ -589,16 +631,16 @@ describe("documented provenance (synthetic policy fixture, not cryptographic pro
 
 	it("pins the release and asset evidence", () => {
 		for (const pin of [
-			"423116405",
+			"423574844",
 			sourceSha,
-			"refs/tags/v3.7.0",
-			"674050273",
-			"97965536",
+			"refs/tags/v3.7.1",
+			"675765162",
+			"97969632",
 			releaseDigest,
-			"674050665",
-			"48c84581f5640e698d743670d67637990e3242bb1f98c22c5328e9a4a8eb8940",
-			"674050062",
-			"df8114cb8aa7da5c4ba673ed910c61fd199041dd3da99f6d6ed708e0b81edec4",
+			"675765600",
+			"5e88ab1d8376fe783da736003c40f34a0207db4c71be5f6a5c328d1c30881d0c",
+			"675764852",
+			"923d6041201ba6ade61ff3dcd2ec200970475076ae7b9af261058211394545e5",
 		])
 			expect(releaseGuide).toContain(pin);
 	});
@@ -654,7 +696,7 @@ describe("documented provenance (synthetic policy fixture, not cryptographic pro
 		],
 		[
 			"wrong tag",
-			"--source-ref refs/tags/v3.7.0",
+			"--source-ref refs/tags/v3.7.1",
 			"--source-ref refs/heads/main",
 		],
 		["self-hosted runner allowance", "--deny-self-hosted-runners", ""],

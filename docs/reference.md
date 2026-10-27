@@ -40,7 +40,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 - **Powerful CLI** - Complete command-line interface for account management and configuration
 - **REST API** - Complete API for automation and integration
 - **Claude Code `/model` Route Profiles** - Discover operator-defined exact-account or capability-pool routes in Claude Code's native picker and pin one authenticated session tree when caller/session identity is available, without changing other sessions. See [configuration](configuration.md#claude-code-model-route-profiles) and [routing semantics](routing-architecture.md#claude-code-model-route-profiles)
-- **Standalone Linux x86_64 Binary** - Router 3.7.0 runs without Node.js or Bun; other platforms use the source-build path
+- **Standalone Linux x86_64 Binary** - Router 3.7.1 runs without Node.js or Bun; other platforms use the source-build path
 - **Comprehensive Logging** - Request/response tracking with searchable history
 - **Alert Webhooks** - With an empty `ALERT_WEBHOOK_TYPES` list, Discord keeps cache-efficiency observations (including recovery) and unknown-model catalog observations in alert history and the dashboard stream without sending a notification. Authentication failures, capacity warnings, actual stale-policy model rewrites, and cache telemetry gaps (including recovery) remain eligible. A nonempty list admits exactly the named types, including these observations. Generic webhooks retain their legacy admission and `{type, alert}` body. Discord presents the affected thing, observation, impact, action, and where to find evidence; raw messages remain in history. Persistence is not a delivery receipt: failed sends are logged, and the existing engine can record an opening that never arrived and later send its recovery.
 - **Database Integration** - SQLite (default) or PostgreSQL for persistent storage and analytics, supporting Kubernetes multi-pod deployments
@@ -62,9 +62,9 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 
 ### Install the Linux x86_64 release
 
-[Release 3.7.0](https://github.com/StartupBros/hov-router/releases/tag/v3.7.0) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
+[Release 3.7.1](https://github.com/StartupBros/hov-router/releases/tag/v3.7.1) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
 
-The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 3.7.0 prints `HoV Router v3.7.0` through every command name it is installed under. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed 3.6.2 with this guide, install 3.7.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
+The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 3.7.1 prints `HoV Router v3.7.1` through every command name it is installed under. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed 3.6.2 or 3.7.0 with this guide, install 3.7.1 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install).
 
 Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, `chmod`). No GitHub CLI, Node.js, or Bun is needed.
 
@@ -75,13 +75,13 @@ Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, 
 (
   set -eu
   umask 077
-  version_dir="$HOME/.local/lib/hov-router/3.7.0"
+  version_dir="$HOME/.local/lib/hov-router/3.7.1"
   mkdir -p "$HOME/.local/lib/hov-router"
   mkdir "$version_dir"
   cd "$version_dir"
   curl -q --fail --location --proto '=https' --proto-redir '=https' \
-    --output hov-router https://github.com/StartupBros/hov-router/releases/download/v3.7.0/better-ccflare-linux-amd64
-  digest=49e3ddbc9fc683ffc68dbbacbf4350db582e4cdac417df32a8e6244c90bf2afe
+    --output hov-router https://github.com/StartupBros/hov-router/releases/download/v3.7.1/better-ccflare-linux-amd64
+  digest=f6e6ee137d0766eb6df9d6c76d264603e9696c12797e1570b8ad6b9648d0b12c
   printf '%s  hov-router\n' "$digest" | sha256sum --check --strict -
   chmod 755 hov-router
 )
@@ -90,13 +90,13 @@ Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, 
 
 The checksum verifies the bytes against this trusted reference; it does not independently prove who built them. Before the first run, you can also [verify signed build provenance](hov-router-releases.md#optional-consumer-provenance-verification). That optional check verifies the binary against the exact repository, source commit, tag, workflow identity, signer commit, and hosted runner that built it.
 
-If any command fails, stop: do not run the binary. The block refuses any existing `3.7.0` path, including a symlink, and leaves partial downloads for inspection rather than deleting or overwriting them. Inspect the error and existing files before retrying.
+If any command fails, stop: do not run the binary. The block refuses any existing `3.7.1` path, including a symlink, and leaves partial downloads for inspection rather than deleting or overwriting them. Inspect the error and existing files before retrying.
 
 **2. Run.** After the checksum (and optional provenance check) succeeds:
 
 <!-- router-release-run -->
 ```bash
-"$HOME/.local/lib/hov-router/3.7.0/hov-router" --help
+"$HOME/.local/lib/hov-router/3.7.1/hov-router" --help
 ```
 <!-- /router-release-run -->
 
@@ -110,7 +110,7 @@ After verification succeeds, create `hov-router` and `better-ccflare` in `$HOME/
 ```bash
 (
   set -eu
-  binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"
+  binary="$HOME/.local/lib/hov-router/3.7.1/hov-router"
   bin_dir="$HOME/.local/bin"
   test -x "$binary"
   mkdir -p "$bin_dir"
@@ -127,7 +127,7 @@ After verification succeeds, create `hov-router` and `better-ccflare` in `$HOME/
 ```
 <!-- /router-release-path -->
 
-After success, use `export PATH="$HOME/.local/bin:$PATH"` in each terminal where you want the short commands. Check `command -v hov-router` and `command -v better-ccflare`; both should resolve there. Guides for 3.6.2 through 3.7.1 also created `wstack-router`; this block leaves that name alone, and the upgrade block below keeps an existing one pointed at the new release. To keep this PATH setting, add it to your shell configuration yourself. Nothing here edits shell profiles or uses `sudo`. Existing commands elsewhere remain untouched; PATH order determines which runs. If alias creation fails, inspect the error and any link already created rather than forcing replacement.
+After success, use `export PATH="$HOME/.local/bin:$PATH"` in each terminal where you want the short commands. Check `command -v hov-router` and `command -v better-ccflare`; both should resolve there. Earlier versions of this guide also created `wstack-router`; this block leaves that name alone, and the upgrade block below keeps an existing one pointed at the new release. To keep this PATH setting, add it to your shell configuration yourself. Nothing here edits shell profiles or uses `sudo`. Existing commands elsewhere remain untouched; PATH order determines which runs. If alias creation fails, inspect the error and any link already created rather than forcing replacement.
 
 #### Upgrade an earlier binary install
 
@@ -137,7 +137,7 @@ Each release installs into its own version directory, so step 1 leaves an earlie
 ```bash
 (
   set -eu
-  binary="$HOME/.local/lib/hov-router/3.7.0/hov-router"
+  binary="$HOME/.local/lib/hov-router/3.7.1/hov-router"
   bin_dir="$HOME/.local/bin"
   test -x "$binary"
   mkdir -p "$bin_dir"
@@ -169,20 +169,20 @@ Each release installs into its own version directory, so step 1 leaves an earlie
 ```
 <!-- /router-release-upgrade -->
 
-Then `hov-router --version` should print `HoV Router v3.7.0`. The block does not delete the earlier version directory or change a running service. To roll back, set `binary` to the earlier release's path, such as `$HOME/.local/lib/wstack-router/3.6.2/wstack-router`, and run the block again.
+Then `hov-router --version` should print `HoV Router v3.7.1`. The block does not delete the earlier version directory or change a running service. To roll back, set `binary` to the earlier release's path, such as `$HOME/.local/lib/hov-router/3.7.0/hov-router` or `$HOME/.local/lib/wstack-router/3.6.2/wstack-router`, and run the block again.
 
 ### Install from source
 
 Requires Git, Node.js (used by the build), and Bun (this checkout pins Bun 1.4.2). These commands use a POSIX shell on Linux/macOS; on Windows use WSL. The public HTTPS clone below does not require a GitHub login.
 
 ```bash
-git clone https://github.com/StartupBros/hov-router.git better-ccflare
-cd better-ccflare
+git clone https://github.com/StartupBros/hov-router.git
+cd hov-router
 bun install --frozen-lockfile
 bun run build
 ```
 
-The build produces `apps/cli/dist/better-ccflare`. It does not install a command on your PATH. From the checkout root, copy that same artifact under both names into a fresh user-owned directory. Each name runs the same version with the same provenance and configuration. The clone directory, build filename, `better-ccflare` configuration/database paths, and environment variables retain their existing names. This deliberately leaves any previous installation untouched.
+The build produces `apps/cli/dist/better-ccflare`. It does not install a command on your PATH. From the checkout root, copy that same artifact under both names into a fresh user-owned directory. Each name runs the same version with the same provenance and configuration. The build filename, `better-ccflare` configuration/database paths, and environment variables retain their existing names. This deliberately leaves any previous installation untouched.
 
 <!-- source-install-local -->
 ```bash
@@ -203,7 +203,7 @@ The PATH change applies to this shell only. To keep it, add the printed director
 
 ### Start the local server
 
-The commands below assume you completed the optional [PATH setup](#optional-add-commands-to-path) or the source install. If you skipped PATH setup, replace `hov-router` (or the `better-ccflare` compatibility command) in these examples with `"$HOME/.local/lib/hov-router/3.7.0/hov-router"`.
+The commands below assume you completed the optional [PATH setup](#optional-add-commands-to-path) or the source install. If you skipped PATH setup, replace `hov-router` (or the `better-ccflare` compatibility command) in these examples with `"$HOME/.local/lib/hov-router/3.7.1/hov-router"`.
 
 For a new local setup, start the server and dashboard with:
 
@@ -1208,7 +1208,7 @@ Full documentation available in [the documentation index](index.md):
 
 ## Platform Support
 
-HoV Router 3.7.0, like the historical 3.6.2 release, provides a **Linux x86_64 binary only**. No Router Linux ARM64, macOS, or native Windows binary is published. The [source-build path](#install-from-source) remains available; its acceptance check runs on Linux x86_64, not macOS or native Windows.
+HoV Router 3.7.1, like the earlier 3.7.0 and 3.6.2 releases, provides a **Linux x86_64 binary only**. No Router Linux ARM64, macOS, or native Windows binary is published. The [source-build path](#install-from-source) remains available; its acceptance check runs on Linux x86_64, not macOS or native Windows.
 
 The table and device list below describe the retained **upstream distribution** recipes, not HoV Router artifacts.
 

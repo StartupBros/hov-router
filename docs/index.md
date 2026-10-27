@@ -11,7 +11,7 @@ New here? [Send the setup prompt to your coding agent](../README.md#send-this-to
 - [Claude Code authentication](reference.md#configure-claude-sdk) or [Codex client configuration](reference.md#codex-cli-as-a-client).
 - [Migration and rollback](hov-router-migration.md): existing users of older command names, unchanged storage names, and manual updates.
 
-Router 3.7.0 publishes a Linux x86_64 binary only. The [platform notes](reference.md#platform-support) distinguish source-build coverage from upstream packages and downloads, which do not install Router.
+Router 3.7.1 publishes a Linux x86_64 binary only. The [platform notes](reference.md#platform-support) distinguish source-build coverage from upstream packages and downloads, which do not install Router.
 
 ## Configure and operate
 

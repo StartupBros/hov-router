@@ -64,8 +64,8 @@ Before you begin, ensure you have the following installed:
 
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/hov-router.git better-ccflare
-   cd better-ccflare
+   git clone https://github.com/YOUR_USERNAME/hov-router.git
+   cd hov-router
    ```
 
 3. **Add the upstream remote**:

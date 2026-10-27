@@ -24,10 +24,10 @@ afterEach(() => {
 });
 
 describe("documented source installer shell (synthetic artifact, not native build proof)", () => {
-	it("installs both names from the unchanged build filename into a fresh legacy directory without overwriting commands or profiles", () => {
+	it("installs both names from the unchanged build filename in a fresh clone without overwriting commands or profiles", () => {
 		const reference = readFileSync(join(root, "docs/reference.md"), "utf8");
 		expect(reference).toContain(
-			"git clone https://github.com/StartupBros/hov-router.git better-ccflare\ncd better-ccflare\n",
+			"git clone https://github.com/StartupBros/hov-router.git\ncd hov-router\n",
 		);
 		const commands = reference
 			.split("<!-- source-install-local -->")[1]
@@ -36,7 +36,7 @@ describe("documented source installer shell (synthetic artifact, not native buil
 		expect(commands).toBeDefined();
 		const home = mkdtempSync(join(tmpdir(), "hov-router-source-install-"));
 		homes.push(home);
-		const checkout = join(home, "better-ccflare");
+		const checkout = join(home, "hov-router");
 		const built = join(checkout, "apps/cli/dist/better-ccflare");
 		mkdirSync(dirname(built), { recursive: true });
 		const payload = `#!/bin/sh\ncase "$1" in\n--version) printf '${PRODUCT_NAME} v1.2.3\\n';;\n--help) printf '${PRODUCT_NAME}\\n';;\n*) exit 94;;\nesac\n`;
@@ -104,6 +104,25 @@ describe("documented source install", () => {
 		expect(readme).toContain("https://github.com/snipeship/ccflare");
 		expect(readme).toContain("## Acknowledgements");
 		expect(readme).toContain("MIT - See [LICENSE](LICENSE)");
+	});
+
+	it("clones into the default hov-router directory in every guide", () => {
+		// Existing checkouts keep their directory name; new clones use git's default.
+		const clones: string[] = [];
+		for (const file of [
+			"README.md",
+			...new Bun.Glob("docs/**/*.md").scanSync({ cwd: root }),
+		]) {
+			const text = readFileSync(join(root, file), "utf8");
+			for (const match of text.matchAll(
+				/^\s*git clone (\S+\/hov-router\.git)(.*)\n\s*(.*)$/gm,
+			)) {
+				clones.push(file);
+				expect(match[2], `${file}: ${match[0]}`).toBe("");
+				expect(match[3], `${file}: ${match[0]}`).toStartWith("cd hov-router");
+			}
+		}
+		expect(clones.length).toBeGreaterThanOrEqual(4);
 	});
 
 	it("connects the README agent prompt to setup and working local references", () => {
@@ -175,7 +194,7 @@ describe("documented source install", () => {
 	it("installs the built fork under both names with identical version/source evidence and config behavior while preserving legacy storage", () => {
 		const reference = readFileSync(join(root, "docs/reference.md"), "utf8");
 		expect(reference).toContain(
-			"git clone https://github.com/StartupBros/hov-router.git better-ccflare\ncd better-ccflare\n",
+			"git clone https://github.com/StartupBros/hov-router.git\ncd hov-router\n",
 		);
 		const section = reference.split("<!-- source-install-local -->")[1];
 		expect(section).toBeDefined();
