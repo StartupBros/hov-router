@@ -10,6 +10,7 @@ export type ServerToolRoutingErrorReason =
 	| "replay_unavailable"
 	| "temporary_unavailable"
 	| "forced_incapable"
+	| "forced_structurally_incapable"
 	| "advisor_declaration_unavailable"
 	| "advisor_history_unavailable";
 
@@ -65,6 +66,13 @@ const ERROR_SPEC = Object.freeze({
 		code: "route_unavailable",
 		message:
 			"Proven server-tool capacity is temporarily unavailable for this request.",
+	}),
+	forced_structurally_incapable: Object.freeze({
+		status: 400,
+		type: "force_route_unavailable",
+		code: "server_tool_force_route_unavailable",
+		message:
+			"The pinned route does not implement the requested server tool. Change the route or routing headers, or configure webSearchHelper on an eligible exact, unbounded profile with approved native subscription accounts. Retrying this unchanged request cannot repair the capability mismatch.",
 	}),
 	forced_incapable: Object.freeze({
 		status: 503,
@@ -218,8 +226,14 @@ export function createServerToolRoutingErrorResponse(
 		bodyError.capability = error.capabilitySummary;
 	}
 	const headers = new Headers({ "content-type": "application/json" });
-	if (error.reason === "forced_incapable") {
+	if (
+		error.reason === "forced_incapable" ||
+		error.reason === "forced_structurally_incapable"
+	) {
 		headers.set("x-better-ccflare-force-route", "unavailable");
+	}
+	if (error.reason === "forced_structurally_incapable") {
+		headers.set("x-should-retry", "false");
 	}
 	return new Response(
 		JSON.stringify({

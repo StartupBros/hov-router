@@ -1049,6 +1049,58 @@ describe("server-tool routing integration", () => {
 		expect(mutations.reportFailure).toHaveBeenCalledTimes(0);
 	});
 
+	it("permanently refuses the built-in function-only OpenAI-compatible pinned adapter", async () => {
+		const account = makeAccount({
+			provider: "openai-compatible",
+			model_mappings: JSON.stringify({ sonnet: "chat" }),
+			custom_endpoint: "https://local.invalid/v1",
+		});
+		const { ctx } = makeContext(account);
+		globalThis.fetch = mock(async () => new Response("unexpected"));
+		const request = makeServerToolRequest({ forcedAccountId: account.id });
+		const response = await handleProxy(request, new URL(request.url), ctx);
+		expect(response.status).toBe(400);
+		expect(response.headers.get("x-should-retry")).toBe("false");
+		expect(response.headers.get("x-better-ccflare-force-route")).toBe(
+			"unavailable",
+		);
+		expect(await response.json()).toMatchObject({
+			error: {
+				code: "server_tool_force_route_unavailable",
+				reason: "forced_structurally_incapable",
+			},
+		});
+		expect(globalThis.fetch).toHaveBeenCalledTimes(0);
+	});
+
+	it("permanently refuses a pinned route with a validated unsupported capability proof", async () => {
+		const account = makeAccount();
+		const { ctx } = makeContext(account, (provider) => {
+			provider.resolveServerToolCapability = (_requirements, tuple) => ({
+				decision: "unsupported",
+				proof: {
+					...makeProof(tuple, "unsupported-v1"),
+					decision: "unsupported",
+				},
+			});
+		});
+		globalThis.fetch = mock(async () => new Response("unexpected"));
+		const request = makeServerToolRequest({ forcedAccountId: account.id });
+		const response = await handleProxy(request, new URL(request.url), ctx);
+		expect(response.status).toBe(400);
+		expect(response.headers.get("x-should-retry")).toBe("false");
+		expect(response.headers.get("x-better-ccflare-force-route")).toBe(
+			"unavailable",
+		);
+		expect(await response.json()).toMatchObject({
+			error: {
+				code: "server_tool_force_route_unavailable",
+				reason: "forced_structurally_incapable",
+			},
+		});
+		expect(globalThis.fetch).toHaveBeenCalledTimes(0);
+	});
+
 	it("does not substitute another account when a force-routed proof drifts", async () => {
 		const forced = makeAccount({
 			id: "capability-forced",
@@ -2913,6 +2965,51 @@ describe("route-profile WebSearch helper falls to the global proven lane", () =>
 		expect(response.headers.get("x-better-ccflare-force-route")).toBe(
 			"unavailable",
 		);
+		expect(calls).toHaveLength(0);
+	});
+
+	it("permanently refuses an unopted exact profile pinned to the function-only compatible adapter", async () => {
+		const local = makeAccount({
+			id: "exact-local-account",
+			name: "exact-local-account",
+			provider: "openai-compatible",
+			custom_endpoint: "https://local.invalid/v1",
+			model_mappings: JSON.stringify({ sonnet: "chat" }),
+		});
+		const { ctx, calls } = makeSoftProfileHarness();
+		ctx.dbOps.getAllAccounts = mock(async () => [local, makeNativeAccount()]);
+		ctx.modelRouteSessionRegistry = new ModelRouteSessionRegistry(
+			parseModelRouteProfiles(
+				JSON.stringify([
+					{
+						id: "exact-local-profile",
+						displayName: "Exact local profile",
+						accountId: local.id,
+						logicalModel: MODEL,
+						expectedProvider: "openai-compatible",
+						expectedPhysicalModel: "chat",
+						exclusiveAccount: true,
+					},
+				]),
+			),
+		);
+		calls.length = 0;
+
+		const response = await sendHelper(ctx, {
+			model: "claude-bccf-route-exact-local-profile",
+		});
+		const text = await response.text();
+
+		expect(response.status).toBe(400);
+		expect(response.headers.get("x-should-retry")).toBe("false");
+		expect(response.headers.get("x-better-ccflare-force-route")).toBe(
+			"unavailable",
+		);
+		expect(JSON.parse(text).error).toMatchObject({
+			code: "server_tool_force_route_unavailable",
+			reason: "forced_structurally_incapable",
+		});
+		expect(text).not.toContain(local.id);
 		expect(calls).toHaveLength(0);
 	});
 

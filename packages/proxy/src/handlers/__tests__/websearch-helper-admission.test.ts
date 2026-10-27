@@ -1,15 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { sanitizeRequestRoutingAttemptSummary } from "@better-ccflare/types/request";
 import * as collectors from "../../usage-collector";
+import type { EndMessage } from "../../worker-messages";
 
+const recordedEnds: EndMessage[] = [];
 let collectorSpy: ReturnType<typeof spyOn>;
+let optionalCollectorSpy: ReturnType<typeof spyOn>;
 beforeEach(() => {
+	recordedEnds.length = 0;
 	collectorSpy = spyOn(collectors, "getUsageCollector").mockReturnValue({
 		handleStart() {},
 		handleChunk() {},
-		async handleEnd() {},
+		async handleEnd(message: EndMessage) {
+			recordedEnds.push(message);
+		},
 	} as unknown as collectors.UsageCollector);
+	optionalCollectorSpy = spyOn(
+		collectors,
+		"tryGetUsageCollector",
+	).mockImplementation(() => collectors.getUsageCollector());
 });
-afterEach(() => collectorSpy.mockRestore());
+afterEach(() => {
+	collectorSpy.mockRestore();
+	optionalCollectorSpy.mockRestore();
+});
 
 import { SessionAffinityStrategy } from "@better-ccflare/load-balancer";
 import {
@@ -47,6 +61,7 @@ const body = {
 			name: "web_search",
 			max_uses: 1,
 			allowed_domains: ["example.com"],
+			search_profile: "fast",
 		},
 	],
 };
@@ -220,6 +235,22 @@ async function wholeHelper(
 	const req = helperRequest(options);
 	return handleProxy(req, new URL(req.url), ctx, "key-1");
 }
+// Refusals on a profile route must not disclose the source pin, the private
+// allowlist or the internal admission reason.
+async function expectUndisclosedRefusal(response: Response) {
+	expect(response.status).toBe(503);
+	const text = await response.text();
+	expect(JSON.parse(text)).toMatchObject({
+		error: { reason: "temporary_unavailable" },
+	});
+	for (const hidden of [
+		"local-account",
+		id,
+		"helper-sibling",
+		"helper_admission_unavailable",
+	])
+		expect(text).not.toContain(hidden);
+}
 async function twoCandidates() {
 	await poll();
 	await poll({ enabled: false }, undefined, "helper-sibling");
@@ -232,6 +263,152 @@ async function twoCandidates() {
 }
 
 describe("explicit subscription WebSearch helper selection", () => {
+	it.each([
+		false,
+		true,
+	])("preserves native result blocks, citations and options (stream=%s)", async (stream) => {
+		await poll();
+		const { ctx } = fixture();
+		const content = [
+			{
+				type: "server_tool_use",
+				id: "srvtoolu_fixture",
+				name: "web_search",
+				input: { query: "offline query" },
+			},
+			{
+				type: "web_search_tool_result",
+				tool_use_id: "srvtoolu_fixture",
+				content: [
+					{
+						type: "web_search_result",
+						title: "Fixture",
+						url: "https://example.com",
+						encrypted_content: "opaque-fixture",
+					},
+				],
+			},
+			{
+				type: "text",
+				text: "Fixture answer",
+				citations: [
+					{
+						type: "web_search_result_location",
+						url: "https://example.com",
+						title: "Fixture",
+						encrypted_index: "opaque-index",
+						cited_text: "Fixture",
+					},
+				],
+			},
+		];
+		const message = {
+			id: "msg_fixture",
+			type: "message",
+			role: "assistant",
+			model: body.model,
+			content,
+			stop_reason: "end_turn",
+			usage: { input_tokens: 1, output_tokens: 1 },
+		};
+		const event = (type: string, data: object) =>
+			`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+		const payload = stream
+			? event("message_start", {
+					message: { ...message, content: [], stop_reason: null },
+				}) +
+				content
+					.map(
+						(block, index) =>
+							event("content_block_start", { index, content_block: block }) +
+							event("content_block_stop", { index }),
+					)
+					.join("") +
+				event("message_delta", {
+					delta: { stop_reason: "end_turn" },
+					usage: { output_tokens: 1 },
+				}) +
+				event("message_stop", {})
+			: JSON.stringify(message);
+		let sends = 0;
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			sends++;
+			const sent = await (input as Request).clone().json();
+			expect(sent.tools).toEqual(body.tools);
+			return new Response(payload, {
+				headers: {
+					"content-type": stream ? "text/event-stream" : "application/json",
+				},
+			});
+		}) as typeof fetch;
+		const response = await wholeHelper(ctx, { stream });
+		expect(response.status).toBe(200);
+		const received = await response.text();
+		if (stream) {
+			// The existing streaming adapter adds finish_reason to message_delta;
+			// search blocks and opaque citation/result fields must remain untouched.
+			for (const [index, block] of content.entries())
+				expect(received).toContain(
+					event("content_block_start", { index, content_block: block }),
+				);
+			expect(received).toContain(event("message_stop", {}));
+		} else expect(received).toBe(payload);
+		expect(sends).toBe(1);
+	});
+
+	it.each([
+		true,
+		false,
+	])("persists sanitized helper routing evidence (admitted=%s)", async (admitted) => {
+		if (admitted) await poll();
+		const { ctx } = fixture();
+		globalThis.fetch = (async () =>
+			Response.json({
+				type: "message",
+				content: [{ type: "text", text: "offline fixture" }],
+				stop_reason: "end_turn",
+			})) as typeof fetch;
+		const response = await wholeHelper(ctx);
+		expect(response.status).toBe(admitted ? 200 : 503);
+		await response.text();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(recordedEnds).toHaveLength(1);
+		const summary = sanitizeRequestRoutingAttemptSummary(
+			JSON.parse(JSON.stringify(recordedEnds[0].routingAttemptSummary)),
+		);
+		expect(summary).toMatchObject({
+			webSearchHelper: {
+				sourceProfileId: "local",
+				source: "explicit",
+				selectedAccountId: admitted ? id : null,
+				reason: admitted ? "subscription_admitted" : "subscription_unavailable",
+			},
+		});
+		const serialized = JSON.stringify(summary);
+		expect(serialized).not.toContain(token);
+		expect(serialized).not.toContain(body.messages[0].content);
+		expect(serialized).not.toContain("accountIds");
+		const dirty = {
+			...summary,
+			webSearchHelper: {
+				...summary?.webSearchHelper,
+				sourceProfileId: "unsafe\nprofile",
+				selectedAccountId: "Bearer secret",
+				accountIds: ["private-list"],
+				query: "secret query",
+				credential: token,
+			},
+		};
+		const clean = sanitizeRequestRoutingAttemptSummary(dirty);
+		expect(clean?.webSearchHelper).toMatchObject({
+			sourceProfileId: null,
+			selectedAccountId: null,
+		});
+		expect(JSON.stringify(clean)).not.toMatch(
+			/secret|private-list|fake-helper-oauth/,
+		);
+	});
+
 	it.each([
 		"throw",
 		"timeout",
@@ -322,8 +499,7 @@ describe("explicit subscription WebSearch helper selection", () => {
 			sends++;
 			return Response.json({});
 		}) as typeof fetch;
-		const response = await wholeHelper(ctx);
-		expect(response.ok).toBe(false);
+		await expectUndisclosedRefusal(await wholeHelper(ctx));
 		expect(sends).toBe(0);
 	});
 
@@ -376,8 +552,7 @@ describe("explicit subscription WebSearch helper selection", () => {
 		}) as typeof fetch;
 		try {
 			const { ctx } = fixture();
-			const response = await wholeHelper(ctx);
-			expect(response.status).toBe(503);
+			await expectUndisclosedRefusal(await wholeHelper(ctx));
 			expect(sends).toBe(0);
 		} finally {
 			if (previous === undefined)

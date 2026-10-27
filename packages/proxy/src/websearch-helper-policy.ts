@@ -1,5 +1,9 @@
 import { deriveServerToolRequirement } from "@better-ccflare/providers/server-tool-capabilities";
 import type { RequestMeta } from "@better-ccflare/types";
+import {
+	sanitizeWebSearchHelperRoutingSummary,
+	type WebSearchHelperRoutingSummary,
+} from "@better-ccflare/types/request";
 import type {
 	ModelRouteProfile,
 	ModelRouteResolution,
@@ -13,6 +17,35 @@ export interface WebSearchHelperScope {
 }
 
 const scopes = new WeakMap<RequestMeta, WebSearchHelperScope>();
+const observations = new WeakMap<
+	WebSearchHelperScope,
+	WebSearchHelperRoutingSummary
+>();
+
+/** Diagnostics project private authority; they never establish or change it. */
+export function observeWebSearchHelperRouting(
+	meta: RequestMeta,
+	reason: WebSearchHelperRoutingSummary["reason"],
+	selectedAccountId: string | null = null,
+): void {
+	const scope = scopes.get(meta);
+	if (!scope) return;
+	observations.set(scope, {
+		sourceProfileId: scope.profile.id,
+		source: scope.source,
+		selectedAccountId,
+		reason,
+	});
+}
+
+export function getWebSearchHelperRoutingSummary(
+	meta: RequestMeta,
+): WebSearchHelperRoutingSummary | null {
+	const scope = scopes.get(meta);
+	return scope
+		? sanitizeWebSearchHelperRoutingSummary(observations.get(scope))
+		: null;
+}
 // Keyed by private authority identity, not request ids or serializable metadata.
 // Legitimate candidate clones share this state; independent inbound requests do not.
 const execution = new WeakMap<
@@ -132,6 +165,7 @@ export function authorizeWebSearchHelper(
 		accountIds: profile.webSearchHelper.accountIds,
 	});
 	scopes.set(meta, scope);
+	observeWebSearchHelperRouting(meta, "subscription_unavailable");
 	execution.set(scope, {
 		lane: `websearch-helper:${crypto.randomUUID()}`,
 		sent: false,

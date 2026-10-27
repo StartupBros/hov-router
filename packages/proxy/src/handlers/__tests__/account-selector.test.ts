@@ -6462,9 +6462,23 @@ describe("selectAccountsForRequest — server-tool capability-first routing", ()
 	});
 
 	for (const forcedCase of [
-		{ kind: "unsupported", expectedDecision: "unsupported" },
-		{ kind: "unknown", expectedDecision: "unknown" },
-		{ kind: "proxy-replay", expectedDecision: "proven" },
+		// Only a validated unsupported proof is structural; unknown capability and
+		// replay drift stay transient.
+		{
+			kind: "unsupported",
+			expectedDecision: "unsupported",
+			expectedReason: "forced_structurally_incapable",
+		},
+		{
+			kind: "unknown",
+			expectedDecision: "unknown",
+			expectedReason: "forced_incapable",
+		},
+		{
+			kind: "proxy-replay",
+			expectedDecision: "proven",
+			expectedReason: "forced_incapable",
+		},
 	] as const) {
 		it(`fails a forced ${forcedCase.kind} tuple closed without semantic hard exclusion`, async () => {
 			const providerName = `u4-force-${forcedCase.kind}`;
@@ -6510,7 +6524,7 @@ describe("selectAccountsForRequest — server-tool capability-first routing", ()
 			} catch (error) {
 				expect(error).toMatchObject({
 					name: "ServerToolRoutingError",
-					reason: "forced_incapable",
+					reason: forcedCase.expectedReason,
 					accountId: forced.id,
 				});
 			}

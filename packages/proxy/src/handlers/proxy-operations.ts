@@ -167,6 +167,7 @@ import {
 	getWebSearchHelperScope,
 	hasWebSearchHelperDispatched,
 	isFreshWebSearchHelper,
+	observeWebSearchHelperRouting,
 } from "../websearch-helper-policy";
 import { isModelRewrite } from "../worker-messages";
 import {
@@ -2471,7 +2472,7 @@ export async function proxyUnauthenticated(
 	if (helperScope) {
 		throw new ForceRouteUnavailableError(
 			helperScope.profile.accountId ?? helperScope.profile.id,
-			"lookup_failed",
+			"helper_admission_unavailable",
 		);
 	}
 	if (url.pathname === "/v1/messages/count_tokens") {
@@ -2700,7 +2701,15 @@ export async function proxyWithAccount(
 	}
 	if (helperScope) {
 		if (!isWebSearchHelperCandidateAdmitted(requestMeta, ctx, account)) {
-			throw new ForceRouteUnavailableError(account.id, "lookup_failed");
+			observeWebSearchHelperRouting(
+				requestMeta,
+				"admission_changed",
+				account.id,
+			);
+			throw new ForceRouteUnavailableError(
+				account.id,
+				"helper_admission_unavailable",
+			);
 		}
 		// Candidate-local model choice; never reuse the source account's chat pin.
 		modelOverride = helperScope.profile.logicalModel;
@@ -2927,9 +2936,14 @@ export async function proxyWithAccount(
 									bearer.slice(7),
 								)
 							) {
+								observeWebSearchHelperRouting(
+									requestMeta,
+									"admission_changed",
+									account.id,
+								);
 								throw new ForceRouteUnavailableError(
 									account.id,
-									"lookup_failed",
+									"helper_admission_unavailable",
 								);
 							}
 						}
@@ -2946,6 +2960,12 @@ export async function proxyWithAccount(
 						if (helperScope && !claimWebSearchHelperDispatch(requestMeta)) {
 							throw new HostedDispatchTerminalError("already_dispatched");
 						}
+						if (helperScope)
+							observeWebSearchHelperRouting(
+								requestMeta,
+								"subscription_admitted",
+								account.id,
+							);
 						markDispatched();
 						const pendingHttp = makeProxyRequest(
 							request,

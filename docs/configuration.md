@@ -632,6 +632,7 @@ routing, error reasons, and saved picker IDs are unchanged.
 | `contextWindow` | no | Exact-account profiles only; required with `maxOutputTokens`. Positive integer total context bound |
 | `maxOutputTokens` | no | Exact-account profiles only; required with `contextWindow`. Positive integer less than `contextWindow`; caps request output |
 | `clientContextWindowHint` | no | Only `"1m"` is accepted. It is a Claude Code context-classification hint and is invalid with bounded `contextWindow` or `maxOutputTokens` |
+| `webSearchHelper` | no | Exact-account, unbounded profiles only: invalid with `selection`, `contextWindow` or `maxOutputTokens`. An object whose only field, `accountIds`, is a non-empty list of unique account IDs allowed to serve this profile's standalone WebSearch helpers. Never returned by discovery. See [Subscription WebSearch helper opt-in](#subscription-websearch-helper-opt-in) |
 
 At startup, HoV Router logs only the configured profile count, never the JSON, account IDs, logical models, or physical models. Legacy profiles name exact account IDs, so keep those values in a protected environment file or service-manager credential rather than committing a real deployment value. Capability profiles contain no account IDs, but their provider/model constraints are still operational configuration and should be protected accordingly.
 
@@ -663,6 +664,37 @@ CCFLARE_MODEL_ROUTE_PROFILES_JSON='[
 ```
 
 This profile has a fixed 2,500-token input limit, a 4,000-token output cap, and a 6,500-token total envelope. That limit is calibrated for the current 440 GB DQ4plus-q8 champion on a 512 GB M3 Ultra: unique 1.5k–2.5k envelopes reached semantic output in 17–23 seconds, while 3k took 37 seconds, 4k took 60 seconds, and 8k took 108 seconds. Treat this as an emergency focused-worker route, not a normal Claude Code daily-driver profile; raise it only under a new versioned profile after runtime or model changes pass the same cold-prefix gate. The deployment account ID shown here is protected operational configuration: do not commit real deployment IDs to a public configuration file. This repository is private, but use the same protected-environment or service-manager credential posture for deployed values. If other profiles exist, include this object in the same complete JSON array rather than replacing them or supplying the object alone. Its public picker ID is `claude-bccf-route-glm-5-2-bounded-v1`.
+
+### Subscription WebSearch helper opt-in
+
+An exact-account profile whose account cannot run Claude Code's hosted WebSearch tool refuses every WebSearch helper. When the account uses the built-in OpenAI-compatible adapter, which only converts client function tools, the refusal is permanent: HTTP 400 `server_tool_force_route_unavailable` with `x-should-retry: false`. `webSearchHelper` lets that profile send only its standalone WebSearch helpers to approved first-party Anthropic subscription accounts, while ordinary root and subagent inference stays on the profile's own account:
+
+```bash
+CCFLARE_MODEL_ROUTE_PROFILES_JSON='[
+  {
+    "id": "local-chat",
+    "displayName": "Local chat",
+    "accountId": "<local-account-id>",
+    "logicalModel": "claude-sonnet-4-5",
+    "expectedProvider": "openai-compatible",
+    "expectedPhysicalModel": "chat",
+    "exclusiveAccount": true,
+    "webSearchHelper": { "accountIds": ["<approved-anthropic-oauth-account-id>"] }
+  }
+]'
+```
+
+The helper is sent to the approved account with the profile's `logicalModel`, so that model must be in the fable, opus, sonnet or haiku family. A listed account serves a helper only while all of these hold, checked at selection and again immediately before the send:
+
+- It is a first-party Anthropic OAuth account: no custom endpoint, no API key, a refresh token, and the same access token the usage poll observed.
+- The router's own usage poll observed it less than 180 seconds ago, the relevant subscription allowance remains, and provider-side extra usage is explicitly disabled. Unknown or enabled extra usage, passive header observations, spend grants and credit-drain settings never admit it.
+- It is available and not excluded or reserved by another profile's `exclusiveAccount`.
+
+Only a fresh standalone helper qualifies: one user text message and one valid `web_search_20250305` declaration, with no client tools and no assistant, search or replay history, both as received and after request rewriting. A public `x-better-ccflare-account-id` header disables the opt-in for that request. When no listed account qualifies, the helper gets a temporary 503 `route_unavailable`, never a paid fallback, and the response names no account.
+
+A revoked candidate can yield to another listed account before the send. Once a send starts, the helper is never retried on the same or another account, and an ambiguous outcome returns 502 `server_tool_dispatch_terminal`. That rule covers one inbound request; it is not exactly-once execution across client retries. The extra-usage check is an observation, not an atomic provider guarantee, so verify extra usage is disabled on every listed account before enabling the option and keep it disabled.
+
+Adding this field to a deployed configuration is a separate, approved activation step; merging or deploying the code changes nothing until it is configured. To roll back, remove `webSearchHelper` from the profile through the same protected configuration path and restart the service; helpers on an OpenAI-compatible profile then return the permanent 400 above. Routing semantics are in [routing-architecture.md](routing-architecture.md#exact-profile-subscription-websearch-helpers).
 
 ### Claude Code `/model` setup
 

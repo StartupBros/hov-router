@@ -371,7 +371,18 @@ export interface RoutingPhysicalAttempt {
 	readonly cause: RoutingAttemptCause | null;
 	readonly streamEvidence?: RoutingStreamEvidence | null;
 }
+export interface WebSearchHelperRoutingSummary {
+	readonly sourceProfileId: string | null;
+	readonly source: "explicit" | "inherited";
+	readonly selectedAccountId: string | null;
+	readonly reason:
+		| "subscription_admitted"
+		| "subscription_unavailable"
+		| "admission_changed";
+}
+
 export interface RequestRoutingAttemptSummary {
+	readonly webSearchHelper?: WebSearchHelperRoutingSummary | null;
 	readonly decision?: RoutingDecision | null;
 	readonly decisionGap?: RoutingDecisionGap | null;
 	readonly version: 1;
@@ -448,6 +459,27 @@ function routingStatus(value: unknown): number | null {
 		? value
 		: null;
 }
+export function sanitizeWebSearchHelperRoutingSummary(
+	value: unknown,
+): WebSearchHelperRoutingSummary | null {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	const source = value as Record<string, unknown>;
+	if (source.source !== "explicit" && source.source !== "inherited")
+		return null;
+	if (
+		source.reason !== "subscription_admitted" &&
+		source.reason !== "subscription_unavailable" &&
+		source.reason !== "admission_changed"
+	)
+		return null;
+	return {
+		sourceProfileId: routingIdentity(source.sourceProfileId),
+		source: source.source,
+		selectedAccountId: routingIdentity(source.selectedAccountId),
+		reason: source.reason,
+	};
+}
+
 /** Reject arbitrary fields/events/content at both persistence and read boundaries. */
 export function sanitizeRequestRoutingAttemptSummary(
 	value: unknown,
@@ -529,6 +561,13 @@ export function sanitizeRequestRoutingAttemptSummary(
 			? source.decisionGap
 			: null);
 	const result: RequestRoutingAttemptSummary = {
+		...(source.webSearchHelper === undefined
+			? {}
+			: {
+					webSearchHelper: sanitizeWebSearchHelperRoutingSummary(
+						source.webSearchHelper,
+					),
+				}),
 		...(source.decision === undefined && source.decisionGap === undefined
 			? {}
 			: { decision: decisionResult.decision, decisionGap }),

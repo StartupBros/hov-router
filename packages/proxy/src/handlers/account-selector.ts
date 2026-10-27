@@ -21,6 +21,7 @@ import {
 	CountTokensUnsupportedError,
 	canonicalizeBetaSignature,
 	deriveComboRouteClass,
+	getProvider,
 	getProviderPathCapability,
 	isNativeWebSearchPassthroughEligible,
 	materializeProviderServerToolCapabilityDecision,
@@ -731,6 +732,35 @@ function evaluateCandidateServerToolCapability(input: {
 	}
 }
 
+/** The built-in compatible adapter only converts to Chat Completions function tools.
+ * This is a local adapter limitation, not an inference about an unknown endpoint.
+ * Do not generalize missing proofs/resolvers to structural incompatibility.
+ */
+function isStructurallyIncapablePinnedCandidate(
+	account: Account,
+	routing: RoutingCandidateMetadata,
+	meta: RequestMeta,
+	ctx: ProxyContext,
+): boolean {
+	if (routing.serverToolCapability?.decision === "unsupported") return true;
+	const requirements = meta.serverToolRequirements;
+	if (
+		account.provider !== "openai-compatible" ||
+		!requirements ||
+		requirements.replay.input.length !== 0 ||
+		!isNativeWebSearchPassthroughEligible(requirements, true)
+	)
+		return false;
+	const provider = resolveProviderForAccount(account.provider, ctx.provider);
+	return (
+		provider !== undefined &&
+		provider === getProvider("openai-compatible") &&
+		routing.serverToolCapability?.reason === "tuple_unavailable" &&
+		provider.createServerToolCapabilityTuple === undefined &&
+		provider.resolveServerToolCapability === undefined
+	);
+}
+
 function isServerToolCandidateSemanticallyEligible(
 	candidate: RoutingCandidateMetadata,
 ): boolean {
@@ -851,6 +881,7 @@ export type ForceRouteUnavailableReason =
 	| "catalog_role_unavailable"
 	| "conflicting_force_route"
 	| "lookup_failed"
+	| "helper_admission_unavailable"
 	| "model_capacity_exhausted"
 	| "model_mapping_mismatch"
 	| "not_found"
@@ -3451,11 +3482,9 @@ async function selectAccountsForRequestInternal(
 		const admitted = selected.filter((account) =>
 			isWebSearchHelperCandidateAdmitted(meta, ctx, account),
 		);
+		// Profile routes never disclose the source or approved account ids.
 		if (!admitted.length)
-			throw new ServerToolRoutingError({
-				reason: "temporary_unavailable",
-				accountId: helperScope.profile.accountId,
-			});
+			throw new ServerToolRoutingError({ reason: "temporary_unavailable" });
 		return admitted;
 	}
 	const forcedAccountId = serverForcedAccountId || publicForcedAccountId;
@@ -3570,7 +3599,14 @@ async function selectAccountsForRequestInternal(
 						? "invalid_requirement"
 						: meta.serverToolRequirements.unsupported?.length
 							? "unsupported_requirement"
-							: "forced_incapable";
+							: isStructurallyIncapablePinnedCandidate(
+										forcedAccount,
+										forcedRouting,
+										meta,
+										ctx,
+									)
+								? "forced_structurally_incapable"
+								: "forced_incapable";
 					throw new ServerToolRoutingError({
 						reason,
 						accountId: getClientVisibleServerToolAccountId(

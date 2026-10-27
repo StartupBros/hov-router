@@ -1104,6 +1104,14 @@ async function handleProxyCoreImpl(
 	const createRecordedForceRouteResponse = (
 		error: ForceRouteUnavailableError,
 	): Response => {
+		if (error.reason === "helper_admission_unavailable") {
+			return recordLocalRoutingTerminal(
+				createServerToolRoutingErrorResponse(
+					new ServerToolRoutingError({ reason: "temporary_unavailable" }),
+				),
+				"server_tool_temporary_unavailable",
+			);
+		}
 		// Every terminal force-route failure passes through here, so this is
 		// the one place a catalog-role profile's fail-closed is reported.
 		reportCatalogRoleRouteFailClosed(requestMeta.routeProfileId, error);
