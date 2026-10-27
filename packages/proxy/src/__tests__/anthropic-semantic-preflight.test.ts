@@ -1,12 +1,18 @@
 import { describe, expect, it, mock } from "bun:test";
 import { BUFFER_SIZES } from "@better-ccflare/core";
 import {
+	getProvider,
+	listProviders,
+	OpenAICompatibleProvider,
+} from "@better-ccflare/providers";
+import {
 	ANTHROPIC_PRE_COMMIT_MAX_BUFFERED_BYTES,
 	ANTHROPIC_PRE_COMMIT_ROUTE_SUPPRESSION_MS,
 	AnthropicPreCommitAbortedError,
 	AnthropicPreCommitStallError,
 	AnthropicPreCommitTransientError,
 	gateAnthropicSsePreCommit,
+	isTranslatedSseProvider,
 } from "../anthropic-semantic-preflight";
 
 // Guard defaults shipped in scripts/run-ccflare-stack.sh. Kept as literals so
@@ -99,6 +105,26 @@ describe("route suppression default", () => {
 		expect(ANTHROPIC_PRE_COMMIT_ROUTE_SUPPRESSION_MS * 4).toBeLessThanOrEqual(
 			holdableMs,
 		);
+	});
+});
+
+describe("isTranslatedSseProvider", () => {
+	it("matches every registered provider that inherits the openai-formats translator", () => {
+		// OpenAICompatibleProvider.processResponse runs transformStreamingResponse,
+		// which synthesizes its own pings. A new subclass must join the set.
+		const names = listProviders();
+		expect(names).toContain("xai");
+		for (const name of names) {
+			expect({
+				name,
+				translated: isTranslatedSseProvider(name),
+			}).toEqual({
+				name,
+				translated: getProvider(name) instanceof OpenAICompatibleProvider,
+			});
+		}
+		expect(isTranslatedSseProvider("anthropic")).toBe(false);
+		expect(isTranslatedSseProvider("codex")).toBe(false);
 	});
 });
 
@@ -233,6 +259,38 @@ describe("gateAnthropicSsePreCommit", () => {
 			unknown: 0,
 		});
 		expect(error.lastValidProtocolActivityAgeMs).toBeGreaterThanOrEqual(150);
+		expect(source.cancel).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not refresh precommit idle on pings that are not upstream evidence", async () => {
+		// Translated streams get their pings from our own translator timer, so a
+		// ping says nothing about whether the upstream is alive (#638).
+		const source = controllableStream();
+		const result = gateAnthropicSsePreCommit(source.stream, {
+			semanticTimeoutMs: 120,
+			meaningfulProgressTimeoutMs: 1_000,
+			terminalGraceMs: 10,
+			maxBufferedBytes: 4096,
+			keepaliveIsProtocolActivity: false,
+		});
+
+		source.controller().enqueue(bytes(messageStart));
+		const pings = setInterval(() => {
+			try {
+				source.controller().enqueue(bytes(ping));
+			} catch {
+				// The gate already cancelled the source.
+			}
+		}, 20);
+		try {
+			const error = await stallFrom(result);
+			expect(error.reason).toBe("semantic_timeout");
+			expect(error.validProtocolFramesSeen).toBe(1);
+			expect(error.frameKindCounts.keepalive).toBeGreaterThanOrEqual(2);
+			expect(error.lastValidProtocolActivityAgeMs).toBeGreaterThanOrEqual(100);
+		} finally {
+			clearInterval(pings);
+		}
 		expect(source.cancel).toHaveBeenCalledTimes(1);
 	});
 

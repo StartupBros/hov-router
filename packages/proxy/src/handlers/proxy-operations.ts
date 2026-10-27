@@ -109,6 +109,7 @@ import {
 	isDownstreamAnthropicMessagesSse,
 	isNativeAnthropicMessagesSse,
 	isProtocolIdleExemptProvider,
+	isTranslatedSseProvider,
 } from "../anthropic-semantic-preflight";
 import {
 	CACHE_REPLAY_MODEL_HEADER,
@@ -7726,6 +7727,9 @@ export async function proxyWithAccount(
 						disableProtocolIdleTimeout:
 							hasIrreversibleCodexWebSocketWrite ||
 							isProtocolIdleExemptProvider(account.provider),
+						keepaliveIsProtocolActivity: !isTranslatedSseProvider(
+							account.provider,
+						),
 						meaningfulProgressTimeoutMs:
 							streamConfig.meaningfulProgressTimeoutMs,
 						commitmentDeadlineAt: semanticCommitmentDeadlineAt,
