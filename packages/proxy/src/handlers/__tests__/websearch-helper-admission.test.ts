@@ -501,6 +501,16 @@ describe("explicit subscription WebSearch helper selection", () => {
 		}) as typeof fetch;
 		await expectUndisclosedRefusal(await wholeHelper(ctx));
 		expect(sends).toBe(0);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(recordedEnds).toHaveLength(1);
+		expect(
+			sanitizeRequestRoutingAttemptSummary(
+				JSON.parse(JSON.stringify(recordedEnds[0].routingAttemptSummary)),
+			)?.webSearchHelper,
+		).toMatchObject({
+			reason: "admission_changed",
+			selectedAccountId: sibling.id,
+		});
 	});
 
 	it("claims one send atomically across simultaneous candidate clones", async () => {

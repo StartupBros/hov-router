@@ -367,6 +367,17 @@ export function createHostedDispatchTerminalResponse(
 	);
 }
 
+function refuseWebSearchHelperAdmission(
+	requestMeta: RequestMeta,
+	accountId: string,
+): never {
+	observeWebSearchHelperRouting(requestMeta, "admission_changed", accountId);
+	throw new ForceRouteUnavailableError(
+		accountId,
+		"helper_admission_unavailable",
+	);
+}
+
 interface AnthropicDegradedNoAccountSuppressionDecision {
 	readonly action: "suppress";
 	readonly wouldAction: "suppress";
@@ -2700,17 +2711,8 @@ export async function proxyWithAccount(
 		);
 	}
 	if (helperScope) {
-		if (!isWebSearchHelperCandidateAdmitted(requestMeta, ctx, account)) {
-			observeWebSearchHelperRouting(
-				requestMeta,
-				"admission_changed",
-				account.id,
-			);
-			throw new ForceRouteUnavailableError(
-				account.id,
-				"helper_admission_unavailable",
-			);
-		}
+		if (!isWebSearchHelperCandidateAdmitted(requestMeta, ctx, account))
+			refuseWebSearchHelperAdmission(requestMeta, account.id);
 		// Candidate-local model choice; never reuse the source account's chat pin.
 		modelOverride = helperScope.profile.logicalModel;
 	}
@@ -2935,17 +2937,8 @@ export async function proxyWithAccount(
 									helperBody.model,
 									bearer.slice(7),
 								)
-							) {
-								observeWebSearchHelperRouting(
-									requestMeta,
-									"admission_changed",
-									account.id,
-								);
-								throw new ForceRouteUnavailableError(
-									account.id,
-									"helper_admission_unavailable",
-								);
-							}
+							)
+								refuseWebSearchHelperAdmission(requestMeta, account.id);
 						}
 						// No await after the final authoritative gates. Observation is
 						// fail-open and cannot make an expired attempt dispatchable.
@@ -2957,15 +2950,15 @@ export async function proxyWithAccount(
 						}
 						assertManagedWorkAvailable(req);
 						onHttpDispatch?.();
-						if (helperScope && !claimWebSearchHelperDispatch(requestMeta)) {
-							throw new HostedDispatchTerminalError("already_dispatched");
-						}
-						if (helperScope)
+						if (helperScope) {
+							if (!claimWebSearchHelperDispatch(requestMeta))
+								throw new HostedDispatchTerminalError("already_dispatched");
 							observeWebSearchHelperRouting(
 								requestMeta,
 								"subscription_admitted",
 								account.id,
 							);
+						}
 						markDispatched();
 						const pendingHttp = makeProxyRequest(
 							request,
