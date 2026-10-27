@@ -757,11 +757,11 @@ export function buildCodexRouteRoleUnavailableAlert(
 		const subject = accountLabel
 			? `Codex account ${accountLabel} has`
 			: "no account in its pool has";
-		message = `Codex route profile ${event.profileId} failed closed: ${subject} a role target in a catalog of its own yet (its own model catalog has not loaded or could not be read), so the request was refused rather than routed to a different model.`;
+		message = `Codex route profile ${event.profileId} failed closed: ${subject} a target model in a catalog of its own yet (its own model catalog has not loaded or could not be read), so the request was refused rather than routed to a different model.`;
 	} else {
 		message = accountLabel
 			? `Codex route profile ${event.profileId} failed closed: Codex account ${accountLabel}'s effective model mapping differs from the role target in its own catalog, so the request was refused. Remove the pin to follow the catalog, or use an exact-model profile.`
-			: `Codex route profile ${event.profileId} failed closed: no account in its pool both has a catalog of its own and follows that catalog's role target (at least one is pinned to a different model), so the request was refused.`;
+			: `Codex route profile ${event.profileId} failed closed: no account in its pool has a catalog of its own naming a model the route can follow (a catalog-role pool needs an account's mapping to match its role target; a line pool needs the catalog to list a model of the line), so the request was refused.`;
 	}
 	return {
 		id: buildThresholdAlertId(
@@ -773,7 +773,7 @@ export function buildCodexRouteRoleUnavailableAlert(
 		timestamp,
 		type: "codex_route_role_unavailable",
 		severity: "warning",
-		title: "Codex catalog-role route failed closed",
+		title: "Codex catalog route failed closed",
 		message,
 		value: null,
 		threshold: null,

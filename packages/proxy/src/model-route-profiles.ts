@@ -1,5 +1,9 @@
 import { getModelFamily } from "@better-ccflare/core";
-import type { RoutePhysicalModelPolicy } from "@better-ccflare/types";
+import { getSupportedLines } from "@better-ccflare/providers";
+import type {
+	QualityApprovedLine,
+	RoutePhysicalModelPolicy,
+} from "@better-ccflare/types";
 
 export const MODEL_ROUTE_PROFILES_ENV =
 	"CCFLARE_MODEL_ROUTE_PROFILES_JSON" as const;
@@ -30,6 +34,7 @@ const PROFILE_KEYS = new Set([
 	"maxOutputTokens",
 	"clientContextWindowHint",
 	"physicalModelPolicy",
+	"line",
 ]);
 
 const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -42,7 +47,10 @@ export type ModelRouteEffort = (typeof EFFORTS)[number];
  * `catalog-role` follows whatever model sits at `logicalModel`'s family role
  * in each Codex account's own catalog, so a new model generation needs no
  * config edit. The role is always derived from `logicalModel`; there is no
- * separate role key that could disagree with it.
+ * separate role key that could disagree with it. `line` follows the newest
+ * supported model of one quality line (`gpt-sol`, `gpt-astra`) in each
+ * account's own catalog, however OpenAI ranks it; a new generation of the line
+ * is followed once it joins the curated supported identities.
  */
 export type ModelRoutePhysicalModelPolicy = RoutePhysicalModelPolicy;
 
@@ -80,6 +88,8 @@ export interface ModelRouteProfile {
 	readonly clientContextWindowHint?: "1m";
 	/** Present only when configured; absent means `exact`. */
 	readonly physicalModelPolicy?: ModelRoutePhysicalModelPolicy;
+	/** The quality line a `line` policy follows; present only with that policy. */
+	readonly line?: QualityApprovedLine;
 }
 
 export type BoundedModelRouteProfile = ModelRouteProfile & {
@@ -366,44 +376,68 @@ export function parseModelRouteProfiles(
 		if (physicalModelPolicyValue !== undefined) {
 			if (
 				physicalModelPolicyValue !== "exact" &&
-				physicalModelPolicyValue !== "catalog-role"
+				physicalModelPolicyValue !== "catalog-role" &&
+				physicalModelPolicyValue !== "line"
 			) {
 				throw configError(
-					`profile ${index} field physicalModelPolicy must be exact or catalog-role`,
+					`profile ${index} field physicalModelPolicy must be exact, catalog-role or line`,
 				);
 			}
 			physicalModelPolicy = physicalModelPolicyValue;
 		}
+		let line: QualityApprovedLine | undefined;
+		if (physicalModelPolicy === "line") {
+			const lines = getSupportedLines(CATALOG_ROLE_PROVIDER);
+			line = lines.find((supported) => supported === candidate.line);
+			if (!line) {
+				throw configError(
+					`profile ${index} physicalModelPolicy line requires line ${[...lines].sort().join(" or ")}`,
+				);
+			}
+			// The pool is what binds same-family subagents to the line's model;
+			// an exact-account route would send them the account's family slot.
+			if (selection !== "capability") {
+				throw configError(
+					`profile ${index} physicalModelPolicy line requires selection capability`,
+				);
+			}
+		} else if (candidate.line !== undefined) {
+			throw configError(
+				`profile ${index} field line requires physicalModelPolicy line`,
+			);
+		}
+		const followsCatalog =
+			physicalModelPolicy === "catalog-role" || physicalModelPolicy === "line";
 		if (selection === "capability") {
 			if (!expectedProvider) {
 				throw configError(
 					`profile ${index} capability selection requires expectedProvider`,
 				);
 			}
-			// A catalog-role pool admits accounts by their own catalog evidence,
-			// so it deliberately has no fixed model to require here.
-			if (!expectedPhysicalModel && physicalModelPolicy !== "catalog-role") {
+			// A catalog-role or line pool admits accounts by their own catalog
+			// evidence, so it deliberately has no fixed model to require here.
+			if (!expectedPhysicalModel && !followsCatalog) {
 				throw configError(
 					`profile ${index} capability selection requires expectedPhysicalModel`,
 				);
 			}
 		}
-		if (physicalModelPolicy === "catalog-role") {
+		if (physicalModelPolicy !== undefined && followsCatalog) {
 			if (expectedProvider !== CATALOG_ROLE_PROVIDER) {
 				throw configError(
-					`profile ${index} physicalModelPolicy catalog-role requires expectedProvider ${CATALOG_ROLE_PROVIDER}`,
+					`profile ${index} physicalModelPolicy ${physicalModelPolicy} requires expectedProvider ${CATALOG_ROLE_PROVIDER}`,
 				);
 			}
 			if (expectedPhysicalModel !== undefined) {
 				throw configError(
-					`profile ${index} physicalModelPolicy catalog-role must omit expectedPhysicalModel`,
+					`profile ${index} physicalModelPolicy ${physicalModelPolicy} must omit expectedPhysicalModel`,
 				);
 			}
 			// The model moves with the catalog, so a fixed capacity claim would
 			// silently go stale; capacity comes from the catalog snapshot instead.
 			if (contextWindow !== undefined || maxOutputTokens !== undefined) {
 				throw configError(
-					`profile ${index} physicalModelPolicy catalog-role must omit contextWindow and maxOutputTokens`,
+					`profile ${index} physicalModelPolicy ${physicalModelPolicy} must omit contextWindow and maxOutputTokens`,
 				);
 			}
 			const roleLogicalModel = requiredString(
@@ -414,7 +448,7 @@ export function parseModelRouteProfiles(
 			);
 			if (getModelFamily(roleLogicalModel) === null) {
 				throw configError(
-					`profile ${index} physicalModelPolicy catalog-role requires a logicalModel in the fable, opus, sonnet or haiku family`,
+					`profile ${index} physicalModelPolicy ${physicalModelPolicy} requires a logicalModel in the fable, opus, sonnet or haiku family`,
 				);
 			}
 		}
@@ -456,6 +490,7 @@ export function parseModelRouteProfiles(
 			expectedPhysicalModel,
 			// Added only when configured so existing profiles stay byte-identical.
 			...(physicalModelPolicy === undefined ? {} : { physicalModelPolicy }),
+			...(line === undefined ? {} : { line }),
 		};
 		return profile;
 	});

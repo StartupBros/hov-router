@@ -1507,6 +1507,7 @@ async function handleProxyCoreImpl(
 			profile.expectedPhysicalModel ?? null;
 		requestMeta.routeProfilePhysicalModelPolicy =
 			profile.physicalModelPolicy ?? null;
+		requestMeta.routeProfileLine = profile.line ?? null;
 		requestMeta.routeExpectedProvider = profile.expectedProvider;
 		freezeRoutingDecisionConstraints(requestMeta);
 		const inheritedPickerModel =
@@ -2020,16 +2021,18 @@ async function handleProxyCoreImpl(
 		}
 	}
 
-	// 5b'. A catalog-role rung admits a Codex account only on its own catalog
-	// listing, and those live in memory: every process start is cold until the
-	// refresh heartbeat's first tick. Prime cold candidates here, as the implicit
-	// Codex route does, bounded by the account-selection deadline and the
-	// routing signal. Selection stays fetch-free, so a prime that fails or runs
-	// out of time leaves the account cold and the route fails closed with
-	// catalog_role_unavailable. Exact-policy and non-profile requests skip this.
+	// 5b'. A catalog-role or line rung admits a Codex account only on its own
+	// catalog listing, and those live in memory: every process start is cold
+	// until the refresh heartbeat's first tick. Prime cold candidates here, as
+	// the implicit Codex route does, bounded by the account-selection deadline
+	// and the routing signal. Selection stays fetch-free, so a prime that fails
+	// or runs out of time leaves the account cold and the route fails closed
+	// with catalog_role_unavailable. Exact-policy and non-profile requests skip
+	// this.
 	if (
 		modelRouteResolution?.kind === "route" &&
-		requestMeta.routePhysicalModelPolicy === "catalog-role"
+		(requestMeta.routePhysicalModelPolicy === "catalog-role" ||
+			requestMeta.routePhysicalModelPolicy === "line")
 	) {
 		const primeDeadlineAt =
 			Date.now() + preTransportDeadlines.accountSelectionTimeoutMs;

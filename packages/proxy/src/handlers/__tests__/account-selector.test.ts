@@ -46,7 +46,9 @@ const {
 	usageCache,
 } = await import("@better-ccflare/providers");
 const { SessionStrategy } = await import("@better-ccflare/load-balancer");
-const { getCodexCatalogRoleTarget } = await import("../../codex-model-catalog");
+const { getCodexCatalogLineTarget, getCodexCatalogRoleTarget } = await import(
+	"../../codex-model-catalog"
+);
 const {
 	ForceRouteUnavailableError,
 	deriveAffinityLaneKey,
@@ -2394,6 +2396,198 @@ describe("selectAccountsForRequest — catalog-role route profile", () => {
 			name: "ForceRouteUnavailableError",
 			reason: "model_mapping_mismatch",
 		});
+	});
+});
+
+describe("selectAccountsForRequest — line route profile", () => {
+	// Real identities: a line follows only the curated supported models, so
+	// these cannot be fictitious. Sol tops the listing, which puts Astra in the
+	// sonnet slot — the reorder that made a sonnet catalog-role pool serve Astra.
+	const SOL_FIRST = ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-mini"] as const;
+	const LOGICAL_SONNET = "claude-sonnet-5";
+
+	afterEach(() => {
+		clearCodexModelCacheForTests();
+		clearDerivedProviderModelDefaults();
+		setProviderModelDefaultOverrides(undefined);
+	});
+
+	function codexAccount(id: string, overrides: Partial<Account> = {}): Account {
+		return makeAccount({ id, name: id, provider: "codex", ...overrides });
+	}
+
+	function lineCtx(accounts: Account[]): ProxyContext {
+		const ctx = makeCtx({ accounts });
+		ctx.dbOps.getAccount = mock(
+			async (id: string) =>
+				accounts.find((account) => account.id === id) ?? null,
+		);
+		return ctx;
+	}
+
+	async function publishOwnCatalog(
+		account: Account,
+		ctx: ProxyContext,
+		models: readonly string[] = SOL_FIRST,
+	): Promise<void> {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = mock(async () =>
+			Response.json({
+				models: models.map((slug, index) => ({
+					slug,
+					visibility: "list",
+					priority: index + 1,
+				})),
+			}),
+		) as unknown as typeof fetch;
+		try {
+			const listing = await getCodexModels(account.id, ctx);
+			expect(listing?.source).toBe("live");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	}
+
+	function linePoolMeta(overrides: Partial<RequestMeta> = {}): RequestMeta {
+		return makeRequestMeta({
+			routeProfileId: "pro-primary-sol",
+			routeProfileSelection: "capability",
+			routeProfileLogicalModel: LOGICAL_SONNET,
+			routeProfilePhysicalModelPolicy: "line",
+			routePhysicalModelPolicy: "line",
+			routeProfileLine: "gpt-sol",
+			routeExpectedProvider: "codex",
+			routeLineage: { kind: "root", childHomeKey: null },
+			...overrides,
+		});
+	}
+
+	it("admits the line's model even when the family slot holds another line", async () => {
+		const account = codexAccount("line-sol-first");
+		const ctx = lineCtx([account]);
+		await publishOwnCatalog(account, ctx);
+		expect(getCodexCatalogRoleTarget(account.id, "sonnet")).toBe("gpt-6-astra");
+		const meta = linePoolMeta();
+
+		await expect(
+			selectAccountsForRequest(meta, ctx, LOGICAL_SONNET),
+		).resolves.toEqual([account]);
+		expect(meta.routeCatalogRoleTargetByAccountId?.get(account.id)).toBe(
+			"gpt-6.1-sol",
+		);
+		// The attempt is held to the admitted line model, not the slot.
+		expect(
+			getRouteProfileConstraintViolation(
+				account,
+				meta,
+				LOGICAL_SONNET,
+				"gpt-6.1-sol",
+			),
+		).toBeNull();
+		expect(
+			getRouteProfileConstraintViolation(
+				account,
+				meta,
+				LOGICAL_SONNET,
+				"gpt-6-astra",
+			),
+		).toBe("catalog_role_mismatch");
+	});
+
+	it("takes the newest supported member of the line in the account's own catalog", async () => {
+		const both = codexAccount("line-both-sols");
+		const olderOnly = codexAccount("line-older-sol");
+		const ctx = lineCtx([both, olderOnly]);
+		await publishOwnCatalog(both, ctx, [
+			"gpt-6-astra",
+			"gpt-5.6-sol",
+			"gpt-6.1-sol",
+		]);
+		await publishOwnCatalog(olderOnly, ctx, ["gpt-6-astra", "gpt-5.6-sol"]);
+
+		expect(getCodexCatalogLineTarget(both.id, "gpt-sol")).toBe("gpt-6.1-sol");
+		expect(getCodexCatalogLineTarget(olderOnly.id, "gpt-sol")).toBe(
+			"gpt-5.6-sol",
+		);
+		expect(getCodexCatalogLineTarget(both.id, "gpt-astra")).toBe("gpt-6-astra");
+	});
+
+	it("admits an account whose family pin points elsewhere, since the line names the model", async () => {
+		const pinned = codexAccount("line-pinned", {
+			model_mappings: JSON.stringify({ sonnet: "gpt-6-astra" }),
+		});
+		const ctx = lineCtx([pinned]);
+		await publishOwnCatalog(pinned, ctx);
+		const meta = linePoolMeta();
+
+		await expect(
+			selectAccountsForRequest(meta, ctx, LOGICAL_SONNET),
+		).resolves.toEqual([pinned]);
+		expect(meta.routeCatalogRoleTargetByAccountId?.get(pinned.id)).toBe(
+			"gpt-6.1-sol",
+		);
+	});
+
+	it("leaves out accounts without an own catalog listing the line, and borrowed listings", async () => {
+		const owner = codexAccount("line-owner");
+		const lacking = codexAccount("line-lacking", { priority: 1 });
+		const borrower = codexAccount("line-borrower", { priority: 2 });
+		const ctx = lineCtx([owner, lacking, borrower]);
+		await publishOwnCatalog(owner, ctx);
+		await publishOwnCatalog(lacking, ctx, ["gpt-6-astra", "gpt-5.6-mini"]);
+		expect(getCodexCatalogLineTarget(borrower.id, "gpt-sol")).toBeNull();
+		const meta = linePoolMeta();
+
+		const result = await selectAccountsForRequest(meta, ctx, LOGICAL_SONNET);
+
+		expect(result.map(({ id }) => id)).toEqual([owner.id]);
+		expect(meta.routeCatalogRoleTargetByAccountId?.has(lacking.id)).toBe(false);
+		expect(meta.routeCatalogRoleTargetByAccountId?.has(borrower.id)).toBe(
+			false,
+		);
+	});
+
+	it("fails a pool whose loaded catalogs all lack the line as catalog_role_mismatch", async () => {
+		const lacking = codexAccount("line-pool-lacking");
+		const ctx = lineCtx([lacking]);
+		await publishOwnCatalog(lacking, ctx, ["gpt-6-astra", "gpt-5.6-mini"]);
+
+		await expect(
+			selectAccountsForRequest(linePoolMeta(), ctx, LOGICAL_SONNET),
+		).rejects.toMatchObject({
+			name: "ForceRouteUnavailableError",
+			accountId: "pro-primary-sol",
+			reason: "catalog_role_mismatch",
+		});
+		expect(ctx.strategy.select).not.toHaveBeenCalled();
+	});
+
+	it("fails a pool with only cold catalogs as catalog_role_unavailable", async () => {
+		const cold = codexAccount("line-pool-cold");
+		const ctx = lineCtx([cold]);
+
+		await expect(
+			selectAccountsForRequest(linePoolMeta(), ctx, LOGICAL_SONNET),
+		).rejects.toMatchObject({
+			name: "ForceRouteUnavailableError",
+			reason: "catalog_role_unavailable",
+		});
+	});
+
+	it("binds a same-family descendant to the line model inside the pool", async () => {
+		const account = codexAccount("line-descendant");
+		const ctx = lineCtx([account]);
+		await publishOwnCatalog(account, ctx);
+		const meta = linePoolMeta({
+			routePhysicalModelPolicy: null,
+			routeLineage: { kind: "descendant", childHomeKey: null },
+		});
+
+		await selectAccountsForRequest(meta, ctx, LOGICAL_SONNET);
+
+		expect(meta.routeCatalogRoleTargetByAccountId?.get(account.id)).toBe(
+			"gpt-6.1-sol",
+		);
 	});
 });
 

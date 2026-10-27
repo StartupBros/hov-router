@@ -422,6 +422,120 @@ describe("parseModelRouteProfiles", () => {
 	});
 });
 
+describe("parseModelRouteProfiles line policy", () => {
+	const linePool = {
+		id: "pro-primary-sol",
+		displayName: "Sol pool",
+		selection: "capability",
+		logicalModel: "claude-sonnet-5",
+		expectedProvider: "codex",
+		clientContextWindowHint: "1m",
+		physicalModelPolicy: "line",
+		line: "gpt-sol",
+	};
+	const PREFIX = "CCFLARE_MODEL_ROUTE_PROFILES_JSON: profile 0";
+
+	it("accepts a Codex capability pool that follows a model line", () => {
+		const [sol, astra] = parseModelRouteProfiles(
+			JSON.stringify([
+				linePool,
+				{ ...linePool, id: "codex-pool-astra", line: "gpt-astra" },
+			]),
+		);
+
+		expect(sol).toMatchObject({
+			selection: "capability",
+			expectedProvider: "codex",
+			physicalModelPolicy: "line",
+			line: "gpt-sol",
+			discoveryModelId: "claude-bccf-route-pro-primary-sol[1m]",
+		});
+		expect(sol?.expectedPhysicalModel).toBeUndefined();
+		expect(astra).toMatchObject({
+			physicalModelPolicy: "line",
+			line: "gpt-astra",
+		});
+	});
+
+	it("rejects a line without the line policy, and the line policy without a line", () => {
+		const { line: _line, ...withoutLine } = linePool;
+		expect(() =>
+			parseModelRouteProfiles(JSON.stringify([withoutLine])),
+		).toThrow(
+			`${PREFIX} physicalModelPolicy line requires line gpt-astra or gpt-sol`,
+		);
+		for (const physicalModelPolicy of [undefined, "exact", "catalog-role"]) {
+			expect(() =>
+				parseModelRouteProfiles(
+					JSON.stringify([
+						{
+							...linePool,
+							physicalModelPolicy,
+							...(physicalModelPolicy === "exact"
+								? { expectedPhysicalModel: "gpt-6.1-sol" }
+								: {}),
+						},
+					]),
+				),
+			).toThrow(`${PREFIX} field line requires physicalModelPolicy line`);
+		}
+	});
+
+	it("accepts only the Codex lines that have supported identities", () => {
+		for (const line of [
+			"claude-opus",
+			"claude-fable",
+			"gpt-6.1-sol",
+			"sol",
+			"GPT-SOL",
+			"",
+			null,
+			1,
+		]) {
+			expect(() =>
+				parseModelRouteProfiles(JSON.stringify([{ ...linePool, line }])),
+			).toThrow(
+				`${PREFIX} physicalModelPolicy line requires line gpt-astra or gpt-sol`,
+			);
+		}
+	});
+
+	it("keeps a line pool on Codex, without a fixed model or capacity claim", () => {
+		expect(() =>
+			parseModelRouteProfiles(
+				JSON.stringify([{ ...linePool, expectedProvider: "xai" }]),
+			),
+		).toThrow(
+			`${PREFIX} physicalModelPolicy line requires expectedProvider codex`,
+		);
+		expect(() =>
+			parseModelRouteProfiles(
+				JSON.stringify([{ ...linePool, expectedPhysicalModel: "gpt-6.1-sol" }]),
+			),
+		).toThrow(
+			`${PREFIX} physicalModelPolicy line must omit expectedPhysicalModel`,
+		);
+		expect(() =>
+			parseModelRouteProfiles(
+				JSON.stringify([{ ...linePool, logicalModel: "gpt-6.1-sol" }]),
+			),
+		).toThrow(
+			`${PREFIX} physicalModelPolicy line requires a logicalModel in the fable, opus, sonnet or haiku family`,
+		);
+	});
+
+	it("limits the line policy to capability pools", () => {
+		const { selection: _selection, ...exactAccount } = linePool;
+		expect(() =>
+			parseModelRouteProfiles(
+				JSON.stringify([{ ...exactAccount, accountId: "codex-account" }]),
+			),
+		).toThrow(
+			`${PREFIX} physicalModelPolicy line requires selection capability`,
+		);
+	});
+});
+
 describe("parseModelRouteProfiles physicalModelPolicy", () => {
 	const roleProfile = {
 		id: "codex-opus",
@@ -592,7 +706,7 @@ describe("parseModelRouteProfiles physicalModelPolicy", () => {
 					JSON.stringify([{ ...roleProfile, physicalModelPolicy }]),
 				),
 			).toThrow(
-				"CCFLARE_MODEL_ROUTE_PROFILES_JSON: profile 0 field physicalModelPolicy must be exact or catalog-role",
+				"CCFLARE_MODEL_ROUTE_PROFILES_JSON: profile 0 field physicalModelPolicy must be exact, catalog-role or line",
 			);
 		}
 	});
