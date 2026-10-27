@@ -330,6 +330,8 @@ describe("U5 canary: forced route to a paused or missing Vercel account fails cl
 		expect(parsed.error.type).toBe("force_route_unavailable");
 		expect(parsed.error.account_id).toBe("vercel-catchall");
 		expect(parsed.error.reason).toBe("paused");
+		// A manual pause lasts until an operator resumes the account.
+		expect(response.headers.get("x-should-retry")).toBe("false");
 	});
 
 	it("returns the typed 503 force_route_unavailable for a missing Vercel account (not found)", async () => {
@@ -389,5 +391,113 @@ describe("U5 canary: forced route to a paused or missing Vercel account fails cl
 		expect(parsed.error.type).toBe("force_route_unavailable");
 		expect(parsed.error.account_id).toBe("vercel-catchall-deleted");
 		expect(parsed.error.reason).toBe("not_found");
+		expect(response.headers.get("x-should-retry")).toBe("false");
+	});
+});
+
+// A force-route 503 is final for one request, but a client such as Claude Code
+// retries a 503 about ten times before showing it. `x-should-retry: false`
+// stops that only when a retry cannot succeed: a pause an operator must lift,
+// or a missing account. Pauses and limits that clear on their own keep the
+// client's default retry behavior.
+describe("handleProxy: force-route 503 retry instruction", () => {
+	function makeCtx(accounts: Account[]): ProxyContext {
+		return {
+			strategy: { select: mock(() => []) },
+			dbOps: {
+				getAllAccounts: mock(async () => accounts),
+				getActiveComboForFamily: mock(async () => null),
+				getAgentPreference: mock(async () => null),
+			},
+			runtime: { port: 8080, clientId: "test" },
+			config: {
+				getUsageThrottlingFiveHourEnabled: () => false,
+				getUsageThrottlingWeeklyEnabled: () => false,
+				getSystemPromptCacheTtl1h: () => false,
+				getAgentFrontmatterModelFallback: () => false,
+				getStorePayloads: () => false,
+			},
+			provider: {
+				name: "test-provider",
+				canHandle: () => true,
+				buildUrl: (_path: string, _search: string, account: Account) =>
+					`https://upstream.test/${account.id}`,
+				prepareHeaders: (headers: Headers) => new Headers(headers),
+				processResponse: async (response: Response) => response,
+				parseRateLimit: () => ({
+					isRateLimited: false,
+					resetTime: null,
+				}),
+			},
+			refreshInFlight: new Map(),
+			asyncWriter: { enqueue: mock(() => undefined) },
+		} as unknown as ProxyContext;
+	}
+
+	async function forceRoute(account: Account): Promise<Response> {
+		const request = new Request("https://proxy.local/v1/messages", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-better-ccflare-account-id": account.id,
+			},
+			body: JSON.stringify({
+				model: "claude-opus-4-8",
+				messages: [{ role: "user", content: "hello" }],
+				max_tokens: 16,
+			}),
+		});
+		return handleProxy(request, new URL(request.url), makeCtx([account]));
+	}
+
+	it.each([
+		["manual", { paused: true, pause_reason: "manual" }],
+		[
+			"needs reauthentication",
+			{ paused: true, pause_reason: "oauth_invalid_grant" },
+		],
+	] as const)("tells the client not to retry a %s pause", async (_label, state) => {
+		const response = await forceRoute(makeAccount(state));
+
+		expect(response.status).toBe(503);
+		expect(response.headers.get("x-should-retry")).toBe("false");
+		expect(response.headers.get("x-better-ccflare-force-route")).toBe(
+			"unavailable",
+		);
+		const parsed = (await response.json()) as {
+			error: { type: string; reason: string; message: string };
+		};
+		expect(parsed.error.type).toBe("force_route_unavailable");
+		expect(parsed.error.reason).toBe("paused");
+		expect(parsed.error.message).toContain("Retrying will not help");
+	});
+
+	it.each([
+		["overage", { paused: true, pause_reason: "overage" }],
+		["failure-threshold", { paused: true, pause_reason: "failure_threshold" }],
+		["peak-hours", { paused: true, pause_reason: "peak_hours" }],
+		["rate-limit-window", { paused: true, pause_reason: "rate_limit_window" }],
+		["unattributed", { paused: true, pause_reason: null }],
+	] as const)("leaves retrying to the client for a %s pause", async (_label, state) => {
+		const response = await forceRoute(makeAccount(state));
+
+		expect(response.status).toBe(503);
+		expect(response.headers.get("x-should-retry")).toBeNull();
+		const parsed = (await response.json()) as {
+			error: { reason: string; message: string };
+		};
+		expect(parsed.error.reason).toBe("paused");
+		expect(parsed.error.message).not.toContain("Retrying will not help");
+	});
+
+	it("leaves retrying to the client for a rate-limited account", async () => {
+		const response = await forceRoute(
+			makeAccount({ rate_limited_until: Date.now() + 60_000 }),
+		);
+
+		expect(response.status).toBe(503);
+		expect(response.headers.get("x-should-retry")).toBeNull();
+		const parsed = (await response.json()) as { error: { reason: string } };
+		expect(parsed.error.reason).toBe("rate_limited_or_unavailable");
 	});
 });

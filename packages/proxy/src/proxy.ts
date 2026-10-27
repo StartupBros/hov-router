@@ -260,24 +260,31 @@ function requestBodyTooLargeResponse(): Response {
 
 function forceRouteUnavailableResponse(
 	error: ForceRouteUnavailableError,
-	revealAccountId: boolean,
+	routeProfile: boolean,
 ): Response {
+	const headers: Record<string, string> = {
+		"content-type": "application/json",
+		"x-better-ccflare-force-route": "unavailable",
+	};
+	let message = error.message;
+	if (!error.retryable) {
+		// Clients such as Claude Code retry a 503 about ten times before showing
+		// it. This one cannot clear until an operator acts, so say so at once.
+		headers["x-should-retry"] = "false";
+		message += routeProfile
+			? ". Retrying will not help until an operator changes this route or its account; choose another model with /model."
+			: ". Retrying will not help until an operator changes this account or the request's routing headers.";
+	}
 	return new Response(
 		JSON.stringify({
 			error: {
 				type: "force_route_unavailable",
-				message: error.message,
-				...(revealAccountId ? { account_id: error.accountId } : {}),
+				message,
+				...(routeProfile ? {} : { account_id: error.accountId }),
 				reason: error.reason,
 			},
 		}),
-		{
-			status: 503,
-			headers: {
-				"content-type": "application/json",
-				"x-better-ccflare-force-route": "unavailable",
-			},
-		},
+		{ status: 503, headers },
 	);
 }
 
@@ -1090,7 +1097,7 @@ async function handleProxyCoreImpl(
 		// the one place a catalog-role profile's fail-closed is reported.
 		reportCatalogRoleRouteFailClosed(requestMeta.routeProfileId, error);
 		return recordLocalRoutingTerminal(
-			forceRouteUnavailableResponse(error, requestMeta.routeProfileId == null),
+			forceRouteUnavailableResponse(error, requestMeta.routeProfileId != null),
 			`force_route_${error.reason}`,
 		);
 	};
