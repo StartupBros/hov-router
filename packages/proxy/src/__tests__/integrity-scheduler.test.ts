@@ -22,7 +22,11 @@ import {
 	it,
 	mock,
 } from "bun:test";
+import { TIME_CONSTANTS } from "@better-ccflare/core";
 import type { DatabaseOperations } from "@better-ccflare/database";
+import type { IntegrityStatus } from "@better-ccflare/types";
+
+const { SECOND, MINUTE, HOUR } = TIME_CONSTANTS;
 
 // ---------------------------------------------------------------------------
 // Module mock — must be declared before importing the scheduler so that
@@ -69,6 +73,7 @@ afterAll(() => {
 });
 
 import {
+	firstRunDelayMs,
 	runIntegrityCheckOnDemand,
 	startFullIntegrityCheckBackground,
 	startIntegrityScheduler,
@@ -82,6 +87,9 @@ interface MockDbOpsOptions {
 	/** Bytes returned by getDbSizeBytes(); defaults small (below the full-check
 	 *  size threshold) so full checks run normally unless a test overrides it. */
 	dbSizeBytes?: number;
+	/** Fields of getIntegrityStatus() (as restored at startup); defaults to a
+	 *  never-checked database. */
+	status?: Partial<IntegrityStatus>;
 }
 
 function makeDbOps(opts: MockDbOpsOptions = {}): DatabaseOperations {
@@ -113,6 +121,23 @@ function makeDbOps(opts: MockDbOpsOptions = {}): DatabaseOperations {
 	// Default well below the 16 GiB full-check threshold so full checks run
 	// normally; tests that exercise the size-skip path pass a large value.
 	const getDbSizeBytes = mock(async () => opts.dbSizeBytes ?? 1024);
+	const getIntegrityStatus = mock(
+		(): IntegrityStatus => ({
+			status: "unchecked",
+			runningKind: null,
+			lastCheckAt: null,
+			lastError: null,
+			lastQuickCheckAt: null,
+			lastQuickResult: null,
+			lastQuickError: null,
+			lastFullCheckAt: null,
+			lastFullResult: null,
+			lastFullError: null,
+			lastQuickSkipReason: null,
+			lastFullSkipReason: null,
+			...opts.status,
+		}),
+	);
 
 	return {
 		runQuickIntegrityCheck,
@@ -122,6 +147,7 @@ function makeDbOps(opts: MockDbOpsOptions = {}): DatabaseOperations {
 		recordIntegritySkipped,
 		getResolvedDbPath,
 		getDbSizeBytes,
+		getIntegrityStatus,
 	} as unknown as DatabaseOperations;
 }
 
@@ -198,6 +224,99 @@ describe("startIntegrityScheduler", () => {
 		});
 		expect(typeof stop).toBe("function");
 		stop();
+	});
+
+	it("schedules the first runs from the restored status and starts the repeats only then", () => {
+		const dbOps = makeDbOps({
+			status: { lastQuickCheckAt: Date.now() - HOUR, lastQuickResult: "ok" },
+		});
+		const timeouts: number[] = [];
+		let intervalsStarted = 0;
+		const realSetTimeout = globalThis.setTimeout;
+		const realSetInterval = globalThis.setInterval;
+		globalThis.setTimeout = ((
+			fn: (...args: unknown[]) => void,
+			ms?: number,
+			...rest: unknown[]
+		) => {
+			timeouts.push(ms ?? 0);
+			return realSetTimeout(fn, ms, ...rest);
+		}) as typeof setTimeout;
+		globalThis.setInterval = ((
+			fn: (...args: unknown[]) => void,
+			ms?: number,
+			...rest: unknown[]
+		) => {
+			intervalsStarted++;
+			return realSetInterval(fn, ms, ...rest);
+		}) as typeof setInterval;
+		let stop: () => void;
+		try {
+			stop = startIntegrityScheduler(dbOps, {
+				quickIntervalHours: 6,
+				fullIntervalHours: 24,
+			});
+		} finally {
+			globalThis.setTimeout = realSetTimeout;
+			globalThis.setInterval = realSetInterval;
+		}
+		stop();
+
+		// The quick check passed an hour ago, so it waits out the other ~5 h;
+		// the full check never ran, so it keeps the 30-minute startup delay.
+		expect(timeouts).toHaveLength(2);
+		expect(timeouts[0]).toBeGreaterThan(5 * HOUR - MINUTE);
+		expect(timeouts[0]).toBeLessThanOrEqual(5 * HOUR);
+		expect(timeouts[1]).toBe(30 * MINUTE);
+		// A repeat registered at startup would fire a second check one interval
+		// after boot, shortly after the deferred first one.
+		expect(intervalsStarted).toBe(0);
+	});
+});
+
+describe("firstRunDelayMs", () => {
+	const now = 1_800_000_000_000;
+	const interval = 6 * HOUR;
+	const startup = 30 * SECOND;
+
+	it("a probe that never ran uses the startup delay", () => {
+		expect(firstRunDelayMs(null, null, interval, startup, now)).toBe(startup);
+	});
+
+	it("a probe that passed an hour ago waits out the rest of its interval", () => {
+		expect(firstRunDelayMs(now - HOUR, "ok", interval, startup, now)).toBe(
+			5 * HOUR,
+		);
+	});
+
+	it("a probe that is almost due still waits the startup delay", () => {
+		expect(
+			firstRunDelayMs(now - interval + SECOND, "ok", interval, startup, now),
+		).toBe(startup);
+	});
+
+	it("a probe that is overdue uses the startup delay", () => {
+		expect(firstRunDelayMs(now - 7 * HOUR, "ok", interval, startup, now)).toBe(
+			startup,
+		);
+	});
+
+	it("a probe that last found corruption re-runs at the startup delay", () => {
+		expect(firstRunDelayMs(now - HOUR, "corrupt", interval, startup, now)).toBe(
+			startup,
+		);
+	});
+
+	it("a skipped probe (no verdict) counts as run, like the in-process repeat", () => {
+		expect(firstRunDelayMs(now - HOUR, null, interval, startup, now)).toBe(
+			5 * HOUR,
+		);
+	});
+
+	it("a timestamp from the future waits at most one interval", () => {
+		expect(firstRunDelayMs(now + 3 * HOUR, "ok", interval, startup, now)).toBe(
+			interval,
+		);
 	});
 });
 

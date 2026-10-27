@@ -29,6 +29,11 @@ import { Logger } from "@better-ccflare/logger";
  * tick logs and skips rather than queueing — checks are idempotent reads,
  * so dropping a tick is harmless.
  *
+ * The cadence survives restarts: `DatabaseOperations` restores the last
+ * results from a file beside the database, and each probe's first run waits
+ * out the rest of its interval (see {@link firstRunDelayMs}). Before that,
+ * every deploy re-read the whole database twice (#606).
+ *
  * Setting either env var to `0` disables that probe; the corresponding
  * status field stays at its last value (or `null` if never run).
  */
@@ -48,6 +53,30 @@ const QUICK_INITIAL_DELAY_MS = 30 * TIME_CONSTANTS.SECOND;
  *  migrations, performance index creation) so it doesn't compound with
  *  startup latency. */
 const FULL_INITIAL_DELAY_MS = 30 * TIME_CONSTANTS.MINUTE;
+
+/**
+ * Delay before a probe's first run in this process. The last results are
+ * restored from a file beside the database (#606), so a probe that completed
+ * without finding corruption less than one interval ago waits out the rest of
+ * that interval instead of re-reading the whole database after every deploy.
+ * A skipped probe (no verdict) counts as completed, as it does for the
+ * in-process repeat. A probe that never ran, is overdue, or last found
+ * corruption keeps the startup delay; a clock that moved backwards waits at
+ * most one interval.
+ */
+export function firstRunDelayMs(
+	lastCompletedAt: number | null,
+	lastResult: "ok" | "corrupt" | null,
+	intervalMs: number,
+	startupDelayMs: number,
+	now: number = Date.now(),
+): number {
+	if (lastCompletedAt === null || lastResult === "corrupt") {
+		return startupDelayMs;
+	}
+	const remaining = lastCompletedAt + intervalMs - now;
+	return Math.min(intervalMs, Math.max(startupDelayMs, remaining));
+}
 
 function parseIntervalEnv(
 	envVar: string,
@@ -171,10 +200,48 @@ export function startIntegrityScheduler(
 
 	const handles: ReturnType<typeof setTimeout>[] = [];
 	const intervals: ReturnType<typeof setInterval>[] = [];
+	const restored = dbOps.getIntegrityStatus();
+
+	// The repeat starts at the first run, not at boot: started at boot, it
+	// would fire one interval after startup, soon after a deferred first run.
+	const schedule = (
+		kind: "quick" | "full",
+		run: () => Promise<void>,
+		lastCompletedAt: number | null,
+		lastResult: "ok" | "corrupt" | null,
+		interval: number,
+		startupDelay: number,
+	) => {
+		const firstDelay = firstRunDelayMs(
+			lastCompletedAt,
+			lastResult,
+			interval,
+			startupDelay,
+		);
+		if (firstDelay > startupDelay) {
+			logger.info(
+				`The ${kind} integrity check ran recently; next one in ${(
+					firstDelay / TIME_CONSTANTS.HOUR
+				).toFixed(1)}h`,
+			);
+		}
+		handles.push(
+			setTimeout(() => {
+				void run();
+				intervals.push(setInterval(run, interval));
+			}, firstDelay),
+		);
+	};
 
 	if (quickInterval !== null) {
-		handles.push(setTimeout(runQuick, QUICK_INITIAL_DELAY_MS));
-		intervals.push(setInterval(runQuick, quickInterval));
+		schedule(
+			"quick",
+			runQuick,
+			restored.lastQuickCheckAt,
+			restored.lastQuickResult,
+			quickInterval,
+			QUICK_INITIAL_DELAY_MS,
+		);
 	} else {
 		logger.info(
 			"Quick integrity check disabled (CCFLARE_INTEGRITY_CHECK_INTERVAL=0)",
@@ -182,8 +249,14 @@ export function startIntegrityScheduler(
 	}
 
 	if (fullInterval !== null) {
-		handles.push(setTimeout(runFull, FULL_INITIAL_DELAY_MS));
-		intervals.push(setInterval(runFull, fullInterval));
+		schedule(
+			"full",
+			runFull,
+			restored.lastFullCheckAt,
+			restored.lastFullResult,
+			fullInterval,
+			FULL_INITIAL_DELAY_MS,
+		);
 	} else {
 		logger.info(
 			"Full integrity check disabled (CCFLARE_FULL_INTEGRITY_CHECK_INTERVAL=0)",

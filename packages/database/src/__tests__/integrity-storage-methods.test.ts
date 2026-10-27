@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 // ---------------------------------------------------------------------------
 
 import { randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseOperations } from "../database-operations";
@@ -227,6 +228,113 @@ describe("DatabaseOperations.recordIntegritySkipped", () => {
 		expect(s.runningKind).toBeNull();
 		// Mutex released — a new probe can be claimed.
 		expect(dbOps.markIntegrityCheckRunning("quick")).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Tests: integrity status survives a restart (status file beside the DB, #606)
+// ---------------------------------------------------------------------------
+
+describe("DatabaseOperations integrity status file", () => {
+	const opened: DatabaseOperations[] = [];
+	const open = (path: string): DatabaseOperations => {
+		const ops = new DatabaseOperations(path);
+		opened.push(ops);
+		return ops;
+	};
+
+	afterEach(async () => {
+		await Promise.all(opened.splice(0).map((ops) => ops.dispose()));
+	});
+
+	it("restores the last results after a restart", async () => {
+		const path = tempDbPath();
+		const first = open(path);
+		first.recordIntegrityResult("quick", "ok");
+		first.recordIntegritySkipped("full", "too big");
+		const saved = first.getIntegrityStatus();
+		await first.close();
+
+		const s = open(path).getIntegrityStatus();
+		expect(s.status).toBe("ok");
+		expect(s.runningKind).toBeNull();
+		expect(s.lastCheckAt).toBe(saved.lastCheckAt);
+		expect(s.lastQuickCheckAt).toBe(saved.lastQuickCheckAt);
+		expect(s.lastQuickResult).toBe("ok");
+		expect(s.lastFullCheckAt).toBe(saved.lastFullCheckAt);
+		expect(s.lastFullResult).toBeNull();
+		expect(s.lastFullSkipReason).toBe("too big");
+	});
+
+	it("STICKY: a full corrupt result stays corrupt across a restart", async () => {
+		const path = tempDbPath();
+		const first = open(path);
+		first.recordIntegrityResult("full", "corrupt", "index has missing entry");
+		first.recordIntegrityResult("quick", "ok");
+		await first.close();
+
+		const s = open(path).getIntegrityStatus();
+		expect(s.status).toBe("corrupt");
+		expect(s.lastFullResult).toBe("corrupt");
+		expect(s.lastError).toBe("index has missing entry");
+	});
+
+	it("the latest result wins when several are saved in a row", async () => {
+		const path = tempDbPath();
+		const first = open(path);
+		first.recordIntegrityResult("quick", "corrupt", "page 42");
+		first.recordIntegrityResult("quick", "ok");
+		await first.close();
+
+		const s = open(path).getIntegrityStatus();
+		expect(s.status).toBe("ok");
+		expect(s.lastQuickResult).toBe("ok");
+		expect(s.lastQuickError).toBeNull();
+	});
+
+	it("a probe in flight at shutdown is not restored as running", async () => {
+		const path = tempDbPath();
+		const first = open(path);
+		first.recordIntegrityResult("quick", "ok");
+		expect(first.markIntegrityCheckRunning("full")).toBe(true);
+		await first.close();
+
+		const second = open(path);
+		expect(second.getIntegrityStatus().status).toBe("ok");
+		expect(second.getIntegrityStatus().runningKind).toBeNull();
+		expect(second.markIntegrityCheckRunning("quick")).toBe(true);
+	});
+
+	it("writes the results to <db>.integrity.json", async () => {
+		const path = tempDbPath();
+		const first = open(path);
+		first.recordIntegrityResult("quick", "ok");
+		const saved = first.getIntegrityStatus();
+		await first.close();
+
+		const file = JSON.parse(readFileSync(`${path}.integrity.json`, "utf8"));
+		expect(file.lastQuickCheckAt).toBe(saved.lastQuickCheckAt);
+		expect(file.lastQuickResult).toBe("ok");
+	});
+
+	it.each([
+		["text that is not JSON", "{oops"],
+		[
+			"a timestamp that is not a number",
+			JSON.stringify({ lastQuickCheckAt: "yesterday", lastQuickResult: "ok" }),
+		],
+		[
+			"an unknown result",
+			JSON.stringify({ lastQuickCheckAt: 1, lastQuickResult: "maybe" }),
+		],
+	])("ignores a status file holding %s", (_label, body) => {
+		const path = tempDbPath();
+		writeFileSync(`${path}.integrity.json`, body);
+
+		const s = open(path).getIntegrityStatus();
+		expect(s.status).toBe("unchecked");
+		expect(s.lastQuickCheckAt).toBeNull();
+		expect(s.lastQuickResult).toBeNull();
 	});
 });
 

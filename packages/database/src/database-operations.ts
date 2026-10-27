@@ -52,6 +52,12 @@ import { EMBEDDED_INCREMENTAL_VACUUM_WORKER_CODE } from "./inline-incremental-va
 import { EMBEDDED_READER_WORKER_CODE } from "./inline-reader-worker";
 import { EMBEDDED_VACUUM_WORKER_CODE } from "./inline-vacuum-worker";
 import {
+	integrityStatusPath,
+	type PersistedIntegrityStatus,
+	readIntegrityStatusFile,
+	writeIntegrityStatusFile,
+} from "./integrity-status-file";
+import {
 	type MaintenanceWorkerOptions,
 	MaintenanceWorkerOwner,
 } from "./maintenance-worker-owner";
@@ -349,6 +355,26 @@ function configureSqlite(db: Database, config: DatabaseConfig): void {
 const INC_VAC_SKIP_ESCALATE_AT = 3;
 
 /**
+ * Recompute the collapsed integrity `status` / `lastError` from the per-probe
+ * verdicts. Order: any corrupt result wins.
+ */
+function collapseIntegrityStatus(next: IntegrityStatus): void {
+	const fullCorrupt = next.lastFullResult === "corrupt";
+	const quickCorrupt = next.lastQuickResult === "corrupt";
+	if (fullCorrupt || quickCorrupt) {
+		next.status = "corrupt";
+		next.lastError =
+			next.lastFullError ?? next.lastQuickError ?? "integrity check failed";
+	} else if (next.lastQuickResult === "ok" || next.lastFullResult === "ok") {
+		next.status = "ok";
+		next.lastError = null;
+	} else {
+		next.status = "unchecked";
+		next.lastError = null;
+	}
+}
+
+/**
  * DatabaseOperations using Repository Pattern
  * Provides a clean, organized interface for database operations
  *
@@ -415,6 +441,10 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		lastQuickSkipReason: null,
 		lastFullSkipReason: null,
 	};
+	/** Where integrityStatus is saved so it survives a restart (SQLite only). */
+	private integrityStatusFile?: string;
+	/** Serializes saves, so the file always ends on the latest results. */
+	private integrityStatusSave: Promise<void> = Promise.resolve();
 
 	// Repositories
 	private accounts: AccountRepository;
@@ -597,6 +627,10 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 				this.sqliteDb.close();
 				this.sqliteDb = undefined;
 				throw error;
+			}
+
+			if (resolvedPath !== ":memory:") {
+				this.restoreIntegrityStatus(resolvedPath);
 			}
 
 			this.adapter = new BunSqlAdapter(this.sqliteDb);
@@ -834,22 +868,9 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 
 		next.lastCheckAt = now;
 
-		// Recompute collapsed status. Order: any corrupt result wins.
-		const fullCorrupt = next.lastFullResult === "corrupt";
-		const quickCorrupt = next.lastQuickResult === "corrupt";
-		if (fullCorrupt || quickCorrupt) {
-			next.status = "corrupt";
-			next.lastError =
-				next.lastFullError ?? next.lastQuickError ?? "integrity check failed";
-		} else if (next.lastQuickResult === "ok" || next.lastFullResult === "ok") {
-			next.status = "ok";
-			next.lastError = null;
-		} else {
-			next.status = "unchecked";
-			next.lastError = null;
-		}
-
+		collapseIntegrityStatus(next);
 		this.integrityStatus = next;
+		this.saveIntegrityStatus();
 	}
 
 	/**
@@ -883,23 +904,60 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			// real verdict.
 		}
 
-		// Recompute collapsed status with the SAME logic as
-		// recordIntegrityResult. A skip must never set status to "corrupt".
-		const fullCorrupt = next.lastFullResult === "corrupt";
-		const quickCorrupt = next.lastQuickResult === "corrupt";
-		if (fullCorrupt || quickCorrupt) {
-			next.status = "corrupt";
-			next.lastError =
-				next.lastFullError ?? next.lastQuickError ?? "integrity check failed";
-		} else if (next.lastQuickResult === "ok" || next.lastFullResult === "ok") {
-			next.status = "ok";
-			next.lastError = null;
-		} else {
-			next.status = "unchecked";
-			next.lastError = null;
-		}
-
+		// Same collapse as recordIntegrityResult. It reads only the verdicts,
+		// which a skip leaves alone, so a skip never sets status to "corrupt".
+		collapseIntegrityStatus(next);
 		this.integrityStatus = next;
+		this.saveIntegrityStatus();
+	}
+
+	/**
+	 * Restore the results saved beside the database, so `/health`, the
+	 * dashboard and the scheduler see when each probe last completed instead of
+	 * "unchecked" after every restart (#606). A probe in flight at shutdown was
+	 * never saved, so nothing comes back as running.
+	 */
+	private restoreIntegrityStatus(dbPath: string): void {
+		this.integrityStatusFile = integrityStatusPath(dbPath);
+		const saved = readIntegrityStatusFile(this.integrityStatusFile);
+		if (!saved) return;
+		const times = [saved.lastQuickCheckAt, saved.lastFullCheckAt].filter(
+			(time): time is number => time !== null,
+		);
+		const next: IntegrityStatus = {
+			...this.integrityStatus,
+			...saved,
+			lastCheckAt: times.length > 0 ? Math.max(...times) : null,
+		};
+		collapseIntegrityStatus(next);
+		this.integrityStatus = next;
+	}
+
+	/**
+	 * Save the completed results in the background. A failed save costs at most
+	 * one extra check after the next restart, so it is logged, not raised.
+	 */
+	private saveIntegrityStatus(): void {
+		const path = this.integrityStatusFile;
+		if (!path) return;
+		const status = this.integrityStatus;
+		const saved: PersistedIntegrityStatus = {
+			lastQuickCheckAt: status.lastQuickCheckAt,
+			lastQuickResult: status.lastQuickResult,
+			lastQuickError: status.lastQuickError,
+			lastFullCheckAt: status.lastFullCheckAt,
+			lastFullResult: status.lastFullResult,
+			lastFullError: status.lastFullError,
+			lastQuickSkipReason: status.lastQuickSkipReason,
+			lastFullSkipReason: status.lastFullSkipReason,
+		};
+		this.integrityStatusSave = this.integrityStatusSave
+			.then(() => writeIntegrityStatusFile(path, saved))
+			.catch((error) => {
+				new Logger("IntegrityStatus").warn(
+					`Could not save integrity results to ${path}: ${error}`,
+				);
+			});
 	}
 
 	/**
@@ -2107,6 +2165,8 @@ OAuth tokens will need to be re-authenticated.
 			this.maintenanceOwner.close(),
 			this.compactionOwner.close(),
 			stopHeartbeat?.(),
+			// Never rejects; lets the last integrity result reach disk.
+			this.integrityStatusSave,
 		]);
 		await this.adapter.close();
 	}
