@@ -189,6 +189,67 @@ describe("heavy read result equivalence", () => {
 		);
 		expect(reader.readsServed - before).toBe(3);
 	});
+	it("runs the external usage attribution reads on the reader and sees rows the same pass wrote", async () => {
+		const adapter = db.getAdapter();
+		for (const [account, reset] of [
+			["a1", 100],
+			["a2", 200],
+		] as const)
+			await adapter.run(
+				"INSERT INTO usage_windows (id,account_id,window_key,started_at,resets_at,grant_type) VALUES (?,?,'seven_day',0,?,'natural')",
+				[`${account}-window`, account, reset * 1000],
+			);
+		const event = (timestamp: string, rateLimitResetsAt: number | null) => ({
+			sourceKind: "rollout" as const,
+			eventTs: 1000,
+			timestamp,
+			model: "gpt-6-astra",
+			inputTokens: 100,
+			cacheReadInputTokens: 20,
+			outputTokens: 30,
+			reasoningOutputTokens: 10,
+			totalTokens: 150,
+			isFallbackModel: false,
+			rateLimitResetsAt,
+			planType: "pro",
+			limitId: "codex",
+			creditsHasCredits: true,
+			creditsBalance: "1",
+			primaryUsedPercent: 100,
+			sessionId: "rollout-session",
+		});
+		const external = new ExternalUsageRepository(adapter);
+		adapter.setOffThreadReader(reader);
+		const mainQuery = spyOn(adapter, "query");
+		await external.ingest([event("a-direct", 100), event("vote-1", null)]);
+		const before = reader.readsServed;
+		// The pending read must see the NULL row this pass inserts, and the evidence
+		// read the two a2 rows, or the session vote cannot move to a2.
+		await external.ingest([
+			event("b-direct-1", 200),
+			event("b-direct-2", 200),
+			event("vote-2", null),
+		]);
+		expect(reader.readsServed - before).toBe(2);
+		expect(
+			mainQuery.mock.calls.filter(([sql]) =>
+				/SELECT id,session_id|SELECT session_id,rate_limit_resets_at/.test(
+					String(sql),
+				),
+			),
+		).toEqual([]);
+		expect(
+			await adapter.query(
+				"SELECT timestamp,account_id,attribution_basis FROM external_usage_events WHERE source_kind='rollout' ORDER BY timestamp",
+			),
+		).toEqual([
+			{ timestamp: "a-direct", account_id: "a1", attribution_basis: "exact" },
+			{ timestamp: "b-direct-1", account_id: "a2", attribution_basis: "exact" },
+			{ timestamp: "b-direct-2", account_id: "a2", attribution_basis: "exact" },
+			{ timestamp: "vote-1", account_id: "a2", attribution_basis: "vote" },
+			{ timestamp: "vote-2", account_id: "a2", attribution_basis: "vote" },
+		]);
+	});
 	it("preserves the alerts exhaustion projection after a synchronously committed snapshot", async () => {
 		const adapter = db.getAdapter();
 		const resetsAt = NOW + 60 * 60_000;

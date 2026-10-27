@@ -351,7 +351,10 @@ export class ExternalUsageRepository extends BaseRepository<ExternalUsageEvent> 
 			if (this.evidenceChanged || this.windowFingerprint !== fingerprint) {
 				if (windows.length) {
 					const bound = Math.min(...windows.map((w) => Number(w.started_at)));
-					const pending = await this.query<Unresolved>(
+					// Both reads walk most of a large table (seconds under disk pressure), so they run
+					// on the reader thread. Every batch above has committed, and each UPDATE
+					// below re-checks the row's old attribution, so a stale row is a no-op.
+					const pending = await this.queryOffThread<Unresolved>(
 						"SELECT id,session_id,event_ts,rate_limit_resets_at,account_id,attribution_basis FROM external_usage_events WHERE source_kind='rollout' AND (account_id IS NULL OR attribution_basis='vote') AND attribution_basis IS DISTINCT FROM 'conflict' AND event_ts>=?",
 						[bound],
 					);
@@ -359,7 +362,7 @@ export class ExternalUsageRepository extends BaseRepository<ExternalUsageEvent> 
 					const sessions = [...new Set(pending.map((row) => row.session_id))];
 					for (let offset = 0; offset < sessions.length; offset += 200) {
 						const batch = sessions.slice(offset, offset + 200);
-						const evidence = await this.query<{
+						const evidence = await this.queryOffThread<{
 							session_id: string;
 							rate_limit_resets_at: number | null;
 						}>(
