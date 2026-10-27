@@ -19,11 +19,14 @@ builds the upstream request. An account that relies on its provider's default mo
 fails a physical-model assertion even when the model it would send is right, and a family that
 turns automatic stops satisfying one. A pinned profile meant to follow a provider's newest model
 should assert only the provider; a capability profile meant to follow it names a catalog role
-instead of a physical model.
+or an approved line instead of a physical model. A catalog role is a position in the catalog; an
+approved line names the model, so a profile that should stay on one model, or whose name names
+one, follows the line.
 
 What the client is shown follows routing, not configuration. Each offered profile is labelled
 with the model it currently serves, so a profile that follows a catalog role is relabelled when
-the provider re-ranks its catalog. A profile whose accounts are all paused, or can never satisfy
+the provider re-ranks its catalog, and one that follows an approved line when a newer supported
+model of the line appears. A profile whose accounts are all paused, or can never satisfy
 its assertions, is not offered. The operator's configured name shows only while the served model
 is still unknown.
 
@@ -112,7 +115,8 @@ adapter's built-in version.
 
 The accounts admitted by a capability profile because each can serve the profile's root
 logical model through its expected provider and physical model, or through the model at the
-profile's catalog role in that account's own catalog. Membership establishes the
+profile's catalog role, or the newest supported model of its approved line, in that account's
+own catalog. Membership establishes the
 preferred pool for descendants; it does not force every child family onto the root physical
 model.
 
@@ -470,7 +474,7 @@ shipped.
 
 ### Quality lane and approved line
 
-A lane expresses operator quality intent, not a model capability. Approved lines map Fable to `fable`, Astra to `astra`, Opus and Sol to `opus`, Sonnet to `standard`, and Haiku to `lightweight`. Account enrollment and current exact-model support are separate requirements. Catalog position never assigns a new model to a quality role.
+A lane expresses operator quality intent, not a model capability. Approved lines map Fable to `fable`, Astra to `astra`, Opus and Sol to `opus`, Sonnet to `standard`, and Haiku to `lightweight`. Account enrollment and current exact-model support are separate requirements. Catalog position never assigns a new model to a quality role. A Codex route profile can follow an approved line too: each account serves the newest supported model of that line in its own catalog, wherever the provider ranks it.
 
 ### Accepted intent versus successful home
 

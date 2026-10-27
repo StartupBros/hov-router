@@ -1,6 +1,7 @@
 ---
 title: The Claude Code /model picker named the wrong model and kept dead routes, from hand-written route labels and a client cache that discovery never refreshed
 date: 2026-10-26
+last_updated: 2026-10-27
 category: integration-issues
 module: model-route-profiles
 problem_type: integration_issue
@@ -22,6 +23,7 @@ tags:
   - model-picker
   - gateway-model-discovery
   - catalog-role
+  - line-policy
   - display-name
   - codex
   - claude-code-client
@@ -64,13 +66,13 @@ Pre-fix rows, from the cache backup taken before the rebuild (`gateway-models.js
 
 PR #617 (merged at 447f7dc7, deployed backend-only 2026-10-26) derives each row's label and visibility from what the route serves, on every discovery request.
 
-- **`packages/proxy/src/model-route-discovery.ts`** builds the rows. `buildModelRouteDiscoveryModels` (line 117) labels each row `<served model>[ (1M)] · <where>`. `<where>` is the exact account's name, or `<provider> pool` for a capability pool. A pool whose accounts disagree lists each distinct model. The label is cut at 120 characters.
-  - `servedModel` (line 82): a catalog-role row reads each account's own catalog target. Other rows use `expectedPhysicalModel`, else the previewed physical model (below).
-  - `servedModelLabel` (line 97): the Codex catalog's display name for Codex rows, the Claude display name for Claude ids, the raw id otherwise.
-  - `admits` (line 63) hides a paused account, and any account that `getRouteProfileConstraintViolation` (`packages/proxy/src/handlers/account-selector.ts:211`) rejects. The one exception is `catalog_role_unavailable`: a cold catalog after a restart is admitted, and the row shows the operator `displayName` until the catalog loads. A pool with no admitted account is left out.
-  - `listModelRouteDiscoveryModels` (line 160) does one local account read. If it fails, discovery serves the static operator rows and hides nothing.
-- **`previewAccountPhysicalModel`** (`packages/providers/src/request-capabilities.ts:196`) previews the physical model for a non-catalog-role row: the account mapping, else the provider default, or the logical model itself for a native Anthropic pass-through account.
-- **`packages/proxy/src/proxy.ts:943`**: the `/v1/models` handler calls `listModelRouteDiscoveryModels` in place of the static list.
+- **`packages/proxy/src/model-route-discovery.ts`** builds the rows. `buildModelRouteDiscoveryModels` (line 129) labels each row `<served model>[ (1M)] · <where>`. `<where>` is the exact account's name, or `<provider> pool` for a capability pool. A pool whose accounts disagree lists each distinct model. The label is cut at 120 characters.
+  - `servedModel` (line 89): a catalog-role row reads each account's own catalog target for its family. A `line` row (added later by PR #635) reads the newest model of its line in the account's own catalog. Other rows use `expectedPhysicalModel`, else the previewed physical model (below).
+  - `servedModelLabel` (line 109): the Codex catalog's display name for Codex rows, the Claude display name for Claude ids, the raw id otherwise.
+  - `admits` (line 69) hides a paused account, and any account that `getRouteProfileConstraintViolation` (`packages/proxy/src/handlers/account-selector.ts:250`) rejects. The one exception is `catalog_role_unavailable`: a cold catalog after a restart is admitted, and the row shows the operator `displayName` until the catalog loads. Line profiles reuse that reason, so the same holds for them. A pool with no admitted account is left out.
+  - `listModelRouteDiscoveryModels` (line 172) does one local account read. If it fails, discovery serves the static operator rows and hides nothing.
+- **`previewAccountPhysicalModel`** (`packages/providers/src/request-capabilities.ts:196`) previews the physical model for a row that does not follow a catalog: the account mapping, else the provider default, or the logical model itself for a native Anthropic pass-through account.
+- **`packages/proxy/src/proxy.ts:951`**: the `/v1/models` handler calls `listModelRouteDiscoveryModels` in place of the static list.
 
 Rows served after the deploy:
 
@@ -81,11 +83,13 @@ claude-bccf-route-codex-pool-astra[1m]  GPT-6.1-Sol (1M) · codex pool
 claude-bccf-route-glm-5-3-flash         chat · ai-gateway-chat
 ```
 
-The fusion and ox-alpha rows are gone. The ids are unchanged, because a renamed id breaks saved picker choices until alias support exists (#618). The local cache was rebuilt by hand once with `ccflare-refresh-picker-cache` (9 rows to 7).
+The fusion and ox-alpha rows are gone. The ids were left unchanged, because a renamed id breaks saved picker choices. The local cache was rebuilt by hand once with `ccflare-refresh-picker-cache` (9 rows to 7).
+
+**Follow-up, 2026-10-27: the ids are true again.** #618 weighed id aliases against pools that follow a model line rather than a catalog slot, and was closed by the second. PR #635 (470b9db9) added `physicalModelPolicy: "line"`, which follows a named line (`gpt-sol` or `gpt-astra`) in each account's own catalog wherever OpenAI ranks it. Production switched both pools to it at 06:07Z. `pro-primary-sol` became `GPT-6.1-Sol (1M) · codex pool`, and every request routed on it in the next 20 minutes went to `gpt-6.1-sol` (278, all HTTP 200). `codex-pool-astra` became `GPT-6-Astra (1M) · codex pool`. No id was renamed or aliased.
 
 ## Why This Works
 
-**Server half: catalog-role pools follow a position, not a model.** `deriveFamilyDefaults` (`packages/proxy/src/codex-model-catalog.ts:752-764`) maps fable and opus to the first entry of the account's normalized catalog, sonnet to the second and haiku to the third. The catalog is sorted by OpenAI's own priority. When OpenAI moved gpt-6-astra ahead of gpt-6.1-sol, the opus pool and the sonnet pool swapped models with no configuration change, exactly as designed. Only the text around them, the ids and the hand-written labels, still described the old order. A label computed from the same catalog lookup the selector uses cannot drift from it.
+**Server half: catalog-role pools follow a position, not a model.** `deriveFamilyDefaults` (`packages/proxy/src/codex-model-catalog.ts:753-765`) maps fable and opus to the first entry of the account's normalized catalog, sonnet to the second and haiku to the third. The catalog is sorted by OpenAI's own priority. When OpenAI moved gpt-6-astra ahead of gpt-6.1-sol, the opus pool and the sonnet pool swapped models with no configuration change, exactly as designed. Only the text around them, the ids and the hand-written labels, still described the old order. A label computed from the same catalog lookup the selector uses cannot drift from it. A pool that should stay on one model now uses the `line` policy (PR #635), which a reorder cannot move.
 
 **Server half: hiding uses the selector's own rule.** `admits` calls the same `getRouteProfileConstraintViolation` the selector runs before admitting an account. A row is therefore listed only when the selector could pick at least one of its accounts. A new admission rule in the selector hides rows with no change to discovery.
 
@@ -102,14 +106,15 @@ A claude.ai login is none of the three. The router key in `ANTHROPIC_CUSTOM_HEAD
 - **When the picker looks wrong, split server from client first.** Compare `GET /v1/models` (sent with the router key) with the rows and `fetchedAt` in `~/.claude/cache/gateway-models.json`. If the router is right and the cache is old, the problem is client discovery, not routing.
 - **Prove discovery with a fresh process that sends no prompt.** Start `claude --debug-file <path>`, exit without a prompt, and grep the file for `[gatewayDiscovery]`. `cached N models` means it ran. `skipped: no credential` means the gate blocked it. This spends no Anthropic inference, which the repository's testing restriction requires.
 - **Fallbacks when discovery cannot run.** `/model claude-bccf-route-<id>` typed directly is accepted under a non-first-party base URL even when the picker has no row (read from 2.1.299, and used on 2026-10-14). On the operator machine, `ccflare-refresh-picker-cache` rebuilds the cache and keeps a timestamped backup. Start a new `claude` after either.
-- **Don't name a model in a route-profile id or label that follows a catalog role.** The router now writes the model into the label, so the operator `displayName` is only a cold-start fallback. A model-named id can't be fixed by renaming until #618 adds aliases.
+- **A model-named id must follow that model's line.** Give a profile whose id names a model, such as `pro-primary-sol`, `physicalModelPolicy: "line"` with the matching `line`, so a catalog reorder cannot move it. A catalog-role profile follows a position, so give it a role name such as `codex-opus`. Either way the router writes the served model into the label, so the operator `displayName` is only a cold-start fallback. See `docs/configuration.md`, "Line Codex profiles".
 - **Don't add admission logic to discovery.** Hide rows through `getRouteProfileConstraintViolation`, so the picker and the selector cannot disagree.
 - **An alias lane shows its alias.** An account mapped to a LiteLLM group such as `chat` shows `chat`, because the router can't see what the alias resolves to. Map the account to the concrete model id to show the model.
 
 ## Related Issues
 
 - PR #617: the fix.
-- #618 (open): alias old ids, and decide between catalog-slot and model-line pools.
+- #618 (closed 2026-10-27): alias old ids, or decide between catalog-slot and model-line pools. Resolved by model-line pools, with no aliases.
+- PR #635: the `line` policy that closed #618.
 - #398 (open): R17 asked for labels that describe current routing; R18, the unexplained GPT-5.6 row, has a lead (a stale cached label) but no provenance.
 - PR #420: generated, kind-only descriptions for discovery rows.
 - #387 (open): alert when a catalog role's target changes across a restart, the same silent reorder seen from the alerting side.
