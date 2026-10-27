@@ -1,6 +1,10 @@
 import { describe, expect, it, mock } from "bun:test";
 import { BUFFER_SIZES } from "@better-ccflare/core";
 import {
+	DEFAULT_KEEPALIVE_INTERVAL_MS,
+	transformStreamingResponse,
+} from "@better-ccflare/openai-formats";
+import {
 	ANTHROPIC_PRECOMMIT_RESCUE_PING_FRAME,
 	coordinateAnthropicPreCommitRescue,
 	createAnthropicPreCommitRescueActivation,
@@ -506,5 +510,76 @@ describe("Claude Code custom-base ping compatibility", () => {
 		expect(await settledWithin(upstreamCancelled, 1_000)).toBe("client gone");
 		expect(cancelled).toHaveBeenCalledTimes(1);
 		expect(cancelled).toHaveBeenCalledWith("client gone");
+	});
+});
+
+describe("Claude Code compatibility for translated keepalive pings", () => {
+	it("rewrites the translator's mid-stream keepalive ping so the installed client yields it", async () => {
+		// An OpenAI-format upstream writing a long tool call: the translator holds
+		// the arguments until [DONE] and pings meanwhile (#633). The ping must
+		// survive the outermost rewrite or Claude Code never sees it.
+		let clock = 0;
+		let tick: (() => void) | undefined;
+		let upstream!: ReadableStreamDefaultController<Uint8Array>;
+		const openAIBody = new ReadableStream<Uint8Array>({
+			start(controller) {
+				upstream = controller;
+			},
+		});
+		const send = (payload: unknown) =>
+			upstream.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+		const translated = transformStreamingResponse(sseResponse(openAIBody), {
+			keepaliveScheduler: {
+				now: () => clock,
+				setInterval(callback) {
+					tick = callback;
+					return 1;
+				},
+				clearInterval() {
+					tick = undefined;
+				},
+			},
+		});
+		const response = adaptAnthropicSsePingsForClaudeCode(
+			claudeRequest(),
+			new URL("http://localhost:8788/v1/messages"),
+			translated,
+		);
+		const bodyText = response.text();
+
+		send({
+			id: "c1",
+			model: "deepseek-v4.1-flash",
+			choices: [
+				{
+					index: 0,
+					delta: {
+						tool_calls: [
+							{
+								index: 0,
+								id: "call_1",
+								type: "function",
+								function: { name: "Write", arguments: '{"a":1}' },
+							},
+						],
+					},
+					finish_reason: null,
+				},
+			],
+		});
+		for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+		clock += DEFAULT_KEEPALIVE_INTERVAL_MS;
+		tick?.();
+		upstream.enqueue(encoder.encode("data: [DONE]\n\n"));
+		upstream.close();
+
+		const body = await settledWithin(bodyText, 1_000);
+		expect(body).not.toContain("event: ping");
+		const yielded = parseLikeInstalledClaudeCode212(body);
+		// The message_start ping plus the keepalive ping.
+		expect(
+			yielded.filter((event) => JSON.stringify(event) === '{"type":"ping"}'),
+		).toHaveLength(2);
+		expect(yielded.at(-1)).toEqual({ type: "message_stop" });
 	});
 });
