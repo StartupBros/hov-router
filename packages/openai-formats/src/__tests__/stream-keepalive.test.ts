@@ -332,6 +332,25 @@ describe("transformStreamingResponse — keepalive ping", () => {
 		await downstream.finished;
 	});
 
+	it("pings on the real clock when no scheduler is injected", async () => {
+		const upstream = controllableUpstream();
+		const transformed = transformStreamingResponse(upstream.response, {
+			keepaliveIntervalMs: 20,
+		});
+		const downstream = collect(transformed.body);
+		upstream.send(toolCallStartChunk());
+		await Bun.sleep(90);
+		expect(countPings(downstream.text())).toBeGreaterThanOrEqual(2);
+
+		upstream.send("[DONE]");
+		upstream.close();
+		await downstream.finished;
+		const afterDone = downstream.text();
+		await Bun.sleep(60);
+		expect(downstream.text()).toBe(afterDone);
+		expect(afterDone).toContain("event: message_stop");
+	});
+
 	it("does not arm a timer when the interval is not positive", async () => {
 		const scheduler = manualScheduler();
 		const upstream = controllableUpstream();
