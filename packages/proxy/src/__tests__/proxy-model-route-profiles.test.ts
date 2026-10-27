@@ -62,6 +62,8 @@ const codexModelCatalogModule = await import("../codex-model-catalog");
 const serverToolReplayRuntimeModule = await import(
 	"../server-tool-replay-runtime"
 );
+const webSearchPolicy = await import("../websearch-helper-policy");
+const proxyHandlers = await import("../handlers");
 const { handleProxy } = await import("../proxy");
 
 const PROFILE_MODEL = "claude-bccf-route-pro-primary-sol";
@@ -122,6 +124,164 @@ afterEach(() => {
 	restoreUsageCollector();
 	restoreUsageCollector = (): void => {};
 	globalThis.fetch = originalFetch;
+});
+
+describe("exact profile private WebSearch authorization", () => {
+	it.each([
+		"picker",
+		"stock",
+		"child",
+	])("authorizes %s helpers without enabling a new upstream send", async (form) => {
+		const registry = makeRegistry({
+			webSearchHelper: { accountIds: ["native-search"] },
+		});
+		const harness = makeContext(registry);
+		const { createReadyServerToolReplayRuntimeForTest } = await import(
+			"./helpers/server-tool-replay-runtime"
+		);
+		harness.ctx.serverToolReplay =
+			await createReadyServerToolReplayRuntimeForTest();
+		const upstream = installJsonUpstream();
+		const session = { "x-claude-code-session-id": `private-helper-${form}` };
+		const root = await handleProxy(
+			apiRequest("/v1/messages", PROFILE_MODEL, session),
+			new URL("https://proxy.local/v1/messages"),
+			harness.ctx,
+			"key-1",
+		);
+		expect(root.status).toBe(200);
+		await root.text();
+		const spy = spyOn(webSearchPolicy, "authorizeWebSearchHelper");
+		try {
+			const response = await handleProxy(
+				apiRequest(
+					"/v1/messages",
+					form === "picker" ? PROFILE_MODEL : CHILD_MODEL,
+					{
+						...session,
+						...(form === "child"
+							? {
+									"x-claude-code-agent-id": "child-search",
+									"x-claude-code-parent-agent-id": "root",
+								}
+							: {}),
+					},
+					{ tools: [{ type: "web_search_20250305", name: "web_search" }] },
+				),
+				new URL("https://proxy.local/v1/messages"),
+				harness.ctx,
+				"key-1",
+			);
+			expect(response.status).toBe(503);
+			const call = spy.mock.calls.at(-1);
+			if (!call) throw new Error("Expected authorization evaluation");
+			const scope = webSearchPolicy.getWebSearchHelperScope(call[0]);
+			expect(scope?.source).toBe(form === "picker" ? "explicit" : "inherited");
+			expect(scope?.profile.accountId).toBe(ROUTE_ACCOUNT_ID);
+			expect(call[0].forcedAccountId).toBe(ROUTE_ACCOUNT_ID);
+			expect(call[0].routeExpectedProvider).toBe("test-provider");
+			expect(upstream.fetchMock).toHaveBeenCalledTimes(1);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it.each([
+		false,
+		true,
+	])("public force disables authorization even when empty=%s", async (empty) => {
+		const harness = makeContext(
+			makeRegistry({ webSearchHelper: { accountIds: ["native-search"] } }),
+		);
+		const { createReadyServerToolReplayRuntimeForTest } = await import(
+			"./helpers/server-tool-replay-runtime"
+		);
+		harness.ctx.serverToolReplay =
+			await createReadyServerToolReplayRuntimeForTest();
+		const upstream = installJsonUpstream();
+		const spy = spyOn(webSearchPolicy, "authorizeWebSearchHelper");
+		try {
+			await handleProxy(
+				apiRequest(
+					"/v1/messages",
+					PROFILE_MODEL,
+					{
+						"x-claude-code-session-id": "forced-helper",
+						"x-better-ccflare-account-id": empty ? "" : ROUTE_ACCOUNT_ID,
+					},
+					{ tools: [{ type: "web_search_20250305", name: "web_search" }] },
+				),
+				new URL("https://proxy.local/v1/messages"),
+				harness.ctx,
+				"key-1",
+			);
+			expect(spy).toHaveBeenCalledTimes(1);
+			const call = spy.mock.calls[0];
+			if (!call) throw new Error("Expected authorization evaluation");
+			expect(webSearchPolicy.getWebSearchHelperScope(call[0])).toBeUndefined();
+			expect(upstream.fetchMock).not.toHaveBeenCalled();
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("does not authorize history removed by interception", async () => {
+		const harness = makeContext(
+			makeRegistry({ webSearchHelper: { accountIds: ["native-search"] } }),
+		);
+		const { createReadyServerToolReplayRuntimeForTest } = await import(
+			"./helpers/server-tool-replay-runtime"
+		);
+		harness.ctx.serverToolReplay =
+			await createReadyServerToolReplayRuntimeForTest();
+		const upstream = installJsonUpstream();
+		const spy = spyOn(webSearchPolicy, "authorizeWebSearchHelper");
+		const intercept = spyOn(
+			proxyHandlers,
+			"interceptAndModifyRequest",
+		).mockImplementation(async (body) => {
+			body.mutateParsedJson((parsed) => {
+				parsed.messages = [{ role: "user", content: "search now" }];
+			});
+			return {
+				modifiedBody: body.getBuffer(),
+				agentUsed: null,
+				originalModel: PROFILE_MODEL,
+				appliedModel: PROFILE_MODEL,
+				agentAttributionSource: "none" as const,
+			};
+		});
+		try {
+			await handleProxy(
+				apiRequest(
+					"/v1/messages",
+					PROFILE_MODEL,
+					{ "x-claude-code-session-id": "intercepted-helper" },
+					{
+						tools: [{ type: "web_search_20250305", name: "web_search" }],
+						messages: [
+							{ role: "assistant", content: "old search" },
+							{ role: "user", content: "search now" },
+						],
+					},
+				),
+				new URL("https://proxy.local/v1/messages"),
+				harness.ctx,
+				"key-1",
+			);
+			expect(spy).toHaveBeenCalledTimes(1);
+			const call = spy.mock.calls[0];
+			if (!call) throw new Error("Expected authorization evaluation");
+			const [meta, input] = call;
+			expect(webSearchPolicy.isFreshWebSearchHelper(input.body)).toBe(true);
+			expect(input.originalEligible).toBe(false);
+			expect(webSearchPolicy.getWebSearchHelperScope(meta)).toBeUndefined();
+			expect(upstream.fetchMock).not.toHaveBeenCalled();
+		} finally {
+			spy.mockRestore();
+			intercept.mockRestore();
+		}
+	});
 });
 
 function makeAccount(id = ROUTE_ACCOUNT_ID): Account {

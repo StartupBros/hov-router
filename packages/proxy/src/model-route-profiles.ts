@@ -35,6 +35,7 @@ const PROFILE_KEYS = new Set([
 	"clientContextWindowHint",
 	"physicalModelPolicy",
 	"line",
+	"webSearchHelper",
 ]);
 
 const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -90,6 +91,10 @@ export interface ModelRouteProfile {
 	readonly physicalModelPolicy?: ModelRoutePhysicalModelPolicy;
 	/** The quality line a `line` policy follows; present only with that policy. */
 	readonly line?: QualityApprovedLine;
+	/** Explicit native search exception; ordinary inference keeps the exact route. */
+	readonly webSearchHelper?: {
+		readonly accountIds: readonly string[];
+	};
 }
 
 export type BoundedModelRouteProfile = ModelRouteProfile & {
@@ -119,6 +124,8 @@ export function describeModelRouteProfileFlow(
 		return "This model on any pool account. Fails instead of switching. Subagents try the pool first.";
 	if (isBoundedModelRouteProfile(profile))
 		return "One account only, size-capped requests. Fails instead of switching. Subagents use it too.";
+	if (profile.webSearchHelper)
+		return "Inference stays on one account. Subagents use it too. Search helpers may use approved accounts.";
 	return "One account only. Fails instead of switching. Subagents use it too.";
 }
 
@@ -359,6 +366,46 @@ export function parseModelRouteProfiles(
 			);
 		}
 
+		let webSearchHelper: ModelRouteProfile["webSearchHelper"];
+		if ("webSearchHelper" in candidate) {
+			if (selection !== undefined || contextWindow !== undefined) {
+				throw configError(
+					`profile ${index} webSearchHelper requires an exact, unbounded profile`,
+				);
+			}
+			const policy = candidate.webSearchHelper;
+			if (
+				!isPlainObject(policy) ||
+				Object.keys(policy).some((key) => key !== "accountIds") ||
+				!Array.isArray(policy.accountIds) ||
+				policy.accountIds.length === 0
+			) {
+				throw configError(
+					`profile ${index} webSearchHelper requires only a non-empty accountIds list`,
+				);
+			}
+			const accountIds = policy.accountIds.map((value: unknown) => {
+				if (
+					typeof value !== "string" ||
+					!value.trim() ||
+					value.trim().length > MAX_ACCOUNT_ID_LENGTH
+				) {
+					throw configError(
+						`profile ${index} webSearchHelper accountIds must contain non-empty account IDs`,
+					);
+				}
+				return value.trim();
+			});
+			if (new Set(accountIds).size !== accountIds.length) {
+				throw configError(
+					`profile ${index} webSearchHelper accountIds must be unique`,
+				);
+			}
+			webSearchHelper = Object.freeze({
+				accountIds: Object.freeze(accountIds),
+			});
+		}
+
 		const expectedProvider = optionalString(
 			candidate,
 			"expectedProvider",
@@ -491,8 +538,9 @@ export function parseModelRouteProfiles(
 			// Added only when configured so existing profiles stay byte-identical.
 			...(physicalModelPolicy === undefined ? {} : { physicalModelPolicy }),
 			...(line === undefined ? {} : { line }),
+			...(webSearchHelper === undefined ? {} : { webSearchHelper }),
 		};
-		return profile;
+		return Object.freeze(profile);
 	});
 }
 

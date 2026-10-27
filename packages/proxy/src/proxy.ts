@@ -213,6 +213,10 @@ import {
 	tryGetUsageCollector,
 	type UsageCollectorHealth,
 } from "./usage-collector";
+import {
+	authorizeWebSearchHelper,
+	isFreshWebSearchHelper,
+} from "./websearch-helper-policy";
 
 export type { ProxyContext } from "./handlers";
 
@@ -1004,6 +1008,9 @@ async function handleProxyCoreImpl(
 	}
 	const requestBodyContext = new RequestBodyContext(requestBodyBuffer);
 	const originalParsedBody = requestBodyContext.getParsedJson();
+	// Capture before interception: removing history/tools cannot manufacture authority.
+	const originalWebSearchHelperEligible =
+		isFreshWebSearchHelper(originalParsedBody);
 	let qualityRequirements = ctx.qualityRouteService
 		? captureAutoRequestRequirements(originalParsedBody)
 		: undefined;
@@ -1867,6 +1874,14 @@ async function handleProxyCoreImpl(
 		}
 	}
 	const finalParsedBody = finalRequestBodyContext.getParsedJson();
+	if (!isCountHelper) {
+		authorizeWebSearchHelper(requestMeta, {
+			originalEligible: originalWebSearchHelperEligible,
+			body: finalParsedBody,
+			resolution: modelRouteResolution,
+			publicForceAccount: req.headers.has("x-better-ccflare-account-id"),
+		});
+	}
 	const potentialAnthropicCohortFacts =
 		derivePotentialAnthropicOAuthCohortFacts({
 			ctx,
