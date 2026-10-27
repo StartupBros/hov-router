@@ -64,6 +64,10 @@ import {
 	ServerToolRoutingError,
 	type ServerToolRoutingErrorReason,
 } from "../server-tool-routing-errors";
+import {
+	createWebSearchHelperCandidateMeta,
+	getWebSearchHelperScope,
+} from "../websearch-helper-policy";
 import { buildComboMembershipDiagnostics } from "./managed-routing-diagnostics";
 import {
 	evaluateNativeQuotaPolicy,
@@ -88,6 +92,7 @@ import {
 	evaluateHardCapacity,
 	getWeeklyQuotaPressure,
 	type HardCapacityExclusion,
+	isAnthropicSubscriptionHelperAdmitted,
 	isCodexCreditDrainActive,
 } from "./usage-throttling";
 
@@ -3310,6 +3315,45 @@ export async function getOrderedAccounts(
 	}
 }
 
+/** Shared selection / last-moment dispatch predicate; never accepts a public helper bit. */
+export function isWebSearchHelperCandidateAdmitted(
+	meta: RequestMeta,
+	ctx: ProxyContext,
+	account: Account,
+	physicalModel?: string | null,
+	accessToken = account.access_token ?? "",
+): boolean {
+	const scope = getWebSearchHelperScope(meta);
+	if (
+		!scope ||
+		!ctx.modelRouteSessionRegistry?.isPublicModelIdForProfile(
+			scope.profile.publicModelId,
+			scope.profile,
+		) ||
+		meta.headers?.has("x-better-ccflare-account-id") ||
+		!scope.accountIds.includes(account.id) ||
+		!isAccountAvailable(account) ||
+		!isFirstPartyAnthropicAccount(account) ||
+		!isAccountEligibleForRouteIntent(account, meta, ctx) ||
+		isProviderExcludedForRequest(account, getExcludedProviders(meta, false)) ||
+		!isNativeWebSearchPassthroughEligible(meta.serverToolRequirements, true)
+	)
+		return false;
+	const provider = resolveProviderForAccount(account.provider, ctx.provider);
+	const model =
+		provider &&
+		previewCandidatePhysicalModel(
+			account,
+			scope.profile.logicalModel,
+			provider,
+		);
+	return (
+		!!model &&
+		(physicalModel === undefined || physicalModel === model) &&
+		isAnthropicSubscriptionHelperAdmitted(account, model, accessToken)
+	);
+}
+
 /**
  * Selects accounts for a request based on the load balancing strategy.
  * When an active combo exists for the request's model family, returns
@@ -3377,6 +3421,39 @@ async function selectAccountsForRequestInternal(
 			serverForcedAccountId,
 			"conflicting_force_route",
 		);
+	}
+	const helperScope = getWebSearchHelperScope(meta);
+	if (helperScope && !publicForcedAccountId) {
+		const accounts = await loadRoutingInventory(meta, () =>
+			ctx.dbOps.getAllAccounts(),
+		);
+		const candidateMeta = createWebSearchHelperCandidateMeta(meta);
+		const eligible = accounts.filter((account) =>
+			isWebSearchHelperCandidateAdmitted(meta, ctx, account),
+		);
+		// An empty subscription pool is not evidence of a structural tool gap.
+		const selected = eligible.length
+			? await getOrderedAccounts(
+					candidateMeta,
+					ctx,
+					helperScope.profile.logicalModel,
+					false,
+					eligible,
+				)
+			: [];
+		meta.routingCandidateCatalog = candidateMeta.routingCandidateCatalog;
+		meta.routingCandidates = candidateMeta.routingCandidates;
+		meta.serverToolCapabilitySummary =
+			candidateMeta.serverToolCapabilitySummary;
+		const admitted = selected.filter((account) =>
+			isWebSearchHelperCandidateAdmitted(meta, ctx, account),
+		);
+		if (!admitted.length)
+			throw new ServerToolRoutingError({
+				reason: "temporary_unavailable",
+				accountId: helperScope.profile.accountId,
+			});
+		return admitted;
 	}
 	const forcedAccountId = serverForcedAccountId || publicForcedAccountId;
 	if (capabilityProfileRoute && forcedAccountId) {

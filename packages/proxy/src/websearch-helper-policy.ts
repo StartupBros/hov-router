@@ -109,6 +109,25 @@ export function authorizeWebSearchHelper(
 	);
 }
 
+/** Internal preparation retains private authority without changing source constraints. */
+export function createWebSearchHelperCandidateMeta(
+	meta: RequestMeta,
+): RequestMeta {
+	const scope = scopes.get(meta);
+	if (!scope) return meta;
+	const candidate = {
+		...meta,
+		routeExpectedProvider: null,
+		routeExpectedPhysicalModel: null,
+		routeProfileExpectedPhysicalModel: null,
+		routePhysicalModelPolicy: null,
+		routeProfilePhysicalModelPolicy: null,
+		routeCatalogRoleTargetByAccountId: null,
+	};
+	scopes.set(candidate, scope);
+	return candidate;
+}
+
 /** Candidate admission must still enforce provider exclusions and other reservations. */
 export function getWebSearchHelperScope(
 	meta: RequestMeta,

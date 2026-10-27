@@ -161,12 +161,18 @@ import {
 	sessionIdForObservation,
 } from "../session-account-observer";
 import { combineChunks } from "../stream-tee";
+import {
+	createWebSearchHelperCandidateMeta,
+	getWebSearchHelperScope,
+	isFreshWebSearchHelper,
+} from "../websearch-helper-policy";
 import { isModelRewrite } from "../worker-messages";
 import {
 	ForceRouteUnavailableError,
 	getConcreteCodexModelList,
 	getRouteProfileConstraintViolation,
 	getXaiConvId,
+	isWebSearchHelperCandidateAdmitted,
 } from "./account-selector";
 import { cancelDiscardedResponseBody } from "./discard-body-cancel";
 import { forwardObservedUpstream } from "./observed-upstream";
@@ -2459,6 +2465,13 @@ export async function proxyUnauthenticated(
 	anthropicPreCommitRescue?: AnthropicPreCommitRescueRouteContext,
 	routingAttemptLedger?: RoutingAttemptLedger,
 ): Promise<Response> {
+	const helperScope = getWebSearchHelperScope(requestMeta);
+	if (helperScope) {
+		throw new ForceRouteUnavailableError(
+			helperScope.profile.accountId ?? helperScope.profile.id,
+			"lookup_failed",
+		);
+	}
 	if (url.pathname === "/v1/messages/count_tokens") {
 		if (
 			getProviderPathCapability(ctx.provider, url.pathname).support ===
@@ -2677,6 +2690,14 @@ export async function proxyWithAccount(
 	/** Refresh credential snapshot carried into the bounded same-account retry. */
 	staleTokenRefreshTokenAtStart?: string | null,
 ): Promise<ProxyWithAccountResult> {
+	const helperScope = getWebSearchHelperScope(requestMeta);
+	if (helperScope) {
+		if (!isWebSearchHelperCandidateAdmitted(requestMeta, ctx, account)) {
+			throw new ForceRouteUnavailableError(account.id, "lookup_failed");
+		}
+		// Candidate-local model choice; never reuse the source account's chat pin.
+		modelOverride = helperScope.profile.logicalModel;
+	}
 	// Dispatch backstop (KTD7): only api.anthropic.com executes the advisor tool,
 	// so a native-Anthropic requirement never leaves a first-party account. Every
 	// caller (main loop, deferred routes, native-quota queue, fallback waves,
@@ -2858,6 +2879,15 @@ export async function proxyWithAccount(
 						);
 						if (optionalResponse) return optionalResponse;
 						if (qualityPrepare) await qualityPrepare();
+						let helperAccount: Account | null = null;
+						let helperBody: Record<string, unknown> | null = null;
+						if (helperScope) {
+							helperBody = (await request.clone().json()) as Record<
+								string,
+								unknown
+							>;
+							helperAccount = await ctx.dbOps.getAccount(account.id);
+						}
 						// This attempt owns disposable transport headers. Use the original
 						// client's parent, never a previous retry's stamped child span.
 						applyPrivateAiTraceContext(
@@ -2868,6 +2898,32 @@ export async function proxyWithAccount(
 							req.headers,
 						);
 						modelFallbackPolicy?.qualityAttempt?.assertDispatch();
+						if (helperScope) {
+							const target = new URL(request.url);
+							const bearer = request.headers.get("authorization");
+							if (
+								!helperAccount ||
+								helperAccount.created_at !== account.created_at ||
+								target.origin !== "https://api.anthropic.com" ||
+								target.pathname !== "/v1/messages" ||
+								request.headers.has("x-api-key") ||
+								!bearer?.startsWith("Bearer ") ||
+								!isFreshWebSearchHelper(helperBody) ||
+								typeof helperBody?.model !== "string" ||
+								!isWebSearchHelperCandidateAdmitted(
+									requestMeta,
+									ctx,
+									helperAccount,
+									helperBody.model,
+									bearer.slice(7),
+								)
+							) {
+								throw new ForceRouteUnavailableError(
+									account.id,
+									"lookup_failed",
+								);
+							}
+						}
 						// No await after the final authoritative gates. Observation is
 						// fail-open and cannot make an expired attempt dispatchable.
 						assertManagedWorkAvailable(req);
@@ -3450,7 +3506,7 @@ export async function proxyWithAccount(
 							routeProfileLogicalModel: null,
 							routeCatalogRoleTargetByAccountId: null,
 						}
-					: requestMeta;
+					: createWebSearchHelperCandidateMeta(requestMeta);
 			const constraintViolation = getRouteProfileConstraintViolation(
 				account,
 				routeConstraintMeta,

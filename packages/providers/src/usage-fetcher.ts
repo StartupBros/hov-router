@@ -902,6 +902,42 @@ class UsageCache {
 	 */
 	private registrations = new Map<string, PollRegistration>();
 	private nextEpoch = 0;
+	#anthropicSubscriptionEvidence = new Map<
+		string,
+		{
+			registration: PollRegistration;
+			entry: { data: AnyUsageData; timestamp: number };
+			fingerprint: string;
+			data: AnyUsageData;
+		}
+	>();
+
+	/** Poll ownership is private; ordinary cache writes cannot authorize dispatch. */
+	getAnthropicSubscriptionEvidence(
+		accountId: string,
+		accessToken: string,
+		customEndpoint?: string | null,
+		now = Date.now(),
+	): UsageSnapshot | null {
+		const proof = this.#anthropicSubscriptionEvidence.get(accountId);
+		if (
+			!proof ||
+			!accessToken ||
+			!this.isCurrent(proof.registration) ||
+			this.cache.get(accountId) !== proof.entry ||
+			(customEndpoint ?? "") !== (proof.registration.customEndpoint ?? "") ||
+			!Number.isFinite(now) ||
+			now < proof.entry.timestamp ||
+			now - proof.entry.timestamp >= 180_000 ||
+			createHash("sha256").update(accessToken).digest("hex") !==
+				proof.fingerprint
+		)
+			return null;
+		return {
+			data: structuredClone(proof.data),
+			observedAt: proof.entry.timestamp,
+		};
+	}
 	#codexAdmissionEvidence = new Map<
 		string,
 		{
@@ -945,15 +981,16 @@ class UsageCache {
 	>();
 
 	/** Keep the fence on the registration so delete/recreate cannot cause ABA. */
-	private invalidateCodexAcquisition(accountId: string): void {
+	private invalidatePollAcquisition(accountId: string): void {
 		const registration = this.registrations.get(accountId);
-		if (registration?.provider === "codex") registration.cacheRevision++;
+		if (registration) registration.cacheRevision++;
 	}
 
 	private deleteCacheEntry(accountId: string): void {
-		this.invalidateCodexAcquisition(accountId);
+		this.invalidatePollAcquisition(accountId);
 		this.cache.delete(accountId);
 		this.#codexAdmissionEvidence.delete(accountId);
+		this.#anthropicSubscriptionEvidence.delete(accountId);
 	}
 
 	/** True only while this exact registration still owns its account. */
@@ -1017,7 +1054,7 @@ class UsageCache {
 						this.isCurrent(registration) &&
 						this.cache.get(registration.accountId) === entry,
 				) ?? data;
-			this.invalidateCodexAcquisition(registration.accountId);
+			this.invalidatePollAcquisition(registration.accountId);
 			this.cache.set(registration.accountId, entry);
 			const evidence = readCodexCreditEvidence(
 				entry.data,
@@ -1266,9 +1303,10 @@ class UsageCache {
 	): Promise<{ success: boolean; retryAfterMs: number | null }> {
 		const { accountId, tokenProvider, provider, customEndpoint } = registration;
 		// Capture before token acquisition: even a write during credential refresh
-		// supersedes this poll. Scope ordering to Codex; other providers are unchanged.
+		// supersedes owned admission evidence. Codex also fences cache publication;
+		// Anthropic retains ordinary cache semantics but cannot mint proof after a write.
 		const cacheRevision = registration.cacheRevision;
-		const canPublishCodex = () =>
+		const canPublishOwnedObservation = () =>
 			this.isCurrent(registration) &&
 			registration.cacheRevision === cacheRevision;
 		try {
@@ -1445,7 +1483,7 @@ class UsageCache {
 					registration.abortController.signal,
 					accountId,
 				);
-				if (!canPublishCodex()) {
+				if (!canPublishOwnedObservation()) {
 					// Teardown or any intervening account-local cache mutation wins.
 					// Discard before reset/history callbacks or rate-limit changes.
 					return { success: false, retryAfterMs: null };
@@ -1459,7 +1497,7 @@ class UsageCache {
 						"codex",
 					);
 					// A reset callback may synchronously invalidate or replace the cache.
-					if (!canPublishCodex()) {
+					if (!canPublishOwnedObservation()) {
 						return { success: false, retryAfterMs: null };
 					}
 					this.setRegistrationCache(registration, result.data, token);
@@ -1515,7 +1553,20 @@ class UsageCache {
 						result.data,
 						"anthropic",
 					);
+					const canOwnSubscription =
+						canPublishOwnedObservation() &&
+						(provider === "anthropic" || provider === undefined) &&
+						!customEndpoint;
 					this.setRegistrationCache(registration, result.data);
+					const entry = this.cache.get(accountId);
+					if (canOwnSubscription && this.isCurrent(registration) && entry) {
+						this.#anthropicSubscriptionEvidence.set(accountId, {
+							registration,
+							entry,
+							fingerprint: createHash("sha256").update(token).digest("hex"),
+							data: structuredClone(result.data),
+						});
+					}
 					this.notifySnapshot(registration, result.data);
 					const weeklyWindow = getCanonicalActiveWeeklyWindow(
 						result.data,
@@ -1817,8 +1868,9 @@ class UsageCache {
 	 * registered but never invoked for them (pro-gate finding).
 	 */
 	private setAuthoritative(accountId: string, data: AnyUsageData): void {
+		this.#anthropicSubscriptionEvidence.delete(accountId);
 		this.#codexAdmissionEvidence.delete(accountId);
-		this.invalidateCodexAcquisition(accountId);
+		this.invalidatePollAcquisition(accountId);
 		this.cache.set(accountId, { data, timestamp: Date.now() });
 		// Ordinary usage snapshots do not prove a recent model+client-beta-specific
 		// out_of_credits condition has cleared, and an older in-flight poll can
@@ -1921,7 +1973,7 @@ class UsageCache {
 		}
 		if (!valid) {
 			this.#codexAdmissionEvidence.delete(accountId);
-			this.invalidateCodexAcquisition(accountId);
+			this.invalidatePollAcquisition(accountId);
 			// Even an unparseable response supersedes direct poll ownership.
 			const entry = this.cache.get(accountId);
 			if (entry) this.cache.set(accountId, { ...entry });
@@ -1942,7 +1994,7 @@ class UsageCache {
 					merged[key] = prev[key];
 			}
 		}
-		this.invalidateCodexAcquisition(accountId);
+		this.invalidatePollAcquisition(accountId);
 		this.cache.set(accountId, { data, timestamp: now });
 		const evidence = this.#codexAdmissionEvidence.get(accountId);
 		if (retained && valid && evidence && windows.size > 0) {
@@ -2108,6 +2160,7 @@ class UsageCache {
 		}
 		this.cache.clear();
 		this.#codexAdmissionEvidence.clear();
+		this.#anthropicSubscriptionEvidence.clear();
 		this.codexCreditEvidence.clear();
 		this.usageRateLimitedUntil.clear();
 		this.modelScopedDepletions.clear();

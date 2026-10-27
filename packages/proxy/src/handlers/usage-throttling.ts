@@ -32,6 +32,47 @@ export interface AutoCapacityOptions {
 	readonly spendGrants: readonly QualitySpendGrant[];
 }
 
+/** Subscription helpers use the actual native model line and never spend grants. */
+export function isAnthropicSubscriptionHelperAdmitted(
+	account: Account,
+	physicalModel: string,
+	accessToken = account.access_token ?? "",
+): boolean {
+	if (
+		account.provider !== "anthropic" ||
+		account.custom_endpoint ||
+		account.api_key?.trim() ||
+		!account.refresh_token?.trim() ||
+		!accessToken ||
+		account.access_token !== accessToken
+	)
+		return false;
+	const family = getModelFamily(physicalModel);
+	if (
+		family !== "fable" &&
+		family !== "opus" &&
+		family !== "sonnet" &&
+		family !== "haiku"
+	)
+		return false;
+	const snapshot = usageCache.getAnthropicSubscriptionEvidence(
+		account.id,
+		accessToken,
+		account.custom_endpoint,
+	);
+	return (
+		snapshot !== null &&
+		evaluateAutoCapacity(snapshot.data, {
+			accountId: account.id,
+			provider: "anthropic",
+			line: `claude-${family}`,
+			requestModel: physicalModel,
+			observedAt: snapshot.observedAt,
+			spendGrants: [],
+		}).status === "admit"
+	);
+}
+
 /** Mandatory Auto policy, intentionally separate from manual/predictive flags. */
 export function evaluateAutoCapacity(
 	data: unknown,
