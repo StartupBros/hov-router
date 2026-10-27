@@ -12,6 +12,7 @@ import {
 	requestEvents,
 	setProbeBackoff,
 } from "@better-ccflare/core";
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import type { BunSqlAdapter } from "@better-ccflare/database";
 import { Logger } from "@better-ccflare/logger";
 import { fetchUsageData, getProvider } from "@better-ccflare/providers";
@@ -651,7 +652,7 @@ export class AutoRefreshScheduler {
 				log.error(
 					`🔧 MANUAL ACTION REQUIRED: Please run the following command to reauthenticate:`,
 				);
-				log.error(`   bun run cli --reauthenticate "${accountRow.name}"`);
+				log.error(`   ${COMMAND_NAME} --reauthenticate "${accountRow.name}"`);
 
 				log.error(
 					`📋 Alternative: You can also reauthenticate through the web dashboard at http://localhost:${this.proxyContext.runtime.port}/`,
@@ -668,7 +669,7 @@ export class AutoRefreshScheduler {
 					`🚫 Auto-refresh has been DISABLED for account "${accountRow.name}" until reauthentication is completed`,
 				);
 				log.error(
-					`💡 Re-enable auto-refresh after reauthentication with: bun run cli --auto-refresh "${accountRow.name}"`,
+					`💡 After reauthenticating, turn auto-refresh back on with the Auto-refresh switch for "${accountRow.name}" on the dashboard's Accounts page`,
 				);
 
 				return false;
@@ -974,7 +975,7 @@ export class AutoRefreshScheduler {
 				this.consecutiveFailures.delete(accountId);
 				if (changes > 0) {
 					log.error(
-						`Account ${accountName} has failed ${newFailures} consecutive auto-refresh attempts — PAUSED (failure_threshold). Resume with: bun run cli --resume "${accountName}"`,
+						`Account ${accountName} has failed ${newFailures} consecutive auto-refresh attempts — PAUSED (failure_threshold). Resume with: ${COMMAND_NAME} --resume "${accountName}"`,
 					);
 				} else {
 					log.warn(

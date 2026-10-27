@@ -1523,7 +1523,7 @@ export default async function startServer(options?: {
 	// needs to know it across restarts.
 	const internalProbeSecret = crypto.randomUUID();
 	// Persisted secret shared with the CLI (via the same on-disk config file)
-	// so `bun run cli --reauthenticate` / `--force-reset-rate-limit` can
+	// so `hov-router --reauthenticate` / `--force-reset-rate-limit` can
 	// notify this locally-running server of DB-side changes even when
 	// API-key auth is enabled (issue #216). See AuthService#isLocalControlRequest.
 	const localControlSecret = config.getLocalControlSecret();
