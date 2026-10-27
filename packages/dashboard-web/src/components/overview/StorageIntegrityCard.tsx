@@ -1,3 +1,4 @@
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import {
 	AlertTriangle,
 	CheckCircle,
@@ -231,7 +232,7 @@ export function StorageIntegrityBanner() {
 				</p>
 				<p className="text-muted-foreground">
 					{data?.last_integrity_error ??
-						"See server logs and run `bun run cli --doctor` for details."}
+						`See server logs and run \`${COMMAND_NAME} --doctor\` for details.`}
 				</p>
 			</div>
 		</div>

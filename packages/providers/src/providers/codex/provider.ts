@@ -16,6 +16,7 @@ import {
 	ValidationError,
 	validateEndpointUrl,
 } from "@better-ccflare/core";
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import {
 	CODEX_LOGICAL_MODEL_FAMILY_HEADER,
 	sanitizeProxyHeaders,
@@ -2726,7 +2727,7 @@ export class CodexProvider extends BaseProvider {
 			if (errorCode === "refresh_token_reused") {
 				throw new OAuthRefreshTokenError(
 					account.id,
-					`Codex refresh_token_reused for account ${account.name}. Please re-authenticate with: bun run cli --reauthenticate ${account.name}`,
+					`Codex refresh_token_reused for account ${account.name}. Please re-authenticate with: ${COMMAND_NAME} --reauthenticate ${account.name}`,
 					errorCode,
 				);
 			}

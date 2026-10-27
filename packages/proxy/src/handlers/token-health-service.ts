@@ -1,3 +1,4 @@
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import { Logger } from "@better-ccflare/logger";
 import type { Account } from "@better-ccflare/types";
 import { REFRESH_TOKEN_HEALTH_CHECK_INTERVAL_MS } from "../constants";
@@ -38,7 +39,7 @@ export function createTokenHealthService(): TokenHealthService {
 					log.warn(`  - ${account.name} (${account.provider})`);
 				});
 				log.warn(
-					"Run 'bun run cli --reauth-needed' to see details and get re-authentication commands.",
+					`Re-authenticate each with '${COMMAND_NAME} --reauthenticate <name>', or from the dashboard's Accounts page.`,
 				);
 			}
 

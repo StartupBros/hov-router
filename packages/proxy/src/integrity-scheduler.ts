@@ -1,4 +1,5 @@
 import { TIME_CONSTANTS } from "@better-ccflare/core";
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import type { DatabaseOperations } from "@better-ccflare/database";
 import { runIntegrityCheckInWorker } from "@better-ccflare/database";
 import { Logger } from "@better-ccflare/logger";
@@ -170,7 +171,7 @@ export function startIntegrityScheduler(
 		} else {
 			logger.error(`Quick integrity check FAILED: ${error}`);
 			logger.error(
-				"Database corruption detected. Run `bun run cli --doctor` for details.",
+				`Database corruption detected. Run \`${COMMAND_NAME} --doctor\` for details.`,
 			);
 		}
 	};
@@ -193,7 +194,7 @@ export function startIntegrityScheduler(
 		} else {
 			logger.error(`Full integrity check FAILED: ${error}`);
 			logger.error(
-				"Database corruption detected. Run `bun run cli --doctor` for details.",
+				`Database corruption detected. Run \`${COMMAND_NAME} --doctor\` for details.`,
 			);
 		}
 	};

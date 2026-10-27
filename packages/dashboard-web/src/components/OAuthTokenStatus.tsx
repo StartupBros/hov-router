@@ -1,3 +1,4 @@
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import { AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
@@ -147,7 +148,7 @@ export function OAuthTokenStatus({
 				return `OAuth token expiring soon - ${message}`;
 			case "critical":
 			case "expired":
-				return `OAuth token expired - ${message} - Re-authenticate with: bun run cli --reauthenticate ${accountName}`;
+				return `OAuth token expired - ${message} - Re-authenticate with: ${COMMAND_NAME} --reauthenticate ${accountName}`;
 			case "loading":
 				return "Checking OAuth token status...";
 			default:

@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import { DatabaseOperations } from "../database-operations";
 
 function tempDbPath(): string {
@@ -489,8 +490,12 @@ describe("DatabaseOperations.generateRecoveryInstructions", () => {
 		expect(instructions).toContain("BACKUP CORRUPTED DATABASE");
 	});
 
-	it("contains bun start instruction", () => {
+	it("names the installed command, and only flags it accepts", () => {
 		const instructions = dbOps.generateRecoveryInstructions();
-		expect(instructions).toContain("bun start");
+		expect(instructions).toContain(`${COMMAND_NAME} --serve`);
+		expect(instructions).toContain(`${COMMAND_NAME} --add-account <name>`);
+		expect(instructions).not.toContain("bun start");
+		expect(instructions).not.toContain("bun run cli");
+		expect(instructions).not.toContain("--stop");
 	});
 });
