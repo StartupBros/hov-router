@@ -3,6 +3,20 @@ import type { BunSqlAdapter } from "../adapters/bun-sql-adapter";
 export abstract class BaseRepository<_T> {
 	constructor(protected adapter: BunSqlAdapter) {}
 
+	protected queryOffThread<R>(
+		sql: string,
+		params: unknown[] = [],
+	): Promise<R[]> {
+		return this.adapter.queryOffThread<R>(sql, params);
+	}
+
+	protected getOffThread<R>(
+		sql: string,
+		params: unknown[] = [],
+	): Promise<R | null> {
+		return this.adapter.getOffThread<R>(sql, params);
+	}
+
 	protected async query<R>(sql: string, params: unknown[] = []): Promise<R[]> {
 		return this.adapter.query<R>(sql, params);
 	}

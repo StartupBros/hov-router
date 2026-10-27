@@ -321,6 +321,8 @@ BETTER_CCFLARE_CONFIG_PATH=/path/to/config.json  # Custom config location
 BETTER_CCFLARE_DB_PATH=/path/to/database.db  # Custom database path (default: ~/.config/better-ccflare/better-ccflare.db)
                                        # Use this for development/testing with a separate database
 
+BETTER_CCFLARE_DB_READER_WORKER=0       # Set 0, false, or off to disable the off-thread reader; heavy reads run on the main thread as before.
+
 # Logging and Debugging
 LOG_LEVEL=INFO                         # Log level (ERROR, WARN, INFO, DEBUG)
 LOG_FORMAT=json                        # Log format (json or text)

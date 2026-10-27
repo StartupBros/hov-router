@@ -5,6 +5,9 @@ import { StatsRepository } from "../stats.repository";
 const createRepoWithRows = (rows: Array<Record<string, unknown>>) => {
 	const adapter = {
 		query: async () => rows,
+		queryOffThread() {
+			return this.query();
+		},
 	};
 
 	// biome-ignore lint/suspicious/noExplicitAny: partial mock adapter object

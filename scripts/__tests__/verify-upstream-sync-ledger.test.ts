@@ -27,6 +27,7 @@ const EXCLUDED_PATH = "packages/proxy/src/inline-worker.ts";
 const CANONICAL_EXCLUSIONS = [
   "packages/database/src/inline-incremental-vacuum-worker.ts",
   "packages/database/src/inline-integrity-check-worker.ts",
+  "packages/database/src/inline-reader-worker.ts",
   "packages/database/src/inline-vacuum-worker.ts",
   EXCLUDED_PATH,
 ];

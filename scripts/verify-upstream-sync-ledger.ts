@@ -26,6 +26,7 @@ const DEFAULT_TRACKING_ISSUE = 338;
 const CANONICAL_EXCLUSIONS = [
   "packages/database/src/inline-incremental-vacuum-worker.ts",
   "packages/database/src/inline-integrity-check-worker.ts",
+  "packages/database/src/inline-reader-worker.ts",
   "packages/database/src/inline-vacuum-worker.ts",
   "packages/proxy/src/inline-worker.ts",
 ] as const;

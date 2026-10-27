@@ -28,9 +28,10 @@ Display text uses the constants instead of hard-coded names: `PRODUCT_NAME` / `C
 - `packages/database/src/inline-vacuum-worker.ts`
 - `packages/database/src/inline-integrity-check-worker.ts`
 - `packages/database/src/inline-incremental-vacuum-worker.ts`
+- `packages/database/src/inline-reader-worker.ts`
 - `packages/proxy/src/inline-worker.ts` (orphaned — see below)
 
-All three `packages/database` files are gitignored build output of `bun run build:cli`.
+All four `packages/database` files are gitignored build output of `bun run build:cli`.
 If one is accidentally modified, do not stage or commit it; re-run that build to
 restore it. A fresh worktree will not have them at all, and `bun test` crashes on
 import until you build once.

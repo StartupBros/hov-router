@@ -808,7 +808,7 @@ export class RequestRepository extends BaseRepository<RequestData> {
 		const promptTokens =
 			"(COALESCE(input_tokens, 0) + COALESCE(cache_read_input_tokens, 0) + COALESCE(cache_creation_input_tokens, 0))";
 		const overThreshold = `${promptTokens} > ${LONG_CONTEXT_PROMPT_TOKENS}`;
-		const rows = await this.query<TokenAggregateRow>(
+		const rows = await this.queryOffThread<TokenAggregateRow>(
 			`
 			SELECT
 				COALESCE(model, '') as model,
@@ -838,7 +838,10 @@ export class RequestRepository extends BaseRepository<RequestData> {
 		// count. An entry with no model joins the '' line, as an executor row
 		// with no model does, so window value reports it unpriced rather than
 		// dropping it.
-		const advisorRows = await this.query<{ id: string; advisor_usage: string }>(
+		const advisorRows = await this.queryOffThread<{
+			id: string;
+			advisor_usage: string;
+		}>(
 			`
 			SELECT id, advisor_usage
 			FROM requests

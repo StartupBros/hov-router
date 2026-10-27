@@ -446,6 +446,7 @@ describe("Claude Code 2.1.207 reactive compaction compatibility", () => {
 		);
 		try {
 			mock.module("../../../packages/database/src/inline-integrity-check-worker", () => ({ EMBEDDED_INTEGRITY_CHECK_WORKER_CODE: "" }));
+			mock.module("../../../packages/database/src/inline-reader-worker", () => ({ EMBEDDED_READER_WORKER_CODE: "" }));
 			mock.module("../../../packages/database/src/inline-vacuum-worker", () => ({ EMBEDDED_VACUUM_WORKER_CODE: "" }));
 			mock.module("../../../packages/database/src/inline-incremental-vacuum-worker", () => ({ EMBEDDED_INCREMENTAL_VACUUM_WORKER_CODE: "" }));
 			const collector = {

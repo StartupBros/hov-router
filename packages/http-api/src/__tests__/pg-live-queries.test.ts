@@ -134,6 +134,7 @@ interface SourceFile {
 const EXCLUDED_GENERATED_DATABASE_SOURCES = new Set([
 	"inline-vacuum-worker.ts",
 	"inline-integrity-check-worker.ts",
+	"inline-reader-worker.ts",
 	"inline-incremental-vacuum-worker.ts",
 ]);
 

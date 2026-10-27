@@ -1986,7 +1986,8 @@ export class AlertService {
 		// Bound the query at `timestamp` so the current poll is represented
 		// EXACTLY once regardless of insert/evaluate ordering: on SQLite the
 		// caller's un-awaited recordUsageSnapshot commits synchronously before
-		// this SELECT runs, and reading that row PLUS the push below would
+		// the worker read is posted, so it still sees the snapshot. Reading
+		// that row PLUS the push below would
 		// double-count the current point and bias the regression (pro-gate
 		// cross-model finding).
 		//
@@ -1995,7 +1996,7 @@ export class AlertService {
 		// at the supported 10s poll interval — re-reading every raw row per
 		// poll is quadratic over the cycle (pro-gate finding). Integer
 		// division truncates identically on SQLite and Postgres.
-		const rows = await this.db.query<UsageSnapshotSqlRow>(
+		const rows = await this.db.queryOffThread<UsageSnapshotSqlRow>(
 			`SELECT MAX(timestamp) AS timestamp, AVG(utilization) AS utilization, MAX(resets_at) AS resets_at
 			 FROM usage_snapshots
 			 WHERE account_id = ? AND window_key = ? AND timestamp >= ? AND timestamp < ?

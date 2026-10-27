@@ -46,4 +46,5 @@ test_*.sh
 docs/superpowers/
 docs/plans/
 packages/database/src/inline-integrity-check-worker.ts
+packages/database/src/inline-reader-worker.ts
 .tmp/

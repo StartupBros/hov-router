@@ -40,7 +40,7 @@ export class StatsRepository {
 	 */
 	async getAggregatedStats(sinceMs?: number): Promise<AggregatedStats> {
 		const since = sinceMs ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
-		const stats = await this.adapter.get<{
+		const stats = await this.adapter.getOffThread<{
 			totalRequests: unknown;
 			successfulRequests: unknown;
 			avgResponseTime: unknown;
@@ -246,7 +246,7 @@ export class StatsRepository {
 		// a real account has that id and a different name. Sum rates by id before
 		// filtering/limiting display groups: a hidden group containing only
 		// legacy NULL request ids can still contribute to the shared rate.
-		const rows = await this.adapter.query<{
+		const rows = await this.adapter.queryOffThread<{
 			name: string;
 			requestCount: unknown;
 			totalRequests: unknown;
@@ -322,7 +322,7 @@ export class StatsRepository {
 		sinceMs: number,
 		limit = 10,
 	): Promise<RecentErrorGroup[]> {
-		const rows = await this.adapter.query<{
+		const rows = await this.adapter.queryOffThread<{
 			latest_request_id: unknown;
 			latest_timestamp: unknown;
 			error_code: unknown;
@@ -432,7 +432,7 @@ export class StatsRepository {
 	async getTopModels(
 		limit = 5,
 	): Promise<Array<{ model: string; count: number; percentage: number }>> {
-		const rows = await this.adapter.query<{
+		const rows = await this.adapter.queryOffThread<{
 			model: string;
 			count: unknown;
 			percentage: unknown;
@@ -554,7 +554,7 @@ export class StatsRepository {
 			a.session_start,
 		]);
 
-		const rows = await this.adapter.query<{
+		const rows = await this.adapter.queryOffThread<{
 			account_used: string;
 			requests: unknown;
 			input_tokens: unknown;

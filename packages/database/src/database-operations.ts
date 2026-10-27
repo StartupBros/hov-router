@@ -49,6 +49,7 @@ import {
 } from "./adapters/bun-sql-adapter";
 import type { CleanupPacer } from "./cleanup-pacing";
 import { EMBEDDED_INCREMENTAL_VACUUM_WORKER_CODE } from "./inline-incremental-vacuum-worker";
+import { EMBEDDED_READER_WORKER_CODE } from "./inline-reader-worker";
 import { EMBEDDED_VACUUM_WORKER_CODE } from "./inline-vacuum-worker";
 import {
 	type MaintenanceWorkerOptions,
@@ -61,6 +62,7 @@ import {
 	runStartupGuard,
 	startHeartbeatLoop,
 } from "./multi-instance-guard";
+import { OffThreadReader } from "./off-thread-reader";
 import { resolveDbPath } from "./paths";
 import {
 	AccountRepository,
@@ -434,6 +436,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private maintenanceOwner: MaintenanceWorkerOwner;
 	private compactionOwner: MaintenanceWorkerOwner;
 	private closePromise?: Promise<void>;
+	private offThreadReader?: OffThreadReader;
 	private closing = false;
 
 	constructor(
@@ -597,6 +600,20 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			}
 
 			this.adapter = new BunSqlAdapter(this.sqliteDb);
+			if (
+				resolvedPath !== ":memory:" &&
+				!["0", "false", "off"].includes(
+					process.env.BETTER_CCFLARE_DB_READER_WORKER?.toLowerCase() ?? "",
+				)
+			) {
+				this.offThreadReader = new OffThreadReader({
+					dbPath: resolvedPath,
+					busyTimeoutMs: this.dbConfig.busyTimeoutMs ?? 10000,
+					embeddedCode: EMBEDDED_READER_WORKER_CODE,
+					sourceUrl: new URL("./reader-worker.ts", import.meta.url).href,
+				});
+				this.adapter.setOffThreadReader(this.offThreadReader);
+			}
 		}
 
 		// Initialize repositories
@@ -2086,6 +2103,7 @@ OAuth tokens will need to be re-authenticated.
 		// pending owner must positively settle; ambiguity holds adapter close
 		// until the supervisor reaps the process instead of allowing replacement.
 		await Promise.all([
+			this.offThreadReader?.close(),
 			this.maintenanceOwner.close(),
 			this.compactionOwner.close(),
 			stopHeartbeat?.(),
