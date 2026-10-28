@@ -8,7 +8,7 @@ import { Logger } from "@better-ccflare/logger";
 import type { AlertsConfigPayload } from "@better-ccflare/types";
 import { getAlertsConfig, setAlertsConfig } from "../services/alerts";
 import type { APIContext } from "../types";
-import { startSseKeepalive } from "./sse-keepalive";
+import { createEventStreamHandler } from "./event-stream";
 
 const log = new Logger("AlertsHandler");
 
@@ -135,66 +135,5 @@ export function createAlertsAcknowledgeAllHandler(context: APIContext) {
 }
 
 export function createAlertsStreamHandler() {
-	return (req: Request): Response => {
-		let writeHandler: ((data: AlertEvt) => void) | null = null;
-		let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-		let stopKeepalive: (() => void) | null = null;
-		let isClosed = false;
-		const handleAbort = () => cleanup();
-		const cleanup = () => {
-			if (isClosed) return;
-			isClosed = true;
-			stopKeepalive?.();
-			stopKeepalive = null;
-			if (writeHandler) {
-				alertEvents.off("event", writeHandler);
-				writeHandler = null;
-			}
-			req.signal.removeEventListener("abort", handleAbort);
-			try {
-				controller?.close();
-			} catch {
-				// The consumer may already have cancelled the stream.
-			}
-		};
-		const stream = new ReadableStream<Uint8Array>({
-			start(streamController) {
-				controller = streamController;
-				if (req.signal.aborted) {
-					cleanup();
-					return;
-				}
-				req.signal.addEventListener("abort", handleAbort);
-				const encoder = new TextEncoder();
-				writeHandler = (data: AlertEvt) => {
-					if (isClosed) return;
-					try {
-						streamController.enqueue(
-							encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
-						);
-					} catch {
-						cleanup();
-					}
-				};
-				try {
-					streamController.enqueue(
-						encoder.encode("event: connected\ndata: ok\n\n"),
-					);
-				} catch {
-					cleanup();
-					return;
-				}
-				alertEvents.on("event", writeHandler);
-				stopKeepalive = startSseKeepalive(streamController, cleanup);
-			},
-			cancel: cleanup,
-		});
-		return new Response(stream, {
-			headers: {
-				"Content-Type": "text/event-stream",
-				Connection: "keep-alive",
-				"Cache-Control": "no-cache",
-			},
-		});
-	};
+	return createEventStreamHandler<AlertEvt>(alertEvents, "event");
 }
