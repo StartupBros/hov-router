@@ -256,6 +256,8 @@ async function expectUndisclosedRefusal(response: Response) {
 		id,
 		"helper-sibling",
 		"helper_admission_unavailable",
+		"anthropic-subscription",
+		"api-only",
 	])
 		expect(text).not.toContain(hidden);
 }
@@ -1323,7 +1325,9 @@ describe("subscription pool WebSearch helper selection", () => {
 		expect(await selectedIds(meta, ctx)).toEqual([sibling.id]);
 	});
 
-	it("answers an upstream 429 once and cools that account down for the next search", async () => {
+	it.each([
+		429, 529,
+	])("forwards an upstream %d once and cools that account down for the next search", async (status) => {
 		await poll();
 		await poll({ enabled: false }, undefined, "helper-sibling");
 		const { meta, ctx, native } = fixture(account(), subscriptionPool);
@@ -1339,21 +1343,34 @@ describe("subscription pool WebSearch helper selection", () => {
 			return { consecutiveRateLimits: 1, applied: true };
 		};
 		ctx.dbOps.updateAccountUsage = async () => {};
+		ctx.dbOps.updateAccountRateLimitMeta = async () => {};
 		let sends = 0;
 		globalThis.fetch = (async () => {
 			sends++;
 			return Response.json(
 				{
 					type: "error",
-					error: { type: "rate_limit_error", message: "offline" },
+					error: {
+						type: status === 429 ? "rate_limit_error" : "overloaded_error",
+						message: "offline",
+					},
 				},
-				{ status: 429, headers: { "retry-after": "60" } },
+				{
+					status,
+					headers: {
+						"retry-after": "60",
+						"anthropic-ratelimit-unified-status": "rejected",
+						"anthropic-ratelimit-unified-reset": String(
+							Math.floor(Date.now() / 1000) + 60,
+						),
+					},
+				},
 			);
 		}) as typeof fetch;
 		try {
 			const response = await wholeHelper(ctx);
 			await response.text();
-			expect(response.ok).toBe(false);
+			expect(response.status).toBe(status);
 			expect(sends).toBe(1);
 			for (const write of writes) await write();
 			expect(marked).toEqual([native.id]);
