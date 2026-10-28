@@ -564,7 +564,7 @@ describe("explicit subscription WebSearch helper selection", () => {
 
 	it("refuses an empty approved pool even with ordinary passthrough enabled", async () => {
 		const previous = process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL;
-		process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = "true";
+		process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = "1";
 		let sends = 0;
 		globalThis.fetch = (async () => {
 			sends++;
@@ -1283,7 +1283,7 @@ describe("subscription pool WebSearch helper selection", () => {
 		await poll({ enabled: false }, undefined, id, 100);
 		await poll({ enabled: false }, undefined, "helper-sibling", 100);
 		const previous = process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL;
-		process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = "true";
+		process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = "1";
 		let sends = 0;
 		globalThis.fetch = (async () => {
 			sends++;
