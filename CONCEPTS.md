@@ -30,6 +30,9 @@ model of the line appears. A profile whose accounts are all paused, or can never
 its assertions, is not offered. The operator's configured name shows only while the served model
 is still unknown.
 
+A profile can keep former names that still resolve to it, so a client that saved one keeps
+working after a rename. Only the current name is offered to the client and recorded on requests.
+
 ### Force route
 
 A request's demand that one exact account serve it, carried by the account header or by a
@@ -37,6 +40,12 @@ pinned route profile. Selection fails closed: when that account is paused, rate-
 capacity, or cannot satisfy the profile's model assertions, the request is rejected rather than
 routed to any other account, so a forced request never lands on a provider the caller did not
 name. The rejection happens before any provider code runs, so it leaves no provider-side trace.
+
+A pinned profile that sets no context or output bound may opt in to one narrow exception for its
+web-search helpers (see Trusted internal helper). Those helpers go to approved subscription
+accounts whose fresh usage evidence shows allowance left and no billing beyond the plan, with no
+further fallback. The session's own requests stay on the pinned account. The account header
+allows no exception and switches the opt-in off.
 
 ### Logical model
 
