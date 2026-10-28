@@ -618,6 +618,7 @@ routing, error reasons, and saved picker IDs are unchanged.
 | Field | Required | Contract |
 |---|---:|---|
 | `id` | yes | Unique lowercase kebab-case slug, up to 48 characters. HoV Router generates the reserved public model ID `claude-bccf-route-<id>`; clients cannot configure a different public ID |
+| `aliases` | no | Former `id` values that still resolve to this profile, so a session or setting that saved `claude-bccf-route-<old-id>` keeps working after a rename. A list of 1–8 slugs, each following the `id` rules exactly (no surrounding spaces) and unused by any profile's `id` or alias. The `[1m]` form is accepted only when the profile sets `clientContextWindowHint`. Discovery lists only the `id`, and requests record the `id`. Remove an alias, with a restart, once nothing sends it |
 | `displayName` | yes | Fallback picker label, 1–120 characters. Discovery labels each row with the model it serves (see [Claude Code `/model` setup](#claude-code-model-setup)); this label shows only while that model is unknown, for example before Codex catalogs load after a restart |
 | `description` | no | Operator-facing description, up to 500 characters. It is never returned by discovery; the picker description is generated from the profile kind instead |
 | `selection` | no | Set to `capability` for a live matching-account pool. When omitted, the profile retains legacy exact-account selection |

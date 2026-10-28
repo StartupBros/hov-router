@@ -11,6 +11,8 @@ export const MODEL_ROUTE_PROFILE_MODEL_PREFIX = "claude-bccf-route-" as const;
 
 const MAX_PROFILES = 32;
 const MAX_ID_LENGTH = 48;
+const MAX_ALIASES = 8;
+const PROFILE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_DISPLAY_NAME_LENGTH = 120;
 const MAX_DESCRIPTION_LENGTH = 500;
 const MAX_ACCOUNT_ID_LENGTH = 128;
@@ -21,6 +23,7 @@ const DEFAULT_MAX_ENTRIES = 10_000;
 
 const PROFILE_KEYS = new Set([
 	"id",
+	"aliases",
 	"displayName",
 	"description",
 	"accountId",
@@ -71,6 +74,8 @@ export interface ModelRouteProfile {
 	readonly publicModelId: string;
 	/** Client-facing route ID advertised by local model discovery. */
 	readonly discoveryModelId: string;
+	/** Former ids still accepted as picker ids after a rename; never advertised. */
+	readonly aliases?: readonly string[];
 	readonly displayName: string;
 	readonly description?: string;
 	readonly accountId?: string;
@@ -250,6 +255,52 @@ function optionalPositiveInteger(
 	return value;
 }
 
+function optionalAliases(
+	entry: Record<string, unknown>,
+	index: number,
+): readonly string[] | undefined {
+	if (!("aliases" in entry)) return undefined;
+	const value = entry.aliases;
+	if (
+		!Array.isArray(value) ||
+		value.length === 0 ||
+		value.length > MAX_ALIASES
+	) {
+		throw configError(
+			`profile ${index} field aliases must list 1-${MAX_ALIASES} former ids`,
+		);
+	}
+	return Object.freeze(
+		value.map((alias: unknown) => {
+			if (
+				typeof alias !== "string" ||
+				alias.length > MAX_ID_LENGTH ||
+				!PROFILE_ID_PATTERN.test(alias)
+			) {
+				throw configError(
+					`profile ${index} field aliases must contain lowercase kebab-case slugs of at most ${MAX_ID_LENGTH} characters`,
+				);
+			}
+			return alias;
+		}),
+	);
+}
+
+/**
+ * Every picker id that resolves to the profile: its own id first, then each
+ * alias, each followed by its `[1m]` form when the profile advertises the hint.
+ */
+export function modelRouteProfileModelIds(
+	profile: ModelRouteProfile,
+): readonly string[] {
+	return [profile.id, ...(profile.aliases ?? [])].flatMap((id) => {
+		const modelId = `${MODEL_ROUTE_PROFILE_MODEL_PREFIX}${id}`;
+		return profile.clientContextWindowHint === "1m"
+			? [modelId, `${modelId}[1m]`]
+			: [modelId];
+	});
+}
+
 function optionalClientContextWindowHint(
 	entry: Record<string, unknown>,
 	index: number,
@@ -311,7 +362,7 @@ export function parseModelRouteProfiles(
 			);
 		}
 		const id = requiredString(candidate, "id", index, MAX_ID_LENGTH);
-		if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
+		if (!PROFILE_ID_PATTERN.test(id)) {
 			throw configError(
 				`profile ${index} field id must be a lowercase kebab-case slug`,
 			);
@@ -322,6 +373,14 @@ export function parseModelRouteProfiles(
 		}
 		ids.add(id);
 		publicIds.add(publicModelId);
+		const aliases = optionalAliases(candidate, index);
+		for (const alias of aliases ?? []) {
+			const aliasModelId = `${MODEL_ROUTE_PROFILE_MODEL_PREFIX}${alias}`;
+			if (publicIds.has(aliasModelId)) {
+				throw configError(`duplicate profile or public model id: ${alias}`);
+			}
+			publicIds.add(aliasModelId);
+		}
 
 		const defaultEffortValue = candidate.defaultEffort;
 		let defaultEffort: ModelRouteEffort | undefined;
@@ -530,6 +589,7 @@ export function parseModelRouteProfiles(
 			id,
 			publicModelId,
 			discoveryModelId,
+			...(aliases === undefined ? {} : { aliases }),
 			displayName: requiredString(
 				candidate,
 				"displayName",
@@ -679,9 +739,8 @@ export class ModelRouteSessionRegistry {
 		);
 		const profilesByPublicModelId = new Map<string, ModelRouteProfile>();
 		for (const profile of profiles) {
-			profilesByPublicModelId.set(profile.publicModelId, profile);
-			if (profile.discoveryModelId !== profile.publicModelId) {
-				profilesByPublicModelId.set(profile.discoveryModelId, profile);
+			for (const modelId of modelRouteProfileModelIds(profile)) {
+				profilesByPublicModelId.set(modelId, profile);
 			}
 		}
 		this.profilesByPublicModelId = profilesByPublicModelId;

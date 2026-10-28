@@ -152,6 +152,17 @@ describe("buildModelRouteDiscoveryModels", () => {
 			expect(JSON.stringify(rows)).not.toContain("private-search-account");
 		}
 	});
+	it("lists a renamed route once, by its new id, in live and fallback discovery", () => {
+		const configured = registry([
+			{ ...PROFILES[4], id: "ai-gateway-chat", aliases: ["glm-5-3-flash"] },
+		]);
+		for (const rows of [
+			configured.getDiscoveryModels(),
+			buildModelRouteDiscoveryModels(configured, accounts(), deps()),
+		]) {
+			expect(rows.map((row) => row.id)).toEqual([route("ai-gateway-chat")]);
+		}
+	});
 	it("names the model each route serves and hides routes that cannot run", () => {
 		expect(
 			buildModelRouteDiscoveryModels(registry(), accounts(), deps()),

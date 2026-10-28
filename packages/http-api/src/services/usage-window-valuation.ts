@@ -4,6 +4,7 @@ import {
 } from "@better-ccflare/core";
 import {
 	type ModelRouteProfile,
+	modelRouteProfileModelIds,
 	parseModelRouteProfiles,
 } from "@better-ccflare/proxy";
 
@@ -17,8 +18,8 @@ export function valueWindowAggregates(
 	return valueCoreAggregates(aggregates, atMs, (model) => {
 		if (!model.startsWith("claude-bccf-route-")) return model;
 		const bare = model.replace(/\[1m\]$/, "");
-		const profile = profiles.find(
-			(p) => p.publicModelId === bare || p.discoveryModelId === model,
+		const profile = profiles.find((p) =>
+			modelRouteProfileModelIds(p).includes(bare),
 		);
 		// Catalog roles can select a different physical model for each account.
 		// Current config cannot reconstruct that historical selection safely.

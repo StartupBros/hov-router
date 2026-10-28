@@ -205,6 +205,7 @@ export {
 	type ModelRouteSelection,
 	ModelRouteSessionRegistry,
 	type ModelRouteSessionRegistryOptions,
+	modelRouteProfileModelIds,
 	parseModelRouteProfiles,
 } from "./model-route-profiles";
 export type {
