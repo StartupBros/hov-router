@@ -632,7 +632,7 @@ routing, error reasons, and saved picker IDs are unchanged.
 | `contextWindow` | no | Exact-account profiles only; required with `maxOutputTokens`. Positive integer total context bound |
 | `maxOutputTokens` | no | Exact-account profiles only; required with `contextWindow`. Positive integer less than `contextWindow`; caps request output |
 | `clientContextWindowHint` | no | Only `"1m"` is accepted. It is a Claude Code context-classification hint and is invalid with bounded `contextWindow` or `maxOutputTokens` |
-| `webSearchHelper` | no | Exact-account, unbounded profiles only: invalid with `selection`, `contextWindow` or `maxOutputTokens`. An object whose only field, `accountIds`, is a non-empty list of unique account IDs allowed to serve this profile's standalone WebSearch helpers. Never returned by discovery. See [Subscription WebSearch helper opt-in](#subscription-websearch-helper-opt-in) |
+| `webSearchHelper` | no | Exact-account, unbounded profiles only: invalid with `selection`, `contextWindow` or `maxOutputTokens`. An object with exactly one field: `accountIds`, a non-empty list of unique account IDs allowed to serve this profile's standalone WebSearch helpers, or `"accounts": "anthropic-subscription"`, which allows every first-party Anthropic subscription account that passes the same checks. Never returned by discovery. See [Subscription WebSearch helper opt-in](#subscription-websearch-helper-opt-in) |
 
 At startup, HoV Router logs only the configured profile count, never the JSON, account IDs, logical models, or physical models. Legacy profiles name exact account IDs, so keep those values in a protected environment file or service-manager credential rather than committing a real deployment value. Capability profiles contain no account IDs, but their provider/model constraints are still operational configuration and should be protected accordingly.
 
@@ -679,20 +679,22 @@ CCFLARE_MODEL_ROUTE_PROFILES_JSON='[
     "expectedProvider": "openai-compatible",
     "expectedPhysicalModel": "chat",
     "exclusiveAccount": true,
-    "webSearchHelper": { "accountIds": ["<approved-anthropic-oauth-account-id>"] }
+    "webSearchHelper": { "accounts": "anthropic-subscription" }
   }
 ]'
 ```
 
-The helper is sent to the approved account with the profile's `logicalModel`, so that model must be in the fable, opus, sonnet or haiku family. A listed account serves a helper only while all of these hold, checked at selection and again immediately before the send:
+`"accounts": "anthropic-subscription"` lets any first-party Anthropic subscription account serve the helpers, in the order the load-balancing strategy (`lb_strategy`) gives them, so accounts added, paused or exhausted later need no configuration change. To restrict helpers to named accounts instead, use `"webSearchHelper": { "accountIds": ["<approved-anthropic-oauth-account-id>"] }`. A profile sets one form or the other, never both. The configuration names the profile, not the model behind it, so swapping the local model leaves the option in place.
+
+The helper is sent to the approved account with the profile's `logicalModel`, so that model must be in the fable, opus, sonnet or haiku family. An account in either form serves a helper only while all of these hold, checked at selection and again immediately before the send:
 
 - It is a first-party Anthropic OAuth account: no custom endpoint, no API key, a refresh token, and the same access token the usage poll observed.
 - The router's own usage poll observed it less than 180 seconds ago, the relevant subscription allowance remains, and provider-side extra usage is explicitly disabled. Unknown or enabled extra usage, passive header observations, spend grants and credit-drain settings never admit it.
 - It is available and not excluded or reserved by another profile's `exclusiveAccount`.
 
-Only a fresh standalone helper qualifies: one user text message and one valid `web_search_20250305` declaration, with no client tools and no assistant, search or replay history, both as received and after request rewriting. A public `x-better-ccflare-account-id` header disables the opt-in for that request. When no listed account qualifies, the helper gets a temporary 503 `route_unavailable`, never a paid fallback, and the response names no account.
+Only a fresh standalone helper qualifies: one user text message and one valid `web_search_20250305` declaration, with no client tools and no assistant, search or replay history, both as received and after request rewriting. A public `x-better-ccflare-account-id` header disables the opt-in for that request. When no account qualifies, for example because every subscription account has exhausted its allowance, the helper gets a temporary 503 `route_unavailable`, never a paid fallback, and the response names no account.
 
-Helpers from one client session prefer the listed account that last served that session's helpers, in a lane separate from the session's ordinary inference; every helper still passes the checks above. A revoked candidate can yield to another listed account before the send. Once a send starts, the helper is never retried on the same or another account, and an ambiguous outcome returns 502 `server_tool_dispatch_terminal`. That rule covers one inbound request; it is not exactly-once execution across client retries. The extra-usage check is an observation, not an atomic provider guarantee, so verify extra usage is disabled on every listed account before enabling the option and keep it disabled.
+Helpers from one client session prefer the account that last served that session's helpers, in a lane separate from the session's ordinary inference; every helper still passes the checks above. A revoked candidate can yield to another qualifying account before the send. Once a send starts, the helper is never retried on the same or another account, and an ambiguous outcome returns 502 `server_tool_dispatch_terminal`. An upstream 429 or 529 reaches the client once and puts that account on the usual rate-limit cooldown, so the next helper selects a different account. That rule covers one inbound request; it is not exactly-once execution across client retries. The extra-usage check is an observation, not an atomic provider guarantee. With named accounts, verify extra usage is disabled on every listed account before enabling the option and keep it disabled. With the subscription pool, an account whose poll shows extra usage enabled or unknown is skipped rather than refused outright, so turning extra usage on for one account removes it from the pool instead of making helpers spend.
 
 Adding this field to a deployed configuration is a separate, approved activation step; merging or deploying the code changes nothing until it is configured. To roll back, remove `webSearchHelper` from the profile through the same protected configuration path and restart the service; helpers on an OpenAI-compatible profile then return the permanent 400 above. Routing semantics are in [routing-architecture.md](routing-architecture.md#exact-profile-subscription-websearch-helpers).
 

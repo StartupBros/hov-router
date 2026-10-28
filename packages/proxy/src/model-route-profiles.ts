@@ -92,10 +92,17 @@ export interface ModelRouteProfile {
 	/** The quality line a `line` policy follows; present only with that policy. */
 	readonly line?: QualityApprovedLine;
 	/** Explicit native search exception; ordinary inference keeps the exact route. */
-	readonly webSearchHelper?: {
-		readonly accountIds: readonly string[];
-	};
+	readonly webSearchHelper?: WebSearchHelperPolicy;
 }
+
+/** Any first-party Anthropic OAuth account, in the load balancer's order. */
+export const ANTHROPIC_SUBSCRIPTION_HELPER_POOL =
+	"anthropic-subscription" as const;
+
+/** Named accounts, or the whole subscription pool; never both. */
+export type WebSearchHelperPolicy =
+	| { readonly accountIds: readonly string[] }
+	| { readonly accounts: typeof ANTHROPIC_SUBSCRIPTION_HELPER_POOL };
 
 export type BoundedModelRouteProfile = ModelRouteProfile & {
 	readonly contextWindow: number;
@@ -125,7 +132,9 @@ export function describeModelRouteProfileFlow(
 	if (isBoundedModelRouteProfile(profile))
 		return "One account only, size-capped requests. Fails instead of switching. Subagents use it too.";
 	if (profile.webSearchHelper)
-		return "Inference stays on one account. Subagents use it too. Search helpers may use approved accounts.";
+		return "accounts" in profile.webSearchHelper
+			? "Inference stays on one account. Subagents use it too. Search helpers may use subscription accounts."
+			: "Inference stays on one account. Subagents use it too. Search helpers may use approved accounts.";
 	return "One account only. Fails instead of switching. Subagents use it too.";
 }
 
@@ -140,6 +149,48 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 		!Array.isArray(value) &&
 		Object.getPrototypeOf(value) === Object.prototype
 	);
+}
+
+function parseWebSearchHelperPolicy(
+	policy: unknown,
+	index: number,
+): WebSearchHelperPolicy {
+	if (!isPlainObject(policy) || Object.keys(policy).length !== 1) {
+		throw configError(
+			`profile ${index} webSearchHelper requires exactly one of accountIds or accounts`,
+		);
+	}
+	if ("accounts" in policy) {
+		if (policy.accounts !== ANTHROPIC_SUBSCRIPTION_HELPER_POOL) {
+			throw configError(
+				`profile ${index} webSearchHelper accounts must be "${ANTHROPIC_SUBSCRIPTION_HELPER_POOL}"`,
+			);
+		}
+		return Object.freeze({ accounts: ANTHROPIC_SUBSCRIPTION_HELPER_POOL });
+	}
+	if (!Array.isArray(policy.accountIds) || policy.accountIds.length === 0) {
+		throw configError(
+			`profile ${index} webSearchHelper requires a non-empty accountIds list`,
+		);
+	}
+	const accountIds = policy.accountIds.map((value: unknown) => {
+		if (
+			typeof value !== "string" ||
+			!value.trim() ||
+			value.trim().length > MAX_ACCOUNT_ID_LENGTH
+		) {
+			throw configError(
+				`profile ${index} webSearchHelper accountIds must contain non-empty account IDs`,
+			);
+		}
+		return value.trim();
+	});
+	if (new Set(accountIds).size !== accountIds.length) {
+		throw configError(
+			`profile ${index} webSearchHelper accountIds must be unique`,
+		);
+	}
+	return Object.freeze({ accountIds: Object.freeze(accountIds) });
 }
 
 function requiredString(
@@ -373,37 +424,10 @@ export function parseModelRouteProfiles(
 					`profile ${index} webSearchHelper requires an exact, unbounded profile`,
 				);
 			}
-			const policy = candidate.webSearchHelper;
-			if (
-				!isPlainObject(policy) ||
-				Object.keys(policy).some((key) => key !== "accountIds") ||
-				!Array.isArray(policy.accountIds) ||
-				policy.accountIds.length === 0
-			) {
-				throw configError(
-					`profile ${index} webSearchHelper requires only a non-empty accountIds list`,
-				);
-			}
-			const accountIds = policy.accountIds.map((value: unknown) => {
-				if (
-					typeof value !== "string" ||
-					!value.trim() ||
-					value.trim().length > MAX_ACCOUNT_ID_LENGTH
-				) {
-					throw configError(
-						`profile ${index} webSearchHelper accountIds must contain non-empty account IDs`,
-					);
-				}
-				return value.trim();
-			});
-			if (new Set(accountIds).size !== accountIds.length) {
-				throw configError(
-					`profile ${index} webSearchHelper accountIds must be unique`,
-				);
-			}
-			webSearchHelper = Object.freeze({
-				accountIds: Object.freeze(accountIds),
-			});
+			webSearchHelper = parseWebSearchHelperPolicy(
+				candidate.webSearchHelper,
+				index,
+			);
 		}
 
 		const expectedProvider = optionalString(

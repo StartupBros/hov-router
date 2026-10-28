@@ -105,6 +105,20 @@ describe("webSearchHelper profile policy", () => {
 		expect(profile().webSearchHelper).toBeUndefined();
 	});
 
+	it("accepts the subscription pool without naming accounts", () => {
+		const configured = parse({
+			webSearchHelper: { accounts: "anthropic-subscription" },
+		});
+		expect(configured.accountId).toBe(profile().accountId);
+		expect(configured.webSearchHelper).toEqual({
+			accounts: "anthropic-subscription",
+		});
+		expect(Object.isFrozen(configured.webSearchHelper)).toBe(true);
+		expect(describeModelRouteProfileFlow(configured)).toContain(
+			"Search helpers may use subscription accounts",
+		);
+	});
+
 	it.each([
 		null,
 		{},
@@ -114,6 +128,12 @@ describe("webSearchHelper profile policy", () => {
 		{ accountIds: ["a", "a"] },
 		{ accountIds: ["a", " a "] },
 		{ accountIds: ["a"], unknown: true },
+		{ accounts: "anthropic" },
+		{ accounts: "" },
+		{ accounts: ["native-a"] },
+		{ accounts: null },
+		{ accounts: "anthropic-subscription", accountIds: ["native-a"] },
+		{ accounts: "anthropic-subscription", unknown: true },
 	])("rejects malformed helper policy %j", (webSearchHelper) => {
 		expect(() => parse({ webSearchHelper })).toThrow("webSearchHelper");
 	});
@@ -123,9 +143,14 @@ describe("webSearchHelper profile policy", () => {
 			{ selection: "capability", accountId: undefined },
 			{ contextWindow: 1000, maxOutputTokens: 100 },
 		]) {
-			expect(() =>
-				parse({ ...fields, webSearchHelper: { accountIds: ["native-a"] } }),
-			).toThrow("webSearchHelper");
+			for (const webSearchHelper of [
+				{ accountIds: ["native-a"] },
+				{ accounts: "anthropic-subscription" },
+			]) {
+				expect(() => parse({ ...fields, webSearchHelper })).toThrow(
+					"webSearchHelper",
+				);
+			}
 		}
 	});
 });

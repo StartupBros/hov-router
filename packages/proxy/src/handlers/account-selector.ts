@@ -69,6 +69,7 @@ import {
 	createWebSearchHelperCandidateMeta,
 	getWebSearchHelperAffinityLane,
 	getWebSearchHelperScope,
+	isWebSearchHelperAccountInScope,
 } from "../websearch-helper-policy";
 import { buildComboMembershipDiagnostics } from "./managed-routing-diagnostics";
 import {
@@ -3365,7 +3366,7 @@ export function isWebSearchHelperCandidateAdmitted(
 			scope.profile,
 		) ||
 		meta.headers?.has("x-better-ccflare-account-id") ||
-		!scope.accountIds.includes(account.id) ||
+		!isWebSearchHelperAccountInScope(scope, account.id) ||
 		!isAccountAvailable(account) ||
 		!isFirstPartyAnthropicAccount(account) ||
 		!isAccountEligibleForRouteIntent(account, meta, ctx) ||
