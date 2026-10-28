@@ -32,6 +32,7 @@ import {
 	usageCache,
 } from "@better-ccflare/providers";
 import type { Account, RequestMeta } from "@better-ccflare/types";
+import { resetDefaultCircuitBreaker } from "../../circuit-breaker";
 import {
 	ModelRouteSessionRegistry,
 	parseModelRouteProfiles,
@@ -103,7 +104,11 @@ function account(): Account {
 		consecutive_rate_limits: 0,
 	} as Account;
 }
-function fixture(native = account(), accountIds = [id]) {
+const subscriptionPool = { accounts: "anthropic-subscription" } as const;
+function fixture(
+	native = account(),
+	helper: string[] | typeof subscriptionPool = [id],
+) {
 	const profiles = parseModelRouteProfiles(
 		JSON.stringify([
 			{
@@ -113,7 +118,9 @@ function fixture(native = account(), accountIds = [id]) {
 				logicalModel: body.model,
 				expectedProvider: "openai-compatible",
 				expectedPhysicalModel: "chat",
-				webSearchHelper: { accountIds },
+				webSearchHelper: Array.isArray(helper)
+					? { accountIds: helper }
+					: helper,
 			},
 		]),
 	);
@@ -165,11 +172,12 @@ async function poll(
 	spend: unknown = { enabled: false },
 	extra?: unknown,
 	pollId = id,
+	utilization = 10,
 ) {
 	globalThis.fetch = (async () =>
 		Response.json({
 			five_hour: {
-				utilization: 10,
+				utilization,
 				resets_at: new Date(Date.now() + 3_600_000).toISOString(),
 			},
 			spend,
@@ -248,6 +256,8 @@ async function expectUndisclosedRefusal(response: Response) {
 		id,
 		"helper-sibling",
 		"helper_admission_unavailable",
+		"anthropic-subscription",
+		"api-only",
 	])
 		expect(text).not.toContain(hidden);
 }
@@ -554,7 +564,7 @@ describe("explicit subscription WebSearch helper selection", () => {
 
 	it("refuses an empty approved pool even with ordinary passthrough enabled", async () => {
 		const previous = process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL;
-		process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = "true";
+		process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = "1";
 		let sends = 0;
 		globalThis.fetch = (async () => {
 			sends++;
@@ -1191,5 +1201,182 @@ describe("explicit subscription WebSearch helper selection", () => {
 		await expect(
 			selectAccountsForRequest(meta, ctx, body.model),
 		).rejects.toThrow();
+	});
+});
+
+describe("subscription pool WebSearch helper selection", () => {
+	// The source pin and an API-key Anthropic account sit in the same inventory:
+	// the pool is every native subscription account, never every account.
+	function poolInventory(
+		ctx: ProxyContext,
+		native: Account,
+		sibling: Account = {
+			...account(),
+			id: "helper-sibling",
+			name: "helper-sibling",
+		},
+	) {
+		const source = {
+			...account(),
+			id: "local-account",
+			name: "local-account",
+			provider: "openai-compatible",
+			access_token: null,
+			refresh_token: null,
+			api_key: "fake-local-key",
+			custom_endpoint: "http://local.example",
+		} as Account;
+		const apiOnly = {
+			...account(),
+			id: "api-only",
+			name: "api-only",
+			api_key: "fake-key",
+			refresh_token: null,
+		} as Account;
+		const inventory = [source, apiOnly, native, sibling];
+		ctx.dbOps.getAllAccounts = async () => inventory;
+		ctx.dbOps.getAccount = async (accountId) =>
+			inventory.find((candidate) => candidate.id === accountId) ?? null;
+		return { sibling };
+	}
+	const selectedIds = async (meta: RequestMeta, ctx: ProxyContext) =>
+		(await selectAccountsForRequest(meta, ctx, body.model)).map((a) => a.id);
+
+	it("admits every subscription account in the strategy's order", async () => {
+		await poll();
+		await poll({ enabled: false }, undefined, "helper-sibling");
+		const { meta, ctx, native } = fixture(account(), subscriptionPool);
+		const { sibling } = poolInventory(ctx, native);
+		ctx.strategy.select = (accounts: Account[]) => [...accounts].reverse();
+		expect(await selectedIds(meta, ctx)).toEqual([sibling.id, native.id]);
+		expect(meta.forcedAccountId).toBe("local-account");
+		expect(meta.routeExpectedPhysicalModel).toBe("chat");
+	});
+
+	it.each([
+		"exhausted",
+		"spending",
+		"rate-limited",
+		"paused",
+		"custom-endpoint",
+	])("moves past a %s subscription account", async (kind) => {
+		await poll(
+			{ enabled: kind === "spending" },
+			undefined,
+			id,
+			kind === "exhausted" ? 100 : 10,
+		);
+		await poll({ enabled: false }, undefined, "helper-sibling");
+		const { meta, ctx } = fixture(account(), subscriptionPool);
+		const native = {
+			...account(),
+			paused: kind === "paused",
+			rate_limited_until: kind === "rate-limited" ? Date.now() + 60_000 : null,
+			custom_endpoint:
+				kind === "custom-endpoint" ? "https://other.example" : null,
+		};
+		const { sibling } = poolInventory(ctx, native);
+		expect(await selectedIds(meta, ctx)).toEqual([sibling.id]);
+	});
+
+	it("refuses without sending or spilling when every subscription account is exhausted", async () => {
+		await poll({ enabled: false }, undefined, id, 100);
+		await poll({ enabled: false }, undefined, "helper-sibling", 100);
+		const previous = process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL;
+		process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = "1";
+		let sends = 0;
+		globalThis.fetch = (async () => {
+			sends++;
+			return Response.json({});
+		}) as typeof fetch;
+		try {
+			const { ctx, native } = fixture(account(), subscriptionPool);
+			poolInventory(ctx, native);
+			await expectUndisclosedRefusal(await wholeHelper(ctx));
+			expect(sends).toBe(0);
+		} finally {
+			if (previous === undefined)
+				delete process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL;
+			else process.env.CCFLARE_PASSTHROUGH_ON_EMPTY_POOL = previous;
+		}
+	});
+
+	it("never borrows an account another profile reserves", async () => {
+		await poll();
+		await poll({ enabled: false }, undefined, "helper-sibling");
+		const { meta, ctx, native } = fixture(account(), subscriptionPool);
+		const { sibling } = poolInventory(ctx, native);
+		const registry = ctx.modelRouteSessionRegistry;
+		if (!registry) throw new Error("incomplete fixture");
+		ctx.modelRouteSessionRegistry = new ModelRouteSessionRegistry([
+			...registry.getProfiles(),
+			...parseModelRouteProfiles(
+				JSON.stringify([
+					{
+						id: "reserved",
+						displayName: "Reserved",
+						accountId: id,
+						logicalModel: body.model,
+						exclusiveAccount: true,
+					},
+				]),
+			),
+		]);
+		expect(await selectedIds(meta, ctx)).toEqual([sibling.id]);
+	});
+
+	it.each([
+		429, 529,
+	])("forwards an upstream %d once and cools that account down for the next search", async (status) => {
+		await poll();
+		await poll({ enabled: false }, undefined, "helper-sibling");
+		const { meta, ctx, native } = fixture(account(), subscriptionPool);
+		const { sibling } = poolInventory(ctx, native);
+		const writes: (() => Promise<unknown>)[] = [];
+		ctx.asyncWriter.enqueue = (job: () => Promise<unknown>) => {
+			writes.push(job);
+		};
+		const marked: string[] = [];
+		ctx.dbOps.markAccountRateLimited = async (accountId, until) => {
+			marked.push(accountId);
+			if (accountId === native.id) native.rate_limited_until = until;
+			return { consecutiveRateLimits: 1, applied: true };
+		};
+		ctx.dbOps.updateAccountUsage = async () => {};
+		ctx.dbOps.updateAccountRateLimitMeta = async () => {};
+		let sends = 0;
+		globalThis.fetch = (async () => {
+			sends++;
+			return Response.json(
+				{
+					type: "error",
+					error: {
+						type: status === 429 ? "rate_limit_error" : "overloaded_error",
+						message: "offline",
+					},
+				},
+				{
+					status,
+					headers: {
+						"retry-after": "60",
+						"anthropic-ratelimit-unified-status": "rejected",
+						"anthropic-ratelimit-unified-reset": String(
+							Math.floor(Date.now() / 1000) + 60,
+						),
+					},
+				},
+			);
+		}) as typeof fetch;
+		try {
+			const response = await wholeHelper(ctx);
+			await response.text();
+			expect(response.status).toBe(status);
+			expect(sends).toBe(1);
+			for (const write of writes) await write();
+			expect(marked).toEqual([native.id]);
+			expect(await selectedIds(meta, ctx)).toEqual([sibling.id]);
+		} finally {
+			resetDefaultCircuitBreaker();
+		}
 	});
 });

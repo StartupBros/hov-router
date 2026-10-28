@@ -5,6 +5,7 @@ import {
 	authorizeWebSearchHelper,
 	getWebSearchHelperScope,
 	isFreshWebSearchHelper,
+	isWebSearchHelperAccountInScope,
 } from "../websearch-helper-policy";
 
 const fresh = () => ({
@@ -12,7 +13,9 @@ const fresh = () => ({
 	tools: [{ type: "web_search_20250305", name: "web_search" }],
 	messages: [{ role: "user", content: "search for current news" }],
 });
-const profile = () => {
+const profile = (
+	webSearchHelper: unknown = { accountIds: ["native-a", "native-b"] },
+) => {
 	const configured = parseModelRouteProfiles(
 		JSON.stringify([
 			{
@@ -23,7 +26,7 @@ const profile = () => {
 				expectedProvider: "openai-compatible",
 				expectedPhysicalModel: "chat",
 				exclusiveAccount: true,
-				webSearchHelper: { accountIds: ["native-a", "native-b"] },
+				webSearchHelper,
 			},
 		]),
 	)[0];
@@ -177,10 +180,35 @@ describe("fresh standalone WebSearch policy", () => {
 		const scope = getWebSearchHelperScope(meta);
 		expect(scope?.source).toBe(source);
 		expect(scope?.profile).toBe(configured);
-		expect(scope?.accountIds).toEqual(["native-a", "native-b"]);
+		expect(scope?.accounts).toEqual(["native-a", "native-b"]);
 		expect(Object.isFrozen(scope)).toBe(true);
 		expect(meta).toEqual(before);
 		expect(getWebSearchHelperScope({ ...meta })).toBeUndefined();
+	});
+	it("limits named helpers to their list and opens the subscription pool to any account", () => {
+		const scopeFor = (webSearchHelper: unknown) => {
+			const meta = {} as RequestMeta;
+			authorizeWebSearchHelper(meta, {
+				originalEligible: true,
+				body: fresh(),
+				resolution: {
+					kind: "route",
+					source: "explicit",
+					profile: profile(webSearchHelper),
+					generation: null,
+				},
+				publicForceAccount: false,
+			});
+			const scope = getWebSearchHelperScope(meta);
+			if (!scope) throw new Error("Expected helper scope");
+			return scope;
+		};
+		const named = scopeFor({ accountIds: ["native-a"] });
+		expect(isWebSearchHelperAccountInScope(named, "native-a")).toBe(true);
+		expect(isWebSearchHelperAccountInScope(named, "native-b")).toBe(false);
+		const pool = scopeFor({ accounts: "anthropic-subscription" });
+		expect(pool.accounts).toBe("anthropic-subscription");
+		expect(isWebSearchHelperAccountInScope(pool, "native-b")).toBe(true);
 	});
 	it("requires both original and final eligibility and rejects public force and unopted routes", () => {
 		const configured = profile();

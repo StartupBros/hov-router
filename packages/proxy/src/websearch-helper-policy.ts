@@ -4,9 +4,10 @@ import {
 	sanitizeWebSearchHelperRoutingSummary,
 	type WebSearchHelperRoutingSummary,
 } from "@better-ccflare/types/request";
-import type {
-	ModelRouteProfile,
-	ModelRouteResolution,
+import {
+	ANTHROPIC_SUBSCRIPTION_HELPER_POOL,
+	type ModelRouteProfile,
+	type ModelRouteResolution,
 } from "./model-route-profiles";
 import { opaqueRuntimeId } from "./opaque-runtime-id";
 
@@ -14,7 +15,21 @@ export interface WebSearchHelperScope {
 	/** Original profile constraints remain intact; never an ordinary-route grant. */
 	readonly profile: ModelRouteProfile;
 	readonly source: "explicit" | "inherited";
-	readonly accountIds: readonly string[];
+	/** Named accounts, or every account that passes subscription admission. */
+	readonly accounts:
+		| readonly string[]
+		| typeof ANTHROPIC_SUBSCRIPTION_HELPER_POOL;
+}
+
+/** Scope membership only; the caller still runs full subscription admission. */
+export function isWebSearchHelperAccountInScope(
+	scope: WebSearchHelperScope,
+	accountId: string,
+): boolean {
+	return (
+		scope.accounts === ANTHROPIC_SUBSCRIPTION_HELPER_POOL ||
+		scope.accounts.includes(accountId)
+	);
 }
 
 const scopes = new WeakMap<RequestMeta, WebSearchHelperScope>();
@@ -169,10 +184,11 @@ export function authorizeWebSearchHelper(
 		!profile.accountId
 	)
 		return;
+	const policy = profile.webSearchHelper;
 	const scope = Object.freeze({
 		profile,
 		source: resolution.source,
-		accountIds: profile.webSearchHelper.accountIds,
+		accounts: "accounts" in policy ? policy.accounts : policy.accountIds,
 	});
 	scopes.set(meta, scope);
 	observeWebSearchHelperRouting(meta, "subscription_unavailable");
