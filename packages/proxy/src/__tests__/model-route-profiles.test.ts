@@ -3,6 +3,7 @@ import {
 	describeModelRouteProfileFlow,
 	MODEL_ROUTE_PROFILE_MODEL_PREFIX,
 	ModelRouteSessionRegistry,
+	modelRouteProfileModelIds,
 	parseModelRouteProfiles,
 } from "../model-route-profiles";
 
@@ -499,6 +500,160 @@ describe("parseModelRouteProfiles", () => {
 				JSON.stringify([makeEntry("same"), makeEntry("same")]),
 			),
 		).toThrow("duplicate");
+	});
+});
+
+describe("route profile aliases", () => {
+	const renamed = {
+		id: "ai-gateway-chat",
+		displayName: "Local gateway chat",
+		accountId: "gateway-account",
+		logicalModel: "claude-opus-5",
+		aliases: ["glm-5-3-flash"],
+	};
+	const parseOne = (fields: Record<string, unknown>) => {
+		const [configured] = parseModelRouteProfiles(JSON.stringify([fields]));
+		if (!configured) throw new Error("Expected the aliased route to parse");
+		return configured;
+	};
+	const explicit = (
+		registry: ModelRouteSessionRegistry,
+		requestModel: string,
+	) =>
+		resolveRequest(registry, {
+			callerIdentity: null,
+			requestModel,
+			sessionId: null,
+			isSubagent: false,
+		});
+
+	it("keeps the former id as an immutable alias of the renamed profile", () => {
+		const configured = parseOne(renamed);
+		expect(configured.id).toBe("ai-gateway-chat");
+		expect(configured.publicModelId).toBe(
+			`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}ai-gateway-chat`,
+		);
+		expect(configured.aliases).toEqual(["glm-5-3-flash"]);
+		expect(Object.isFrozen(configured.aliases)).toBe(true);
+	});
+
+	it("resolves a former picker id to the renamed profile and discovers only the new id", () => {
+		const configured = parseOne(renamed);
+		const registry = new ModelRouteSessionRegistry([configured]);
+		const former = `${MODEL_ROUTE_PROFILE_MODEL_PREFIX}glm-5-3-flash`;
+
+		expect(registry.hasPublicModelId(former)).toBe(true);
+		expect(registry.isPublicModelIdForProfile(former, configured)).toBe(true);
+		expect(explicit(registry, former)).toEqual({
+			kind: "route",
+			source: "explicit",
+			profile: configured,
+			generation: null,
+		});
+		expect(registry.getDiscoveryModels().map((row) => row.id)).toEqual([
+			configured.publicModelId,
+		]);
+	});
+
+	it("binds a session selected by its former id so children inherit the renamed profile", () => {
+		const configured = parseOne(renamed);
+		const registry = new ModelRouteSessionRegistry([configured]);
+		const root = {
+			callerIdentity: "caller",
+			requestModel: `${MODEL_ROUTE_PROFILE_MODEL_PREFIX}glm-5-3-flash`,
+			sessionId: "session",
+			isSubagent: false,
+		};
+		resolveAndCommit(registry, root);
+
+		expect(
+			resolveRequest(registry, {
+				...root,
+				requestModel: "claude-haiku-5-5",
+				isSubagent: true,
+			}),
+		).toEqual({ kind: "route", source: "inherited", profile: configured });
+	});
+
+	it("accepts the 1M form of an alias only when the profile advertises the hint", () => {
+		const former = `${MODEL_ROUTE_PROFILE_MODEL_PREFIX}glm-5-3-flash[1m]`;
+		const hinted = parseOne({ ...renamed, clientContextWindowHint: "1m" });
+		const plain = parseOne(renamed);
+
+		expect(
+			new ModelRouteSessionRegistry([hinted]).hasPublicModelId(former),
+		).toBe(true);
+		expect(
+			new ModelRouteSessionRegistry([plain]).hasPublicModelId(former),
+		).toBe(false);
+		expect(
+			new ModelRouteSessionRegistry([hinted])
+				.getDiscoveryModels()
+				.map((row) => row.id),
+		).toEqual([`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}ai-gateway-chat[1m]`]);
+	});
+
+	it("lists every model id a profile accepts, canonical first", () => {
+		const hinted = parseOne({
+			...renamed,
+			aliases: ["glm-5-3-flash", "local-chat"],
+			clientContextWindowHint: "1m",
+		});
+		expect(modelRouteProfileModelIds(hinted)).toEqual([
+			`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}ai-gateway-chat`,
+			`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}ai-gateway-chat[1m]`,
+			`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}glm-5-3-flash`,
+			`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}glm-5-3-flash[1m]`,
+			`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}local-chat`,
+			`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}local-chat[1m]`,
+		]);
+		expect(modelRouteProfileModelIds(profile())).toEqual([
+			`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}pro-primary-sol`,
+		]);
+	});
+
+	it("rejects malformed alias lists", () => {
+		for (const aliases of [
+			"glm-5-3-flash",
+			{},
+			null,
+			[],
+			[""],
+			["Glm-5-3-flash"],
+			["glm_5_3_flash"],
+			[" glm-5-3-flash"],
+			["implicit-codex:glm"],
+			["a".repeat(49)],
+			[1],
+			[null],
+			Array.from({ length: 9 }, (_, i) => `former-${i}`),
+		]) {
+			expect(() => parseOne({ ...renamed, aliases })).toThrow(
+				"CCFLARE_MODEL_ROUTE_PROFILES_JSON",
+			);
+		}
+	});
+
+	it("rejects an alias that collides with any profile id or alias", () => {
+		const other = {
+			id: "other-route",
+			displayName: "Other",
+			accountId: "other-account",
+			logicalModel: "claude-opus-5",
+		};
+		const collisions = [
+			[{ ...renamed, aliases: ["ai-gateway-chat"] }],
+			[{ ...renamed, aliases: ["glm-5-3-flash", "glm-5-3-flash"] }],
+			[{ ...renamed, aliases: ["other-route"] }, other],
+			[other, { ...renamed, aliases: ["other-route"] }],
+			[renamed, { ...other, id: "glm-5-3-flash" }],
+			[renamed, { ...other, aliases: ["glm-5-3-flash"] }],
+		];
+		for (const config of collisions) {
+			expect(() => parseModelRouteProfiles(JSON.stringify(config))).toThrow(
+				"duplicate",
+			);
+		}
 	});
 });
 

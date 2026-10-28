@@ -1085,6 +1085,43 @@ describe("Claude Code gateway model route profiles", () => {
 		expect(harness.strategySelect).not.toHaveBeenCalled();
 	});
 
+	it("serves a former picker id through its renamed profile and records the new id", async () => {
+		const harness = makeContext(
+			makeRegistry({ id: "sol-renamed", aliases: ["pro-primary-sol"] }),
+		);
+		const { requests } = installJsonUpstream();
+		const sessionId = "renamed-route-session";
+		const root = apiRequest("/v1/messages", PROFILE_MODEL, {
+			"x-claude-code-session-id": sessionId,
+		});
+		expect(
+			(await handleProxy(root, new URL(root.url), harness.ctx, "key-1")).status,
+		).toBe(200);
+		const child = apiRequest("/v1/messages", PROFILE_MODEL, {
+			"x-claude-code-session-id": sessionId,
+			"x-claude-code-agent-id": "renamed-route-child",
+		});
+		expect(
+			(await handleProxy(child, new URL(child.url), harness.ctx, "key-1"))
+				.status,
+		).toBe(200);
+
+		expect(requests).toHaveLength(2);
+		for (const request of requests) {
+			expect(request.url).toBe(
+				`https://upstream.test/${ROUTE_ACCOUNT_ID}/v1/messages`,
+			);
+			expect((await fetchedJson(request)).model).toBe(LOGICAL_MODEL);
+		}
+		expect(getServedAccountObservation(sessionId)).toMatchObject({
+			accountId: ROUTE_ACCOUNT_ID,
+			routeProfileId: "sol-renamed",
+			models: { requestedModel: PROFILE_MODEL },
+		});
+		expect(harness.strategySelect).not.toHaveBeenCalled();
+		clearSession(sessionId);
+	});
+
 	it("rewrites an explicit route, pins its account, defaults effort, and records provenance", async () => {
 		const harness = makeContext(makeRegistry());
 		const { requests } = installJsonUpstream();
