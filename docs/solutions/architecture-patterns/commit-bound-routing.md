@@ -47,7 +47,7 @@ Provider-owned hosted tools have the same boundary in a stricter form. The reque
 
 1. **Authorize first.** Derive route class and hard boundaries from server-trusted state, then compile an immutable request-local candidate plan. A strategy may only reorder or temporarily suppress members of that plan; it must not add accounts, providers, models, or fallback rungs. The selector treats strategy output as ordering rather than authority and filters it back to the established eligible set: candidate ids for a descendant plan (`packages/proxy/src/handlers/account-selector.ts:3151-3158`), account ids for the ordinary pool (`packages/proxy/src/handlers/account-selector.ts:3268-3276`).
 
-2. **Make rung order stronger than ranking.** Preserve semantic order between rungs; allow priority, load, probes, and affinity only to order candidates within a rung. The compiler emits rung specifications in semantic order before deduplication and capacity filtering (`packages/proxy/src/handlers/account-selector.ts:3052-3110`).
+2. **Preserve rung order in fresh ranking; retain a healthy child home first.** Priority, load, probes, and ordinary affinity may reorder candidates within a rung, not promote a later rung. The intentional exception is an already-authorized, healthy retained child home under the strategies described in guidance 5: it may lead even when an earlier rung recovers, while the remaining candidates stay in rung order. Do not apply a rung sort after retaining that home. The compiler emits rung specifications in semantic order before deduplication and capacity filtering (`packages/proxy/src/handlers/account-selector.ts:3052-3110`); strategy comparators preserve that order before priority or probe penalties (`packages/load-balancer/src/strategies/routing-metadata.ts:179-228`).
 
 3. **Keep hard boundaries outside the ladder.** Exact-account, public force-routed, and bounded routes fail closed; do not compile their unavailable route into a global fallback. A same-session provider-owned WebSearch helper inherits the active capability profile and uses its exact proven server-tool route first; it may use the global proven capability lane only when that soft capability pool is unavailable before hosted dispatch (`docs/configuration.md:458`; helper lineage is classified in `docs/routing-architecture.md:98`). One narrow exception exists since #644. An exact, unbounded profile that explicitly opts in with `webSearchHelper` sends its fresh standalone WebSearch helpers to first-party Anthropic subscription accounts instead of failing closed. Those accounts are the listed ones, or any of them in pool mode. Each needs router-owned usage evidence under 180 seconds old, allowance left, and extra usage disabled. There is no paid or ordinary-inventory fallback and at most one send. A public `x-better-ccflare-account-id` header disables the exception. It does not widen the ladder. The opt-in is part of the profile's server-trusted authorization, and the helper branch admits accounts before the strategy ranks them, then filters the ranked list through the same admission again (`packages/proxy/src/handlers/account-selector.ts:3460-3490`). Details: [configuration](../../configuration.md#subscription-websearch-helper-opt-in) and [routing architecture](../../routing-architecture.md#exact-profile-subscription-websearch-helpers).
 
@@ -93,7 +93,9 @@ function compileAuthorizedPlan(input: RouteInput): AuthorizedCandidate[] {
 
 async function routeDescendant(input: RouteInput) {
   const authorized = compileAuthorizedPlan(input);
-  const ordered = rankWithinRung(preferHealthyHome(authorized, input.childLane));
+  const ranked = rankWithinRung(authorized);
+  // No-op unless the strategy retains child homes and its home remains eligible.
+  const ordered = preferHealthyHome(ranked, input.childLane);
 
   for (const candidate of ordered) {
     const result = await attempt(candidate);
@@ -106,7 +108,7 @@ async function routeDescendant(input: RouteInput) {
 }
 ```
 
-The pseudocode models existing behavior: candidate metadata includes the rung and effective logical model (`packages/proxy/src/handlers/account-selector.ts:3091-3106`), and route provenance constrains allowed rungs, home actions, and re-pin reasons (`packages/types/src/request.ts:45-80`).
+The pseudocode models existing behavior: candidate metadata includes the rung and effective logical model (`packages/proxy/src/handlers/account-selector.ts:3091-3106`), and route provenance constrains allowed rungs, home actions, and re-pin reasons (`packages/types/src/request.ts:45-80`). `preferHealthyHome` may only move the eligible recorded home already in `ranked` to the front, leaving the other candidates in their ranked order. It cannot restore a removed candidate or override authorization, availability, or route-circuit checks.
 
 ## Why This Matters
 
@@ -143,7 +145,8 @@ const plan = compileAuthorizedPlan({
   childLane,
 });
 
-// Correct: reorder only candidates already proven by their rung.
+// Fresh ranking: reorder only authorized candidates within each rung.
+// Apply eligible child-home retention afterward, as shown above.
 const ranked = rankWithinEachRung(plan, { affinity, priority, probeState });
 
 // Incorrect: grants eligibility because an unrelated route is available.
@@ -169,6 +172,8 @@ if (attempt.acceptedWinner) {
 ```
 
 Test rejected-before-dispatch, credential failure, pre-acceptance upstream failure, accepted success, concurrent first successes, priority change, recovered preferred rung, every enumerated re-pin reason, sibling isolation, and restart/TTL expiry.
+
+A recovered-rung fixture must actually vary `routeFallbackRung`, not just account priority. [PR #654](https://github.com/StartupBros/hov-router/pull/654) corrected that gap in `packages/load-balancer/src/strategies/__tests__/session-affinity.test.ts`: a fresh lane prefers the recovered candidate, while a healthy committed home remains first on requested, root, or global rungs, with candidate metadata aligned. A mutation that disallowed later-rung retention passed all 96 original tests but failed the two new cross-rung cases. The mutation was removed; the change shipped regression coverage only, not a production routing fix.
 
 ### Hosted tool: authorize before dispatch; never replay after dispatch
 

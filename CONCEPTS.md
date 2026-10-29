@@ -149,8 +149,11 @@ native Anthropic OAuth owner for that lane.
 ### Fallback rung
 
 A semantically ordered tier of authorized routes in a capability descendant's candidate plan.
-Ranking may reorder accounts within one rung but cannot move a lower-authority rung ahead of a
-higher-authority rung or add a route that authorization did not admit.
+
+Fresh ranking may reorder candidates within a rung but preserves the order between rungs.
+Under a strategy that retains [child route homes](#child-route-home), an authorized, healthy
+retained home may lead even from a later rung; the other candidates remain in rung order.
+Neither ranking nor retention may add a route that authorization did not admit.
 
 ### Agent attribution
 
