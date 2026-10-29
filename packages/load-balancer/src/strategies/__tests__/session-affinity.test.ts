@@ -8,6 +8,7 @@ import type {
 	Account,
 	LogEvent,
 	RequestMeta,
+	RoutingCandidateMetadata,
 	StrategyStore,
 } from "@better-ccflare/types";
 
@@ -97,22 +98,31 @@ describe("SessionAffinityStrategy", () => {
 	describe("success-conditioned descendant homes", () => {
 		const descendantMeta = (
 			lane: string,
-			candidates: Array<{ id: string; priority?: number }>,
+			candidates: Array<{
+				id: string;
+				priority?: number;
+				rung?: RoutingCandidateMetadata["routeFallbackRung"];
+			}>,
 		): RequestMeta =>
 			({
 				...metaFor(`client-${lane}`),
 				affinityLaneKey: lane,
 				routeLineage: { kind: "descendant", childHomeKey: `opaque-${lane}` },
-				routingCandidates: candidates.map(({ id, priority = 0 }, ordinal) => ({
-					candidateId: `candidate:${id}`,
-					accountId: id,
-					tier: priority,
-					ordinal,
-					comboSlotId: null,
-					modelOverride: "claude-sonnet-5",
-					quotaPressure: null,
-					routeFallbackRung: "profile_requested_model",
-				})),
+				routingCandidates: candidates.map(
+					(
+						{ id, priority = 0, rung = "profile_requested_model" },
+						ordinal,
+					) => ({
+						candidateId: `candidate:${id}`,
+						accountId: id,
+						tier: priority,
+						ordinal,
+						comboSlotId: null,
+						modelOverride: "claude-sonnet-5",
+						quotaPressure: null,
+						routeFallbackRung: rung,
+					}),
+				),
 			}) as RequestMeta;
 
 		it("defers a new descendant home until the winning candidate commits", async () => {
@@ -130,28 +140,48 @@ describe("SessionAffinityStrategy", () => {
 			expect(strategy.affinityEntries).toBe(1);
 		});
 
-		it("retains a healthy descendant home despite a recovered better rung", async () => {
+		it.each([
+			"profile_requested_model",
+			"profile_root_model",
+			"global_requested_model",
+		] as const)("retains a healthy %s home when a preferred requested-model candidate recovers", async (rung) => {
 			const home = makeAccount({ id: "descendant-home", priority: 20 });
 			const recovered = makeAccount({
 				id: "descendant-recovered",
 				priority: 0,
 			});
+			const candidates = [
+				{ id: recovered.id, priority: 0 },
+				{ id: home.id, priority: 20, rung },
+			];
+			const fresh = descendantMeta("descendant-fresh", candidates);
+			expect((await strategy.select([home, recovered], fresh))[0]?.id).toBe(
+				recovered.id,
+			);
+
 			const initial = descendantMeta("descendant-retain", [
-				{ id: home.id, priority: 20 },
+				{ id: home.id, priority: 20, rung },
 			]);
 			await strategy.select([home], initial);
-			strategy.commitDescendantAffinityOwner(initial, {
-				candidateId: `candidate:${home.id}`,
-				accountId: home.id,
-			});
+			expect(
+				strategy.commitDescendantAffinityOwner(initial, {
+					candidateId: `candidate:${home.id}`,
+					accountId: home.id,
+				}),
+			).toBe("initial_commit");
 
-			const next = descendantMeta("descendant-retain", [
-				{ id: recovered.id, priority: 0 },
-				{ id: home.id, priority: 20 },
-			]);
-			expect((await strategy.select([recovered, home], next))[0]?.id).toBe(
-				home.id,
-			);
+			const next = descendantMeta("descendant-retain", candidates);
+			expect(
+				(await strategy.select([recovered, home], next)).map(
+					(account) => account.id,
+				),
+			).toEqual([home.id, recovered.id]);
+			expect(
+				next.routingCandidates?.map((candidate) => candidate.candidateId),
+			).toEqual([`candidate:${home.id}`, `candidate:${recovered.id}`]);
+			expect(
+				next.routingCandidates?.map((candidate) => candidate.routeFallbackRung),
+			).toEqual([rung, "profile_requested_model"]);
 			expect(next.routeHomeAction).toBe("retained");
 		});
 
