@@ -95,6 +95,90 @@ describe("SessionAffinityStrategy", () => {
 		strategy.initialize(store);
 	});
 
+	it("exports owner selections, upgrades, suppression and fallback without refreshing the lane", async () => {
+		let now = 1_793_346_681_000;
+		const clocked = new SessionAffinityStrategy(
+			60_000,
+			undefined,
+			5_000,
+			undefined,
+			() => now,
+		);
+		clocked.initialize(store);
+		const m = () => metaFor("export-client");
+		const low = makeAccount({ id: "low", priority: 10 });
+		const high = makeAccount({ id: "high", priority: 0 });
+		const down = { ...high, rate_limited_until: now + 1_000_000 };
+		await clocked.select([low, down], m());
+		expect(clocked.exportAffinityLaneRecord(m())).toMatchObject({
+			observedAt: now,
+			owner: {
+				candidateId: "account:low",
+				accountId: "low",
+				assignedAt: now,
+				installedBelowBestConfiguredTier: true,
+			},
+		});
+		now += 1_000;
+		await clocked.select([low, high], m());
+		expect(clocked.exportAffinityLaneRecord(m())?.owner).toEqual({
+			candidateId: "account:high",
+			accountId: "high",
+			assignedAt: now,
+			upgradedAt: now,
+			installedBelowBestConfiguredTier: false,
+		});
+		now += 1;
+		await clocked.select([low, down], m());
+		expect(clocked.exportAffinityLaneRecord(m())?.owner).toEqual({
+			candidateId: "account:low",
+			accountId: "low",
+			assignedAt: now,
+			suppressUpgradesUntil: 1_793_346_687_000,
+			installedBelowBestConfiguredTier: true,
+		});
+		now += 5_000;
+		await clocked.select([low, high], m());
+		now += 5_001;
+		await clocked.select([low, down], m());
+		const health = clocked.getRoutingHealth();
+		const exported = clocked.exportAffinityLaneRecord(m());
+		expect(exported?.owner).toMatchObject({
+			candidateId: "account:high",
+			accountId: "high",
+			fallbackCandidateId: "account:low",
+		});
+		expect(clocked.getRoutingHealth()).toEqual(health);
+		// Export is an observation, so even repeated reads cannot extend the TTL.
+		now += 59_999;
+		expect(clocked.exportAffinityLaneRecord(m())?.owner).not.toBeNull();
+		now += 1;
+		expect(clocked.exportAffinityLaneRecord(m())).toEqual({
+			digest: exported?.digest,
+			observedAt: now,
+			owner: null,
+		});
+	});
+
+	it("exports unselected lanes as tombstones and anonymous requests as no record", () => {
+		const now = 1_793_346_681_000;
+		const clocked = new SessionAffinityStrategy(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			() => now,
+		);
+		expect(clocked.exportAffinityLaneRecord(metaFor())).toBeNull();
+		expect(clocked.exportAffinityLaneRecord(metaFor("never-selected"))).toEqual(
+			{
+				digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+				observedAt: now,
+				owner: null,
+			},
+		);
+	});
+
 	it("hashes domain-tagged lane and client keys to fixed lowercase SHA-256 digests", async () => {
 		const { affinityLaneDigest } = await import("../affinity-lane-digest");
 		expect(affinityLaneDigest("lane:restart-session")).toBe(

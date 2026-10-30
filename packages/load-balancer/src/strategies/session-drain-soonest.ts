@@ -77,6 +77,10 @@ export class SessionDrainSoonestStrategy extends SessionAffinityStrategy {
 		return super.selectionAffinityKey(meta);
 	}
 
+	protected override retainsOrdinaryOwners(): boolean {
+		return this.mode === "sticky";
+	}
+
 	protected override preservesAffinityAcrossQuotaPressure(
 		owner: StrategyCandidate,
 		challenger: StrategyCandidate,

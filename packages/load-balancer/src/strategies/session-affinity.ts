@@ -12,6 +12,7 @@ import type {
 	RequestMeta,
 	RouteCircuitRecoveryHint,
 	RouteHomeAction,
+	RoutingAffinityLaneRecord,
 	RoutingCandidateFailureReport,
 	RoutingCandidateSuccessReport,
 	RoutingHealth,
@@ -409,6 +410,44 @@ export class SessionAffinityStrategy implements LoadBalancingStrategy {
 		return {
 			candidateId: mapping.candidateId,
 			accountId: mapping.accountId,
+		};
+	}
+
+	protected retainsOrdinaryOwners(): boolean {
+		return true;
+	}
+
+	exportAffinityLaneRecord(
+		meta: RequestMeta,
+	): RoutingAffinityLaneRecord | null {
+		if (!this.retainsOrdinaryOwners()) return null;
+		const digest = this.affinityKey(meta);
+		if (digest === null) return null;
+		const observedAt = this.now();
+		const entry = this.affinity.get(digest);
+		if (!entry || observedAt - entry.assignedAt >= this.affinityTtlMs) {
+			return { digest, observedAt, owner: null };
+		}
+		return {
+			digest,
+			observedAt,
+			owner: {
+				candidateId: entry.candidateId,
+				accountId: entry.accountId,
+				assignedAt: entry.assignedAt,
+				installedBelowBestConfiguredTier:
+					entry.installedBelowBestConfiguredTier,
+				...(entry.fallbackCandidateId === null
+					? {}
+					: { fallbackCandidateId: entry.fallbackCandidateId }),
+				...(entry.upgradedAt === null ? {} : { upgradedAt: entry.upgradedAt }),
+				...(entry.suppressUpgradesUntil === null
+					? {}
+					: { suppressUpgradesUntil: entry.suppressUpgradesUntil }),
+				...(entry.pressureHoldSince === null
+					? {}
+					: { pressureHoldSince: entry.pressureHoldSince }),
+			},
 		};
 	}
 

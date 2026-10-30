@@ -10,15 +10,82 @@ import {
 	attemptRequest as base,
 	expectedA,
 	expectedB,
+	attemptSummary as legacySummary,
 	provenanceA,
 	provenanceB,
 	ROUTE_PROVENANCE_COLUMNS as ROUTE_COLUMNS,
-	attemptSummary as summary,
 } from "../../__tests__/route-provenance.fixture";
 import { BunSqlAdapter } from "../../adapters/bun-sql-adapter";
 import { ensureSchema, runMigrations } from "../../migrations";
 import { ensureSchemaPg, runMigrationsPg } from "../../migrations-pg";
 import { RequestRepository } from "../request.repository";
+
+const summary = {
+	...legacySummary,
+	processStartedAt: 1_793_346_681_000,
+	affinityLane: {
+		digest: "a".repeat(64),
+		observedAt: 1_793_346_681_263,
+		owner: {
+			candidateId: "profile:main:model:vendor%2Fmodel:account:a#1",
+			accountId: "account-a",
+			assignedAt: 1_793_346_681_100,
+			installedBelowBestConfiguredTier: true,
+			fallbackCandidateId: "account:b#1",
+			upgradedAt: 1_793_346_681_150,
+			suppressUpgradesUntil: 1_793_346_682_000,
+			pressureHoldSince: 1_793_346_681_200,
+		},
+	},
+};
+
+test("SQLite and fake PostgreSQL rows retain tombstones and legacy summaries have no lane", async () => {
+	const db = new Database(":memory:");
+	try {
+		ensureSchema(db);
+		runMigrations(db);
+		const repo = new RequestRepository(new BunSqlAdapter(db));
+		for (const [id, value] of [
+			[
+				"tombstone",
+				{ ...summary, affinityLane: { ...summary.affinityLane, owner: null } },
+			],
+			["legacy-summary", legacySummary],
+		] as const) {
+			await repo.save({ ...base, id, routingAttemptSummary: value });
+			const row = db
+				.query("SELECT * FROM requests WHERE id = ?")
+				.get(id) as RequestRow;
+			expect(toRequest(row).routingAttemptSummary).toEqual(value);
+			let boundSummary: unknown;
+			const adapter = {
+				run: async (sql: string, params: unknown[]) => {
+					const columns = (
+						sql.match(/INSERT INTO requests \(([^)]*)\)/)?.[1] ?? ""
+					)
+						.split(",")
+						.map((column) => column.trim());
+					boundSummary = params[columns.indexOf("routing_attempt_summary")];
+				},
+			} as unknown as BunSqlAdapter;
+			await new RequestRepository(adapter).save({
+				...base,
+				id,
+				routingAttemptSummary: value,
+			});
+			expect(
+				toRequest({ ...row, routing_attempt_summary: boundSummary as string })
+					.routingAttemptSummary,
+			).toEqual(value);
+			if (id === "legacy-summary")
+				expect(
+					toRequest(row).routingAttemptSummary?.affinityLane,
+				).toBeUndefined();
+		}
+	} finally {
+		db.close();
+	}
+});
 
 test("first terminal attribution survives late usage/save and reads through history", async () => {
 	const db = new Database(":memory:");
@@ -155,6 +222,13 @@ test("PostgreSQL fresh/upgrade schema and adapter writes preserve the bounded fi
 	expect(summaryIndex).toBeGreaterThanOrEqual(0);
 	expect(insertColumns).toHaveLength(write.params.length);
 	expect(JSON.parse(write.params[summaryIndex] as string)).toEqual(summary);
+	// The fake adapter captures the SQL boundary, then exercises the same row
+	// mapper used by PostgreSQL history reads. This is not live-PG evidence.
+	expect(
+		toRequest({
+			routing_attempt_summary: write.params[summaryIndex],
+		} as RequestRow).routingAttemptSummary,
+	).toEqual(summary);
 	expect(write.sql).toContain(
 		"routing_attempt_summary = COALESCE(requests.routing_attempt_summary, EXCLUDED.routing_attempt_summary)",
 	);

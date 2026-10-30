@@ -87,6 +87,32 @@ describe("SessionDrainSoonestStrategy", () => {
 		strategy.initialize(store);
 	});
 
+	it("exports sticky owners but nothing in strict mode even with an explicit retained owner", async () => {
+		const account = makeAccount({ id: "export-owner" });
+		const stickyMeta = meta("export-sticky");
+		await strategy.select([account], stickyMeta);
+		expect(strategy.exportAffinityLaneRecord(stickyMeta)?.owner).toMatchObject({
+			candidateId: "account:export-owner",
+			accountId: "export-owner",
+			installedBelowBestConfiguredTier: false,
+		});
+		const strict = new SessionDrainSoonestStrategy(undefined, "strict");
+		strict.initialize(store);
+		const strictMeta = {
+			...meta("export-strict"),
+			affinityOwnerDirective: {
+				kind: "retain-owner",
+				owner: {
+					candidateId: "account:export-owner",
+					accountId: "export-owner",
+				},
+			},
+		} as RequestMeta;
+		await strict.select([account], strictMeta);
+		expect(strict.snapshotAffinityOwner(strictMeta)).not.toBeNull();
+		expect(strict.exportAffinityLaneRecord(strictMeta)).toBeNull();
+	});
+
 	it("ranks a fresh client assignment by the earliest future weekly reset", async () => {
 		const now = Date.now();
 		const later = makeAccount({ id: "later", priority: 0 });
@@ -777,6 +803,15 @@ describe("SessionDrainSoonestStrategy", () => {
 				expect((await held.select([owner, urgent], pressureMeta()))[0]).toBe(
 					owner,
 				);
+				expect(
+					held.exportAffinityLaneRecord(meta("warm-client"))?.owner,
+				).toEqual({
+					candidateId: "account:owner",
+					accountId: "owner",
+					assignedAt: now,
+					installedBelowBestConfiguredTier: false,
+					pressureHoldSince: holdStart,
+				});
 			}
 			now = holdStart + 29 * MINUTE;
 			expect((await held.select([owner, urgent], pressureMeta()))[0]).toBe(

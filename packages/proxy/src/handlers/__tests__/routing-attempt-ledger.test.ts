@@ -1,5 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import { PROCESS_STARTED_AT_MS } from "@better-ccflare/core";
+import * as requestTypes from "@better-ccflare/types/request";
 import { sanitizeRequestRoutingAttemptSummary } from "@better-ccflare/types/request";
 import {
 	formatRoutingAttemptMessage,
@@ -7,6 +8,258 @@ import {
 	PhysicalAttemptBudgetExceededError,
 	RoutingAttemptLedger,
 } from "../routing-attempt-ledger";
+
+const laneRecord = {
+	digest: "a".repeat(64),
+	observedAt: 1_793_346_681_263,
+	owner: {
+		candidateId: "profile:main:model:vendor%2Fmodel:account:a#1",
+		accountId: "account-a",
+		assignedAt: 1_793_346_681_000,
+		installedBelowBestConfiguredTier: false,
+		fallbackCandidateId: "account:b#1",
+		upgradedAt: 1_793_346_681_100,
+		suppressUpgradesUntil: 1_793_346_682_000,
+		pressureHoldSince: 1_793_346_681_200,
+	},
+};
+
+describe("affinity lane summary boundary", () => {
+	const base = { version: 1, attempts: [], physicalAttemptCount: 0 };
+	it("keeps encoded, repeated-account and 185-character managed candidate ids without loosening attempt identities", () => {
+		const managed = `combo:${"c".repeat(36)}:managed:sonnet:rule:${"r".repeat(77)}:account:${"a".repeat(36)}`;
+		expect(managed.length).toBe(185);
+		for (const candidateId of [
+			laneRecord.owner.candidateId,
+			"account:a#1",
+			managed,
+		]) {
+			const block = {
+				...laneRecord,
+				owner: {
+					...laneRecord.owner,
+					candidateId,
+					fallbackCandidateId: candidateId,
+				},
+			};
+			const sanitized = sanitizeRequestRoutingAttemptSummary({
+				...base,
+				affinityLane: block,
+			});
+			expect(sanitized?.affinityLane).toEqual(block);
+			expect(
+				sanitizeRequestRoutingAttemptSummary(JSON.stringify(sanitized)),
+			).toEqual(sanitized);
+		}
+		const summary = sanitizeRequestRoutingAttemptSummary({
+			...base,
+			physicalAttemptCount: 1,
+			attempts: [{ ordinal: 1, accountId: "account:a#1" }],
+		});
+		expect(summary?.attempts[0].accountId).toBeNull();
+	});
+	it("turns invalid owners into tombstones and retains the summary", () => {
+		for (const invalid of [
+			{ assignedAt: Number.POSITIVE_INFINITY },
+			{ assignedAt: -1 },
+			{ assignedAt: 1.5 },
+			{ candidateId: "a".repeat(513) },
+			{ fallbackCandidateId: "a".repeat(513) },
+			{ candidateId: "" },
+			{ candidateId: "secret with spaces" },
+			{ accountId: "a#1" },
+			{ accountId: "a".repeat(129) },
+			{ installedBelowBestConfiguredTier: 1 },
+			{ upgradedAt: null },
+			{ suppressUpgradesUntil: Number.NaN },
+			{ pressureHoldSince: -1 },
+		]) {
+			const summary = sanitizeRequestRoutingAttemptSummary({
+				...base,
+				affinityLane: {
+					...laneRecord,
+					owner: { ...laneRecord.owner, ...invalid },
+				},
+			});
+			expect(summary?.affinityLane).toEqual({ ...laneRecord, owner: null });
+			expect(summary?.version).toBe(1);
+		}
+	});
+	it("omits invalid blocks and parses restore records through the write sanitizer", () => {
+		expect(typeof requestTypes.sanitizeRoutingAffinityLaneRecord).toBe(
+			"function",
+		);
+		for (const invalid of [
+			null,
+			[],
+			"raw",
+			{ ...laneRecord, digest: "A".repeat(64) },
+			{ ...laneRecord, digest: "a".repeat(63) },
+			{ ...laneRecord, observedAt: -1 },
+			{ ...laneRecord, observedAt: 1.5 },
+		]) {
+			expect(
+				requestTypes.sanitizeRoutingAffinityLaneRecord(invalid),
+			).toBeNull();
+			expect(
+				sanitizeRequestRoutingAttemptSummary({ ...base, affinityLane: invalid })
+					?.affinityLane,
+			).toBeUndefined();
+		}
+		expect(typeof requestTypes.parseRoutingAffinityLaneSummary).toBe(
+			"function",
+		);
+		for (const processStartedAt of [undefined, 1_793_346_680_000]) {
+			const text = JSON.stringify({
+				...base,
+				processStartedAt,
+				affinityLane: laneRecord,
+			});
+			expect(requestTypes.parseRoutingAffinityLaneSummary(text)).toEqual({
+				record: laneRecord,
+				processStartedAt: processStartedAt ?? null,
+			});
+		}
+		expect(
+			requestTypes.parseRoutingAffinityLaneSummary(
+				JSON.stringify({ ...base, affinityLane: { ...laneRecord, owner: {} } }),
+			),
+		).toEqual({
+			record: { ...laneRecord, owner: null },
+			processStartedAt: null,
+		});
+		for (const text of ["{broken", JSON.stringify(base), " ".repeat(16385)])
+			expect(requestTypes.parseRoutingAffinityLaneSummary(text)).toBeNull();
+	});
+	it("exports the lane block from the ledger and bounds the longest real ids to 1,024 characters", () => {
+		const managed = `combo:${"c".repeat(36)}:managed:sonnet:rule:${"r".repeat(77)}:account:${"a".repeat(36)}`;
+		const profile = `profile:${"p".repeat(36)}:model:${encodeURIComponent("vendor/model[large]")}:account:${"a".repeat(36)}#1`;
+		for (const candidateId of [
+			managed,
+			profile,
+			`account:${"a".repeat(36)}#1`,
+		]) {
+			const block = {
+				...laneRecord,
+				owner: {
+					...laneRecord.owner,
+					accountId: "a".repeat(36),
+					candidateId,
+					fallbackCandidateId: candidateId,
+				},
+			};
+			expect(JSON.stringify(block).length).toBeLessThanOrEqual(1024);
+			const summary = new RoutingAttemptLedger().terminalSummary({
+				success: true,
+				nativeStatus: 200,
+				wireStatus: 200,
+				affinityLane: block,
+			});
+			expect(summary?.affinityLane).toEqual(block);
+		}
+		expect(
+			new RoutingAttemptLedger().terminalSummary({
+				success: true,
+				nativeStatus: 200,
+				wireStatus: 200,
+				affinityLane: null,
+			})?.affinityLane,
+		).toBeUndefined();
+	});
+	it("counts the block in the oversize ladder, dropping decision and stream evidence while retaining the lane", () => {
+		const ledger = new RoutingAttemptLedger();
+		const identity = "m".repeat(128);
+		for (let i = 0; i < 16; i++) {
+			ledger.recordPhysicalAttempt({
+				accountId: identity,
+				provider: identity,
+				logicalModel: identity,
+				physicalModel: identity,
+			});
+			ledger.observePhysicalStream({
+				rawEventCounts: Object.fromEntries(
+					requestTypes.ROUTING_RAW_STREAM_CATEGORIES.map((k) => [
+						k,
+						Number.MAX_SAFE_INTEGER,
+					]),
+				),
+				rawVisibleEvents: Number.MAX_SAFE_INTEGER,
+				meaningfulFrames: Number.MAX_SAFE_INTEGER,
+				protocolFrames: Number.MAX_SAFE_INTEGER,
+				providerTerminal: "resource_limit",
+				gateOutcome: "buffer_limit",
+				remainingCommitmentMs: Number.MAX_SAFE_INTEGER,
+				cancellationOrigin: "semantic_deadline",
+				diagnosis: "meaningful_output",
+			});
+			ledger.recordPhysicalOutcome("buffer_limit");
+		}
+		ledger.observeRoutingDecision({
+			version: 1,
+			requestedLogicalModel: "model",
+			operation: "messages",
+			origin: "unknown",
+			reason: "route_unavailable",
+			evidence: "inferred",
+			inventory: "complete",
+			constraints: {
+				forcedRoute: false,
+				capabilityProfile: false,
+				routeProfile: false,
+				profileId: null,
+				provider: null,
+				physicalModel: null,
+			},
+			selection: null,
+			stages: [],
+		});
+		const without = ledger.terminalSummary({
+			success: false,
+			nativeStatus: 503,
+			wireStatus: 503,
+		});
+		const managed = `combo:${"c".repeat(36)}:managed:sonnet:rule:${"r".repeat(77)}:account:${"a".repeat(36)}`;
+		const affinityLane = {
+			...laneRecord,
+			owner: {
+				...laneRecord.owner,
+				candidateId: managed,
+				fallbackCandidateId: managed,
+				accountId: "a".repeat(36),
+			},
+		};
+		const withLane = ledger.terminalSummary({
+			success: false,
+			nativeStatus: 503,
+			wireStatus: 503,
+			affinityLane,
+		});
+		expect(withLane?.decision).toBeNull();
+		expect(withLane?.decisionGap).toBe("oversize");
+		expect(withLane?.affinityLane).toEqual(affinityLane);
+		expect(withLane?.attempts.some((a) => a.streamEvidence === null)).toBe(
+			true,
+		);
+		// Including the block makes another evidence snapshot exceed the cap.
+		expect(
+			withLane?.attempts.filter((a) => a.streamEvidence).length,
+		).toBeLessThan(
+			without?.attempts.filter((a) => a.streamEvidence).length ?? 0,
+		);
+		expect(JSON.stringify(withLane).length).toBeLessThanOrEqual(16384);
+	});
+	it("rejects an entire over-cap stored summary and its block at the restore boundary", () => {
+		const text = JSON.stringify({ ...base, affinityLane: laneRecord });
+		const atCap = text.padEnd(16384, " ");
+		expect(requestTypes.parseRoutingAffinityLaneSummary(atCap)?.record).toEqual(
+			laneRecord,
+		);
+		expect(sanitizeRequestRoutingAttemptSummary(`${atCap} `)).toBeNull();
+		expect(
+			requestTypes.parseRoutingAffinityLaneSummary(`${atCap} `),
+		).toBeNull();
+	});
+});
 
 describe("RoutingAttemptLedger", () => {
 	it("preserves failed physical attempts separately from a successful rescue winner", () => {
@@ -240,6 +493,31 @@ describe("RoutingAttemptLedger", () => {
 		expect(summary?.terminalCause).toBe("buffer_limit");
 		expect(summary?.completeness).toBe("partial");
 		expect(summary?.truncated).toBe(true);
+		const managed = `combo:${"c".repeat(36)}:managed:sonnet:rule:${"r".repeat(77)}:account:${"a".repeat(36)}`;
+		const affinityLane = {
+			...laneRecord,
+			owner: {
+				...laneRecord.owner,
+				candidateId: managed,
+				fallbackCandidateId: managed,
+				accountId: "a".repeat(36),
+			},
+		};
+		const withLane = ledger.terminalSummary({
+			success: false,
+			error: "route_unavailable",
+			nativeStatus: 503,
+			wireStatus: 200,
+			affinityLane,
+		});
+		expect(withLane?.affinityLane).toEqual(affinityLane);
+		expect(JSON.stringify(withLane).length).toBeLessThanOrEqual(16384);
+		expect(
+			sanitizeRequestRoutingAttemptSummary(JSON.stringify(withLane)),
+		).toEqual(withLane);
+		console.info(
+			`maximal 16-attempt summary: without lane=${encoded.length}; with lane=${JSON.stringify(withLane).length}; before ladder=${JSON.stringify({ ...summary, affinityLane }).length}; block=${JSON.stringify(affinityLane).length}`,
+		);
 	});
 
 	it("claims hosted dispatch exactly once and exposes its monotonic state", () => {

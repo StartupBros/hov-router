@@ -12,7 +12,7 @@ import type { Account } from "./account";
 import type { AlertEvent } from "./alerts";
 import type { AffinityOwnerSnapshot, RequestMeta } from "./api";
 import type { ApiKey } from "./api-key";
-import type { RouteHomeAction } from "./request";
+import type { RouteHomeAction, RoutingAffinityLaneRecord } from "./request";
 import type {
 	AnthropicDegradedRuntimeHealth,
 	IntegrityStatus,
@@ -212,6 +212,10 @@ export interface APIContext {
 
 // Load balancing strategy interface
 export interface LoadBalancingStrategy {
+	/** Observe the retained lane state without refreshing it. */
+	exportAffinityLaneRecord?(
+		meta: RequestMeta,
+	): RoutingAffinityLaneRecord | null;
 	/**
 	 * Return a filtered & ordered list of candidate accounts.
 	 * Accounts that are rate-limited should be filtered out.
