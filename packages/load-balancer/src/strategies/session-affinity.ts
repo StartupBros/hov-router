@@ -8,20 +8,25 @@ import { Logger } from "@better-ccflare/logger";
 import type {
 	Account,
 	AffinityOwnerSnapshot,
+	AffinityRestoreHealth,
+	AffinityRestoreSession,
 	LoadBalancingStrategy,
 	RequestMeta,
 	RouteCircuitRecoveryHint,
 	RouteHomeAction,
+	RoutingAffinityLaneRecord,
 	RoutingCandidateFailureReport,
 	RoutingCandidateSuccessReport,
 	RoutingHealth,
 	StrategyStore,
 } from "@better-ccflare/types";
+import { affinityLaneDigest } from "./affinity-lane-digest";
 import { isPeekAvailable, wouldAutoUnpause } from "./peek-availability";
 import {
 	commitStrategyCandidateOrder,
 	compareStrategyCandidates,
 	filterHardExcludedCandidates,
+	hasDecidedPressureComparison,
 	isSameStrategyCandidateClass,
 	type StrategyCandidate,
 	zipStrategyCandidates,
@@ -266,6 +271,8 @@ export class SessionAffinityStrategy implements LoadBalancingStrategy {
 	>();
 	private nextRouteFailureGcAt = Number.NEGATIVE_INFINITY;
 	private routeFailureGcSweepCount = 0;
+	private restoreGate: Promise<void> | null = null;
+	private affinityRestoreHealth?: AffinityRestoreHealth;
 
 	constructor(
 		affinityTtlMs: number = TIME_CONSTANTS.ANTHROPIC_SESSION_DURATION_DEFAULT,
@@ -298,6 +305,9 @@ export class SessionAffinityStrategy implements LoadBalancingStrategy {
 
 	getRoutingHealth(): RoutingHealth {
 		return {
+			...(this.affinityRestoreHealth
+				? { affinityRestore: { ...this.affinityRestoreHealth } }
+				: {}),
 			affinityEntries: this.affinityEntries,
 			routeSuppressionEntries: this.routeSuppressionEntries,
 			routeSuppressionGcSweeps: this.routeSuppressionGcSweeps,
@@ -311,9 +321,9 @@ export class SessionAffinityStrategy implements LoadBalancingStrategy {
 
 	private affinityKey(meta: RequestMeta): string | null {
 		const laneKey = meta.affinityLaneKey ?? null;
-		if (laneKey !== null) return `lane:${laneKey}`;
+		if (laneKey !== null) return affinityLaneDigest(`lane:${laneKey}`);
 		const clientId = meta.clientSessionId ?? null;
-		return clientId !== null ? `client:${clientId}` : null;
+		return clientId !== null ? affinityLaneDigest(`client:${clientId}`) : null;
 	}
 
 	/** Strategy variants may suppress ordinary stickiness without disabling route circuits. */
@@ -408,6 +418,130 @@ export class SessionAffinityStrategy implements LoadBalancingStrategy {
 		return {
 			candidateId: mapping.candidateId,
 			accountId: mapping.accountId,
+		};
+	}
+
+	protected retainsOrdinaryOwners(): boolean {
+		return true;
+	}
+
+	affinityRestoreGate(): Promise<void> | null {
+		return this.restoreGate;
+	}
+
+	beginAffinityRestore(): AffinityRestoreSession | null {
+		if (this.restoreGate !== null) return null;
+		this.affinityRestoreHealth = {
+			state: this.retainsOrdinaryOwners() ? "pending" : "skipped",
+			recordsRead: 0,
+			pinsRestored: 0,
+			durationMs: null,
+			abandonReason: null,
+		};
+		if (this.affinityRestoreHealth.state === "skipped") return null;
+		let openGate!: () => void;
+		this.restoreGate = new Promise<void>((resolve) => {
+			openGate = resolve;
+		});
+		let finished = false;
+		return {
+			ttlMs: this.affinityTtlMs,
+			install: (records) =>
+				finished ? 0 : this.installAffinityRecords(records),
+			finish: (outcome) => {
+				if (finished) return;
+				finished = true;
+				this.affinityRestoreHealth = { ...outcome };
+				this.restoreGate = null;
+				openGate();
+			},
+		};
+	}
+
+	/** Restore map state without manufacturing a routing decision or a recent pick. */
+	private installAffinityRecords(records: RoutingAffinityLaneRecord[]): number {
+		const now = this.now();
+		for (const [digest, entry] of this.affinity) {
+			if (now - entry.assignedAt >= this.affinityTtlMs)
+				this.affinity.delete(digest);
+		}
+		const entries: Array<{ digest: string; entry: SessionAffinityEntry }> = [];
+		for (const { digest, owner } of records) {
+			if (!owner || now - owner.assignedAt >= this.affinityTtlMs) continue;
+			const assignedAt = Math.min(owner.assignedAt, now);
+			const upgradedAt =
+				owner.upgradedAt === undefined ? null : Math.min(owner.upgradedAt, now);
+			const pressureHoldSince =
+				owner.pressureHoldSince === undefined
+					? null
+					: Math.min(owner.pressureHoldSince, now);
+			const suppressUpgradesUntil = owner.suppressUpgradesUntil ?? null;
+			if (
+				owner.fallbackCandidateId === owner.candidateId ||
+				(upgradedAt !== null && upgradedAt > assignedAt) ||
+				(pressureHoldSince !== null && pressureHoldSince > assignedAt) ||
+				(suppressUpgradesUntil !== null &&
+					suppressUpgradesUntil > assignedAt + this.antiThrashWindowMs)
+			)
+				continue;
+			entries.push({
+				digest,
+				entry: {
+					candidateId: owner.candidateId,
+					accountId: owner.accountId,
+					fallbackCandidateId: owner.fallbackCandidateId ?? null,
+					assignedAt,
+					upgradedAt,
+					suppressUpgradesUntil,
+					pressureHoldSince,
+					installedBelowBestConfiguredTier:
+						owner.installedBelowBestConfiguredTier,
+					crossTierProtectionLogged: false,
+				},
+			});
+		}
+		entries.sort((a, b) => b.entry.assignedAt - a.entry.assignedAt);
+		let installed = 0;
+		for (const { digest, entry } of entries) {
+			if (this.affinity.size >= this.maxAffinityEntries) break;
+			if (this.affinity.has(digest)) continue;
+			this.affinity.set(digest, entry);
+			installed++;
+		}
+		return installed;
+	}
+
+	exportAffinityLaneRecord(
+		meta: RequestMeta,
+	): RoutingAffinityLaneRecord | null {
+		if (!this.retainsOrdinaryOwners()) return null;
+		const digest = this.affinityKey(meta);
+		if (digest === null) return null;
+		const observedAt = this.now();
+		const entry = this.affinity.get(digest);
+		if (!entry || observedAt - entry.assignedAt >= this.affinityTtlMs) {
+			return { digest, observedAt, owner: null };
+		}
+		return {
+			digest,
+			observedAt,
+			owner: {
+				candidateId: entry.candidateId,
+				accountId: entry.accountId,
+				assignedAt: entry.assignedAt,
+				installedBelowBestConfiguredTier:
+					entry.installedBelowBestConfiguredTier,
+				...(entry.fallbackCandidateId === null
+					? {}
+					: { fallbackCandidateId: entry.fallbackCandidateId }),
+				...(entry.upgradedAt === null ? {} : { upgradedAt: entry.upgradedAt }),
+				...(entry.suppressUpgradesUntil === null
+					? {}
+					: { suppressUpgradesUntil: entry.suppressUpgradesUntil }),
+				...(entry.pressureHoldSince === null
+					? {}
+					: { pressureHoldSince: entry.pressureHoldSince }),
+			},
 		};
 	}
 
@@ -1410,11 +1544,12 @@ export class SessionAffinityStrategy implements LoadBalancingStrategy {
 						// end any in-progress protection episode so the next one logs
 						// at info again.
 						mapping.crossTierProtectionLogged = false;
-						// A hold is capped from its first outclassed turn; any in-class
-						// turn ends the episode.
-						mapping.pressureHoldSince = warmPressureHold
-							? (mapping.pressureHoldSince ?? now)
-							: null;
+						// Missing/incomparable usage cannot end an existing hold episode.
+						if (warmPressureHold) {
+							mapping.pressureHoldSince ??= now;
+						} else if (hasDecidedPressureComparison(mapped, best, meta)) {
+							mapping.pressureHoldSince = null;
+						}
 						const others = this.rankByLeastUsed(
 							available.filter(
 								(candidate) =>

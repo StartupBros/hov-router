@@ -252,6 +252,25 @@ interface TokenAggregateRow {
 }
 
 export class RequestRepository extends BaseRepository<RequestData> {
+	async listAffinityLaneSummariesSince(
+		sinceMs: number,
+		limit: number,
+	): Promise<{ summaries: string[]; capReached: boolean }> {
+		// REPLACE matches the literal, case-sensitive key on both TEXT backends.
+		// Keep malformed JSON for the restore parser rather than parsing in SQL.
+		const rows = await this.queryOffThread<{ routing_attempt_summary: string }>(
+			`SELECT routing_attempt_summary FROM requests
+			 WHERE timestamp >= ?
+			   AND REPLACE(routing_attempt_summary, '"affinityLane"', '') <> routing_attempt_summary
+			 ORDER BY timestamp DESC LIMIT ?`,
+			[sinceMs, limit + 1],
+		);
+		return {
+			summaries: rows.slice(0, limit).map((row) => row.routing_attempt_summary),
+			capReached: rows.length > limit,
+		};
+	}
+
 	async save(data: RequestData): Promise<void> {
 		const { usage } = data;
 		const decision = sanitizeQualityDecision(data.qualityDecision);

@@ -210,6 +210,12 @@ The unit to which session affinity pins an owner account: one client session's t
 one protocol, request path, model and set of requested beta features, separated further by
 route profile when one applies.
 
+Ordinary and profile lanes (and the client-session fallback) retain their owners across
+restarts in session-affinity and sticky drain-soonest mode, restored from finalized request
+history within the affinity TTL. Child-home, quality and web-search helper lanes have
+process-local identities and do not survive a restart. Strict drain-soonest and strategies
+that order every turn afresh do not restore owners.
+
 One session and model can run several lanes at once, each with its own owner, so a
 session's successive requests can alternate accounts while no owner moves. It is unrelated to
 the quality lane, the physical-model lane, and the hosted and native web-search lanes.

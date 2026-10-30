@@ -1,5 +1,9 @@
 import { describe, expect, it, mock } from "bun:test";
 import { getGitSha, getVersionSync } from "@better-ccflare/core";
+import {
+	restoreAffinityPins,
+	SessionAffinityStrategy,
+} from "@better-ccflare/load-balancer";
 import type { Account, HealthResponse } from "@better-ccflare/types";
 
 mock.module("@better-ccflare/database", () => ({
@@ -213,6 +217,58 @@ describe("health runtime payload", () => {
 		const body = (await response.json()) as HealthResponse;
 
 		expect(body.routing).toEqual(routing);
+	});
+
+	it("serves health during a pending restore and includes the strategy's settled affinity restore outcome", async () => {
+		const db = {
+			getAllAccounts: async () => [
+				{ name: "test-account", paused: false, rate_limited_until: null },
+			],
+		} as unknown as import("@better-ccflare/database").DatabaseOperations;
+		const config = {
+			getStrategy: () => "session-affinity",
+			getHealthDetailEnabled: () => false,
+		} as unknown as import("@better-ccflare/config").Config;
+		const strategy = new SessionAffinityStrategy();
+		let finishRead!: () => void;
+		const pending = new Promise<{ summaries: string[]; capReached: boolean }>(
+			(resolve) => {
+				finishRead = () => resolve({ summaries: [], capReached: false });
+			},
+		);
+		const restoring = restoreAffinityPins({
+			strategy,
+			reader: { listAffinityLaneSummariesSince: () => pending },
+		});
+		const providers = { getRoutingHealth: () => strategy.getRoutingHealth() };
+		const url = new URL("http://localhost/health");
+		try {
+			expect(strategy.affinityRestoreGate()).not.toBeNull();
+			const response = await createHealthHandler(db, config, providers)(url);
+			const body = (await response.json()) as HealthResponse;
+			expect(response.status).toBe(200);
+			expect(body.routing?.affinityRestore).toEqual({
+				state: "pending",
+				recordsRead: 0,
+				pinsRestored: 0,
+				durationMs: null,
+				abandonReason: null,
+			});
+		} finally {
+			finishRead();
+			await restoring;
+		}
+		// A fresh handler avoids the pre-existing two-second health cache.
+		const response = await createHealthHandler(db, config, providers)(url);
+		const body = (await response.json()) as HealthResponse;
+		expect(response.status).toBe(200);
+		expect(body.routing?.affinityRestore).toEqual({
+			state: "restored",
+			recordsRead: 0,
+			pinsRestored: 0,
+			durationMs: expect.any(Number),
+			abandonReason: null,
+		});
 	});
 
 	it("exposes only the fixed aggregate Anthropic degraded runtime schema", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import "@better-ccflare/core";
+import { SessionAffinityStrategy } from "@better-ccflare/load-balancer";
 import type { RequestMeta } from "@better-ccflare/types";
 import {
 	sanitizeRequestRoutingAttemptSummary,
@@ -20,6 +21,223 @@ import {
 	recordRoutingTerminalRequest,
 } from "../routing-terminal-recorder";
 import type { EndMessage, StartMessage } from "../worker-messages";
+
+describe("affinity lane finalization", () => {
+	function lifecycle() {
+		let now = 1_793_346_681_000;
+		const m = { ...meta(), clientSessionId: "finalize-client" };
+		const strategy = new SessionAffinityStrategy(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			() => now,
+		);
+		const owner = { candidateId: "account:owner", accountId: "owner" };
+		strategy.commitAffinityOwner(m, owner);
+		const ledger = new RoutingAttemptLedger();
+		ledger.recordPhysicalAttempt({ accountId: "owner", provider: "test" });
+		const coordinator = getRequestLifecycleCoordinator(m);
+		const ends: EndMessage[] = [];
+		const errors: unknown[] = [];
+		const collector = {
+			handleStart: (_message: StartMessage) => {},
+			handleEnd: async (message: EndMessage) => {
+				ends.push(message);
+			},
+		};
+		return {
+			m,
+			strategy,
+			owner,
+			ledger,
+			coordinator,
+			ends,
+			errors,
+			collector,
+			setNow: (value: number) => {
+				now = value;
+			},
+			start: () =>
+				coordinator.start({
+					collector,
+					onError: (error) => errors.push(error),
+					message: {
+						requestId: m.id,
+						responseStatus: 200,
+						accountId: "owner",
+					} as StartMessage,
+				}),
+		};
+	}
+
+	it("records successful owner state at finalize rather than bind", async () => {
+		const t = lifecycle();
+		t.coordinator.bindRoutingObservation(
+			t.ledger,
+			(status) => status,
+			() => t.strategy.exportAffinityLaneRecord(t.m),
+		);
+		t.start();
+		t.setNow(1_793_346_681_500);
+		t.strategy.commitAffinityOwner(t.m, t.owner);
+		await t.coordinator.finalize({
+			type: "end",
+			requestId: t.m.id,
+			success: true,
+		});
+		expect(t.ends[0].routingAttemptSummary?.affinityLane).toMatchObject({
+			observedAt: 1_793_346_681_500,
+			owner: {
+				...t.owner,
+				assignedAt: 1_793_346_681_500,
+				installedBelowBestConfiguredTier: false,
+			},
+		});
+	});
+	it("observes a deferred request at release and calls the closure once", async () => {
+		const t = lifecycle();
+		let calls = 0;
+		t.coordinator.bindRoutingObservation(
+			t.ledger,
+			(status) => status,
+			() => {
+				calls++;
+				return t.strategy.exportAffinityLaneRecord(t.m);
+			},
+		);
+		t.start();
+		t.coordinator.deferFinalization();
+		await t.coordinator.finalize({
+			type: "end",
+			requestId: t.m.id,
+			success: true,
+		});
+		expect(calls).toBe(0);
+		expect(t.ends).toHaveLength(0);
+		t.setNow(1_793_346_682_000);
+		t.strategy.commitAffinityOwner(t.m, t.owner);
+		await t.coordinator.releaseFinalization();
+		await t.coordinator.releaseFinalization();
+		expect(calls).toBe(1);
+		expect(
+			t.ends[0].routingAttemptSummary?.affinityLane?.owner?.assignedAt,
+		).toBe(1_793_346_682_000);
+	});
+	it("records a local routing terminal's current owner", async () => {
+		const t = lifecycle();
+		t.coordinator.bindRoutingObservation(
+			t.ledger,
+			(status) => status,
+			() => t.strategy.exportAffinityLaneRecord(t.m),
+		);
+		t.setNow(1_793_346_683_000);
+		t.strategy.commitAffinityOwner(t.m, t.owner);
+		await recordRoutingTerminalRequest({
+			collector: t.collector,
+			requestMeta: t.m,
+			requestHeaders: new Headers(),
+			response: new Response(null, { status: 503 }),
+			providerName: "test",
+			terminalKind: "route_unavailable",
+			upstreamAttempts: 1,
+		});
+		expect(t.ends[0].routingAttemptSummary?.affinityLane).toMatchObject({
+			observedAt: 1_793_346_683_000,
+			owner: { ...t.owner, assignedAt: 1_793_346_683_000 },
+		});
+	});
+	it("reports a throwing lane recorder and keeps the rest of the summary", async () => {
+		const t = lifecycle();
+		const failure = new Error("synthetic lane export failure");
+		t.coordinator.bindRoutingObservation(
+			t.ledger,
+			(status) => status,
+			() => {
+				throw failure;
+			},
+		);
+		t.start();
+		await t.coordinator.finalize({
+			type: "end",
+			requestId: t.m.id,
+			success: true,
+		});
+		expect(t.errors).toEqual([failure]);
+		expect(t.ends[0].routingAttemptSummary).toMatchObject({
+			physicalAttemptCount: 1,
+			processStartedAt: expect.any(Number),
+			winnerOrdinal: 1,
+		});
+		expect(t.ends[0].routingAttemptSummary?.affinityLane).toBeUndefined();
+	});
+	it("records only the final fallback rung's lane, leaving the earlier rung's prior record", async () => {
+		const t = lifecycle();
+		const firstLane = JSON.stringify([
+			"routing-lane-profile-v1",
+			"session",
+			"requested-model",
+		]);
+		const finalLane = JSON.stringify([
+			"routing-lane-profile-v1",
+			"session",
+			"root-model",
+		]);
+		t.m.affinityLaneKey = firstLane;
+		t.strategy.commitAffinityOwner(t.m, {
+			candidateId: "profile:requested:account:first",
+			accountId: "first",
+		});
+		const prior = new RoutingAttemptLedger().terminalSummary({
+			success: true,
+			nativeStatus: 200,
+			wireStatus: 200,
+			affinityLane: t.strategy.exportAffinityLaneRecord(t.m),
+		});
+		t.coordinator.bindRoutingObservation(
+			t.ledger,
+			(status) => status,
+			() => t.strategy.exportAffinityLaneRecord(t.m),
+		);
+		t.start();
+		t.ledger.recordPhysicalOutcome("upstream_error");
+		t.m.affinityLaneKey = finalLane;
+		t.setNow(1_793_346_684_000);
+		t.strategy.commitAffinityOwner(t.m, {
+			candidateId: "profile:root:account:final",
+			accountId: "final",
+		});
+		t.ledger.recordPhysicalAttempt({ accountId: "final", provider: "test" });
+		await t.coordinator.finalize({
+			type: "end",
+			requestId: t.m.id,
+			success: true,
+		});
+		expect(t.ends[0].routingAttemptSummary?.affinityLane?.owner).toMatchObject({
+			candidateId: "profile:root:account:final",
+			accountId: "final",
+			assignedAt: 1_793_346_684_000,
+		});
+		expect(t.ends[0].routingAttemptSummary?.affinityLane?.digest).not.toBe(
+			prior?.affinityLane?.digest,
+		);
+		expect(prior?.affinityLane?.owner).toMatchObject({
+			candidateId: "profile:requested:account:first",
+			assignedAt: 1_793_346_681_000,
+		});
+		expect(
+			t.strategy.exportAffinityLaneRecord({
+				...t.m,
+				affinityLaneKey: firstLane,
+			})?.owner,
+		).toEqual({
+			candidateId: "profile:requested:account:first",
+			accountId: "first",
+			assignedAt: 1_793_346_681_000,
+			installedBelowBestConfiguredTier: false,
+		});
+	});
+});
 
 const diagnostics = {
 	mode: "enforce" as const,

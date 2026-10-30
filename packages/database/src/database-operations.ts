@@ -1647,6 +1647,13 @@ OAuth tokens will need to be re-authenticated.
 
 	// Request operations delegated to repository
 
+	listAffinityLaneSummariesSince(
+		sinceMs: number,
+		limit: number,
+	): Promise<{ summaries: string[]; capReached: boolean }> {
+		return this.requests.listAffinityLaneSummariesSince(sinceMs, limit);
+	}
+
 	async saveRequest(
 		id: string,
 		method: string,

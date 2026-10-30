@@ -176,6 +176,27 @@ export function compareRoutingMetadata(
 	return rankB - rankA;
 }
 
+/** Whether usage can decide a pressure comparison rather than defaulting in class. */
+export function hasDecidedPressureComparison(
+	candidate: StrategyCandidate,
+	best: StrategyCandidate,
+	meta?: RequestMeta,
+): boolean {
+	const candidatePressure =
+		candidate.routing.quotaPressure ??
+		meta?.quotaPressureByAccountId?.get(candidate.account.id);
+	const bestPressure =
+		best.routing.quotaPressure ??
+		meta?.quotaPressureByAccountId?.get(best.account.id);
+	return Boolean(
+		candidatePressure &&
+			bestPressure &&
+			candidatePressure.comparisonKey !== null &&
+			bestPressure.comparisonKey !== null &&
+			candidatePressure.comparisonKey === bestPressure.comparisonKey,
+	);
+}
+
 /** Compare exact route candidates without collapsing duplicate accounts. */
 export function compareStrategyCandidates(
 	a: StrategyCandidate,
@@ -190,23 +211,16 @@ export function compareStrategyCandidates(
 		return a.routing.tier - b.routing.tier;
 	}
 
+	if (!hasDecidedPressureComparison(a, b, meta)) return 0;
 	const pressureA =
 		a.routing.quotaPressure ??
 		meta?.quotaPressureByAccountId?.get(a.account.id);
 	const pressureB =
 		b.routing.quotaPressure ??
 		meta?.quotaPressureByAccountId?.get(b.account.id);
-	if (
-		!pressureA ||
-		!pressureB ||
-		pressureA.comparisonKey === null ||
-		pressureB.comparisonKey === null ||
-		pressureA.comparisonKey !== pressureB.comparisonKey
-	) {
-		return 0;
-	}
-
-	return PRESSURE_RANK[pressureB.band] - PRESSURE_RANK[pressureA.band];
+	return pressureA && pressureB
+		? PRESSURE_RANK[pressureB.band] - PRESSURE_RANK[pressureA.band]
+		: 0;
 }
 
 /**
@@ -273,6 +287,7 @@ export function isSameStrategyCandidateClass(
 	meta?: RequestMeta,
 ): boolean {
 	if (!isSameStrategyCandidateRouteClass(candidate, best)) return false;
+	if (!hasDecidedPressureComparison(candidate, best, meta)) return true;
 
 	const candidatePressure =
 		candidate.routing.quotaPressure ??
@@ -280,15 +295,5 @@ export function isSameStrategyCandidateClass(
 	const bestPressure =
 		best.routing.quotaPressure ??
 		meta?.quotaPressureByAccountId?.get(best.account.id);
-	if (
-		!candidatePressure ||
-		!bestPressure ||
-		candidatePressure.comparisonKey === null ||
-		bestPressure.comparisonKey === null ||
-		candidatePressure.comparisonKey !== bestPressure.comparisonKey
-	) {
-		return true;
-	}
-
-	return candidatePressure.band === bestPressure.band;
+	return candidatePressure?.band === bestPressure?.band;
 }

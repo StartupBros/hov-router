@@ -2,6 +2,7 @@ import { PROCESS_STARTED_AT_MS } from "@better-ccflare/core";
 import {
 	MAX_ROUTING_ATTEMPT_SNAPSHOTS,
 	type RequestRoutingAttemptSummary,
+	type RoutingAffinityLaneRecord,
 	type RoutingPhysicalAttempt,
 	type RoutingStreamEvidence,
 	sanitizeRequestRoutingAttemptSummary,
@@ -305,6 +306,7 @@ export class RoutingAttemptLedger {
 		nativeStatus: number;
 		wireStatus: number;
 		webSearchHelper?: RequestRoutingAttemptSummary["webSearchHelper"];
+		affinityLane?: RoutingAffinityLaneRecord | null;
 	}): RequestRoutingAttemptSummary | null {
 		const last = this.latestObservation;
 		const selectedCause =
@@ -332,6 +334,7 @@ export class RoutingAttemptLedger {
 				? { webSearchHelper: input.webSearchHelper }
 				: {}),
 			processStartedAt: PROCESS_STARTED_AT_MS,
+			...(input.affinityLane ? { affinityLane: input.affinityLane } : {}),
 			version: 1,
 			...(this.routingDecisionObservation
 				? {

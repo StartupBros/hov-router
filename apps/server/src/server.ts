@@ -47,6 +47,7 @@ import {
 import {
 	LeastUsedStrategy,
 	RoutingTransitionRecorder,
+	restoreAffinityPins,
 	SessionAffinityStrategy,
 	SessionDrainSoonestStrategy,
 	SessionStrategy,
@@ -2085,6 +2086,7 @@ export default async function startServer(options?: {
 	});
 
 	strategy.initialize?.(strategyStore);
+	void restoreAffinityPins({ strategy, reader: dbOps, now: Date.now });
 	currentStrategy = strategy;
 
 	await initProxy(() => config.getStorePayloads());

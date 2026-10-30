@@ -87,6 +87,32 @@ describe("SessionDrainSoonestStrategy", () => {
 		strategy.initialize(store);
 	});
 
+	it("exports sticky owners but nothing in strict mode even with an explicit retained owner", async () => {
+		const account = makeAccount({ id: "export-owner" });
+		const stickyMeta = meta("export-sticky");
+		await strategy.select([account], stickyMeta);
+		expect(strategy.exportAffinityLaneRecord(stickyMeta)?.owner).toMatchObject({
+			candidateId: "account:export-owner",
+			accountId: "export-owner",
+			installedBelowBestConfiguredTier: false,
+		});
+		const strict = new SessionDrainSoonestStrategy(undefined, "strict");
+		strict.initialize(store);
+		const strictMeta = {
+			...meta("export-strict"),
+			affinityOwnerDirective: {
+				kind: "retain-owner",
+				owner: {
+					candidateId: "account:export-owner",
+					accountId: "export-owner",
+				},
+			},
+		} as RequestMeta;
+		await strict.select([account], strictMeta);
+		expect(strict.snapshotAffinityOwner(strictMeta)).not.toBeNull();
+		expect(strict.exportAffinityLaneRecord(strictMeta)).toBeNull();
+	});
+
 	it("ranks a fresh client assignment by the earliest future weekly reset", async () => {
 		const now = Date.now();
 		const later = makeAccount({ id: "later", priority: 0 });
@@ -746,6 +772,55 @@ describe("SessionDrainSoonestStrategy", () => {
 			expect(sameTierRemaps()).toBe(0);
 		});
 
+		it.each([
+			"missing both",
+			"missing owner",
+			"missing challenger",
+			"null key",
+			"different keys",
+		])("keeps a live hold start across an undecided %s turn, then clears it on a decided same-band turn", async (gap) => {
+			const owner = makeAccount({ id: "owner" });
+			const urgent = makeAccount({ id: "urgent" });
+			await held.select([owner], meta("warm-client"));
+			now += MINUTE;
+			const holdStart = now;
+			await held.select([owner, urgent], pressureMeta());
+			store.utilization.set("owner", 90);
+			store.utilization.set("urgent", 0);
+			now += MINUTE;
+			const undecided = pressureMeta();
+			if (gap === "missing both")
+				undecided.quotaPressureByAccountId = new Map();
+			if (gap === "missing owner")
+				undecided.quotaPressureByAccountId?.delete("owner");
+			if (gap === "missing challenger")
+				undecided.quotaPressureByAccountId?.delete("urgent");
+			if (gap === "null key" || gap === "different keys") {
+				undecided.quotaPressureByAccountId?.set("owner", {
+					band: "cold",
+					comparisonKey: gap === "null key" ? null : "other-window",
+				});
+			}
+			expect((await held.select([owner, urgent], undecided))[0]).toBe(owner);
+			expect(
+				held.exportAffinityLaneRecord(meta("warm-client"))?.owner
+					?.pressureHoldSince,
+			).toBe(holdStart);
+			now += MINUTE;
+			expect(
+				(
+					await held.select(
+						[owner, urgent],
+						pressureMeta("warm-client", { owner: "cold", urgent: "cold" }),
+					)
+				)[0],
+			).toBe(owner);
+			expect(
+				held.exportAffinityLaneRecord(meta("warm-client"))?.owner
+					?.pressureHoldSince,
+			).toBeUndefined();
+		});
+
 		it("releases the hold once the session idles for the warm-cache window", async () => {
 			const owner = makeAccount({ id: "owner" });
 			const urgent = makeAccount({ id: "urgent" });
@@ -777,6 +852,15 @@ describe("SessionDrainSoonestStrategy", () => {
 				expect((await held.select([owner, urgent], pressureMeta()))[0]).toBe(
 					owner,
 				);
+				expect(
+					held.exportAffinityLaneRecord(meta("warm-client"))?.owner,
+				).toEqual({
+					candidateId: "account:owner",
+					accountId: "owner",
+					assignedAt: now,
+					installedBelowBestConfiguredTier: false,
+					pressureHoldSince: holdStart,
+				});
 			}
 			now = holdStart + 29 * MINUTE;
 			expect((await held.select([owner, urgent], pressureMeta()))[0]).toBe(

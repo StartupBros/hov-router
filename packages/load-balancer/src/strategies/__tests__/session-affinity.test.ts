@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
+	affinityLaneDigest,
 	RoutingTransitionRecorder,
 	SessionAffinityStrategy,
 } from "@better-ccflare/load-balancer";
@@ -93,6 +94,336 @@ describe("SessionAffinityStrategy", () => {
 		store = new MockStore();
 		strategy = new SessionAffinityStrategy();
 		strategy.initialize(store);
+	});
+
+	describe("affinity restore session", () => {
+		const START = 1_800_000_000_000;
+		let now: number;
+		let restoring: SessionAffinityStrategy;
+		const record = (
+			session: string,
+			assignedAt: number,
+			candidateId = "account:restored",
+		) => ({
+			digest: affinityLaneDigest(`client:${session}`),
+			observedAt: START,
+			owner: {
+				candidateId,
+				accountId: "restored",
+				assignedAt,
+				installedBelowBestConfiguredTier: false,
+			},
+		});
+		const outcome = {
+			state: "restored" as const,
+			recordsRead: 1,
+			pinsRestored: 1,
+			durationMs: 12,
+			abandonReason: null,
+		};
+		beforeEach(() => {
+			now = START;
+			restoring = new SessionAffinityStrategy(
+				60_000,
+				3,
+				5_000,
+				undefined,
+				() => now,
+			);
+			restoring.initialize(store);
+		});
+
+		it("starts open without restore health, closes once, and finish is first-call-wins", async () => {
+			expect(restoring.affinityRestoreGate()).toBeNull();
+			expect(restoring.getRoutingHealth().affinityRestore).toBeUndefined();
+			const session = restoring.beginAffinityRestore();
+			expect(session?.ttlMs).toBe(60_000);
+			expect(restoring.beginAffinityRestore()).toBeNull();
+			const gate = restoring.affinityRestoreGate();
+			expect(gate).toBeInstanceOf(Promise);
+			let opened = false;
+			gate?.then(() => {
+				opened = true;
+			});
+			await Promise.resolve();
+			expect(opened).toBe(false);
+			expect(restoring.getRoutingHealth().affinityRestore).toEqual({
+				state: "pending",
+				recordsRead: 0,
+				pinsRestored: 0,
+				durationMs: null,
+				abandonReason: null,
+			});
+			expect(session?.install([record("session", START - 1)])).toBe(1);
+			session?.finish(outcome);
+			await gate;
+			expect(opened).toBe(true);
+			expect(restoring.affinityRestoreGate()).toBeNull();
+			session?.finish({
+				...outcome,
+				state: "abandoned",
+				abandonReason: "budget",
+			});
+			expect(session?.install([record("late", START)])).toBe(0);
+			expect(restoring.getRoutingHealth().affinityRestore).toEqual(outcome);
+			const snapshot = restoring.getRoutingHealth().affinityRestore;
+			if (snapshot) snapshot.recordsRead = 99;
+			expect(restoring.getRoutingHealth().affinityRestore?.recordsRead).toBe(1);
+		});
+
+		it("binds installation to the original instance while a hot replacement stays open", () => {
+			const session = restoring.beginAffinityRestore();
+			const replacement = new SessionAffinityStrategy();
+			expect(session?.install([record("session", START)])).toBe(1);
+			session?.finish(outcome);
+			expect(restoring.affinityEntries).toBe(1);
+			expect(replacement.affinityEntries).toBe(0);
+			expect(replacement.affinityRestoreGate()).toBeNull();
+			expect(replacement.getRoutingHealth().affinityRestore).toBeUndefined();
+		});
+
+		it("never replaces a live entry for the same digest", async () => {
+			await restoring.select([makeAccount({ id: "live" })], metaFor("same"));
+			const before = restoring.exportAffinityLaneRecord(metaFor("same"));
+			const session = restoring.beginAffinityRestore();
+			expect(session?.install([record("same", START)])).toBe(0);
+			expect(restoring.exportAffinityLaneRecord(metaFor("same"))).toEqual(
+				before,
+			);
+			session?.finish({ ...outcome, pinsRestored: 0 });
+		});
+
+		it("fills only free capacity newest first, excluding expired entries from the live count", async () => {
+			now = START - 60_000;
+			await restoring.select([makeAccount()], metaFor("expired"));
+			now = START - 1_000;
+			await restoring.select([makeAccount()], metaFor("live"));
+			now = START;
+			const session = restoring.beginAffinityRestore();
+			expect(
+				session?.install([
+					record("old", START - 30_000),
+					record("newest", START - 1),
+					record("middle", START - 10_000),
+				]),
+			).toBe(2);
+			expect(restoring.affinityEntries).toBe(3);
+			expect(
+				restoring.exportAffinityLaneRecord(metaFor("old"))?.owner,
+			).toBeNull();
+			expect(
+				restoring.exportAffinityLaneRecord(metaFor("newest"))?.owner
+					?.assignedAt,
+			).toBe(START - 1);
+			expect(
+				restoring.exportAffinityLaneRecord(metaFor("middle"))?.owner
+					?.assignedAt,
+			).toBe(START - 10_000);
+			expect(
+				restoring.exportAffinityLaneRecord(metaFor("live"))?.owner?.candidateId,
+			).toBe("account:a");
+			session?.finish({ ...outcome, pinsRestored: 2 });
+		});
+
+		it("clamps future selection, upgrade and hold times but keeps future suppression", () => {
+			const input = record("future", START + 100);
+			const future = {
+				...input,
+				observedAt: START + 200,
+				owner: {
+					...input.owner,
+					upgradedAt: START + 90,
+					pressureHoldSince: START + 80,
+					suppressUpgradesUntil: START + 5_000,
+				},
+			};
+			const session = restoring.beginAffinityRestore();
+			expect(session?.install([future])).toBe(1);
+			expect(restoring.exportAffinityLaneRecord(metaFor("future"))).toEqual({
+				digest: future.digest,
+				observedAt: START,
+				owner: {
+					candidateId: "account:restored",
+					accountId: "restored",
+					assignedAt: START,
+					installedBelowBestConfiguredTier: false,
+					upgradedAt: START,
+					pressureHoldSince: START,
+					suppressUpgradesUntil: START + 5_000,
+				},
+			});
+			expect(future.owner.assignedAt).toBe(START + 100);
+			session?.finish(outcome);
+		});
+
+		it("install leaves recency, route circuits and transition counters untouched", async () => {
+			const before = restoring.getRoutingHealth();
+			const session = restoring.beginAffinityRestore();
+			expect(session?.install([record("restored", START, "account:a")])).toBe(
+				1,
+			);
+			expect(restoring.getRoutingHealth().transitions).toEqual(
+				before.transitions,
+			);
+			expect(restoring.routeSuppressionEntries).toBe(0);
+			expect(restoring.routeSuppressionGcSweeps).toBe(0);
+			session?.finish(outcome);
+			// An install must not mark a recent pick and penalize a on this fresh lane.
+			expect(
+				(
+					await restoring.select(
+						[makeAccount(), makeAccount({ id: "b" })],
+						metaFor("fresh"),
+					)
+				)[0].id,
+			).toBe("a");
+		});
+	});
+
+	it("exports owner selections, upgrades, suppression and fallback without refreshing the lane", async () => {
+		let now = 1_793_346_681_000;
+		const clocked = new SessionAffinityStrategy(
+			60_000,
+			undefined,
+			5_000,
+			undefined,
+			() => now,
+		);
+		clocked.initialize(store);
+		const m = () => metaFor("export-client");
+		const low = makeAccount({ id: "low", priority: 10 });
+		const high = makeAccount({ id: "high", priority: 0 });
+		const down = { ...high, rate_limited_until: now + 1_000_000 };
+		await clocked.select([low, down], m());
+		expect(clocked.exportAffinityLaneRecord(m())).toMatchObject({
+			observedAt: now,
+			owner: {
+				candidateId: "account:low",
+				accountId: "low",
+				assignedAt: now,
+				installedBelowBestConfiguredTier: true,
+			},
+		});
+		now += 1_000;
+		await clocked.select([low, high], m());
+		expect(clocked.exportAffinityLaneRecord(m())?.owner).toEqual({
+			candidateId: "account:high",
+			accountId: "high",
+			assignedAt: now,
+			upgradedAt: now,
+			installedBelowBestConfiguredTier: false,
+		});
+		now += 1;
+		await clocked.select([low, down], m());
+		expect(clocked.exportAffinityLaneRecord(m())?.owner).toEqual({
+			candidateId: "account:low",
+			accountId: "low",
+			assignedAt: now,
+			suppressUpgradesUntil: 1_793_346_687_000,
+			installedBelowBestConfiguredTier: true,
+		});
+		now += 5_000;
+		await clocked.select([low, high], m());
+		now += 5_001;
+		await clocked.select([low, down], m());
+		const health = clocked.getRoutingHealth();
+		const exported = clocked.exportAffinityLaneRecord(m());
+		expect(exported?.owner).toMatchObject({
+			candidateId: "account:high",
+			accountId: "high",
+			fallbackCandidateId: "account:low",
+		});
+		expect(clocked.getRoutingHealth()).toEqual(health);
+		// Export is an observation, so even repeated reads cannot extend the TTL.
+		now += 59_999;
+		expect(clocked.exportAffinityLaneRecord(m())?.owner).not.toBeNull();
+		now += 1;
+		expect(clocked.exportAffinityLaneRecord(m())).toEqual({
+			digest: exported?.digest,
+			observedAt: now,
+			owner: null,
+		});
+	});
+
+	it("exports unselected lanes as tombstones and anonymous requests as no record", () => {
+		const now = 1_793_346_681_000;
+		const clocked = new SessionAffinityStrategy(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			() => now,
+		);
+		expect(clocked.exportAffinityLaneRecord(metaFor())).toBeNull();
+		expect(clocked.exportAffinityLaneRecord(metaFor("never-selected"))).toEqual(
+			{
+				digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+				observedAt: now,
+				owner: null,
+			},
+		);
+	});
+
+	it("hashes domain-tagged lane and client keys to fixed lowercase SHA-256 digests", async () => {
+		const { affinityLaneDigest } = await import("../affinity-lane-digest");
+		expect(affinityLaneDigest("lane:restart-session")).toBe(
+			"f2f1b2bdda428bdf47d63f9cadca8f207d5c5815866a8e02a9aa6ed690857892",
+		);
+		expect(affinityLaneDigest("client:restart-session")).toBe(
+			"9c63bd37b795a1531fe1e2f95906898b44bf979dd73c91c1bd7b1b62fb8403a6",
+		);
+	});
+
+	it("uses the same content-free lane digest for pins and circuits in two strategy instances", async () => {
+		const expectedLane =
+			"f2f1b2bdda428bdf47d63f9cadca8f207d5c5815866a8e02a9aa6ed690857892";
+		const expectedClient =
+			"9c63bd37b795a1531fe1e2f95906898b44bf979dd73c91c1bd7b1b62fb8403a6";
+		const second = new SessionAffinityStrategy();
+		second.initialize(new MockStore());
+		for (const instance of [strategy, second]) {
+			const laneMeta = {
+				...metaFor("restart-session"),
+				affinityLaneKey: "restart-session",
+			};
+			await instance.select([makeAccount()], laneMeta);
+			await instance.select([makeAccount()], metaFor("restart-session"));
+			instance.reportCandidateFailure(laneMeta, {
+				candidateId: "account:a",
+				reason: "test-failure",
+				suppressForMs: 1000,
+			});
+			const tables = instance as unknown as {
+				affinity: Map<string, unknown>;
+				routeFailureStates: Map<string, { affinityKey: string }>;
+			};
+			expect([...tables.affinity.keys()]).toEqual([
+				expectedLane,
+				expectedClient,
+			]);
+			expect([...tables.routeFailureStates.keys()]).toEqual([
+				`["${expectedLane}","account:a"]`,
+			]);
+			expect([...tables.routeFailureStates.values()][0]?.affinityKey).toBe(
+				expectedLane,
+			);
+			for (const key of tables.affinity.keys()) {
+				expect(key).toMatch(/^[a-f0-9]{64}$/);
+				expect(key).not.toContain("restart-session");
+			}
+		}
+	});
+
+	it("keeps literal repeated-account candidate ids in two strategy instances", async () => {
+		for (const instance of [strategy, new SessionAffinityStrategy()]) {
+			instance.initialize(new MockStore());
+			const account = makeAccount({ id: "fixed-account" });
+			const meta = metaFor("fixed-session");
+			await instance.select([account, account], meta);
+			expect(
+				meta.routingCandidates?.map(({ candidateId }) => candidateId),
+			).toEqual(["account:fixed-account", "account:fixed-account#1"]);
+		}
 	});
 
 	describe("success-conditioned descendant homes", () => {

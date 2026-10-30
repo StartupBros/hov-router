@@ -381,10 +381,29 @@ export interface WebSearchHelperRoutingSummary {
 		| "admission_changed";
 }
 
+export interface RoutingAffinityLaneOwner {
+	readonly candidateId: string;
+	readonly accountId: string;
+	readonly assignedAt: number;
+	readonly installedBelowBestConfiguredTier: boolean;
+	readonly fallbackCandidateId?: string;
+	readonly upgradedAt?: number;
+	readonly suppressUpgradesUntil?: number;
+	readonly pressureHoldSince?: number;
+}
+
+export interface RoutingAffinityLaneRecord {
+	readonly digest: string;
+	readonly observedAt: number;
+	/** Absence or expiry of an owner is recorded as a tombstone. */
+	readonly owner: RoutingAffinityLaneOwner | null;
+}
+
 export interface RequestRoutingAttemptSummary {
 	readonly webSearchHelper?: WebSearchHelperRoutingSummary | null;
 	/** Epoch ms the serving process started; absent on rows written before it was recorded. */
 	readonly processStartedAt?: number | null;
+	readonly affinityLane?: RoutingAffinityLaneRecord;
 	readonly decision?: RoutingDecision | null;
 	readonly decisionGap?: RoutingDecisionGap | null;
 	readonly version: 1;
@@ -452,6 +471,73 @@ function routingTimestamp(value: unknown): number | null {
 	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 		? value
 		: null;
+}
+
+function routingCandidateId(value: unknown): string | null {
+	return typeof value === "string" &&
+		value.length <= 512 &&
+		/^[a-zA-Z0-9_.:/[\]@+%#-]+$/.test(value)
+		? value
+		: null;
+}
+
+/** One boundary for both durable writes and restart restoration. */
+export function sanitizeRoutingAffinityLaneRecord(
+	value: unknown,
+): RoutingAffinityLaneRecord | null {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	const source = value as Record<string, unknown>;
+	const observedAt = routingTimestamp(source.observedAt);
+	if (
+		typeof source.digest !== "string" ||
+		!/^[a-f0-9]{64}$/.test(source.digest) ||
+		observedAt === null
+	)
+		return null;
+	const tombstone: RoutingAffinityLaneRecord = {
+		digest: source.digest,
+		observedAt,
+		owner: null,
+	};
+	if (
+		!source.owner ||
+		typeof source.owner !== "object" ||
+		Array.isArray(source.owner)
+	)
+		return tombstone;
+	const owner = source.owner as Record<string, unknown>;
+	const candidateId = routingCandidateId(owner.candidateId);
+	const accountId = routingIdentity(owner.accountId);
+	const assignedAt = routingTimestamp(owner.assignedAt);
+	const fallbackCandidateId = routingCandidateId(owner.fallbackCandidateId);
+	const upgradedAt = routingTimestamp(owner.upgradedAt);
+	const suppressUpgradesUntil = routingTimestamp(owner.suppressUpgradesUntil);
+	const pressureHoldSince = routingTimestamp(owner.pressureHoldSince);
+	if (
+		candidateId === null ||
+		accountId === null ||
+		assignedAt === null ||
+		typeof owner.installedBelowBestConfiguredTier !== "boolean" ||
+		(owner.fallbackCandidateId !== undefined && fallbackCandidateId === null) ||
+		(owner.upgradedAt !== undefined && upgradedAt === null) ||
+		(owner.suppressUpgradesUntil !== undefined &&
+			suppressUpgradesUntil === null) ||
+		(owner.pressureHoldSince !== undefined && pressureHoldSince === null)
+	)
+		return tombstone;
+	return {
+		...tombstone,
+		owner: {
+			candidateId,
+			accountId,
+			assignedAt,
+			installedBelowBestConfiguredTier: owner.installedBelowBestConfiguredTier,
+			...(fallbackCandidateId === null ? {} : { fallbackCandidateId }),
+			...(upgradedAt === null ? {} : { upgradedAt }),
+			...(suppressUpgradesUntil === null ? {} : { suppressUpgradesUntil }),
+			...(pressureHoldSince === null ? {} : { pressureHoldSince }),
+		},
+	};
 }
 function routingStatus(value: unknown): number | null {
 	return typeof value === "number" &&
@@ -562,6 +648,7 @@ export function sanitizeRequestRoutingAttemptSummary(
 		(source.decisionGap === "oversize" || source.decisionGap === "invalid"
 			? source.decisionGap
 			: null);
+	const affinityLane = sanitizeRoutingAffinityLaneRecord(source.affinityLane);
 	const result: RequestRoutingAttemptSummary = {
 		...(source.webSearchHelper === undefined
 			? {}
@@ -573,6 +660,7 @@ export function sanitizeRequestRoutingAttemptSummary(
 		...(source.processStartedAt === undefined
 			? {}
 			: { processStartedAt: routingTimestamp(source.processStartedAt) }),
+		...(affinityLane === null ? {} : { affinityLane }),
 		...(source.decision === undefined && source.decisionGap === undefined
 			? {}
 			: { decision: decisionResult.decision, decisionGap }),
@@ -645,7 +733,22 @@ export function sanitizeRequestRoutingAttemptSummary(
 			completeness: "partial",
 		};
 	}
-	return bounded;
+	return JSON.stringify(bounded).length > MAX_ROUTING_ATTEMPT_SUMMARY_CHARS
+		? null
+		: bounded;
+}
+
+export function parseRoutingAffinityLaneSummary(text: string): {
+	record: RoutingAffinityLaneRecord;
+	processStartedAt: number | null;
+} | null {
+	const summary = sanitizeRequestRoutingAttemptSummary(text);
+	return summary?.affinityLane
+		? {
+				record: summary.affinityLane,
+				processStartedAt: summary.processStartedAt ?? null,
+			}
+		: null;
 }
 
 export interface RequestRow {
