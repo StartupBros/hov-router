@@ -1309,6 +1309,22 @@ describe("startServer() wiring guards", () => {
 		expect(body).toMatch(/bootstrapMinimaxUsagePolling\s*\(/);
 	});
 
+	it("starts affinity restore without awaiting it immediately after initial strategy initialization, before initProxy", () => {
+		const body = readStartServerBody();
+		const initialSetup = body.slice(
+			body.indexOf("strategy.initialize?.(strategyStore)"),
+			body.indexOf("// Proxy context"),
+		);
+		expect(initialSetup).toMatch(
+			/strategy\.initialize\?\.\(strategyStore\);\s*void restoreAffinityPins\(\{\s*strategy,\s*reader: dbOps,\s*now: Date\.now,?\s*\}\);\s*currentStrategy = strategy;\s*await initProxy\(/,
+		);
+		// Only boot restores: the config change handler builds an open strategy.
+		expect([...body.matchAll(/restoreAffinityPins\s*\(/g)].length).toBe(1);
+		expect(body.slice(body.indexOf('config.on("change"'))).not.toContain(
+			"restoreAffinityPins(",
+		);
+	});
+
 	// Without this call a VALUE_PRICING_VERSION bump never reaches closed
 	// usage windows, and every ledger test would still pass.
 	it("re-prices stale closed usage windows on the ledger it constructs", () => {
@@ -1430,6 +1446,7 @@ describe("buildStrategy() routing recorder sharing (#197)", () => {
 			routingTransitions,
 		);
 		initial.initialize?.(makeStrategyStore());
+		expect(initial.affinityRestoreGate?.()).toBeNull();
 
 		const owner = makeAccount({ id: "owner", priority: 5 });
 		const laneMeta = {
@@ -1455,6 +1472,8 @@ describe("buildStrategy() routing recorder sharing (#197)", () => {
 			routingTransitions,
 		);
 		reloaded.initialize?.(makeStrategyStore());
+		expect(reloaded.affinityRestoreGate?.()).toBeNull();
+		expect(reloaded.getRoutingHealth?.()?.affinityRestore).toBeUndefined();
 
 		// The new strategy's own local gauges (its affinity map) start fresh...
 		expect(reloaded.getRoutingHealth?.()?.affinityEntries).toBe(0);

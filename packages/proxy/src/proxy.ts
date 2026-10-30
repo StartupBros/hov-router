@@ -1427,6 +1427,8 @@ async function handleProxyCoreImpl(
 			rootIntentGeneration,
 		);
 	}
+	const restoreGate = ctx.strategy.affinityRestoreGate?.() ?? null;
+	if (restoreGate !== null) await restoreGate;
 	const qualityResponse = await routeQualityRequest({
 		req,
 		url,
