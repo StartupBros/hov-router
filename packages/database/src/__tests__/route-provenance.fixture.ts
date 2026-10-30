@@ -23,6 +23,7 @@ export function isRouteProvenanceColumn(column: string): boolean {
 // upsert freezes route provenance.
 export const attemptSummary: RequestRoutingAttemptSummary = {
 	version: 1,
+	processStartedAt: 1_793_346_681_263,
 	decision: {
 		version: 1,
 		requestedLogicalModel: "test-logical",

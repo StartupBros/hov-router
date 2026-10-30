@@ -1,3 +1,4 @@
+import { PROCESS_STARTED_AT_MS } from "@better-ccflare/core";
 import {
 	MAX_ROUTING_ATTEMPT_SNAPSHOTS,
 	type RequestRoutingAttemptSummary,
@@ -330,6 +331,7 @@ export class RoutingAttemptLedger {
 			...(input.webSearchHelper
 				? { webSearchHelper: input.webSearchHelper }
 				: {}),
+			processStartedAt: PROCESS_STARTED_AT_MS,
 			version: 1,
 			...(this.routingDecisionObservation
 				? {
