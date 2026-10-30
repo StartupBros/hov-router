@@ -213,8 +213,17 @@ export interface PoolStatus {
 	next_available_at: string | null; // ISO timestamp when earliest rate-limit expires
 }
 
+export interface AffinityRestoreHealth {
+	state: "pending" | "restored" | "abandoned" | "skipped";
+	recordsRead: number;
+	pinsRestored: number;
+	durationMs: number | null;
+	abandonReason: "read_failed" | "row_cap" | "budget" | null;
+}
+
 /** Restart-scoped routing state and monotonic transition counters. */
 export interface RoutingHealth {
+	affinityRestore?: AffinityRestoreHealth;
 	affinityEntries: number;
 	routeSuppressionEntries: number;
 	routeSuppressionGcSweeps: number;

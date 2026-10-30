@@ -14,6 +14,7 @@ import type { AffinityOwnerSnapshot, RequestMeta } from "./api";
 import type { ApiKey } from "./api-key";
 import type { RouteHomeAction, RoutingAffinityLaneRecord } from "./request";
 import type {
+	AffinityRestoreHealth,
 	AnthropicDegradedRuntimeHealth,
 	IntegrityStatus,
 	MemorySnapshot,
@@ -210,8 +211,21 @@ export interface APIContext {
 	modelRouteProfiles?: readonly ModelRouteProfile[];
 }
 
+/** A restore belongs to the strategy instance that began it. */
+export interface AffinityRestoreSession {
+	readonly ttlMs: number;
+	install(records: RoutingAffinityLaneRecord[]): number;
+	/** First call wins; installations after finish are ignored. */
+	finish(
+		outcome: AffinityRestoreHealth & { state: "restored" | "abandoned" },
+	): void;
+}
+
 // Load balancing strategy interface
 export interface LoadBalancingStrategy {
+	beginAffinityRestore?(): AffinityRestoreSession | null;
+	/** Open by default; routing awaits this promise only during startup restore. */
+	affinityRestoreGate?(): Promise<void> | null;
 	/** Observe the retained lane state without refreshing it. */
 	exportAffinityLaneRecord?(
 		meta: RequestMeta,
