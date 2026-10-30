@@ -17,6 +17,7 @@ import type {
 	RoutingHealth,
 	StrategyStore,
 } from "@better-ccflare/types";
+import { affinityLaneDigest } from "./affinity-lane-digest";
 import { isPeekAvailable, wouldAutoUnpause } from "./peek-availability";
 import {
 	commitStrategyCandidateOrder,
@@ -311,9 +312,9 @@ export class SessionAffinityStrategy implements LoadBalancingStrategy {
 
 	private affinityKey(meta: RequestMeta): string | null {
 		const laneKey = meta.affinityLaneKey ?? null;
-		if (laneKey !== null) return `lane:${laneKey}`;
+		if (laneKey !== null) return affinityLaneDigest(`lane:${laneKey}`);
 		const clientId = meta.clientSessionId ?? null;
-		return clientId !== null ? `client:${clientId}` : null;
+		return clientId !== null ? affinityLaneDigest(`client:${clientId}`) : null;
 	}
 
 	/** Strategy variants may suppress ordinary stickiness without disabling route circuits. */

@@ -1329,6 +1329,30 @@ function getProtocolFamily(path: string): string {
 	return "other";
 }
 
+export const AFFINITY_LANE_TAGS = {
+	ordinary: "routing-lane-v1",
+	profile: "routing-lane-profile-v1",
+	child: "routing-lane-profile-child-v1",
+} as const;
+
+/** Only ordinary/profile tuples and the client fallback survive a restart. */
+export function isRestartStableAffinityLane(
+	laneKey: string | null | undefined,
+	clientSessionId: string | null | undefined,
+): boolean {
+	if (laneKey == null) return clientSessionId != null;
+	try {
+		const lane: unknown = JSON.parse(laneKey);
+		return (
+			Array.isArray(lane) &&
+			(lane[0] === AFFINITY_LANE_TAGS.ordinary ||
+				lane[0] === AFFINITY_LANE_TAGS.profile)
+		);
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Construct the pre-selection owner lane. The client-visible beta signature is
  * canonicalized before inclusion so header ordering cannot split ownership.
@@ -1346,7 +1370,7 @@ export function deriveAffinityLaneKey(
 	const family = getModelFamily(model) ?? "unknown";
 	const beta = canonicalizeBetaSignature(meta.headers?.get("anthropic-beta"));
 	const legacyLane = [
-		"routing-lane-v1",
+		AFFINITY_LANE_TAGS.ordinary,
 		session,
 		getProtocolFamily(path),
 		path,
@@ -1359,7 +1383,7 @@ export function deriveAffinityLaneKey(
 	if (meta.routeLineage?.kind === "descendant") {
 		if (!meta.routeLineage.childHomeKey) return null;
 		return JSON.stringify([
-			"routing-lane-profile-child-v1",
+			AFFINITY_LANE_TAGS.child,
 			routeProfileId,
 			meta.routeLineage.childHomeKey,
 			...legacyLane.slice(1),
@@ -1369,7 +1393,7 @@ export function deriveAffinityLaneKey(
 	// the long-standing ordinary-traffic JSON shape/indexes stable while making
 	// capability pools unable to inherit an owner retained by a native lane.
 	return JSON.stringify([
-		"routing-lane-profile-v1",
+		AFFINITY_LANE_TAGS.profile,
 		routeProfileId,
 		...legacyLane.slice(1),
 	]);

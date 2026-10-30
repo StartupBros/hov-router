@@ -95,6 +95,68 @@ describe("SessionAffinityStrategy", () => {
 		strategy.initialize(store);
 	});
 
+	it("hashes domain-tagged lane and client keys to fixed lowercase SHA-256 digests", async () => {
+		const { affinityLaneDigest } = await import("../affinity-lane-digest");
+		expect(affinityLaneDigest("lane:restart-session")).toBe(
+			"f2f1b2bdda428bdf47d63f9cadca8f207d5c5815866a8e02a9aa6ed690857892",
+		);
+		expect(affinityLaneDigest("client:restart-session")).toBe(
+			"9c63bd37b795a1531fe1e2f95906898b44bf979dd73c91c1bd7b1b62fb8403a6",
+		);
+	});
+
+	it("uses the same content-free lane digest for pins and circuits in two strategy instances", async () => {
+		const expectedLane =
+			"f2f1b2bdda428bdf47d63f9cadca8f207d5c5815866a8e02a9aa6ed690857892";
+		const expectedClient =
+			"9c63bd37b795a1531fe1e2f95906898b44bf979dd73c91c1bd7b1b62fb8403a6";
+		const second = new SessionAffinityStrategy();
+		second.initialize(new MockStore());
+		for (const instance of [strategy, second]) {
+			const laneMeta = {
+				...metaFor("restart-session"),
+				affinityLaneKey: "restart-session",
+			};
+			await instance.select([makeAccount()], laneMeta);
+			await instance.select([makeAccount()], metaFor("restart-session"));
+			instance.reportCandidateFailure(laneMeta, {
+				candidateId: "account:a",
+				reason: "test-failure",
+				suppressForMs: 1000,
+			});
+			const tables = instance as unknown as {
+				affinity: Map<string, unknown>;
+				routeFailureStates: Map<string, { affinityKey: string }>;
+			};
+			expect([...tables.affinity.keys()]).toEqual([
+				expectedLane,
+				expectedClient,
+			]);
+			expect([...tables.routeFailureStates.keys()]).toEqual([
+				`["${expectedLane}","account:a"]`,
+			]);
+			expect([...tables.routeFailureStates.values()][0]?.affinityKey).toBe(
+				expectedLane,
+			);
+			for (const key of tables.affinity.keys()) {
+				expect(key).toMatch(/^[a-f0-9]{64}$/);
+				expect(key).not.toContain("restart-session");
+			}
+		}
+	});
+
+	it("keeps literal repeated-account candidate ids in two strategy instances", async () => {
+		for (const instance of [strategy, new SessionAffinityStrategy()]) {
+			instance.initialize(new MockStore());
+			const account = makeAccount({ id: "fixed-account" });
+			const meta = metaFor("fixed-session");
+			await instance.select([account, account], meta);
+			expect(
+				meta.routingCandidates?.map(({ candidateId }) => candidateId),
+			).toEqual(["account:fixed-account", "account:fixed-account#1"]);
+		}
+	});
+
 	describe("success-conditioned descendant homes", () => {
 		const descendantMeta = (
 			lane: string,

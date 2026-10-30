@@ -25,7 +25,10 @@ afterEach(() => {
 	optionalCollectorSpy.mockRestore();
 });
 
-import { SessionAffinityStrategy } from "@better-ccflare/load-balancer";
+import {
+	affinityLaneDigest,
+	SessionAffinityStrategy,
+} from "@better-ccflare/load-balancer";
 import {
 	deriveServerToolRequirement,
 	getProvider,
@@ -44,6 +47,7 @@ import {
 } from "../../websearch-helper-policy";
 import {
 	deriveAffinityLaneKey,
+	isRestartStableAffinityLane,
 	selectAccountsForRequest,
 } from "../account-selector";
 import { proxyUnauthenticated, proxyWithAccount } from "../proxy-operations";
@@ -936,13 +940,23 @@ describe("explicit subscription WebSearch helper selection", () => {
 		for (let search = 0; search < 3; search++) await helperIn("helper-session");
 		const sessionLanes = [...affinity.keys()];
 		expect(sessionLanes).toHaveLength(1);
-		expect(sessionLanes[0]).not.toContain("helper-session");
+		expect(sessionLanes).not.toContain(
+			affinityLaneDigest("client:helper-session"),
+		);
 		await helperIn("other-session");
 		expect(affinity.size).toBe(2);
 		// Like any sessionless request, a sessionless helper has no lane to keep.
 		await helperIn();
 		await helperIn();
 		expect(affinity.size).toBe(2);
+	});
+
+	it("does not treat an authorized web-search helper lane as restart stable", () => {
+		const { meta } = fixture();
+		meta.clientSessionId = "helper-session";
+		const lane = deriveAffinityLaneKey(meta, body.model);
+		expect(lane).toMatch(/^websearch-helper-lane_[a-f0-9]{64}$/);
+		expect(isRestartStableAffinityLane(lane, meta.clientSessionId)).toBe(false);
 	});
 
 	it("dispatches through native preparation with the logical model, not the local chat pin", async () => {

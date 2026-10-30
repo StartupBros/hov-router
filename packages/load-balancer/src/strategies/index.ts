@@ -26,6 +26,7 @@ import {
 } from "./routing-metadata";
 import { codexWindowHasReset } from "./session-window-reset";
 
+export { affinityLaneDigest } from "./affinity-lane-digest";
 export { LeastUsedStrategy } from "./least-used";
 export {
 	RoutingTransitionRecorder,

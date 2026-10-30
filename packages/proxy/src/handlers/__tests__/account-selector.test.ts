@@ -52,6 +52,7 @@ const { getCodexCatalogLineTarget, getCodexCatalogRoleTarget } = await import(
 const {
 	ForceRouteUnavailableError,
 	deriveAffinityLaneKey,
+	isRestartStableAffinityLane,
 	getClientVisibleServerToolAccountId,
 	getCapacityDeferredModelRoutes,
 	getNativeConstraintRemovedAccountIds,
@@ -2595,6 +2596,27 @@ describe("selectAccountsForRequest — capability descendant candidate compilati
 	const ROOT_MODEL = "root-logical";
 	const REQUESTED = "req-model";
 
+	it("keeps literal encoded profile candidate ids across separate selector contexts", async () => {
+		for (let instance = 0; instance < 2; instance++) {
+			const home = poolAccount("fixed/account", {
+				[REQUESTED]: "gpt-y",
+				[ROOT_MODEL]: "gpt-x",
+			});
+			const meta = descendantMeta({ routeProfileId: "fixed/profile" });
+			await selectAccountsForRequest(
+				meta,
+				makeCtx({ accounts: [home] }),
+				REQUESTED,
+			);
+			expect(
+				meta.routingCandidates?.map(({ candidateId }) => candidateId),
+			).toEqual([
+				"profile:fixed%2Fprofile:profile_requested_model:fixed%2Faccount:req-model",
+				"profile:fixed%2Fprofile:profile_root_model:fixed%2Faccount:root-logical",
+			]);
+		}
+	});
+
 	function descendantMeta(overrides: Partial<RequestMeta> = {}): RequestMeta {
 		return makeRequestMeta({
 			routeProfileId: "cap-desc",
@@ -3257,6 +3279,15 @@ describe("selectAccountsForRequest — combo routing", () => {
 				{ accountId: second.id, modelOverride: "claude-opus-4-5" },
 			],
 		});
+		const reconstructed = makeRequestMeta();
+		await selectAccountsForRequest(
+			reconstructed,
+			makeCtx({ accounts: [first, second], activeCombo: combo }),
+			"claude-opus-4-8",
+		);
+		expect(
+			reconstructed.routingCandidates?.map(({ candidateId }) => candidateId),
+		).toEqual(["combo:combo-1:slot:slot-a", "combo:combo-1:slot:slot-b"]);
 	});
 
 	it("keeps manual combo selection equivalent when the managed-policy reader is unavailable", async () => {
@@ -3364,15 +3395,22 @@ describe("selectAccountsForRequest — combo routing", () => {
 		expect(ctx.dbOps.getComboRoutingPolicy).toHaveBeenCalledWith("opus");
 
 		const reconstructedMeta = makeRequestMeta({ id: "req-reconstructed" });
-		await selectAccountsForRequest(reconstructedMeta, ctx, "claude-opus-4-8");
+		await selectAccountsForRequest(
+			reconstructedMeta,
+			makeCtx({ accounts, routingPolicy: policy }),
+			"claude-opus-4-8",
+		);
 		expect(
 			reconstructedMeta.routingCandidates?.map(
 				(candidate) => candidate.candidateId,
 			),
-		).toEqual(
-			meta.routingCandidates?.map((candidate) => candidate.candidateId),
-		);
-		expect(ctx.dbOps.getAllAccounts).toHaveBeenCalledTimes(2);
+		).toEqual([
+			"combo:combo-1:managed:opus:rule:rule-anthropic-oauth:account:anthropic-1",
+			"combo:combo-1:managed:opus:rule:rule-anthropic-oauth:account:anthropic-2",
+			"combo:combo-1:managed:opus:rule:rule-anthropic-oauth:account:anthropic-3",
+			"combo:combo-1:managed:opus:rule:rule-anthropic-oauth:account:anthropic-4",
+		]);
+		expect(ctx.dbOps.getAllAccounts).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps repeated manual lanes while suppressing their managed duplicate", async () => {
@@ -4278,6 +4316,29 @@ describe("selectAccountsForRequest — routes on effective model, not the client
 // ── model-lane capacity planning ─────────────────────────────────────────────
 
 describe("selectAccountsForRequest — model-lane hard capacity", () => {
+	it("keeps literal encoded capacity-deferred ids across separate selector contexts", async () => {
+		const account = makeAccount({
+			id: "fixed/capacity-account",
+			model_mappings: JSON.stringify({
+				fable: ["claude-fable-5", "claude-opus-4-8"],
+			}),
+		});
+		cacheUsage(account.id, weeklyScoped("Fable"));
+		for (let instance = 0; instance < 2; instance++) {
+			const meta = makeRequestMeta(agentPreferenceRewrite("claude-fable-5"));
+			await selectAccountsForRequest(
+				meta,
+				makeExhaustedCapacityCtx({ accounts: [account] }),
+				"claude-fable-5",
+			);
+			expect(
+				getCapacityDeferredModelRoutes(meta).map(
+					({ candidateId }) => candidateId,
+				),
+			).toEqual(["capacity-deferred:fixed%2Fcapacity-account:claude-opus-4-8"]);
+		}
+	});
+
 	function weeklyScoped(
 		displayName: string | null,
 		percent = 100,
@@ -4952,6 +5013,72 @@ describe("selectAccountsForRequest — model-lane hard capacity", () => {
 });
 
 describe("selectAccountsForRequest — lane identity and quota pressure", () => {
+	it.each([
+		[
+			'["routing-lane-v1","session","messages","/v1/messages","opus","claude-opus-4-8",""]',
+			"session",
+			true,
+		],
+		[
+			'["routing-lane-profile-v1","profile","session","messages","/v1/messages","opus","claude-opus-4-8",""]',
+			"session",
+			true,
+		],
+		[null, "session", true],
+		[undefined, "session", true],
+		[
+			'["routing-lane-profile-child-v1","profile","opaque-child","session"]',
+			"session",
+			false,
+		],
+		["websearch-helper-lane_0123456789abcdef", "session", false],
+		["quality-lane_0123456789abcdef", "session", false],
+		[null, null, false],
+		[undefined, undefined, false],
+		["not-json", "session", false],
+		['{"0":"routing-lane-v1"}', "session", false],
+		['["unknown-lane-v1","session"]', "session", false],
+	] as const)("classifies restart stability for lane %s and session %s as %s", (lane, session, expected) => {
+		expect(isRestartStableAffinityLane(lane, session)).toBe(expected);
+	});
+
+	it("re-derives literal ordinary and profile lanes in separate selector contexts", async () => {
+		for (const routeProfileId of [null, "stable-profile"]) {
+			for (let instance = 0; instance < 2; instance++) {
+				const meta = makeRequestMeta({
+					clientSessionId: "stable-session",
+					routeProfileId,
+				});
+				await selectAccountsForRequest(meta, makeCtx(), "claude-opus-4-8");
+				expect(meta.affinityLaneKey).toBe(
+					routeProfileId === null
+						? '["routing-lane-v1","stable-session","messages","/v1/messages","opus","claude-opus-4-8",""]'
+						: '["routing-lane-profile-v1","stable-profile","stable-session","messages","/v1/messages","opus","claude-opus-4-8",""]',
+				);
+				expect(
+					isRestartStableAffinityLane(
+						meta.affinityLaneKey,
+						meta.clientSessionId,
+					),
+				).toBe(true);
+			}
+		}
+	});
+
+	it("keeps literal account candidate ids across separate selector contexts", async () => {
+		for (let instance = 0; instance < 2; instance++) {
+			const meta = makeRequestMeta();
+			await selectAccountsForRequest(
+				meta,
+				makeCtx({ accounts: [makeAccount({ id: "fixed-account" })] }),
+				"claude-opus-4-8",
+			);
+			expect(
+				meta.routingCandidates?.map(({ candidateId }) => candidateId),
+			).toEqual(["account:fixed-account"]);
+		}
+	});
+
 	function weeklyAll(
 		percent: number,
 		hoursUntilReset: number,

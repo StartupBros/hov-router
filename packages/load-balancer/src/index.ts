@@ -1,5 +1,6 @@
 export type { SessionDrainSoonestMode } from "./strategies";
 export {
+	affinityLaneDigest,
 	LeastUsedStrategy,
 	RoutingTransitionRecorder,
 	SessionAffinityStrategy,
