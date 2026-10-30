@@ -383,6 +383,8 @@ export interface WebSearchHelperRoutingSummary {
 
 export interface RequestRoutingAttemptSummary {
 	readonly webSearchHelper?: WebSearchHelperRoutingSummary | null;
+	/** Epoch ms the serving process started; absent on rows written before it was recorded. */
+	readonly processStartedAt?: number | null;
 	readonly decision?: RoutingDecision | null;
 	readonly decisionGap?: RoutingDecisionGap | null;
 	readonly version: 1;
@@ -568,6 +570,9 @@ export function sanitizeRequestRoutingAttemptSummary(
 						source.webSearchHelper,
 					),
 				}),
+		...(source.processStartedAt === undefined
+			? {}
+			: { processStartedAt: routingTimestamp(source.processStartedAt) }),
 		...(source.decision === undefined && source.decisionGap === undefined
 			? {}
 			: { decision: decisionResult.decision, decisionGap }),

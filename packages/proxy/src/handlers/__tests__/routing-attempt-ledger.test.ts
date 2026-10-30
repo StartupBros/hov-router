@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from "bun:test";
+import { PROCESS_STARTED_AT_MS } from "@better-ccflare/core";
 import { sanitizeRequestRoutingAttemptSummary } from "@better-ccflare/types/request";
 import {
 	formatRoutingAttemptMessage,
@@ -672,5 +673,61 @@ describe("RoutingAttemptLedger", () => {
 
 		expect(ledger.attemptedCount).toBe(1);
 		expect(ledger.physicalAttemptCount).toBe(3);
+	});
+
+	it("stamps every terminal summary with the serving process start", () => {
+		expect(Number.isSafeInteger(PROCESS_STARTED_AT_MS)).toBe(true);
+		expect(PROCESS_STARTED_AT_MS).toBeLessThanOrEqual(Date.now());
+
+		const succeeded = new RoutingAttemptLedger();
+		succeeded.recordPhysicalAttempt({ accountId: "account-a" });
+		expect(
+			succeeded.terminalSummary({
+				success: true,
+				nativeStatus: 200,
+				wireStatus: 200,
+			})?.processStartedAt,
+		).toBe(PROCESS_STARTED_AT_MS);
+
+		const rejected = new RoutingAttemptLedger();
+		expect(
+			rejected.terminalSummary({
+				success: false,
+				error: "route_unavailable",
+				nativeStatus: 503,
+				wireStatus: 503,
+			})?.processStartedAt,
+		).toBe(PROCESS_STARTED_AT_MS);
+	});
+
+	it("keeps a valid process start through persistence and omits it on older summaries", () => {
+		const base = {
+			version: 1,
+			physicalAttemptCount: 0,
+			routeCount: 0,
+			attempts: [],
+			completeness: "complete",
+		};
+		const stamped = sanitizeRequestRoutingAttemptSummary({
+			...base,
+			processStartedAt: 1_793_346_681_263,
+		});
+		expect(stamped?.processStartedAt).toBe(1_793_346_681_263);
+		expect(
+			sanitizeRequestRoutingAttemptSummary(JSON.stringify(stamped)),
+		).toEqual(stamped);
+
+		const legacy = sanitizeRequestRoutingAttemptSummary(base);
+		expect(legacy).not.toBeNull();
+		expect(legacy && "processStartedAt" in legacy).toBe(false);
+
+		for (const invalid of [-1, 1.5, "2026-10-30T00:00:00Z", Number.NaN, null]) {
+			expect(
+				sanitizeRequestRoutingAttemptSummary({
+					...base,
+					processStartedAt: invalid,
+				})?.processStartedAt,
+			).toBeNull();
+		}
 	});
 });
