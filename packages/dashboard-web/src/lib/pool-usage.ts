@@ -273,17 +273,27 @@ function classifyQuotaExhaustion(
 	// serving past 100% of its plan windows, so it is not exhausted.
 	if (account.codexCreditDrainActive) return null;
 
+	const spent: Array<{ reason: ExcludedReason; resetMs: number | null }> = [];
 	const fiveHour = extractFiveHour(account.usageData);
 	if (fiveHour?.pct != null && fiveHour.pct >= 100) {
-		return { reason: "five_hour_exhausted", resetMs: fiveHour.resetMs };
+		spent.push({ reason: "five_hour_exhausted", resetMs: fiveHour.resetMs });
 	}
-
 	const sevenDay = extractSevenDay(account.usageData);
 	if (sevenDay?.pct != null && sevenDay.pct >= 100) {
-		return { reason: "seven_day_exhausted", resetMs: sevenDay.resetMs };
+		spent.push({ reason: "seven_day_exhausted", resetMs: sevenDay.resetMs });
 	}
 
-	return null;
+	// The account is usable again only once every spent window has reset, so
+	// report the latest reset (as routing's blockedUntil does). An unknown
+	// reset on any spent window leaves the return time unknown.
+	let latest: { reason: ExcludedReason; resetMs: number } | null = null;
+	for (const s of spent) {
+		if (s.resetMs === null) return s;
+		if (latest === null || s.resetMs > latest.resetMs) {
+			latest = { reason: s.reason, resetMs: s.resetMs };
+		}
+	}
+	return latest;
 }
 
 /**

@@ -762,6 +762,104 @@ describe("computePoolUsage", () => {
 		expect(sevenDay.earliestResetMs).toBe(NOW + 1_000_000);
 		expect(sevenDay.earliestResetAccountName).toBe("five-hour-exhausted");
 	});
+
+	function mkBothSpent(
+		fiveHourResetMs: number | null,
+		sevenDayResetMs: number | null,
+	): AccountResponse {
+		return mkAccount({
+			name: "both-spent",
+			provider: "anthropic",
+			usageData: {
+				five_hour: {
+					utilization: 100,
+					resets_at:
+						fiveHourResetMs === null
+							? null
+							: new Date(fiveHourResetMs).toISOString(),
+				},
+				seven_day: {
+					utilization: 100,
+					resets_at:
+						sevenDayResetMs === null
+							? null
+							: new Date(sevenDayResetMs).toISOString(),
+				},
+			} as never,
+		});
+	}
+
+	it("reports the weekly reset when both windows are spent and the week resets later", () => {
+		const account = mkBothSpent(NOW + 1_000_000, NOW + 90_000_000);
+		for (const window of ["five_hour", "seven_day"] as const) {
+			const result = computePoolUsage([account], window, NOW);
+			expect(result.exhausted).toEqual([
+				{
+					name: "both-spent",
+					reason: "seven_day_exhausted",
+					resetMs: NOW + 90_000_000,
+				},
+			]);
+			expect(result.earliestResetMs).toBe(NOW + 90_000_000);
+		}
+	});
+
+	it("reports the 5h reset when both windows are spent and the week resets first", () => {
+		const account = mkBothSpent(NOW + 3_000_000, NOW + 1_000_000);
+		const result = computePoolUsage([account], "seven_day", NOW);
+		expect(result.exhausted).toEqual([
+			{
+				name: "both-spent",
+				reason: "five_hour_exhausted",
+				resetMs: NOW + 3_000_000,
+			},
+		]);
+		expect(result.earliestResetMs).toBe(NOW + 3_000_000);
+	});
+
+	it("reports no reset when both windows are spent and the weekly reset is unknown", () => {
+		const account = mkBothSpent(NOW + 1_000_000, null);
+		const result = computePoolUsage([account], "five_hour", NOW);
+		expect(result.exhausted).toEqual([
+			{ name: "both-spent", reason: "seven_day_exhausted", resetMs: null },
+		]);
+		expect(result.earliestResetMs).toBeNull();
+	});
+
+	it("reports no reset when both windows are spent and the 5h reset is unknown", () => {
+		const account = mkBothSpent(null, NOW + 90_000_000);
+		const result = computePoolUsage([account], "seven_day", NOW);
+		expect(result.exhausted).toEqual([
+			{ name: "both-spent", reason: "five_hour_exhausted", resetMs: null },
+		]);
+		expect(result.earliestResetMs).toBeNull();
+	});
+
+	it("does not let a both-spent account's 5h reset set the pool's next quota time", () => {
+		const accounts = [
+			mkBothSpent(NOW + 1_000_000, NOW + 90_000_000),
+			mkAccount({
+				name: "busy",
+				provider: "anthropic",
+				usageData: {
+					five_hour: {
+						utilization: 60,
+						resets_at: new Date(NOW + 5_000_000).toISOString(),
+					},
+					seven_day: {
+						utilization: 60,
+						resets_at: new Date(NOW + 50_000_000).toISOString(),
+					},
+				} as never,
+			}),
+		];
+		const fiveHour = computePoolUsage(accounts, "five_hour", NOW);
+		expect(fiveHour.earliestResetMs).toBe(NOW + 5_000_000);
+		expect(fiveHour.earliestResetAccountName).toBe("busy");
+		const sevenDay = computePoolUsage(accounts, "seven_day", NOW);
+		expect(sevenDay.earliestResetMs).toBe(NOW + 50_000_000);
+		expect(sevenDay.earliestResetAccountName).toBe("busy");
+	});
 });
 
 describe("Anthropic limits[] primary (pool usage)", () => {
@@ -1063,6 +1161,41 @@ describe("computeScopedPoolUsage", () => {
 		expect(pool.exhausted).toEqual([
 			{ name: "acc", reason: "five_hour_exhausted", resetMs: NOW + 1_000_000 },
 		]);
+	});
+
+	it("account with both flat windows spent reports the later reset in the family pool", () => {
+		const account = mkScopedAccount("acc", "Fable", 10, {
+			usageData: {
+				five_hour: {
+					utilization: 100,
+					resets_at: new Date(NOW + 1_000_000).toISOString(),
+				},
+				seven_day: {
+					utilization: 100,
+					resets_at: new Date(NOW + 90_000_000).toISOString(),
+				},
+				limits: [
+					{
+						kind: "weekly_scoped",
+						percent: 10,
+						resets_at: RESET_ISO,
+						scope: {
+							model: { id: null, display_name: "Fable" },
+							surface: null,
+						},
+					},
+				],
+			} as never,
+		});
+		const pool = computeScopedPoolUsage([account], NOW)[0].result;
+		expect(pool.exhausted).toEqual([
+			{
+				name: "acc",
+				reason: "seven_day_exhausted",
+				resetMs: NOW + 90_000_000,
+			},
+		]);
+		expect(pool.earliestResetMs).toBe(NOW + 90_000_000);
 	});
 
 	it("entry present but percent null -> excluded no_usage_data", () => {
