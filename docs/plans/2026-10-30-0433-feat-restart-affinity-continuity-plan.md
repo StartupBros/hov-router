@@ -19,7 +19,7 @@ execution: code
 - **Execution profile:** test-first, per AGENTS.md. One PR, shipped as a backend-only deploy.
 - **Stop conditions:** stop and report instead of working around it if a restart-stable lane key or candidate id turns out to differ between processes, if any unit needs a guard, runner, deployment-transaction or schema-migration change (R9), or if the R3 round trip fails on either database without a schema change.
 - **Finishing:** `ce-work` implements the units and merges the PR under AGENTS.md. Deploying is a separate backend-only run of `scripts/deploy-ccflare.sh`, and the Success Criteria are read at least 14 days after it.
-- **Open blockers:** none.
+- **Open blockers:** one operator decision bears on U4 and U5: what the restore read does when the database's background reader is unavailable (Deferred / Open Questions). U1-U3 do not depend on it.
 
 ---
 
@@ -440,3 +440,15 @@ No check sends Anthropic inference. Every scenario runs against strategies, the 
 | U4 | The windowed read returns the right rows on SQLite, and on PostgreSQL when available, and reports a reached cap |
 | U5 | AE1-AE7 pass in the parity harness, and the ordering (including cross-process), normalizer, budget, cap, clamp and skip cases pass |
 | U6 | Request handling waits for a pending gate before quality routing and selection, the hot rebuild does not wait, `/health` shows the outcome, and `bun run build:cli` succeeds |
+
+## Deferred / Open Questions
+
+### From 2026-10-30 review
+
+- **The restore read can stall startup past its 3-second budget when the database's background reader is unavailable** — KTD5, windowed and capped history read (P1, adversarial-codex and whole-doc-codex, confidence 75)
+
+  If the background reader that keeps database reads off the main thread is disabled, closed or out of restarts, the restore's history read silently runs on the main thread at startup, where the budget timer cannot stop it, so readiness can wait on that read, which R8 (restoring never holds up readiness) forbids. The proposed fix abandons the restore with the reason `reader-unavailable` instead of falling back. It awaits the operator because two fresh local reviewers did not independently corroborate it. U1-U3 do not depend on this choice.
+
+- **The success measure counts starts a restore cannot cover** — Success Criteria (P2, adversarial, confidence 75)
+
+  The straddle-switch rate may not fall toward its predeclared target even when restore works, because its population includes the deploy that ships this change, which has no earlier record to restore, and lanes outside the restorable set. Adjusting the population changes the Product Contract, so it is the operator's call; implementation does not depend on it.
