@@ -20,7 +20,10 @@ import {
 	DatabaseFactory,
 	type DatabaseOperations,
 } from "@better-ccflare/database";
-import type { RequestResponse } from "@better-ccflare/types";
+import { SessionAffinityStrategy } from "@better-ccflare/load-balancer";
+import type { RequestMeta, RequestResponse } from "@better-ccflare/types";
+import { RoutingAttemptLedger } from "../handlers/routing-attempt-ledger";
+import { getRequestLifecycleCoordinator } from "../routing-terminal-recorder";
 import { UsageCollector } from "../usage-collector";
 import type { EndMessage, StartMessage } from "../worker-messages";
 
@@ -90,6 +93,80 @@ describe("UsageCollector - stream terminal state in the live summary", () => {
 			failoverAttempts: 0,
 		};
 	}
+
+	test.each([
+		"success",
+		"failure",
+		"client-cancel",
+	] as const)("persists the finalize-time lane through handleEnd's %s branch", async (outcome) => {
+		const requestId = `affinity-${outcome}`;
+		let now = 1_793_346_681_000;
+		const strategy = new SessionAffinityStrategy(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			() => now,
+		);
+		const meta = {
+			id: requestId,
+			clientSessionId: "collector-client",
+		} as RequestMeta;
+		const owner = {
+			candidateId: "account:test-account",
+			accountId: "test-account",
+		};
+		strategy.commitAffinityOwner(meta, owner);
+		const ledger = new RoutingAttemptLedger();
+		ledger.recordPhysicalAttempt({
+			accountId: "test-account",
+			provider: "test",
+		});
+		ledger.observeOutputOrigin("test-account");
+		const coordinator = getRequestLifecycleCoordinator(meta);
+		coordinator.bindRoutingObservation(
+			ledger,
+			(status) => status,
+			() => strategy.exportAffinityLaneRecord(meta),
+		);
+		coordinator.start({ collector, message: makeStart(requestId) });
+		now += 500;
+		strategy.commitAffinityOwner(meta, owner);
+		await coordinator.finalize({
+			type: "end",
+			requestId,
+			success: outcome !== "failure",
+			...(outcome === "failure" ? { error: "upstream_error" } : {}),
+			...(outcome === "client-cancel"
+				? { streamTerminalState: "client_cancelled" as const }
+				: {}),
+		});
+		await collector.drain();
+		const row = await dbOps
+			.getAdapter()
+			.get<{ routing_attempt_summary: string }>(
+				"SELECT routing_attempt_summary FROM requests WHERE id = ?",
+				[requestId],
+			);
+		expect(row).not.toBeNull();
+		const saved = JSON.parse(row?.routing_attempt_summary ?? "null");
+		expect(saved.affinityLane).toMatchObject({
+			observedAt: 1_793_346_681_500,
+			owner: {
+				...owner,
+				assignedAt: 1_793_346_681_500,
+				installedBelowBestConfiguredTier: false,
+			},
+		});
+		expect(saved.winnerOrdinal).toBe(outcome === "success" ? 1 : null);
+		expect(saved.terminalCause).toBe(
+			outcome === "success"
+				? null
+				: outcome === "failure"
+					? "upstream_error"
+					: "client_cancelled",
+		);
+	});
 
 	/**
 	 * Drives a full start->end cycle through the REAL collector and returns the

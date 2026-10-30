@@ -137,6 +137,7 @@ import {
 	isImplicitCodexDiscoveryEligible,
 	isNativeQuotaRequestCandidateEligible,
 	isNativeQuotaRouteAllowed,
+	isRestartStableAffinityLane,
 	type NativeRemovalUsageBlockKind,
 	setNativeRemovalUsageGate,
 } from "./handlers/account-selector";
@@ -1043,6 +1044,16 @@ async function handleProxyCoreImpl(
 		routingAttemptLedger,
 		(nativeStatus) =>
 			activeAnthropicPreCommitRescue?.isRescueCommitted() ? 200 : nativeStatus,
+		() => {
+			if (
+				!isRestartStableAffinityLane(
+					requestMeta.affinityLaneKey,
+					requestMeta.clientSessionId,
+				)
+			)
+				return null;
+			return ctx.strategy.exportAffinityLaneRecord?.(requestMeta) ?? null;
+		},
 	);
 	const recordLocalRoutingTerminal = (
 		response: Response,

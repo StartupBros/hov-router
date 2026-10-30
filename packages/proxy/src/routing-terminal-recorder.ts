@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { sanitizeRequestHeaders } from "@better-ccflare/http-common";
-import type { RequestMeta, RouteProvenance } from "@better-ccflare/types";
+import type {
+	RequestMeta,
+	RouteProvenance,
+	RoutingAffinityLaneRecord,
+} from "@better-ccflare/types";
 import { sanitizeQualityDecision } from "@better-ccflare/types/request";
 import type { RoutingAttemptLedger } from "./handlers/routing-attempt-ledger";
 import { captureRoutingDecision } from "./handlers/routing-selection-diagnostics";
@@ -60,6 +64,7 @@ export class RequestLifecycleCoordinator {
 	private observation?: {
 		ledger: RoutingAttemptLedger;
 		wireStatus(nativeStatus: number): number;
+		recordAffinityLane?: () => RoutingAffinityLaneRecord | null;
 	};
 	private nativeStatus = 200;
 
@@ -77,8 +82,9 @@ export class RequestLifecycleCoordinator {
 	bindRoutingObservation(
 		ledger: RoutingAttemptLedger,
 		wireStatus: (nativeStatus: number) => number,
+		recordAffinityLane?: () => RoutingAffinityLaneRecord | null,
 	): void {
-		this.observation ??= { ledger, wireStatus };
+		this.observation ??= { ledger, wireStatus, recordAffinityLane };
 	}
 
 	deferFinalization(): void {
@@ -129,7 +135,14 @@ export class RequestLifecycleCoordinator {
 		this.state = "finalized";
 		try {
 			if (this.observation) {
+				let affinityLane: RoutingAffinityLaneRecord | null = null;
+				try {
+					affinityLane = this.observation.recordAffinityLane?.() ?? null;
+				} catch (error) {
+					reportRecorderFailure(this.onError, error);
+				}
 				const routingAttemptSummary = this.observation.ledger.terminalSummary({
+					affinityLane,
 					success:
 						message.success &&
 						message.streamTerminalState !== "client_cancelled",

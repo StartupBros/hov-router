@@ -15,6 +15,7 @@ import {
 	DatabaseFactory,
 	type DatabaseOperations,
 } from "@better-ccflare/database";
+import { SessionAffinityStrategy } from "@better-ccflare/load-balancer";
 import type { Account, RequestMeta } from "@better-ccflare/types";
 import type { ProxyContext } from "../handlers";
 import * as operations from "../handlers/proxy-operations";
@@ -108,6 +109,98 @@ function makeRequest(controller: AbortController): Request {
 		}),
 	});
 }
+
+describe("proxy affinity lane export wiring", () => {
+	it.each([
+		"ordinary",
+		"profile",
+		"client-fallback",
+		"child-home",
+	] as const)("records replacement strategy state at finalize for %s lanes", async (kind) => {
+		const original = new SessionAffinityStrategy();
+		const replacement = new SessionAffinityStrategy();
+		ctx.strategy = original;
+		const exportSpy = spyOn(replacement, "exportAffinityLaneRecord");
+		restores.push(() => exportSpy.mockRestore());
+		let routedMeta: RequestMeta | undefined;
+		globalThis.fetch = mock(async (input: string | URL | Request) => {
+			if (
+				String(input instanceof Request ? input.url : input) !==
+				"https://synthetic.invalid/v1/messages"
+			)
+				throw new Error("External fetch disabled in affinity test");
+			return Response.json({ model: "test-model", content: [] });
+		}) as unknown as typeof globalThis.fetch;
+		const proxyWithAccount = operations.proxyWithAccount;
+		const operationSpy = spyOn(
+			operations,
+			"proxyWithAccount",
+		).mockImplementation(async (...args) => {
+			const meta = args[3];
+			routedMeta = meta;
+			meta.clientSessionId = "restart-wiring-client";
+			meta.affinityLaneKey =
+				kind === "client-fallback"
+					? null
+					: JSON.stringify([
+							kind === "ordinary"
+								? "routing-lane-v1"
+								: kind === "profile"
+									? "routing-lane-profile-v1"
+									: "routing-lane-profile-child-v1",
+							"test-session",
+							"test-model",
+						]);
+			original.commitAffinityOwner(meta, {
+				candidateId: "account:old-owner",
+				accountId: "old-owner",
+			});
+			replacement.commitAffinityOwner(meta, {
+				candidateId: "account:cancel-account",
+				accountId: "cancel-account",
+			});
+			// The coordinator was bound before routing. Swap the live context now.
+			ctx.strategy = replacement;
+			return proxyWithAccount(...args);
+		});
+		restores.push(() => operationSpy.mockRestore());
+		const request = makeRequest(new AbortController());
+		const response = await handleProxy(request, new URL(request.url), ctx);
+		expect(response.status).toBe(200);
+		await response.text();
+		await collector.drain();
+		const rows = await db.getRecentRequests();
+		expect(rows).toHaveLength(1);
+		const row = await db
+			.getAdapter()
+			.get<{ routing_attempt_summary: string }>(
+				"SELECT routing_attempt_summary FROM requests WHERE id = ?",
+				[rows[0].id],
+			);
+		const summary = JSON.parse(row?.routing_attempt_summary ?? "null");
+		expect(summary).not.toBeNull();
+		expect(
+			replacement.snapshotAffinityOwner(routedMeta as RequestMeta),
+		).toEqual({
+			candidateId: "account:cancel-account",
+			accountId: "cancel-account",
+		});
+		if (kind === "child-home") {
+			expect(summary.affinityLane).toBeUndefined();
+			expect(exportSpy).not.toHaveBeenCalled();
+		} else {
+			expect(exportSpy).toHaveBeenCalledTimes(1);
+			expect(summary.affinityLane).toMatchObject({
+				digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+				owner: {
+					candidateId: "account:cancel-account",
+					accountId: "cancel-account",
+					installedBelowBestConfiguredTier: false,
+				},
+			});
+		}
+	});
+});
 
 describe("canonical history for caller cancellation before forwarding", () => {
 	it("records an unattempted cancellation once with no invented account or physical attempt and sanitized headers", async () => {
