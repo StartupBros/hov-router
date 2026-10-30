@@ -307,7 +307,8 @@ cost is measured only after matching each request to the conversation turn it co
 against a baseline drawn from same-account sequential requests after the same idle gap.
 A matched pair straddles a start when its two turns were served by different backend
 processes, as the `processStartedAt` in each request's routing summary shows; straddling
-pairs are counted apart from the rest because a process start can move an owner by itself.
+pairs are counted apart from the rest so the effect of a process start on routing can be read
+on its own.
 
 ### Physical-attempt usage
 

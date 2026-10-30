@@ -93,20 +93,20 @@ flowchart TB
 
 ### Acceptance Examples
 
-- AE1. **Covers R4, R5.** **Given** a lane owned by account X that last served 3 minutes before a deploy, **when** its next turn reaches the new process and X is available, **then** X serves it and no remap occurs.
+- AE1. **Covers R4, R5.** **Given** a lane owned by account X that was last selected 3 minutes before a deploy, **when** its next turn reaches the new process and X is available, **then** X serves it and no remap occurs.
 - AE2. **Covers R5.** **Given** the same restored pin, **when** X is rate-limited or paused at the next turn, **then** the turn fails over exactly as a live pin with an unavailable owner would.
 - AE3. **Covers R5.** **Given** a restored pin to an account the deploy removed or the request's route profile no longer authorizes, **when** the next turn arrives, **then** the pin is ignored and the request is routed fresh.
-- AE4. **Covers R6, R7.** **Given** an owner outclassed by a higher pace band, held since 25 minutes before a restart and last selected 2 minutes before it, **when** the next turn arrives, **then** the hold continues for at most the 5 minutes left on its cap.
+- AE4. **Covers R6, R7.** **Given** an owner outclassed by a higher pace band, held since 25 minutes before a restart and last selected 2 minutes before it, **when** the next turn arrives less than 5 minutes after that selection, **then** the owner is held, and the hold ends no later than 30 minutes after its original start.
 - AE5. **Covers R6.** **Given** an owner last selected for a 6-minute stream that started 8 minutes before the restart, **when** the hold judges the owner at the next turn, **then** it counts as idle for 8 minutes plus the time since the restart, exactly as a running process would count it, and no warm-owner hold applies.
 - AE6. **Covers R8.** **Given** the database cannot be read at start, **when** the process starts, **then** it becomes ready with no restored pins and routes as it does today.
 - AE7. **Covers R4.** **Given** a lane whose owner was last selected 6 hours before the restart, **when** the process starts, **then** that lane is not restored.
 
 ### Success Criteria
 
-- Measured with the conversation-parent matching and same-account baseline of `docs/solutions/observability/measure-session-remap-cache-cost-from-the-requests-table.md` (steps 1-6); a pair straddles a start when its two records carry different `processStartedAt`, and pairs where either turn is a failover are excluded.
-- The verdict needs at least 14 days after deploy and at least 100 straddling pairs whose idle gap is under the warm-cache window; missing either floor reads as insufficient evidence, not success.
-- Success: the straddling-pair switch rate is at most 2x the non-straddling rate over the same window (before: 52-62% against 3-4%).
-- Countermetric: on the later turn of each straddling pair, the failover rate and the upstream 429 rate are no higher than on ordinary sticky turns in the same window.
+- Population, for the evidence floor and every rate below: successful Anthropic requests matched to their conversation parent by steps 1-5 of `docs/solutions/observability/measure-session-remap-cache-cost-from-the-requests-table.md`, keeping pairs whose idle gap is under 5 minutes as that doc's step 8 splits it. A pair straddles a start when its two records carry different `processStartedAt`, and switches when its two turns were served by different accounts.
+- Evidence floor: at least 14 days after deploy and at least 100 straddling non-failover pairs in that population; missing either reads as insufficient evidence, not success.
+- Success: excluding pairs where either turn is a failover, the straddling switch rate is at most 2x the non-straddling rate in the same window. The 52% against about 3% before-figure comes from that doc's partition-order pairs, a different population, so it is context, not the comparison.
+- Countermetric: over the same pairs with failovers kept, the later turn's failover rate and upstream 429 rate are no higher for straddling pairs than for non-straddling ones.
 
 ### Scope Boundaries
 
