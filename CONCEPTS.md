@@ -305,6 +305,10 @@ each served by its own owner). Raw same-session account changes are mostly concu
 and sequential changes within one session and model are mostly lane interleaving. So remap
 cost is measured only after matching each request to the conversation turn it continues,
 against a baseline drawn from same-account sequential requests after the same idle gap.
+A matched pair straddles a start when its two turns were served by different backend
+processes, as the `processStartedAt` in each request's routing summary shows; straddling
+pairs are counted apart from the rest so the effect of a process start on routing can be read
+on its own.
 
 ### Physical-attempt usage
 
