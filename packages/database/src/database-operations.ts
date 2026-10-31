@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { RuntimeConfig } from "@better-ccflare/config";
@@ -65,6 +64,7 @@ import {
 	type MaintenanceWorkerOptions,
 	MaintenanceWorkerOwner,
 } from "./maintenance-worker-owner";
+import { ensurePrivateDir, restrictDbFiles } from "./file-modes";
 import { ensureSchema, runMigrations } from "./migrations";
 import { ensureSchemaPg, runMigrationsPg } from "./migrations-pg";
 import {
@@ -587,9 +587,9 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			const resolvedPath = dbPath ?? resolveDbPath();
 			this.resolvedDbPath = resolvedPath;
 
-			// Ensure the directory exists
-			const dir = dirname(resolvedPath);
-			mkdirSync(dir, { recursive: true });
+			// Ensure the directory exists. A directory created here is 0700; an
+			// existing one keeps its mode (it may hold other files).
+			ensurePrivateDir(dirname(resolvedPath));
 
 			// Validate operator-supplied PRAGMA config BEFORE opening the handle.
 			// `configureSqlite()` used to validate mid-flight, after
@@ -608,6 +608,12 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 				onSlow: (sample) => sqlTimingLog.warn(formatSlowSqlStatement(sample)),
 			});
 			this.sqlTiming.instrument(this.sqliteDb);
+
+			// The accounts table stores credentials as plaintext TEXT, and
+			// bun:sqlite creates the file at the umask default (0644 under 022).
+			// Before configureSqlite, which turns WAL on: SQLite gives a new -wal
+			// and -shm the main file's mode, so they are born 0600.
+			if (resolvedPath !== ":memory:") restrictDbFiles(resolvedPath);
 
 			try {
 				// Capture the persisted auto_vacuum mode BEFORE configureSqlite's
