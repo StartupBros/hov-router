@@ -56,7 +56,8 @@ import { Database } from "bun:sqlite";
  * (bench/incremental-vacuum-hold.ts). In WAL mode NORMAL
  * stays corruption-safe; a power loss can roll the chunk back, which only
  * leaves its pages on the freelist. A request without the field keeps the
- * connection default.
+ * connection default. The optimize kind carries no `synchronous`, so it runs
+ * at the connection default (FULL); its cost there is unmeasured.
  *
  * Refuses if `auto_vacuum != 2` — the operation is a no-op there and would
  * mask a misconfigured DB. Callers should have gated already via the same
