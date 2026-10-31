@@ -3,24 +3,64 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Config } from "@better-ccflare/config";
-import { buildServerRuntimeConfig } from "./runtime-config";
+import { TIME_CONSTANTS } from "@better-ccflare/core";
+import {
+	buildServerRuntimeConfig,
+	createModelRouteSessionRegistry,
+	modelRouteSessionTtlMs,
+} from "./runtime-config";
 
 describe("buildServerRuntimeConfig", () => {
 	let dir: string;
 	let configPath: string;
 	let savedAttempts: string | undefined;
+	let savedSessionDuration: string | undefined;
 
 	beforeEach(() => {
 		dir = mkdtempSync(join(tmpdir(), "better-ccflare-server-runtime-"));
 		configPath = join(dir, "config.json");
 		savedAttempts = process.env.RETRY_ATTEMPTS;
 		delete process.env.RETRY_ATTEMPTS;
+		savedSessionDuration = process.env.SESSION_DURATION_MS;
+		delete process.env.SESSION_DURATION_MS;
 	});
 
 	afterEach(() => {
 		if (savedAttempts === undefined) delete process.env.RETRY_ATTEMPTS;
 		else process.env.RETRY_ATTEMPTS = savedAttempts;
+		if (savedSessionDuration === undefined)
+			delete process.env.SESSION_DURATION_MS;
+		else process.env.SESSION_DURATION_MS = savedSessionDuration;
 		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("starts the model route session registry with SESSION_DURATION_MS=0 and an empty config file", () => {
+		// Before getRuntime() the server ignored SESSION_DURATION_MS, so this
+		// configuration started on the default. The registry rejects a TTL of 0.
+		writeFileSync(configPath, JSON.stringify({}));
+		process.env.SESSION_DURATION_MS = "0";
+		const runtime = buildServerRuntimeConfig(new Config(configPath), 8080);
+		expect(runtime.sessionDurationMs).toBe(0);
+
+		expect(() =>
+			createModelRouteSessionRegistry([], runtime.sessionDurationMs),
+		).not.toThrow();
+	});
+
+	it("gives the model route registry the session duration when positive, else its own default", () => {
+		expect(modelRouteSessionTtlMs(60_000)).toBe(60_000);
+		expect(modelRouteSessionTtlMs(0)).toBe(
+			TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+		);
+		expect(modelRouteSessionTtlMs(Number.NaN)).toBe(
+			TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+		);
+	});
+
+	it("server.ts builds the model route session registry through the shared helper", () => {
+		const source = readFileSync(join(import.meta.dir, "server.ts"), "utf8");
+		expect(source).toContain("createModelRouteSessionRegistry(");
+		expect(source).not.toContain("new ModelRouteSessionRegistry(");
 	});
 
 	it("honours RETRY_ATTEMPTS and does not write defaults into the config file", () => {

@@ -109,4 +109,41 @@ describe("getRuntime() retry bounds and env resolution", () => {
 			configWith({ session_duration_ms: 0 }).getRuntime().sessionDurationMs,
 		).toBe(0);
 	});
+
+	it("keeps SESSION_DURATION_MS=0 at 0", () => {
+		process.env.SESSION_DURATION_MS = "0";
+		expect(configWith({}).getRuntime().sessionDurationMs).toBe(0);
+	});
+
+	it("falls back to the default session duration for a non-numeric SESSION_DURATION_MS", () => {
+		// parseInt("abc") is NaN; in SessionStrategy `elapsed >= NaN` is always
+		// false, so a NaN duration would silently stop sessions from expiring.
+		process.env.SESSION_DURATION_MS = "abc";
+		expect(configWith({}).getRuntime().sessionDurationMs).toBe(18_000_000);
+	});
+
+	it("falls back to the default session duration for a negative value from either source", () => {
+		process.env.SESSION_DURATION_MS = "-5";
+		expect(configWith({}).getRuntime().sessionDurationMs).toBe(18_000_000);
+		delete process.env.SESSION_DURATION_MS;
+		expect(
+			configWith({ session_duration_ms: -1 }).getRuntime().sessionDurationMs,
+		).toBe(18_000_000);
+	});
+
+	it("warns once about an invalid session duration", () => {
+		const warn = spyOn(Logger.prototype, "warn").mockImplementation(() => {});
+		try {
+			process.env.SESSION_DURATION_MS = "abc";
+			const config = configWith({});
+			config.getRuntime();
+			config.getRuntime();
+			const sessionWarnings = warn.mock.calls.filter((call) =>
+				String(call[0]).includes("session_duration_ms"),
+			);
+			expect(sessionWarnings.length).toBe(1);
+		} finally {
+			warn.mockRestore();
+		}
+	});
 });

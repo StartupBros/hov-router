@@ -102,7 +102,6 @@ import {
 	initModelCatalogRefresh,
 	initProxy,
 	lowestTierCodexModel,
-	ModelRouteSessionRegistry,
 	markAccountTokensFresh,
 	markBackendRetiring,
 	type ProxyContext,
@@ -153,7 +152,10 @@ import {
 	RetentionSweeps,
 	scheduleAdaptiveVacuumAfterRetentionCleanup,
 } from "./retention-cleanup";
-import { buildServerRuntimeConfig } from "./runtime-config";
+import {
+	buildServerRuntimeConfig,
+	createModelRouteSessionRegistry,
+} from "./runtime-config";
 import {
 	createUsagePollingTrackingClearer,
 	isCurrentUsagePollingAccount,
@@ -2052,9 +2054,9 @@ export default async function startServer(options?: {
 
 	// Create runtime config
 	const runtimeConfig: RuntimeConfig = buildServerRuntimeConfig(config, port);
-	const modelRouteSessionRegistry = new ModelRouteSessionRegistry(
+	const modelRouteSessionRegistry = createModelRouteSessionRegistry(
 		modelRouteProfiles,
-		{ ttlMs: runtimeConfig.sessionDurationMs },
+		runtimeConfig.sessionDurationMs,
 	);
 	if (modelRouteProfiles.length > 0) {
 		log.info(`Model route profiles configured: ${modelRouteProfiles.length}`);

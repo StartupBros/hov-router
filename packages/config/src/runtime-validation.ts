@@ -66,6 +66,33 @@ export function resetRuntimeWarningsForTest(): void {
 	warned.clear();
 }
 
+/**
+ * Validates the resolved `session_duration_ms` (`SESSION_DURATION_MS`).
+ *
+ * 0 is kept: the session strategies and cache affinity then treat every
+ * session as already expired, which turns session stickiness off. A value
+ * that is not a finite number, or is negative, gets the default with a
+ * warning. `parseInt("abc", 10)` is `NaN`, and in SessionStrategy
+ * `elapsed >= NaN` is always false, so a NaN duration would silently stop
+ * sessions from ever expiring.
+ */
+export function validateRuntimeSessionDuration(
+	received: unknown,
+	fallback: number,
+): number {
+	if (typeof received === "number" && Number.isFinite(received)) {
+		if (received >= 0) return received;
+	}
+	const shown =
+		typeof received === "number" ? String(received) : "not a number";
+	warnOnce(
+		`session_duration_ms:${shown}:${fallback}`,
+		`session_duration_ms (SESSION_DURATION_MS) is ${shown}; applying the default ${fallback}. ` +
+			"Set 0 or a positive number of milliseconds.",
+	);
+	return fallback;
+}
+
 /** Clamps `retry` in place and returns the adjustments made. */
 export function validateRuntimeRetry(
 	retry: RetryRuntime,

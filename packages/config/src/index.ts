@@ -39,7 +39,10 @@ import {
 	type QualityRoutingPolicyConfig,
 } from "@better-ccflare/types";
 import { resolveConfigPath } from "./paths";
-import { validateRuntimeRetry } from "./runtime-validation";
+import {
+	validateRuntimeRetry,
+	validateRuntimeSessionDuration,
+} from "./runtime-validation";
 
 const log = new Logger("Config");
 
@@ -2908,6 +2911,10 @@ export class Config extends EventEmitter {
 			delayMs: TIME_CONSTANTS.RETRY_DELAY_DEFAULT,
 			backoff: 2,
 		});
+		defaults.sessionDurationMs = validateRuntimeSessionDuration(
+			defaults.sessionDurationMs,
+			TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+		);
 
 		// Database configuration overrides
 		// Ensure database configuration object exists
