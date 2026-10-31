@@ -37,13 +37,18 @@ A request without a profile runs combo routing when applicable and otherwise the
 ```mermaid
 flowchart TD
     A["Incoming proxied request<br/>(e.g. POST /v1/messages)"] --> R{"Configured model route<br/>explicit or inherited?"}
-    R -->|"Yes"| C["Use server-derived exact account —<br/>skip combos and strategy"]
+    R -->|"Legacy profile"| C["Use server-derived exact account —<br/>skip combos and strategy"]
+    R -->|"Capability profile"| S["Capability pool:<br/>root = provider + first physical model,<br/>no combos; descendant = three-rung plan"]
     R -->|"No"| B{"Forced account header?<br/>(x-better-ccflare-account-id)"}
     B -->|"Yes"| C
     B -->|"No"| D["Combo route when active;<br/>otherwise Strategy.select()"]
     C --> C2{"Exact route valid?<br/>Account available, capacity present,<br/>guards match, no conflict"}
     C2 -->|"No"| C3["Fail closed —<br/>never select another account"]
     C2 -->|"Yes"| H["applyUsageThrottling<br/>(5h / weekly pacing-line gate)"]
+    S --> S2{"Any candidate left after<br/>availability, capacity and guards?"}
+    S2 -->|"No: root, or descendant<br/>with every rung exhausted"| S3["Fail closed —<br/>no account outside the plan"]
+    S2 -->|"Yes"| S4["Strategy orders accounts<br/>inside each rung"]
+    S4 --> H
     D --> E{"Model-capacity routing<br/>mode = exhausted?"}
     E -->|"Yes"| F["Drop accounts capacity-excluded<br/>for the request's model family"]
     E -->|"No"| G["Ordered candidate accounts"]
