@@ -118,7 +118,7 @@ export function createAgentPreferenceUpdateHandler(
 			}
 
 			// Update preference
-			dbOps.setAgentPreference(agentId, model);
+			await dbOps.setAgentPreference(agentId, model);
 
 			const warning = await getLiveCatalogWarning(modelCatalog, model);
 
@@ -218,7 +218,7 @@ export function createBulkAgentPreferenceUpdateHandler(
 			}
 
 			// Update all agent preferences in bulk
-			dbOps.setBulkAgentPreferences(agentIds, modelValidation);
+			await dbOps.setBulkAgentPreferences(agentIds, modelValidation);
 
 			log.info(
 				`Updated ${agentIds.length} agent preferences to model: ${modelValidation}`,

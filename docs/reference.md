@@ -1296,7 +1296,6 @@ bun run apps/cli/src/main.ts --set-priority <name> <priority>  # Set account pri
 # Server management
 bun run apps/cli/src/main.ts --serve                  # Start server
 bun run apps/cli/src/main.ts --serve --port 8081    # Start on specific port
-bun run apps/cli/src/main.ts --logs [N]               # Stream logs
 bun run apps/cli/src/main.ts --stats                  # Show statistics (JSON)
 
 # Maintenance

@@ -35,6 +35,27 @@ import {
 
 const log = new Logger("OAuthHandler");
 
+/**
+ * Delete a one-shot OAuth session once its flow has completed. Best-effort:
+ * the account is already created or re-authenticated and the code is spent,
+ * so a failed delete must not report the flow as failed. The row expires on
+ * its own (getOAuthSession filters expires_at).
+ */
+async function deleteCompletedOAuthSession(
+	dbOps: DatabaseOperations,
+	sessionId: string,
+	accountName: string,
+): Promise<void> {
+	try {
+		await dbOps.deleteOAuthSession(sessionId);
+	} catch (error) {
+		log.warn(
+			`Could not delete the completed OAuth session for '${accountName}'; it will expire on its own:`,
+			error,
+		);
+	}
+}
+
 // In-memory session store for Qwen device flow
 type QwenSession =
 	| { status: "pending"; accountName: string; accountId?: string }
@@ -542,7 +563,7 @@ export function createAnthropicReauthInitHandler(
 				});
 
 				// Store session; use accountName field so callback can look it up by name
-				dbOps.createOAuthSession(
+				await dbOps.createOAuthSession(
 					flowResult.sessionId,
 					account.name,
 					flowResult.pkce.verifier,
@@ -654,7 +675,7 @@ export function createAnthropicReauthCallbackHandler(
 				);
 				clearAccountRefreshCache(account.id);
 
-				dbOps.deleteOAuthSession(sessionId);
+				await deleteCompletedOAuthSession(dbOps, sessionId, name);
 
 				// Drop any stale refresh backoff/failure state so the just-installed
 				// token is used immediately instead of waiting out the backoff window
@@ -760,7 +781,7 @@ export function createOAuthInitHandler(dbOps: DatabaseOperations) {
 
 				// Store custom endpoint and priority in session so the callback
 				// can forward them to oauthFlow.complete() when creating the account.
-				dbOps.createOAuthSession(
+				await dbOps.createOAuthSession(
 					flowResult.sessionId,
 					name,
 					flowResult.pkce.verifier,
@@ -880,7 +901,7 @@ export function createOAuthCallbackHandler(dbOps: DatabaseOperations) {
 				);
 
 				// Clean up OAuth session from database
-				dbOps.deleteOAuthSession(sessionId);
+				await deleteCompletedOAuthSession(dbOps, sessionId, name);
 
 				log.info(`Successfully added account '${name}' via OAuth`);
 

@@ -44,13 +44,17 @@ export async function runIntegrityCheckInWorker(
 	},
 ): Promise<{ ok: true } | { ok: false; error: string; timedOut?: boolean }> {
 	let worker: Worker;
+	// Terminating the worker does not release the Blob URL, so keep it and
+	// revoke it in `finally`.
+	let workerUrl: string | undefined;
 	if (EMBEDDED_INTEGRITY_CHECK_WORKER_CODE) {
 		const workerCode = Buffer.from(
 			EMBEDDED_INTEGRITY_CHECK_WORKER_CODE,
 			"base64",
 		).toString("utf8");
 		const blob = new Blob([workerCode], { type: "text/javascript" });
-		worker = new Worker(URL.createObjectURL(blob), { smol: true });
+		workerUrl = URL.createObjectURL(blob);
+		worker = new Worker(workerUrl, { smol: true });
 	} else {
 		worker = new Worker(
 			new URL("./integrity-check-worker.ts", import.meta.url).href,
@@ -88,6 +92,7 @@ export async function runIntegrityCheckInWorker(
 	} finally {
 		if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
 		worker.terminate();
+		if (workerUrl) URL.revokeObjectURL(workerUrl);
 	}
 }
 

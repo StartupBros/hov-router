@@ -586,7 +586,11 @@ export function RateLimitProgress({
 			)}
 			{usages.map((usage, _index) => {
 				const percentage = usage.utilization;
-				const isAvailable = percentage !== null;
+				// `!= null`, not `!== null`: usage data crosses a JSON boundary through
+				// a cast, so a window missing its percentage field yields `undefined`.
+				// Strict inequality called such a row available and printed
+				// "undefined%" instead of "N/A".
+				const isAvailable = percentage != null;
 
 				// Group header shown before the first row of each group (limits[] rows).
 				const showGroupHeader =

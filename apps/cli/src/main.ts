@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { loadCliDotenv } from "./startup-env";
+import { unknownArgumentLines } from "./unknown-argument";
 
 // Source runs retain the script-directory fallback. Compiled startup has already
 // loaded the same fallbacks using its physical executable, before app imports.
@@ -1013,6 +1014,15 @@ function parseArgs(args: string[]): ParsedArgs {
 			case "--show-config":
 				parsed.showConfig = true;
 				break;
+			case "--smol":
+				// docs/systemd.md ships `ExecStart=... --smol --serve`; Bun consumes
+				// the flag, so the CLI accepts it and ignores it.
+				break;
+			default:
+				// An unknown token used to be skipped, and the no-argument path then
+				// started the server, so a typo such as `--lsit` booted a proxy.
+				for (const line of unknownArgumentLines(arg)) console.error(line);
+				fastExit(1);
 		}
 	}
 

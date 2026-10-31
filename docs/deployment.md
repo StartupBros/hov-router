@@ -1015,8 +1015,8 @@ healthcheck:
 ### Regular Tasks
 
 ```bash
-# Daily: Check recent logs
-hov-router --logs 100 | grep ERROR
+# Daily: Check recent errors (systemd install; use your unit's name)
+journalctl -u better-ccflare --since "24 hours ago" | grep ERROR
 
 # Weekly: Database maintenance
 # Linux/macOS:

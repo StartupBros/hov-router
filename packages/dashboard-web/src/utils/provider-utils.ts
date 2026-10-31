@@ -105,26 +105,40 @@ export function getDefaultEndpointForProvider(provider: string): string {
 
 /**
  * Check if a given timestamp (default: now) falls within Zai peak hours.
- * Zai peak hours are 14:00–18:00 Singapore time (UTC+8).
+ * Zai peak hours are Monday to Friday 14:00–18:00 Singapore time (UTC+8);
+ * weekends are off-peak. The weekday is read after the +8h shift.
  */
 export function isZaiPeakHour(ts?: number): boolean {
-	const d = new Date(ts ?? Date.now());
-	// Convert to UTC+8 hour
-	const utcHour = d.getUTCHours() + d.getUTCMinutes() / 60;
-	const sgtHour = (utcHour + 8) % 24;
+	const sgt = new Date((ts ?? Date.now()) + 8 * 60 * 60 * 1000);
+	const day = sgt.getUTCDay();
+	if (day === 0 || day === 6) return false;
+	const sgtHour = sgt.getUTCHours() + sgt.getUTCMinutes() / 60;
 	return sgtHour >= 14 && sgtHour < 18;
 }
 
+const ANTHROPIC_PEAK_FORMAT = new Intl.DateTimeFormat("en-US", {
+	timeZone: "America/Los_Angeles",
+	weekday: "short",
+	hour: "numeric",
+	hourCycle: "h23",
+});
+
 /**
  * Check if a given timestamp (default: now) falls within Anthropic OAuth peak hours.
- * Peak hours are weekdays 5am–11am PT (1pm–7pm UTC), Monday–Friday.
+ * Peak hours are Monday–Friday 5am–11am in America/Los_Angeles, so the UTC
+ * window is 12:00–18:00 during PDT and 13:00–19:00 during PST.
  * During these windows, 5-hour sessions consume a larger share of the weekly budget.
  */
 export function isAnthropicPeakHour(ts?: number): boolean {
-	const d = new Date(ts ?? Date.now());
-	const day = d.getUTCDay();
-	// Weekdays only (Mon=1 through Fri=5)
-	if (day === 0 || day === 6) return false;
-	const utcHour = d.getUTCHours() + d.getUTCMinutes() / 60;
-	return utcHour >= 13 && utcHour < 19;
+	let weekday = "";
+	let hour = Number.NaN;
+	for (const part of ANTHROPIC_PEAK_FORMAT.formatToParts(
+		new Date(ts ?? Date.now()),
+	)) {
+		if (part.type === "weekday") weekday = part.value;
+		if (part.type === "hour") hour = Number.parseInt(part.value, 10);
+	}
+	// Weekdays only, read in Pacific time
+	if (weekday === "Sat" || weekday === "Sun") return false;
+	return hour >= 5 && hour < 11;
 }

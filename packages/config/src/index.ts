@@ -39,6 +39,10 @@ import {
 	type QualityRoutingPolicyConfig,
 } from "@better-ccflare/types";
 import { resolveConfigPath } from "./paths";
+import {
+	validateRuntimeRetry,
+	validateRuntimeSessionDuration,
+} from "./runtime-validation";
 
 const log = new Logger("Config");
 
@@ -2900,6 +2904,17 @@ export class Config extends EventEmitter {
 		if (typeof this.data.port === "number") {
 			defaults.port = this.data.port;
 		}
+
+		// Clamp the resolved retry family (env and file alike) to its bounds.
+		validateRuntimeRetry(defaults.retry, {
+			attempts: 3,
+			delayMs: TIME_CONSTANTS.RETRY_DELAY_DEFAULT,
+			backoff: 2,
+		});
+		defaults.sessionDurationMs = validateRuntimeSessionDuration(
+			defaults.sessionDurationMs,
+			TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+		);
 
 		// Database configuration overrides
 		// Ensure database configuration object exists
