@@ -15,6 +15,7 @@ import {
 	AsyncDbWriter,
 	DatabaseOperations,
 } from "@better-ccflare/database";
+import { sanitizeResponseHeaders } from "@better-ccflare/http-common";
 import { Logger } from "@better-ccflare/logger";
 import {
 	type AgentAttributionSource,
@@ -2200,7 +2201,10 @@ export class UsageCollector {
 					},
 					response: {
 						status: startMessage.responseStatus,
-						headers: startMessage.responseHeaders,
+						// Every producer of responseHeaders lands here, so this one
+						// strip keeps upstream Set-Cookie and auth challenges out of
+						// the payload table. The client's response is untouched.
+						headers: sanitizeResponseHeaders(startMessage.responseHeaders),
 						body: responseBody,
 					},
 					meta: {
