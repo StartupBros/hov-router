@@ -129,6 +129,8 @@ A chunk is one autocommit write transaction. Under FULL, the second connection w
 
 **For every `new Database(` outside `configureSqlite()`, decide each pragma explicitly.** Set `synchronous`, `busy_timeout`, `wal_autocheckpoint`, `mmap_size`, `cache_size` and `temp_store`, or write down why the compile default is right for that connection. The memory set alone is not enough: the vacuum workers copied it, and `synchronous` is the one that cost latency.
 
+**Decide the open flags too.** Bun's default flags create a missing file. A worker that does not own the database opens it through `openExistingDatabase` (`packages/database/src/open-existing-database.ts`), which fails with "database file missing at <path>" instead (#668).
+
 **Pass config values in the worker request** and validate them before opening the database. A worker cannot read the runtime config, and a hard-coded value drifts from `db_synchronous`.
 
 **Report the applied value back and test it.** `packages/database/src/__tests__/incremental-vacuum-sync-mode.test.ts` asserts the level the worker reports, for OFF, NORMAL and FULL. It also covers a request with no field and a refused injected value.
@@ -147,9 +149,9 @@ A chunk is one autocommit write transaction. Under FULL, the second connection w
 | site | mode | on `--serve` | `synchronous` |
 |---|---|---|---|
 | `database-operations.ts` constructor | read-write | yes | `configureSqlite()` |
-| `incremental-vacuum-worker.ts` `runIncrementalVacuum` | read-write | yes, adaptive vacuum after retention cleanup | from the request since #669 |
-| `incremental-vacuum-worker.ts` `runOptimize` | read-write | yes, every minute (the `wal-checkpoint` job in `apps/server/src/server.ts`) | compile default, FULL |
-| `vacuum-worker.ts` | read-write | no; full VACUUM from the CLI compact command | compile default, FULL |
+| `incremental-vacuum-worker.ts` `runIncrementalVacuum` | read-write, existing file only | yes, adaptive vacuum after retention cleanup | from the request since #669 |
+| `incremental-vacuum-worker.ts` `runOptimize` | read-write, existing file only | yes, every minute (the `wal-checkpoint` job in `apps/server/src/server.ts`) | compile default, FULL |
+| `vacuum-worker.ts` | read-write, existing file only | no; full VACUUM from the CLI compact command | compile default, FULL |
 | `reader-worker.ts` | readonly | yes, dashboard reads | n/a |
 | `integrity-check-worker.ts` | readonly | yes, the integrity scheduler | n/a |
 | `analyze-performance.ts` | readonly | no, CLI | n/a |
@@ -157,7 +159,7 @@ A chunk is one autocommit write transaction. Under FULL, the second connection w
 
 Notes on the inventory:
 
-- **`runOptimize` is the known leftover.** It runs `PRAGMA optimize` and `PRAGMA wal_checkpoint(TRUNCATE)` at FULL with `busy_timeout=0`, so a busy tick skips rather than blocks. Its cost at FULL is unmeasured and it was deliberately left unchanged. Measure it with the second-connection probe before changing it.
+- **`runOptimize` is the known leftover.** It runs `PRAGMA optimize` and `PRAGMA wal_checkpoint(TRUNCATE)` at FULL with `busy_timeout=0`, so a busy tick skips rather than blocks. Its cost at FULL is unmeasured and it was deliberately left unchanged. The pragma docs suggest the cost is small: a WAL checkpoint syncs the same way under NORMAL and FULL, and FULL adds a sync only to commits, which this kind makes only on a tick where `PRAGMA optimize` runs ANALYZE. Measure it with the second-connection probe before changing it.
 - **`wal_autocheckpoint` stays at the default 1000 on the vacuum worker's connection**, while the main connection sets 0. The baseline measured that checkpoint outside the hold.
 
 ## Related Issues
@@ -166,5 +168,5 @@ Notes on the inventory:
 - #624: `--serve` opens the database with the server's config (the main-connection instance).
 - Upstream tombii/better-ccflare PR #231: mmap on the main connection. Its trap is recorded for the worker connection in `vacuum-worker.ts`.
 - #613 (open): the retention-backlog stall, and the source of the derived ~2.8 s per-chunk figure.
-- #668 (open): on 2026-10-28 the production vacuum worker read `auto_vacuum=0` at the database path while the main-side gate passed. It is the same family (a worker connection disagrees with the main one), but its mechanism is unverified.
+- #668: on 2026-10-28 the production vacuum worker read `auto_vacuum=0` at the database path while the main-side gate passed. The config directory had been deleted under the running backend. When it reappeared, the worker's default-flag open created an empty file at the path, while the main connection kept writing to the deleted original. Fixed by opening worker connections existing-only.
 - [verify-fix-ancestry-before-citing-a-measured-rate](../workflow-issues/verify-fix-ancestry-before-citing-a-measured-rate.md)
