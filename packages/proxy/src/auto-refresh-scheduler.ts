@@ -60,9 +60,16 @@ function normalizeRawCreatedAt(
 	return createdAt == null ? null : Number(createdAt);
 }
 
-function isZaiPeakHour(ts = Date.now()): boolean {
-	const d = new Date(ts);
-	const sgtHour = (d.getUTCHours() + d.getUTCMinutes() / 60 + 8) % 24;
+/**
+ * Z.ai peak is Monday to Friday 14:00-18:00 Singapore time (UTC+8); weekends
+ * are off-peak. The weekday is read from the Singapore-shifted date, so a UTC
+ * evening that is already the next day in Singapore counts as that next day.
+ */
+export function isZaiPeakHour(ts = Date.now()): boolean {
+	const sgt = new Date(ts + 8 * 60 * 60 * 1000);
+	const day = sgt.getUTCDay();
+	if (day === 0 || day === 6) return false;
+	const sgtHour = sgt.getUTCHours() + sgt.getUTCMinutes() / 60;
 	return sgtHour >= 14 && sgtHour < 18;
 }
 

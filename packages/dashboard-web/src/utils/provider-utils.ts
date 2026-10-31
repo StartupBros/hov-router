@@ -105,13 +105,14 @@ export function getDefaultEndpointForProvider(provider: string): string {
 
 /**
  * Check if a given timestamp (default: now) falls within Zai peak hours.
- * Zai peak hours are 14:00–18:00 Singapore time (UTC+8).
+ * Zai peak hours are Monday to Friday 14:00–18:00 Singapore time (UTC+8);
+ * weekends are off-peak. The weekday is read after the +8h shift.
  */
 export function isZaiPeakHour(ts?: number): boolean {
-	const d = new Date(ts ?? Date.now());
-	// Convert to UTC+8 hour
-	const utcHour = d.getUTCHours() + d.getUTCMinutes() / 60;
-	const sgtHour = (utcHour + 8) % 24;
+	const sgt = new Date((ts ?? Date.now()) + 8 * 60 * 60 * 1000);
+	const day = sgt.getUTCDay();
+	if (day === 0 || day === 6) return false;
+	const sgtHour = sgt.getUTCHours() + sgt.getUTCMinutes() / 60;
 	return sgtHour >= 14 && sgtHour < 18;
 }
 
