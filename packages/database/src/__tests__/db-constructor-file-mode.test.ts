@@ -1,5 +1,13 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseOperations } from "../database-operations";
@@ -55,6 +63,36 @@ describe("DatabaseOperations constructor file modes", () => {
 			expect(mode(`${dbPath}-wal`)).toBe(0o600);
 		} finally {
 			await ops.dispose();
+		}
+	});
+
+	it("restricts the real WAL and SHM an older binary left 0644, opened through a symlink", async () => {
+		// The older binary's connection is still open, so its 0644 -wal and -shm
+		// are on disk exactly as an unclean shutdown leaves them. SQLite names
+		// them after the symlink's target, not the configured alias.
+		const dataDir = join(dir, "data");
+		mkdirSync(dataDir);
+		const real = join(dataDir, "better-ccflare.db");
+		const alias = join(dir, "better-ccflare.db");
+		const older = new Database(real, { create: true });
+		try {
+			older.exec("PRAGMA journal_mode = WAL");
+			older.exec("CREATE TABLE leftover (token TEXT)");
+			older.exec("INSERT INTO leftover (token) VALUES ('secret-token')");
+			expect(mode(`${real}-wal`)).toBe(0o644);
+			expect(mode(`${real}-shm`)).toBe(0o644);
+			symlinkSync(real, alias);
+
+			const ops = new DatabaseOperations(alias);
+			try {
+				expect(mode(real)).toBe(0o600);
+				expect(mode(`${real}-wal`)).toBe(0o600);
+				expect(mode(`${real}-shm`)).toBe(0o600);
+			} finally {
+				await ops.dispose();
+			}
+		} finally {
+			older.close();
 		}
 	});
 

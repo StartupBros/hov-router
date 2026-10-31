@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -93,6 +95,42 @@ describe("restrictDbFiles", () => {
 		restrictDbFiles(db);
 
 		for (const path of paths) expect(mode(path)).toBe(0o600);
+	});
+
+	it("restricts the real database's sidecars when the configured path is a symlink", () => {
+		// SQLite's unix VFS resolves a symlinked database path and names the
+		// -wal, -shm and -journal after the target, so sweeping the alias's
+		// suffixed paths would find nothing and leave the real ones 0644.
+		mkdirSync(join(dir, "data"));
+		const real = join(dir, "data", "better-ccflare.db");
+		const alias = join(dir, "better-ccflare.db");
+		const sidecars = [`${real}-wal`, `${real}-shm`, `${real}-journal`];
+		seedWorldReadable(real);
+		for (const path of sidecars) seedWorldReadable(path);
+		symlinkSync(real, alias);
+
+		restrictDbFiles(alias);
+
+		expect(mode(real)).toBe(0o600);
+		for (const path of sidecars) expect(mode(path)).toBe(0o600);
+		expect(lstatSync(alias).isSymbolicLink()).toBe(true);
+	});
+
+	it("sweeps backups beside both the configured path and the real database", () => {
+		// runMigrations names backups from the configured path, so they sit
+		// beside the alias; a database once configured by its real path has
+		// them beside the target.
+		mkdirSync(join(dir, "data"));
+		const real = join(dir, "data", "better-ccflare.db");
+		const alias = join(dir, "better-ccflare.db");
+		const backups = [`${alias}.backup.1`, `${real}.backup.2`];
+		seedWorldReadable(real);
+		for (const path of backups) seedWorldReadable(path);
+		symlinkSync(real, alias);
+
+		restrictDbFiles(alias);
+
+		for (const path of backups) expect(mode(path)).toBe(0o600);
 	});
 
 	it("gives a WAL created afterwards 0600 because the database is restricted first", () => {

@@ -1,4 +1,10 @@
-import { chmodSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import {
+	chmodSync,
+	mkdirSync,
+	readdirSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { Logger } from "@better-ccflare/logger";
 
@@ -58,11 +64,38 @@ export function restrictDbFile(path: string): boolean {
  * fixing the database first means the WAL is born 0600. The sidecars are
  * still swept because an unclean shutdown can leave ones an earlier binary
  * created at 0644.
+ *
+ * The sidecars are found beside the database's real path. When the configured
+ * path is a symlink, SQLite's unix VFS resolves it and names the -wal, -shm
+ * and -journal after the target, so the alias's suffixed paths do not exist.
+ * Backups are swept beside both paths: runMigrations names them from the
+ * configured path, and a database once configured by its real path has them
+ * beside the target.
  */
 export function restrictDbFiles(dbPath: string): void {
 	restrictDbFile(dbPath);
-	for (const suffix of SIDECAR_SUFFIXES) restrictDbFile(`${dbPath}${suffix}`);
+	const realPath = canonicalDbPath(dbPath);
+	for (const suffix of SIDECAR_SUFFIXES) restrictDbFile(`${realPath}${suffix}`);
 	restrictDbBackups(dbPath);
+	if (realPath !== dbPath) restrictDbBackups(realPath);
+}
+
+/**
+ * The database's real path, or `dbPath` itself when it cannot be resolved
+ * (absent, or a dangling link): the sweep then checks the configured path's
+ * sidecars as before, and restrictDbFile reports what it finds.
+ */
+function canonicalDbPath(dbPath: string): string {
+	try {
+		return realpathSync(dbPath);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+			log.warn(
+				`Could not resolve ${dbPath} to restrict its sidecars: ${error}`,
+			);
+		}
+		return dbPath;
+	}
 }
 
 /**
