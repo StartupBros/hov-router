@@ -9,7 +9,6 @@ import {
 	STRATEGIES,
 	type StrategyName,
 	setForceAccountModel as setForceAccountModelFlag,
-	TIME_CONSTANTS,
 	validateNumber,
 	validateString,
 } from "@better-ccflare/core";
@@ -201,11 +200,10 @@ export function createConfigHandlers(
 				// Use actual running port from runtime, fall back to config
 				port:
 					runtime?.port || (settings.port as number) || NETWORK.DEFAULT_PORT,
-				// Use Anthropic fallback as default since it's the only provider that uses session duration tracking
-				// Non-Anthropic providers don't use fixed-duration sessions but still need a default value
-				sessionDurationMs:
-					(settings.sessionDurationMs as number) ||
-					TIME_CONSTANTS.ANTHROPIC_SESSION_DURATION_FALLBACK,
+				// The resolved value the load-balancing strategy runs with
+				// (default, then SESSION_DURATION_MS, then session_duration_ms). The
+				// raw settings keys are snake_case and 0 is a legitimate value.
+				sessionDurationMs: config.getRuntime().sessionDurationMs,
 				default_agent_model:
 					(settings.default_agent_model as string) || DEFAULT_AGENT_MODEL,
 				// Include actual TLS status
