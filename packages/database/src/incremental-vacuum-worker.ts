@@ -1,4 +1,5 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { openExistingDatabase } from "./open-existing-database";
 
 /**
  * Dedicated worker for `PRAGMA incremental_vacuum(N)` and the periodic
@@ -57,7 +58,15 @@ import { Database } from "bun:sqlite";
  * stays corruption-safe; a power loss can roll the chunk back, which only
  * leaves its pages on the freelist. A request without the field keeps the
  * connection default. The optimize kind carries no `synchronous`, so it runs
- * at the connection default (FULL); its cost there is unmeasured.
+ * at the connection default (FULL). Per the pragma docs, a WAL checkpoint
+ * syncs the WAL and the database file the same way at NORMAL and FULL; FULL
+ * only adds a WAL sync to each commit, and this kind commits only on a tick
+ * where `PRAGMA optimize` runs ANALYZE. The difference is unmeasured.
+ *
+ * Opening: both kinds open the existing file only (`openExistingDatabase`,
+ * #668). If the file was deleted under the running backend, each optimize
+ * tick fails with "database file missing at <path>", which the server logs
+ * at WARN every minute, instead of creating an empty file at the path.
  *
  * Refuses if `auto_vacuum != 2` — the operation is a no-op there and would
  * mask a misconfigured DB. Callers should have gated already via the same
@@ -155,7 +164,7 @@ function runIncrementalVacuum(
 	}
 	let db: Database | undefined;
 	try {
-		db = new Database(dbPath);
+		db = openExistingDatabase(dbPath);
 		db.exec("PRAGMA busy_timeout = 200");
 		applyWorkerPragmas(db);
 		if (synchronous !== undefined)
@@ -187,7 +196,7 @@ function runIncrementalVacuum(
 function runOptimize(dbPath: string): IncrementalVacuumResult {
 	let db: Database | undefined;
 	try {
-		db = new Database(dbPath);
+		db = openExistingDatabase(dbPath);
 		// Never park a maintenance worker in a long busy handler during traffic.
 		db.exec("PRAGMA busy_timeout = 0");
 		applyWorkerPragmas(db);

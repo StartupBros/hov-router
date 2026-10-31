@@ -1,4 +1,5 @@
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { openExistingDatabase } from "./open-existing-database";
 
 type VacuumRequest = (
 	| { kind?: "compact"; dbPath: string; busyTimeoutMs: number }
@@ -47,7 +48,7 @@ self.onmessage = (event: MessageEvent<VacuumRequest>) => {
 
 	let db: Database | undefined;
 	try {
-		db = new Database(dbPath);
+		db = openExistingDatabase(dbPath);
 		// Apply memory-bounded PRAGMAs BEFORE anything else. The worker opens
 		// its own connection here, so the main process's `configureSqlite`
 		// PRAGMAs do not apply — without these the connection inherits
