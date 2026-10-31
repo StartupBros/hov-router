@@ -87,7 +87,6 @@ Earlier command names, such as better-ccflare, remain supported aliases.
 Options:
   --serve              Start API server with dashboard
   --port <number>      Server port (default: 8080, or PORT env var)
-  --logs [N]           Stream latest N lines then follow
   --stats              Show statistics (JSON output)
   --add-account <name> Add a new account
     --mode <ACCOUNT_MODE>  Account mode (default: claude-oauth; see canonical list below)
@@ -500,26 +499,12 @@ bun run cli --serve [--port <number>]
 - API endpoint: `http://localhost:8080`
 - Dashboard: `http://localhost:8080/dashboard`
 
-#### `--logs [N]`
+#### Streaming logs
 
-Stream request logs in real-time.
-
-**Syntax:**
-```bash
-bun run cli --logs [N]
-```
-
-**Options:**
-- `N`: Number of historical lines to display before streaming (optional)
-
-**Examples:**
-```bash
-# Stream live logs only
-bun run cli --logs
-
-# Show last 50 lines then stream
-bun run cli --logs 50
-```
+The CLI has no log-streaming flag; `--logs` was removed and is now rejected as an unknown argument. To follow logs:
+- Open the dashboard's **Logs** tab (`http://localhost:8080/dashboard`, then Logs), which streams from `/api/logs/stream`.
+- Under systemd, follow the unit's journal: `journalctl -u <unit> -f`.
+- In a foreground run, logs are written to the terminal that started the server.
 
 ## Usage Examples
 
@@ -555,13 +540,9 @@ bun start
 
 # Start server on custom port
 bun run cli --serve --port 3000
-
-# Stream logs
-bun run cli --logs
-
-# View last 100 lines then stream
-bun run cli --logs 100
 ```
+
+Follow its logs in the dashboard's Logs tab, or in the terminal that started it.
 
 ### Managing Rate Limits
 
@@ -769,9 +750,6 @@ export LOG_LEVEL=DEBUG
 
 # Run with verbose output
 bun run cli --list
-
-# Stream debug logs
-bun run cli --logs
 ```
 
 ## Auto quality session controls
@@ -828,7 +806,7 @@ Auto was separately authorized and enabled at **2026-10-03 04:42:21Z**, with zer
    - Protect configuration directory permissions
    - Don't share OAuth tokens or session data
    - Rotate accounts periodically
-   - Monitor logs with `bun run cli --logs` for suspicious activity
+   - Monitor logs in the dashboard's Logs tab for suspicious activity
 
 4. **Performance**
    - Use accounts with higher rate limits for heavy workloads

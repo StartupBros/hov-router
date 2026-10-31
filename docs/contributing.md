@@ -769,9 +769,6 @@ bun run cli --clear-history
 # View statistics (JSON output)
 bun run cli --stats
 
-# Stream logs
-bun run cli --logs [N]  # Show N lines of history then follow
-
 # Analyze database performance
 bun run cli --analyze
 
