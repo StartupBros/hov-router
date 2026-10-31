@@ -60,7 +60,7 @@ cannot show that one policy is cheaper (session history).
 passes `Date.now()` (`packages/database/src/repositories/request.repository.ts:380`). From
 2026-10-27 to 2026-10-31, 84.8–89.4% of each day's requests that ran over 5 seconds carry a
 timestamp within 2 seconds of their first attempt's start plus `response_time_ms` (92–96%
-within 5 seconds), and under 0.4% carry one near the start. So a request starts at
+within 5 seconds), and at most 0.5% carry one near the start. So a request starts at
 `timestamp - response_time_ms` and ends at `timestamp`. The proxy's in-memory
 `requestMeta.timestamp` is the start; do not take the column's meaning from it.
 
