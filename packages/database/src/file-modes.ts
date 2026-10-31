@@ -30,8 +30,11 @@ const SIDECAR_SUFFIXES = ["-wal", "-shm", "-journal"] as const;
  * none of those makes the database unusable.
  *
  * Returns true when the file now reads 0600 as far as this call can tell.
+ * Always false on Windows, where Stats.mode is synthesised from the read-only
+ * attribute and chmod cannot express owner-only access.
  */
 export function restrictDbFile(path: string): boolean {
+	if (process.platform === "win32") return false;
 	try {
 		const info = statSync(path);
 		if (!info.isFile()) return false;

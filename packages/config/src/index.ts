@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
+	chmodSync,
 	closeSync,
 	existsSync,
 	constants as fsConstants,
@@ -10,6 +11,7 @@ import {
 	openSync,
 	readFileSync,
 	readSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname, posix } from "node:path";
@@ -1379,6 +1381,61 @@ export function resolveImplicitFallbackPolicyConfig(
 	});
 }
 
+/** The config holds pg_password, local_control_secret and other secrets. */
+const CONFIG_FILE_MODE = 0o600;
+const CONFIG_DIR_MODE = 0o700;
+
+/**
+ * Bring an existing config file to 0600. Acts on regular files only: a
+ * directory at the config path that lost its execute bits would lock the
+ * operator out of the database beside it. Follows a symlink, so a linked
+ * config's target is the file restricted.
+ *
+ * Warns rather than throws, because chmod fails legitimately on a file owned
+ * by another user and on filesystems without Unix modes. Skipped on Windows,
+ * where Stats.mode is synthesised from the read-only attribute and chmod
+ * cannot express owner-only access.
+ */
+function restrictConfigFile(path: string): void {
+	if (process.platform === "win32") return;
+	try {
+		const info = statSync(path);
+		if (!info.isFile() || (info.mode & 0o777) === CONFIG_FILE_MODE) return;
+		chmodSync(path, CONFIG_FILE_MODE);
+		log.info(`Restricted ${path} permissions to 0600`);
+	} catch (error) {
+		if (isRecord(error) && error.code === "ENOENT") return;
+		log.warn(`Could not restrict ${path} permissions: ${error}`);
+	}
+}
+
+/**
+ * Create the config directory as 0700 if it does not exist yet. Missing
+ * parents keep the ordinary umask mode, because they are shared with other
+ * software (`~/.config` on a fresh machine). An existing directory is never
+ * chmodded: it may hold other files, and production's does.
+ *
+ * Mirrors ensurePrivateDir in @better-ccflare/database, which this package
+ * cannot import (database does not depend on config, nor config on database).
+ */
+function ensureConfigDir(dir: string): void {
+	try {
+		mkdirSync(dir, { mode: CONFIG_DIR_MODE });
+		return;
+	} catch (error) {
+		const code = isRecord(error) ? error.code : undefined;
+		if (code === "EEXIST") return;
+		if (code !== "ENOENT") throw error;
+	}
+	mkdirSync(dirname(dir), { recursive: true });
+	try {
+		mkdirSync(dir, { mode: CONFIG_DIR_MODE });
+	} catch (error) {
+		// Another process created it between the two calls; leave its mode.
+		if (!isRecord(error) || error.code !== "EEXIST") throw error;
+	}
+}
+
 export class Config extends EventEmitter {
 	private configPath: string;
 	private data: ConfigData = {};
@@ -1459,6 +1516,9 @@ export class Config extends EventEmitter {
 	}
 
 	private loadConfig(): void {
+		// A config written by an earlier binary is 0644 on disk now, and nothing
+		// else revisits it.
+		restrictConfigFile(this.configPath);
 		try {
 			const content = readFileSync(this.configPath, "utf8");
 			const parsed: unknown = JSON.parse(content);
@@ -1478,7 +1538,7 @@ export class Config extends EventEmitter {
 		}
 
 		// Only a confirmed missing file gets initialized with defaults.
-		mkdirSync(dirname(this.configPath), { recursive: true });
+		ensureConfigDir(dirname(this.configPath));
 		this.data = { lb_strategy: DEFAULT_STRATEGY };
 		this.saveConfig();
 	}
@@ -1487,7 +1547,17 @@ export class Config extends EventEmitter {
 		if (this.initialLoadFailed) return false;
 		try {
 			const content = JSON.stringify(this.data, null, 2);
-			writeFileSync(this.configPath, content, "utf8");
+			// In place rather than by rename, so a symlinked config keeps its
+			// link. Restricting first means a new secret never lands in a file
+			// someone loosened while the process ran.
+			restrictConfigFile(this.configPath);
+			writeFileSync(this.configPath, content, {
+				encoding: "utf8",
+				mode: CONFIG_FILE_MODE,
+			});
+			// The create mode above is masked by the umask (0400 under 0277,
+			// which the next save could not open for writing).
+			restrictConfigFile(this.configPath);
 			return true;
 		} catch (error) {
 			log.error(`Failed to save config file: ${error}`);
