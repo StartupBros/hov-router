@@ -550,9 +550,18 @@ commit*. A stream that only pings can therefore pass the first kind and still fa
 
 A ping the router emits itself, from a local timer, so the client's and the guard's idle timers
 stay satisfied while the upstream is silent, as opposed to a ping the upstream sent. It proves
-only that the client connection is alive, never that the upstream is, so it must not count as
-*Protocol activity* toward any deadline that judges the upstream. Every ping on a stream the
-router translates from another provider's format into Anthropic's is of this kind.
+only that the router's own side of the stream is alive, never that the upstream is. Every ping
+on a stream the router translates from another provider's format into Anthropic's is of this
+kind, the Codex provider's 25 s heartbeats included. Whether one counts as *Protocol activity*
+depends on the clock. The pre-commit protocol-idle deadline ignores the translator's pings since
+#639, so for xai, kilo and qwen it judges the upstream; openai-compatible has no such deadline
+(#505). Codex is not in that translator set (`TRANSLATED_SSE_PROVIDERS`), and #639 left its
+heartbeats out of scope, so they do refresh the deadline. For Codex the deadline therefore checks
+only that the provider's own stream transform is still emitting, and the upstream is judged by
+the provider's 480 s raw-silence timer (`CODEX_STREAM_RAW_SILENCE_TIMEOUT_MS`), which counts
+upstream bytes alone. Post-commit liveness counts every ping by design (#636): the client already
+has output, and the aim is not to cut a working stream. The commitment deadline never counts a
+ping; only *Meaningful progress* meets it.
 
 ## Flagged ambiguities
 
