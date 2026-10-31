@@ -20,6 +20,7 @@ execution: code
 - **Stop conditions:** stop and report instead of working around it if a restart-stable lane key or candidate id turns out to differ between processes, if any unit needs a guard, runner, deployment-transaction or schema-migration change (R9), or if the R3 round trip fails on either database without a schema change.
 - **Finishing:** `ce-work` implements the units and merges the PR under AGENTS.md. Deploying is a separate backend-only run of `scripts/deploy-ccflare.sh`, and the Success Criteria are read at least 14 days after it.
 - **Open blockers:** none.
+- **Status (2026-10-31):** shipped in #661 (9193caf7) and deployed backend-only on 2026-10-30. The first restored start, at 23:40 UTC, rebuilt 30 pins in 328 ms. The Success Criteria read is #664, due no earlier than 2026-11-13 23:06 UTC, and its query spec lives there. #663 tracks attributing the post-#510 remap rise.
 
 ---
 
