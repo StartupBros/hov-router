@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Logger } from "@better-ccflare/logger";
 import { CACHE_HEALTH_STATE_SCHEMA } from "./cache-health-schema";
+import { restrictDbFile } from "./file-modes";
 import { addPerformanceIndexes } from "./performance-indexes";
 import { ROUTING_ATTEMPT_REASON_SQL } from "./routing-attempt-taxonomy";
 
@@ -1876,6 +1877,11 @@ export function runMigrations(db: Database, dbPath?: string): void {
 							if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
 						}
 						db.exec(`VACUUM INTO '${escapedTempPath}'`);
+						// VACUUM INTO creates the copy at the umask default; it does
+						// not inherit the source database's mode, and the copy holds
+						// every plaintext credential the source does. Before the
+						// rename, because rename keeps the mode it finds.
+						restrictDbFile(tempBackupPath);
 						fs.renameSync(tempBackupPath, backupPath);
 						log.info(`Database backup created at: ${backupPath}`);
 						pruneOldBackups(absoluteSourcePath);

@@ -145,6 +145,37 @@ export function sanitizeRequestHeaders(original: Headers): Headers {
 	return h;
 }
 
+const RESPONSE_SECRET_HEADERS = new Set([
+	"set-cookie",
+	"authorization",
+	"proxy-authenticate",
+	"www-authenticate",
+]);
+
+/**
+ * The response-side counterpart of sanitizeRequestHeaders: removes the
+ * credential-bearing headers an upstream can send back before the response
+ * headers are persisted for analytics. Matched case-insensitively, because the
+ * input is a plain record that is not always built from a Headers object.
+ *
+ * Persistence only. The response forwarded to the client keeps every header,
+ * and the anthropic-ratelimit-* headers that overage detection reads are not
+ * on this list.
+ *
+ * Removes: set-cookie, authorization, proxy-authenticate, www-authenticate
+ */
+export function sanitizeResponseHeaders(
+	original: Record<string, string>,
+): Record<string, string> {
+	const sanitized: Record<string, string> = {};
+	for (const [name, value] of Object.entries(original)) {
+		if (!RESPONSE_SECRET_HEADERS.has(name.toLowerCase())) {
+			sanitized[name] = value;
+		}
+	}
+	return sanitized;
+}
+
 /**
  * Return a new Response with hop-by-hop / compression headers stripped.
  * Body & status are preserved.
