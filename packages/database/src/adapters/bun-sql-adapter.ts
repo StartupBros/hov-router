@@ -10,9 +10,21 @@ interface SqlReader {
 /**
  * Convert SQLite-style `?` and `?N` placeholders to PostgreSQL-style `$N` placeholders.
  * Handles both `?` (sequential) and `?1`, `?2` (positional) styles.
- * Skips placeholders inside single-quoted string literals.
+ *
+ * Three regions are copied through untouched:
+ *
+ *   1. Single-quoted string literals, so a `?` a caller meant as data is not
+ *      renumbered. Escaped quotes (`''`) fall out of the toggle naturally.
+ *   2. `--` line comments, up to the end of the line.
+ *   3. block comments, up to and including the closing marker.
+ *
+ * Without 2 and 3, one apostrophe in a comment left the scanner believing a
+ * string literal was open, so every later `?` reached PostgreSQL verbatim
+ * (a confusing syntax error), and a `?` inside a comment was renumbered,
+ * shifting every following `$N`. SQLite never sees the converted form, so
+ * the unit tests call this function directly.
  */
-function convertPlaceholders(sql: string): string {
+export function convertPlaceholders(sql: string): string {
 	let result = "";
 	let paramIndex = 0;
 	let inString = false;
@@ -29,6 +41,27 @@ function convertPlaceholders(sql: string): string {
 
 		if (inString) {
 			result += ch;
+			continue;
+		}
+
+		// Copy a `--` line comment through verbatim. Runs only outside a string
+		// literal, so a legitimate '--' operand is unaffected.
+		if (ch === "-" && sql[i + 1] === "-") {
+			const nl = sql.indexOf("\n", i);
+			const end = nl === -1 ? sql.length : nl;
+			result += sql.slice(i, end);
+			i = end - 1;
+			continue;
+		}
+
+		// Copy a block comment through verbatim. Nesting is not tracked: a
+		// nested one closes early and fails loudly at Parse time rather than
+		// misnumbering a placeholder.
+		if (ch === "/" && sql[i + 1] === "*") {
+			const close = sql.indexOf("*/", i + 2);
+			const end = close === -1 ? sql.length : close + 2;
+			result += sql.slice(i, end);
+			i = end - 1;
 			continue;
 		}
 
