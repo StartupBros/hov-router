@@ -4165,6 +4165,34 @@ describe("catalog-role Codex route profiles", () => {
 			).toBe(false);
 		});
 
+		it("keeps the line's model when Codex retries after rejecting cache_control", async () => {
+			// Same hazard as the reasoning replay: the retry re-runs the provider
+			// transform, which alone maps the request to the sonnet slot (Astra).
+			const account = makeRoleAccount("line-pool-cache-control-retry");
+			const harness = makeLineContext([account]);
+			const upstream = installCodexRoleUpstream(NEXT_GENERATION, (attempt) =>
+				attempt === 1
+					? Response.json(
+							{
+								error: {
+									message: "cache_control: Extra inputs are not permitted",
+								},
+							},
+							{ status: 400 },
+						)
+					: undefined,
+			);
+			await publish(upstream, account, harness.ctx, SOL_FIRST);
+
+			const routed = await send(harness.ctx, LINE_PICKER);
+
+			expect(routed.response.status, routed.text).toBe(200);
+			expect(await upstreamModels(upstream.responses)).toEqual([
+				"gpt-6.1-sol",
+				"gpt-6.1-sol",
+			]);
+		});
+
 		it("fails closed without a retry hint when no own catalog lists the line", async () => {
 			const account = makeRoleAccount("line-pool-lacking");
 			const harness = makeLineContext([account]);

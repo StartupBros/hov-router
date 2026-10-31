@@ -3601,12 +3601,25 @@ export async function proxyWithAccount(
 		const irreversibleSearchDispatchCommitted = (): boolean =>
 			hasWebSearchHelperDispatched(requestMeta) ||
 			routingAttemptLedger?.hostedDispatchState === "hosted_dispatched";
+		// A provider transform re-maps the model on its own (mapModelName), so a
+		// body-model provider can send a different model than the attempt was
+		// admitted with. The physical model is therefore a required argument with
+		// no default: no send can run the transform without restating it.
 		const transformWithCurrentAttemptPlan = async (
 			plan: ProviderAttemptPlan,
 			request: Request,
+			physicalModel: string | null | undefined,
 		): Promise<Request> => {
 			assertAttemptPlanCapabilityIsCurrent(plan);
-			return plan.transformRequestBody(request);
+			const transformed = await plan.transformRequestBody(request);
+			if (
+				!physicalModel ||
+				plan.cacheReplayModelStrategy !== "transformed-body" ||
+				isSyntheticProviderResponse(transformed)
+			) {
+				return transformed;
+			}
+			return forceModelInTransformedRequest(transformed, physicalModel);
 		};
 		const preflightEndpoint =
 			provider.name === "codex" && account.provider === "codex"
@@ -4733,21 +4746,6 @@ export async function proxyWithAccount(
 				return response;
 			}
 		};
-		const enforcePhysicalModelAfterTransform = async (
-			transportRequest: Request,
-			physicalModel: string | null | undefined,
-			plan: ProviderAttemptPlan = attemptPlan,
-		): Promise<Request> => {
-			if (
-				!physicalModel ||
-				plan.cacheReplayModelStrategy !== "transformed-body" ||
-				isSyntheticProviderResponse(transportRequest)
-			) {
-				return transportRequest;
-			}
-			return forceModelInTransformedRequest(transportRequest, physicalModel);
-		};
-
 		const requestInit: RequestInit & { duplex?: "half" } = {
 			method: req.method,
 			headers,
@@ -4771,9 +4769,6 @@ export async function proxyWithAccount(
 		let transformedRequest = await transformWithCurrentAttemptPlan(
 			attemptPlan,
 			providerRequest,
-		);
-		transformedRequest = await enforcePhysicalModelAfterTransform(
-			transformedRequest,
 			attemptPlan.providerName === "codex"
 				? attemptPlan.physicalModel
 				: (nativeInitialPhysicalModel ?? replayResolvedModel),
@@ -5480,12 +5475,9 @@ export async function proxyWithAccount(
 				const retryProviderRequest = new Request(targetUrl, retryRequestInit);
 				retrySourceRequest = retryProviderRequest.clone();
 
-				let retryTransformedRequest = await transformWithCurrentAttemptPlan(
+				const retryTransformedRequest = await transformWithCurrentAttemptPlan(
 					attemptPlan,
 					retryProviderRequest,
-				);
-				retryTransformedRequest = await enforcePhysicalModelAfterTransform(
-					retryTransformedRequest,
 					currentTransportModel,
 				);
 				retryTransformedTemplate = retryTransformedRequest.clone();
@@ -5535,12 +5527,9 @@ export async function proxyWithAccount(
 				const retryProviderRequest = new Request(targetUrl, retryRequestInit);
 				retrySourceRequest = retryProviderRequest.clone();
 
-				let retryTransformedRequest = await transformWithCurrentAttemptPlan(
+				const retryTransformedRequest = await transformWithCurrentAttemptPlan(
 					attemptPlan,
 					retryProviderRequest,
-				);
-				retryTransformedRequest = await enforcePhysicalModelAfterTransform(
-					retryTransformedRequest,
 					currentTransportModel,
 				);
 				retryTransformedTemplate = retryTransformedRequest.clone();
@@ -5596,12 +5585,9 @@ export async function proxyWithAccount(
 				const retryProviderRequest = new Request(targetUrl, retryRequestInit);
 				retrySourceRequest = retryProviderRequest.clone();
 
-				let retryTransformedRequest = await transformWithCurrentAttemptPlan(
+				const retryTransformedRequest = await transformWithCurrentAttemptPlan(
 					attemptPlan,
 					retryProviderRequest,
-				);
-				retryTransformedRequest = await enforcePhysicalModelAfterTransform(
-					retryTransformedRequest,
 					currentTransportModel,
 				);
 				retryTransformedTemplate = retryTransformedRequest.clone();
@@ -5655,12 +5641,9 @@ export async function proxyWithAccount(
 				const retryProviderRequest = new Request(targetUrl, retryRequestInit);
 				retrySourceRequest = retryProviderRequest.clone();
 
-				let retryTransformedRequest = await transformWithCurrentAttemptPlan(
+				const retryTransformedRequest = await transformWithCurrentAttemptPlan(
 					attemptPlan,
 					retryProviderRequest,
-				);
-				retryTransformedRequest = await enforcePhysicalModelAfterTransform(
-					retryTransformedRequest,
 					currentTransportModel,
 				);
 				retryTransformedTemplate = retryTransformedRequest.clone();
@@ -5724,12 +5707,9 @@ export async function proxyWithAccount(
 					body: new Uint8Array(replayBody),
 				});
 				retrySourceRequest = retrySource.clone();
-				let retryTransformed = await transformWithCurrentAttemptPlan(
+				const retryTransformed = await transformWithCurrentAttemptPlan(
 					attemptPlan,
 					retrySource,
-				);
-				retryTransformed = await enforcePhysicalModelAfterTransform(
-					retryTransformed,
 					currentTransportModel,
 				);
 				// Materialize two independent requests. Reusing nested clone branches here
@@ -5796,6 +5776,7 @@ export async function proxyWithAccount(
 					const retryTransformed = await transformWithCurrentAttemptPlan(
 						attemptPlan,
 						retrySource,
+						currentTransportModel,
 					);
 					retryTransformedTemplate = retryTransformed.clone();
 					retryRequest = retryTransformedTemplate.clone();
@@ -5888,12 +5869,9 @@ export async function proxyWithAccount(
 				};
 				const retrySource = new Request(providerRequest.url, retrySourceInit);
 				retrySourceRequest = retrySource.clone();
-				let retryTransformed = await transformWithCurrentAttemptPlan(
+				const retryTransformed = await transformWithCurrentAttemptPlan(
 					attemptPlan,
 					retrySource,
-				);
-				retryTransformed = await enforcePhysicalModelAfterTransform(
-					retryTransformed,
 					currentTransportModel,
 				);
 				retryTransformedTemplate = retryTransformed.clone();
@@ -7154,13 +7132,8 @@ export async function proxyWithAccount(
 							retryTransformedRequest = await transformWithCurrentAttemptPlan(
 								fallbackPlan,
 								retryProviderRequest,
+								nextModel,
 							);
-							retryTransformedRequest =
-								await enforcePhysicalModelAfterTransform(
-									retryTransformedRequest,
-									nextModel,
-									fallbackPlan,
-								);
 						} catch (error) {
 							// This candidate never sends, so the superseded response is still
 							// the live attempt for whatever runs next.
@@ -7539,17 +7512,11 @@ export async function proxyWithAccount(
 								retrySourceRequest.url,
 								retrySourceInit,
 							);
-							let retryTransformed = await transformWithCurrentAttemptPlan(
+							retryTransport = await transformWithCurrentAttemptPlan(
 								attemptPlan,
 								retrySource,
+								currentTransportModel,
 							);
-							if (currentTransportModel) {
-								retryTransformed = await forceModelInTransformedRequest(
-									retryTransformed,
-									currentTransportModel,
-								);
-							}
-							retryTransport = retryTransformed;
 						} else {
 							// Non-codex providers reach this loop too (the anthropic
 							// provider marks bare 529 overloaded_error responses as rate
@@ -8038,14 +8005,12 @@ export async function proxyWithAccount(
 						rescueRequestInit,
 					);
 					retrySourceRequest = rescueSourceRequest.clone();
-					let rescueTransformedRequest = await transformWithCurrentAttemptPlan(
-						attemptPlan,
-						rescueSourceRequest,
-					);
-					rescueTransformedRequest = await enforcePhysicalModelAfterTransform(
-						rescueTransformedRequest,
-						currentTransportModel,
-					);
+					const rescueTransformedRequest =
+						await transformWithCurrentAttemptPlan(
+							attemptPlan,
+							rescueSourceRequest,
+							currentTransportModel,
+						);
 					retryTransformedTemplate = rescueTransformedRequest.clone();
 					const rescueBodyText = await rescueTransformedRequest.clone().text();
 					currentCacheIdentityHasCacheControl =
