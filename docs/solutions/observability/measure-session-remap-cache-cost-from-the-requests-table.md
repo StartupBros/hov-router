@@ -1,7 +1,7 @@
 ---
 title: Measure session-remap cache cost on remaps of a conversation, not on raw or partition-order account switches
 date: 2026-10-15
-last_updated: 2026-10-15
+last_updated: 2026-10-30
 category: observability
 module: session-affinity
 problem_type: best_practice
@@ -55,6 +55,24 @@ side: judge cache cost by cache-write volume, not by hit rate, because a high hi
 cannot show that one policy is cheaper (session history).
 
 ## Guidance
+
+**`requests.timestamp` is when the row was saved, not when the request started.** The save
+passes `Date.now()` (`packages/database/src/repositories/request.repository.ts:380`). From
+2026-10-27 to 2026-10-31, 84.8–89.4% of each day's requests that ran over 5 seconds carry a
+timestamp within 2 seconds of their first attempt's start plus `response_time_ms` (92–96%
+within 5 seconds), and at most 0.5% carry one near the start. So a request starts at
+`timestamp - response_time_ms` and ends at `timestamp`. The proxy's in-memory
+`requestMeta.timestamp` is the start; do not take the column's meaning from it.
+
+The steps, queries and figures below were written reading `timestamp` as the start.
+Steps 2 and 5 and the queries take `timestamp + response_time_ms` as the end, so the
+concurrency check uses the earlier request's duration where the later one's belongs.
+Step 8 and the queries take `ts - prev_ts` as the idle gap, which also counts the later
+request's own duration and moves pairs near the 5-minute line into the 5–60 minute bucket.
+Rows are ordered by end, not start. How much this changes the published figures has not
+been measured. A new measurement should take `timestamp - COALESCE(response_time_ms, 0)` as
+the start and `timestamp` as the end. A comparison against a figure below must either
+recompute that figure the same way or apply the original reading to both windows.
 
 1. **Partition by `client_session_id` and `model`, and compare each request with the previous
    one.** A model change breaks the cache by itself, so a switch only counts within one
@@ -116,8 +134,16 @@ cannot show that one policy is cheaper (session history).
 
 9. **Count process restarts in every window you compare.**
    - **Why restarts matter.** The affinity map is an in-process `Map`
-     (`packages/load-balancer/src/strategies/session-affinity.ts:257`). A restart therefore
-     forgets every owner, and each lane's next request is routed as a new session.
+     (`packages/load-balancer/src/strategies/session-affinity.ts:262`). Until PR #661
+     (9193caf7, live from the 2026-10-30 23:06 UTC start), a restart forgot every owner and
+     each lane's next request was routed as a new session. Since then a backend start
+     rebuilds the map from the `affinityLane` block that each request writes into
+     `routing_attempt_summary` (`restoreAffinityPins`,
+     `packages/load-balancer/src/strategies/affinity-restore.ts`). Lanes still start fresh
+     after a restore abandoned at its 3-second budget or 20,000-record cap (`/health`
+     reports it under `routing.affinityRestore`), in strict drain-soonest mode, for
+     child-home, quality and web-search helper lanes, and for lanes idle past the affinity
+     TTL.
    - **The size of the effect.** In the baseline window, same-partition pairs that spanned
      an upstream start switched accounts 52% of the time (74 of 142), against about 3%
      otherwise. Remaps that followed a restart carried 12.15M of the 47.37M same-or-lower-band
@@ -126,8 +152,13 @@ cannot show that one policy is cheaper (session history).
      there is one `Dashboard will be available` line per start. The journal retained the
      baseline window only from 2026-10-02 23:33 UTC, and it shows 56 starts from then to the
      window's end.
-     A window with more deploys or memory recycles shows more remaps for reasons unrelated
-     to routing policy.
+     In a window before PR #661, more deploys or memory recycles show more remaps for
+     reasons unrelated to routing policy. From PR #657 (6f2a6ebf) on, each request's routing
+     summary also carries `processStartedAt`, and a matched pair straddles a start when its
+     two requests carry different values. For a window that includes the 2026-10-30 23:06
+     UTC start or later ones, report straddling pairs separately rather than comparing
+     journal start counts. A restored start should move few lanes, so its start count no
+     longer predicts remaps.
 
 10. **Read the production database only with `sqlite3 -readonly`.** Never size or verify this
     with scripted requests through Anthropic accounts; AGENTS.md prohibits scripted Anthropic
@@ -489,11 +520,18 @@ router's own banding to Query 3's split, and assigns each row to the first class
    (over the 12.8 days of the baseline window that the journal retained).
    A large difference in restarts moves remaps whatever the hold does. For an exact
    comparison, re-run the #516 waterfall and compare its class 7 and 5b rows.
+   - This window ends before PR #661 reached production, so every start in it forgot all
+     owners. If you extend a window past the 2026-10-30 23:06 UTC start, also confirm
+     that #661's merge commit (9193caf7) is an ancestor of the deployed `git_sha`. Then
+     exclude pairs that straddle a start (different `processStartedAt`) from the hold
+     comparison instead of setting start counts side by side, because restored starts
+     keep most owners.
 5. Expect the under-five-minute to-higher-band remaps to drop, not reach zero.
    - The hold is capped at 30 minutes per episode.
    - It applies only to Anthropic owners in sticky mode outclassed by pace band alone, at
      the same tier and fallback rung.
-   - Owners that become unavailable still move, and a restart still forgets every owner.
+   - Owners that become unavailable still move. In this window a restart also forgets every
+     owner; from PR #661 on it does so only when restore cannot cover the lane (step 9).
    - The 5–60 minute to-higher-band row may rise. A held session moves once its owner has
      been idle for 5 minutes or more, so some remaps that used to land under five minutes now
      land in that bucket. That is the intended trade: the move happens once the five-minute
