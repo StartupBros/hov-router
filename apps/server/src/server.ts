@@ -19,6 +19,7 @@ import {
 	intervalManager,
 	MemoryMonitor,
 	NETWORK,
+	parseRequestUrl,
 	registerCleanup,
 	registerDisposable,
 	setForceAccountModel,
@@ -142,7 +143,10 @@ import {
 	formatEventLoopStallReport,
 } from "./event-loop-stall-monitor";
 import { createHostCounterReader } from "./host-counters";
-import { createManagedIngress } from "./managed-ingress";
+import {
+	createManagedIngress,
+	malformedRequestUrlResponse,
+} from "./managed-ingress";
 import {
 	describeRetentionSweepStop,
 	type RetentionSweepPacer,
@@ -2417,7 +2421,10 @@ export default async function startServer(options?: {
 				: {}),
 			async fetch(original: Request): Promise<Response> {
 				return managedIngress(original, async (req) => {
-					const url = new URL(req.url);
+					// Host-less scanner requests leave req.url as a bare path that
+					// new URL() rejects; answer 400 before any routing.
+					const url = parseRequestUrl(req.url);
+					if (!url) return malformedRequestUrlResponse();
 
 					// Serve the dashboard SPA + static assets BEFORE the
 					// authentication-gated API router. The dashboard shell is
