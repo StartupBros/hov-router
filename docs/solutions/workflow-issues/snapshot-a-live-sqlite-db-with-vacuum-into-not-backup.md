@@ -59,9 +59,10 @@ It ran from 01:27:55 to 01:30:17 (2 minutes 22 seconds) and wrote a compacted 3,
 Take every snapshot of a running better-ccflare database with `VACUUM INTO`:
 
 ```bash
-sqlite3 "$DB" ".timeout 30000" "VACUUM INTO '$TARGET.partial'" && mv "$TARGET.partial" "$TARGET"
+(umask 077 && sqlite3 "$DB" ".timeout 30000" "VACUUM INTO '$TARGET.partial'" && mv "$TARGET.partial" "$TARGET")
 ```
 
+- Create the snapshot owner-only. It holds the same plaintext OAuth tokens and API keys as the database, which the server keeps at `0600` (#681), but SQLite creates the `VACUUM INTO` target with the default `0644` mode under a typical umask. Checked on 2026-10-31 with sqlite3 3.45.1: under umask 0022, a snapshot of a `0600` database came out `0644`, and under `umask 077` it came out `0600`. The server's startup sweep restricts only `better-ccflare.db.backup.*` files beside the database, so a snapshot anywhere else stays readable by other users unless it is created this way.
 - Give each run a new, dated target. `VACUUM INTO` refuses an existing file (`Error: stepping, output file already exists`) rather than overwriting it, so delete a failed run's partial before retrying.
 - Write to a temporary name and rename only on success. SQLite documents that a `VACUUM INTO` interrupted by a crash or power loss can leave an incomplete, corrupt output file, and a run killed partway leaves its unfinished output behind.
 - Read the snapshot back before relying on it, for example with `sqlite3 -readonly` row counts of `usage_windows`, `requests` and `accounts`.

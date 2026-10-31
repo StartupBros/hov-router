@@ -1037,6 +1037,10 @@ bun update
 #!/bin/bash
 # backup.sh - Run daily via cron
 
+# The database and config file hold plaintext credentials. Without this,
+# VACUUM INTO, mkdir and tar create world-readable files under a typical umask.
+umask 077
+
 BACKUP_DIR="/backup/better-ccflare/$(date +%Y%m%d)"
 mkdir -p "$BACKUP_DIR"
 
@@ -1062,7 +1066,7 @@ if ! sqlite3 "$CONFIG_DIR/better-ccflare.db" ".timeout 30000" "VACUUM INTO '$SNA
     exit 1
 fi
 mv "$SNAPSHOT.partial" "$SNAPSHOT"
-cp "$CONFIG_DIR/config.json" "$BACKUP_DIR/" 2>/dev/null || true
+cp "$CONFIG_DIR/better-ccflare.json" "$BACKUP_DIR/" 2>/dev/null || true
 
 # Compress
 tar -czf "$BACKUP_DIR.tar.gz" "$BACKUP_DIR"

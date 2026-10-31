@@ -36,7 +36,7 @@ The auto-refresh feature automatically starts new usage windows by:
 1. **Window Monitoring**: The system tracks the `rate_limit_reset` timestamp from API responses
 2. **Reset Detection**: Every minute, checks for accounts where `rate_limit_reset <= now` (window has expired)
 3. **Window Expiration Check**: For each candidate account, checks if the stored `rate_limit_reset` from last refresh has expired
-4. **Account Selection**: Only refreshes if the last refreshed window has expired or account was never refreshed
+4. **Account Selection**: Only refreshes if the last refreshed window has expired or account was never refreshed. An account whose cached usage snapshot shows a window at 100% with a reset that is unknown or still ahead is skipped, because a probe could only be refused while using up a prompt from the pool. The skip is logged at info level once per reset, and it does not write to the database
 5. **Probe Message**: One prompt is drawn from the probe pool and sent to start the new usage window
 6. **Window Update**: The NEW `rate_limit_reset` from the API is stored (typically 5 hours in the future)
 7. **Repeat**: Next refresh happens when that stored timestamp expires
@@ -54,6 +54,10 @@ Query: Find accounts where
   - rate_limit_reset <= now (window has expired)
     ↓
 For each candidate account (sequentially):
+    ↓
+Check: Does its cached usage snapshot show a window at 100% whose reset
+is unknown or still in the future?
+  → YES: Skip it (logged once per reset)
     ↓
 Check: Has this account been refreshed before?
   → NO: Refresh it (first time)
