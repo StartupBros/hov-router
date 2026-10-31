@@ -67,12 +67,36 @@ within 5 seconds), and at most 0.5% carry one near the start. So a request start
 The steps, queries and figures below were written reading `timestamp` as the start.
 Steps 2 and 5 and the queries take `timestamp + response_time_ms` as the end, so the
 concurrency check uses the earlier request's duration where the later one's belongs.
-Step 8 and the queries take `ts - prev_ts` as the idle gap, which also counts the later
-request's own duration and moves pairs near the 5-minute line into the 5–60 minute bucket.
-Rows are ordered by end, not start. How much this changes the published figures has not
-been measured. A new measurement should take `timestamp - COALESCE(response_time_ms, 0)` as
-the start and `timestamp` as the end. A comparison against a figure below must either
-recompute that figure the same way or apply the original reading to both windows.
+Step 8 and the queries take `ts - prev_ts` as the idle gap, which runs from end to end. The
+warm-owner hold's clock runs from selection to selection: routing sets `assignedAt` when it
+picks the owner (`packages/load-balancer/src/strategies/session-affinity.ts:1541`) and takes
+the idle time as `now - assignedAt` (`:1526-1529`). The matching gap is therefore start to
+start. The end-to-end gap differs from it by the later request's duration minus the earlier
+one's, which can go either way. Rows are ordered by end, not start.
+
+A new measurement should take `timestamp - COALESCE(response_time_ms, 0)` as the start and
+`timestamp` as the end, order rows by start, and split the gap start to start. A comparison
+against a figure below must either recompute that figure the same way or apply the original
+reading to both windows.
+
+**The effect on the baseline figures, measured 2026-10-30.** Most of the change comes from
+the overlap test. The original reading marks many pairs that ran one after the other as
+overlapping, so the corrected pair count is more than twice the original. A changed gap
+definition alone could only move pairs across the 5-minute line. Query 3's under-five-minute
+figures for the baseline window:
+
+| Figure | Original reading | Corrected reading |
+|---|---:|---:|
+| Sequential non-failover pairs | 61,254 | 135,986 |
+| Baseline cache writes per request | 4,977 | 4,708 |
+| To-higher-band remaps (kinds 4 and 5) | 73 | 117 |
+| Their excess | 10.01M | 19.84M |
+| Remaps per 1,000 pairs | 1.19 | 0.86 |
+| Excess per pair | 163 | 146 |
+
+So a corrected run finds 60% more remaps and twice the excess, but a lower rate per pair,
+because the denominator grows faster. The post-#510 comparison under both readings is in
+"Result for the post-#510 window" below.
 
 1. **Partition by `client_session_id` and `model`, and compare each request with the previous
    one.** A model change breaks the cache by itself, so a switch only counts within one
@@ -515,7 +539,9 @@ router's own banding to Query 3's split, and assigns each row to the first class
      the two window lengths comparable.
 3. Compare Query 3's to-higher-band remap rows (kinds 4 and 5), not Query 2's row counts.
    Use the per-1,000-pairs rate and the excess per pair, because traffic volume changes.
-   The baseline is 1.19 remaps per 1,000 pairs and 163 excess tokens per pair.
+   The baseline is 1.19 remaps per 1,000 pairs and 163 excess tokens per pair under the
+   original reading, or 0.86 and 146 under the corrected one (see the timestamp note).
+   Compare like with like.
 4. Count upstream starts in the post-deploy window and set them beside the baseline's 56
    (over the 12.8 days of the baseline window that the journal retained).
    A large difference in restarts moves remaps whatever the hold does. For an exact
@@ -536,6 +562,49 @@ router's own banding to Query 3's split, and assigns each row to the first class
      been idle for 5 minutes or more, so some remaps that used to land under five minutes now
      land in that bucket. That is the intended trade: the move happens once the five-minute
      cache has gone cold.
+
+### Result for the post-#510 window
+
+Measured 2026-10-30 over the step 2 window.
+
+- **The rate rose instead of falling.**
+  - Original reading: under-five-minute to-higher-band remaps went from 1.19 to 2.65 per
+    1,000 pairs (73 to 150 remaps, 10.01M to 21.97M, 163 to 389 per pair).
+  - Corrected reading: they went from 0.86 to 2.41 (117 to 327 remaps, 19.84M to 46.57M,
+    146 to 343 per pair).
+  - The corrected pair counts barely moved (135,986 and 135,871), so traffic volume does
+    not explain the rise. The rate was above the baseline's 0.86 on 13 of the 15 days.
+  - The 5–60 minute rate rose too, from 10.27 to 50.94 per 1,000 pairs of that bucket (36 to
+    124 remaps, corrected reading).
+- **Restarts do not explain it.**
+  - The journal kept only 2026-10-27 03:27 UTC onward. That covers 2.66 days of the window
+    and 16 backend starts.
+  - In that part, the 58 under-five-minute pairs that straddled a start produced 9
+    to-higher-band remaps (1.35M). The 22,148 pairs with no start between their turns
+    produced 70 (10.52M), or 3.16 per 1,000.
+  - Traffic can reach a new backend some time after its start line. Counting every pair
+    whose earlier turn began within 10 minutes after a start as a restart pair removes 7
+    more remaps, which still leaves 3.03 per 1,000.
+  - 2026-10-29 had one start and 2.47 per 1,000.
+- **The bucket is not exactly the hold's population.** The hold's idle clock belongs to one
+  affinity lane. Step 8 splits on the gap to the previous request of the partition, which
+  can belong to another lane. A remap in the under-five-minute bucket can therefore be a lane
+  that was idle for longer. This alone does not explain a rise, since both windows mix lanes
+  this way.
+- **The first lane records show the hold engaging.** This is a first pass over the
+  `affinityLane` records of the 3.5 hours after the 2026-10-30 23:06 UTC start.
+  - 482 records kept the owner under an active hold.
+  - Each record's owner was diffed against the lane's previous record. That found 37
+    owner changes on Anthropic lanes, all outclass moves (`upgradedAt` equal to `assignedAt`):
+    - 2 when the hold reached its 30-minute cap;
+    - 10 after a hold that ended before its cap. In all 10 the held owner had last been
+      selected 301 to 1,572 seconds earlier, so the hold released at its 5-minute idle limit;
+    - 25 after the lane's owner had been idle for 5 minutes or more with no hold recorded.
+  - None outclassed an owner that was active within 5 minutes with no hold recorded. That is
+    the pattern a hold that failed to engage would leave. Three and a half hours is a small
+    sample, and no lane records exist for the 2026-10-15 to 10-29 window.
+  - What raised the 2026-10-15 to 10-29 rate is not recorded in the `requests` table.
+    Issue #663 tracks recording it, starting with a classifier over these records.
 
 ## Related
 
