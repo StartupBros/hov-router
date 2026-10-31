@@ -1,4 +1,8 @@
-import { BUFFER_SIZES, SseFrameBuffer } from "@better-ccflare/core";
+import {
+	BUFFER_SIZES,
+	parseRequestUrl,
+	SseFrameBuffer,
+} from "@better-ccflare/core";
 import {
 	bindManagedRequest,
 	bootIdentity,
@@ -125,6 +129,23 @@ function acceptedExpiryProtocol(path: string, requestId: string) {
 		},
 	};
 }
+/**
+ * Response for a request whose URL cannot be parsed (Host-less HTTP/1.0 scanner
+ * probes leave `req.url` as a bare path). Answered before any routing, auth or
+ * managed-timing work.
+ */
+export function malformedRequestUrlResponse(): Response {
+	return new Response(
+		JSON.stringify({
+			type: "error",
+			error: {
+				type: "invalid_request_error",
+				message: "Malformed request URL",
+			},
+		}),
+		{ status: 400, headers: { "Content-Type": "application/json" } },
+	);
+}
 export function createManagedIngress(options: ManagedIngressOptions) {
 	const claims = new Map<string, bigint>();
 	const managed =
@@ -150,8 +171,9 @@ export function createManagedIngress(options: ManagedIngressOptions) {
 		original: Request,
 		handler: (request: Request) => Promise<Response>,
 	): Promise<Response> => {
+		const url = parseRequestUrl(original.url);
+		if (!url) return malformedRequestUrlResponse();
 		if (!managed) return handler(original);
-		const url = new URL(original.url);
 		// Local health/control API is not inference and is authenticated by its
 		// existing API policy. The public guard always supplies timing for inference.
 		if (!url.pathname.startsWith("/v1/")) {

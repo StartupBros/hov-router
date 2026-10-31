@@ -34,3 +34,16 @@ export function levenshteinDistance(str1: string, str2: string): number {
 
 	return matrix[str2.length][str1.length];
 }
+
+/**
+ * Parse a request URL, returning null instead of throwing when it is not an
+ * absolute URL. Bun exposes `req.url` as a bare path when a client sends a
+ * Host-less HTTP/1.0 request, which `new URL()` rejects.
+ */
+export function parseRequestUrl(raw: string): URL | null {
+	try {
+		return new URL(raw);
+	} catch {
+		return null;
+	}
+}

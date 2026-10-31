@@ -6,6 +6,7 @@ import {
 	supportsForcedToolChoice,
 } from "@better-ccflare/core";
 import { Logger } from "@better-ccflare/logger";
+import { flattenToolHistory, parseBase64DataUrl } from "./inbound-compat";
 import type {
 	AnthropicContent,
 	AnthropicMessage,
@@ -230,16 +231,16 @@ function translateContentItem(c: {
 		const imageUrl = c.image_url;
 		if (typeof imageUrl === "string") {
 			const trimmed = imageUrl.trim();
-			const dataUrlMatch = /^data:([^;]+);base64,(.+)$/.exec(trimmed);
-			if (dataUrlMatch) {
+			const dataUrl = parseBase64DataUrl(trimmed);
+			if (dataUrl) {
 				return {
 					ok: true,
 					block: {
 						type: "image",
 						source: {
 							type: "base64",
-							media_type: dataUrlMatch[1],
-							data: dataUrlMatch[2],
+							media_type: dataUrl.mediaType,
+							data: dataUrl.data,
 						},
 					},
 				};
@@ -764,7 +765,11 @@ export function translateRequestToAnthropic(
 
 	const result: AnthropicRequest = {
 		model: mapGptModelToClaudeFamily(req.model, forcedToolChoice),
-		messages: mergedMessages,
+		// Anthropic 400s tool_use/tool_result history when no tools are defined.
+		messages:
+			translatedTools.length === 0
+				? flattenToolHistory(mergedMessages)
+				: mergedMessages,
 		max_tokens: req.max_output_tokens ?? 4096,
 	};
 

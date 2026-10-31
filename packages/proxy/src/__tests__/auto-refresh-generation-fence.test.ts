@@ -112,11 +112,13 @@ describe("AutoRefreshScheduler account-generation fences", () => {
 			consecutiveFailures: new Map([["account-1", 2]]),
 			lastFailureProbeAt: new Map([["account-1", 3]]),
 			uncountedProbeFailures: new Map([["account-1", { at: 4, streak: 5 }]]),
+			usageExhaustedAnnouncedFor: new Map([["account-1", 6]]),
 			accountTokens: new Map([["account-1", {}]]),
 		};
 
 		scheduler.clearAccountTracking("account-1");
 
+		expect(scheduler.usageExhaustedAnnouncedFor.has("account-1")).toBe(false);
 		expect(scheduler.lastRefreshResetTime.has("account-1")).toBe(false);
 		expect(scheduler.consecutiveFailures.has("account-1")).toBe(false);
 		expect(scheduler.lastFailureProbeAt.has("account-1")).toBe(false);

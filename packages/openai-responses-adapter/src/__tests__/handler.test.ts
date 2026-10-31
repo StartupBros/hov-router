@@ -76,6 +76,52 @@ describe("handleResponsesRequest", () => {
 		expect(body.error.type).toBe("invalid_request_error");
 	});
 
+	describe("model type guard", () => {
+		const post = (payload: Record<string, unknown>) => {
+			let called = false;
+			const mockHandleProxy: HandleProxyFn = async () => {
+				called = true;
+				return new Response(ANTHROPIC_MESSAGE_BODY, {
+					headers: { "content-type": "application/json" },
+				});
+			};
+			const req = new Request("http://localhost/v1/responses", {
+				method: "POST",
+				body: JSON.stringify(payload),
+				headers: { "Content-Type": "application/json" },
+			});
+			return handleResponsesRequest(
+				req,
+				new URL(req.url),
+				mockHandleProxy,
+				{},
+			).then((resp) => ({ resp, called: () => called }));
+		};
+
+		it.each([
+			["number", 123],
+			["object", { id: "gpt-6" }],
+			["array", ["gpt-6"]],
+			["boolean", true],
+			["null", null],
+		])("rejects a %s model with 400 invalid_request_error", async (_n, model) => {
+			const { resp, called } = await post({ model, input: "hello" });
+			expect(resp.status).toBe(400);
+			const body = await resp.json();
+			expect(body.type).toBe("error");
+			expect(body.error.type).toBe("invalid_request_error");
+			expect(called()).toBe(false);
+		});
+
+		it("still accepts a string model", async () => {
+			const { resp } = await post({
+				model: "claude-haiku-4-5",
+				input: "hello",
+			});
+			expect(resp.status).toBe(200);
+		});
+	});
+
 	test("Test 2: non-streaming path → calls handleProxy with /v1/messages, returns translated response", async () => {
 		let capturedPath = "";
 
