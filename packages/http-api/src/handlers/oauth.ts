@@ -542,7 +542,7 @@ export function createAnthropicReauthInitHandler(
 				});
 
 				// Store session; use accountName field so callback can look it up by name
-				dbOps.createOAuthSession(
+				await dbOps.createOAuthSession(
 					flowResult.sessionId,
 					account.name,
 					flowResult.pkce.verifier,
@@ -654,7 +654,7 @@ export function createAnthropicReauthCallbackHandler(
 				);
 				clearAccountRefreshCache(account.id);
 
-				dbOps.deleteOAuthSession(sessionId);
+				await dbOps.deleteOAuthSession(sessionId);
 
 				// Drop any stale refresh backoff/failure state so the just-installed
 				// token is used immediately instead of waiting out the backoff window
@@ -760,7 +760,7 @@ export function createOAuthInitHandler(dbOps: DatabaseOperations) {
 
 				// Store custom endpoint and priority in session so the callback
 				// can forward them to oauthFlow.complete() when creating the account.
-				dbOps.createOAuthSession(
+				await dbOps.createOAuthSession(
 					flowResult.sessionId,
 					name,
 					flowResult.pkce.verifier,
@@ -880,7 +880,7 @@ export function createOAuthCallbackHandler(dbOps: DatabaseOperations) {
 				);
 
 				// Clean up OAuth session from database
-				dbOps.deleteOAuthSession(sessionId);
+				await dbOps.deleteOAuthSession(sessionId);
 
 				log.info(`Successfully added account '${name}' via OAuth`);
 
