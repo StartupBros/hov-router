@@ -62,12 +62,12 @@ describe("getRuntime() retry bounds and env resolution", () => {
 	});
 
 	it("clamps attempts to 0..10 and floors fractions", () => {
-		expect(
-			configWith({ retry_attempts: 99 }).getRuntime().retry.attempts,
-		).toBe(10);
-		expect(
-			configWith({ retry_attempts: -1 }).getRuntime().retry.attempts,
-		).toBe(0);
+		expect(configWith({ retry_attempts: 99 }).getRuntime().retry.attempts).toBe(
+			10,
+		);
+		expect(configWith({ retry_attempts: -1 }).getRuntime().retry.attempts).toBe(
+			0,
+		);
 		expect(
 			configWith({ retry_attempts: 1.6 }).getRuntime().retry.attempts,
 		).toBe(1);

@@ -105,15 +105,15 @@ describe("unknownArgumentLines", () => {
 });
 
 describe("CLI unknown arguments", () => {
-	test.each([["--lsit"], ["serve"], ["--port=8081"]])(
-		"%s exits 1 with an error and starts nothing",
-		async (arg) => {
-			const result = await runCli([arg]);
-			expect(result.exitCode).toBe(1);
-			expect(result.stderr).toContain("unknown argument");
-		},
-		20000,
-	);
+	test.each([
+		["--lsit"],
+		["serve"],
+		["--port=8081"],
+	])("%s exits 1 with an error and starts nothing", async (arg) => {
+		const result = await runCli([arg]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("unknown argument");
+	}, 20000);
 
 	test("--smol is still accepted, as the systemd unit ships it", async () => {
 		const result = await runCli(["--smol", "--version"]);

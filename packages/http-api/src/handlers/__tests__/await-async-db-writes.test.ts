@@ -9,9 +9,9 @@ import type { Config } from "@better-ccflare/config";
 import { DatabaseOperations } from "@better-ccflare/database";
 import type { APIContext } from "@better-ccflare/types";
 import {
-	createAccountPriorityUpdateHandler,
 	createAccountAutoFallbackHandler,
 	createAccountAutoPauseOnOverageHandler,
+	createAccountPriorityUpdateHandler,
 } from "../accounts";
 import { createAgentPreferenceUpdateHandler } from "../agents";
 import { createAnthropicReauthInitHandler } from "../oauth";
@@ -148,9 +148,10 @@ describe("handlers await async database writes", () => {
 			getRuntime: () => ({ clientId: "test-client-id" }),
 		} as unknown as Config;
 		try {
-			const res = await createAnthropicReauthInitHandler(dbOps, stubConfig)(
-				json({ accountId }),
-			);
+			const res = await createAnthropicReauthInitHandler(
+				dbOps,
+				stubConfig,
+			)(json({ accountId }));
 			expect(res.status).not.toBe(200);
 		} finally {
 			dbOps.createOAuthSession = original;

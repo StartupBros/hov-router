@@ -143,13 +143,13 @@ import {
 } from "./event-loop-stall-monitor";
 import { createHostCounterReader } from "./host-counters";
 import { createManagedIngress } from "./managed-ingress";
-import { buildServerRuntimeConfig } from "./runtime-config";
 import {
 	describeRetentionSweepStop,
 	type RetentionSweepPacer,
 	RetentionSweeps,
 	scheduleAdaptiveVacuumAfterRetentionCleanup,
 } from "./retention-cleanup";
+import { buildServerRuntimeConfig } from "./runtime-config";
 import {
 	createUsagePollingTrackingClearer,
 	isCurrentUsagePollingAccount,

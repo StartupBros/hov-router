@@ -39,9 +39,9 @@ describe("GET /api/config session duration", () => {
 
 	it("reports a configured session_duration_ms", async () => {
 		delete process.env.SESSION_DURATION_MS;
-		expect(await reported(configWith({ session_duration_ms: 18_000_000 }))).toBe(
-			18_000_000,
-		);
+		expect(
+			await reported(configWith({ session_duration_ms: 18_000_000 })),
+		).toBe(18_000_000);
 	});
 
 	it("reports a configured zero as zero", async () => {
