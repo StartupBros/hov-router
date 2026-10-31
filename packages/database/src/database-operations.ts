@@ -51,6 +51,7 @@ import {
 	PG_CLIENT_QUERY_TIMEOUT_MS,
 } from "./adapters/bun-sql-adapter";
 import type { CleanupPacer } from "./cleanup-pacing";
+import { ensurePrivateDir, restrictDbFiles } from "./file-modes";
 import { EMBEDDED_INCREMENTAL_VACUUM_WORKER_CODE } from "./inline-incremental-vacuum-worker";
 import { EMBEDDED_READER_WORKER_CODE } from "./inline-reader-worker";
 import { EMBEDDED_VACUUM_WORKER_CODE } from "./inline-vacuum-worker";
@@ -64,7 +65,6 @@ import {
 	type MaintenanceWorkerOptions,
 	MaintenanceWorkerOwner,
 } from "./maintenance-worker-owner";
-import { ensurePrivateDir, restrictDbFiles } from "./file-modes";
 import { ensureSchema, runMigrations } from "./migrations";
 import { ensureSchemaPg, runMigrationsPg } from "./migrations-pg";
 import {
