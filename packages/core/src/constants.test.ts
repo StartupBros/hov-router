@@ -3,6 +3,7 @@ import {
 	computeOverloadCooldownMs,
 	computeOverloadWithResetCapMs,
 	computeRateLimitBackoffMs,
+	getOverloadRetryConfig,
 	getRateLimitMaxCooldownMs,
 	getRateLimitResetStabilityMs,
 	resolveCooldownUntil,
@@ -177,5 +178,61 @@ describe("duration env overrides", () => {
 		const capUntil = now + computeOverloadWithResetCapMs();
 		expect(Math.min(threeHoursOut, capUntil)).toBe(capUntil);
 		expect(capUntil).toBeLessThan(threeHoursOut);
+	});
+});
+
+describe("overload retry attempt count", () => {
+	const KEY = "CCFLARE_OVERLOAD_RETRY_MAX_ATTEMPTS";
+	const original = process.env[KEY];
+
+	beforeEach(() => {
+		delete process.env[KEY];
+	});
+
+	afterEach(() => {
+		if (original === undefined) delete process.env[KEY];
+		else process.env[KEY] = original;
+	});
+
+	it("defaults to 2 when unset or empty and honors a valid integer", () => {
+		expect(getOverloadRetryConfig().maxAttempts).toBe(2);
+		process.env[KEY] = "";
+		expect(getOverloadRetryConfig().maxAttempts).toBe(2);
+		process.env[KEY] = "3";
+		expect(getOverloadRetryConfig().maxAttempts).toBe(3);
+		process.env[KEY] = " 4 ";
+		expect(getOverloadRetryConfig().maxAttempts).toBe(4);
+		process.env[KEY] = "1";
+		expect(getOverloadRetryConfig().maxAttempts).toBe(1);
+		process.env[KEY] = "10";
+		expect(getOverloadRetryConfig().maxAttempts).toBe(10);
+	});
+
+	it("truncates a fractional attempt count", () => {
+		process.env[KEY] = "2.9";
+		expect(getOverloadRetryConfig().maxAttempts).toBe(2);
+	});
+
+	// The retry loops spin on `attempt < maxAttempts` while the upstream keeps
+	// returning 529/5xx, so a non-finite count is an unbounded loop.
+	it("falls back to the default for non-finite and unparseable values", () => {
+		for (const raw of ["Infinity", "-Infinity", "NaN", "abc"]) {
+			process.env[KEY] = raw;
+			expect(getOverloadRetryConfig().maxAttempts).toBe(2);
+		}
+	});
+
+	it("falls back to the default for zero, negative and sub-one counts", () => {
+		for (const raw of ["0", "-4", "0.5"]) {
+			process.env[KEY] = raw;
+			expect(getOverloadRetryConfig().maxAttempts).toBe(2);
+		}
+	});
+
+	it("clamps a huge attempt count to 10", () => {
+		for (const raw of ["50", "1e9"]) {
+			process.env[KEY] = raw;
+			expect(getOverloadRetryConfig().maxAttempts).toBe(10);
+		}
 	});
 });
