@@ -48,6 +48,16 @@ import { Database } from "bun:sqlite";
  *    sustained write activity — see the consecutive-skip counter in
  *    `incrementalVacuum()` for the escalation path. (Greptile #230)
  *
+ * Durability: a vacuum request carries the main connection's configured
+ * `synchronous` mode, applied before the PRAGMA. Without it this connection
+ * ran at the compile-time default (FULL), whose commit fsyncs the WAL while
+ * still holding the writer slot: on a local temp file, NORMAL cut a
+ * 16,384-page chunk's median hold from 655 ms to 105 ms
+ * (bench/incremental-vacuum-hold.ts). In WAL mode NORMAL
+ * stays corruption-safe; a power loss can roll the chunk back, which only
+ * leaves its pages on the freelist. A request without the field keeps the
+ * connection default.
+ *
  * Refuses if `auto_vacuum != 2` — the operation is a no-op there and would
  * mask a misconfigured DB. Callers should have gated already via the same
  * check on the main connection, but the worker double-checks since it
@@ -80,14 +90,27 @@ const ANALYZE_ANALYSIS_LIMIT = 400;
  */
 const OPTIMIZE_MASK = "0x10002";
 
+export type SynchronousMode = "OFF" | "NORMAL" | "FULL";
+
+const SYNCHRONOUS_MODES: ReadonlySet<unknown> = new Set<SynchronousMode>([
+	"OFF",
+	"NORMAL",
+	"FULL",
+]);
+
 export type IncrementalVacuumRequest = (
-	| { kind?: "vacuum"; dbPath: string; pages: number }
+	| {
+			kind?: "vacuum";
+			dbPath: string;
+			pages: number;
+			synchronous?: SynchronousMode;
+	  }
 	| { kind: "optimize"; dbPath: string }
 	| { kind: "retire" }
 ) & { generation?: number; jobId?: number };
 
 export type IncrementalVacuumResult =
-	| { ok: true; mode: number }
+	| { ok: true; mode: number; synchronous: number }
 	| { ok: true; skipped: boolean }
 	| { ok: false; error: string };
 
@@ -121,12 +144,24 @@ function isSqliteBusy(err: unknown): boolean {
 function runIncrementalVacuum(
 	dbPath: string,
 	pages: number,
+	synchronous: unknown,
 ): IncrementalVacuumResult {
+	if (synchronous !== undefined && !SYNCHRONOUS_MODES.has(synchronous)) {
+		return {
+			ok: false,
+			error: `Invalid synchronous mode: ${JSON.stringify(synchronous)} (must be OFF, NORMAL, or FULL)`,
+		};
+	}
 	let db: Database | undefined;
 	try {
 		db = new Database(dbPath);
 		db.exec("PRAGMA busy_timeout = 200");
 		applyWorkerPragmas(db);
+		if (synchronous !== undefined)
+			db.exec(`PRAGMA synchronous = ${synchronous}`);
+		const appliedSynchronous = (
+			db.query("PRAGMA synchronous").get() as { synchronous: number }
+		).synchronous;
 		const mode = (
 			db.query("PRAGMA auto_vacuum").get() as { auto_vacuum: number }
 		).auto_vacuum;
@@ -137,7 +172,7 @@ function runIncrementalVacuum(
 			};
 		const n = Math.max(1, Math.trunc(Number(pages) || 1));
 		db.exec(`PRAGMA incremental_vacuum(${n})`);
-		return { ok: true, mode };
+		return { ok: true, mode, synchronous: appliedSynchronous };
 	} catch (err) {
 		return {
 			ok: false,
@@ -187,7 +222,11 @@ self.onmessage = (event: MessageEvent<IncrementalVacuumRequest>) => {
 	const result =
 		request.kind === "optimize"
 			? runOptimize(request.dbPath)
-			: runIncrementalVacuum(request.dbPath, request.pages);
+			: runIncrementalVacuum(
+					request.dbPath,
+					request.pages,
+					request.synchronous,
+				);
 	self.postMessage({
 		...result,
 		generation: request.generation,
