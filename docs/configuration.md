@@ -78,10 +78,12 @@ The configuration file is stored at:
 |-------|------|---------|-------------|
 | `lb_strategy` | string | `"session"` | Load balancing strategy. Supported values are `"session"` (default), `"session-affinity"`, `"session-drain-soonest"` (an opt-in affinity-preserving drain policy), and `"least-used"`. Prefer a session-based strategy for OAuth accounts; per-request spreading can trigger provider anti-abuse systems |
 | `client_id` | string | `"9d1c250a-e61b-44d9-88ed-5944d1962f5e"` | OAuth client ID for authentication |
-| `retry_attempts` | number | `3` | Maximum number of retry attempts for failed requests |
-| `retry_delay_ms` | number | `1000` | Initial delay in milliseconds between retry attempts |
-| `retry_backoff` | number | `2` | Exponential backoff multiplier for retry delays |
-| `session_duration_ms` | number | `18000000` (5 hours) | Session persistence duration in milliseconds |
+| `retry_attempts` | number | `3` | Maximum number of retry attempts for failed requests. Whole number from `0` to `10` |
+| `retry_delay_ms` | number | `1000` | Initial delay in milliseconds between retry attempts. Whole number from `0` to `30000` |
+| `retry_backoff` | number | `2` | Exponential backoff multiplier for retry delays. From `1` to `5` |
+| `session_duration_ms` | number | `18000000` (5 hours) | Session persistence duration in milliseconds. `0` turns session stickiness off; a negative or non-numeric value uses the default and logs a warning |
+
+At startup, a retry value outside its range is moved to the nearest bound, and a fractional `retry_attempts` or `retry_delay_ms` is rounded down. A value that is not a number uses the default. Each adjustment logs a warning naming the setting, the value received and the value applied. The same rules apply whether the value comes from the config file or from `RETRY_ATTEMPTS`, `RETRY_DELAY_MS` or `RETRY_BACKOFF`.
 | `port` | number | `8080` | HTTP server port |
 | `model_scoped_capacity_routing` | `"off"` \| `"exhausted"` | `"off"` | Per-model-family capacity exclusion mode. `"off"` leaves account selection unchanged; `"exhausted"` enables fail-open exclusion for exhausted model-family capacity. `MODEL_SCOPED_CAPACITY_ROUTING` takes precedence when it contains a valid value. |
 | `external_codex_homes` | string | unset | Comma-separated Codex home directories whose CLI/Desktop rollouts count toward Codex Window Value. See [External Codex Usage](#external-codex-usage) |
@@ -147,7 +149,7 @@ These environment variables are not stored in the configuration file and must be
 | `BETTER_CCFLARE_HOST` | Server binding host | `0.0.0.0` | `BETTER_CCFLARE_HOST=127.0.0.1` (localhost-only) |
 | `SSL_KEY_PATH` / `SSL_CERT_PATH` | SSL private key / certificate paths for HTTPS | - | `SSL_KEY_PATH=/path/to/key.pem` |
 | `CCFLARE_OVERLOAD_RETRY_ENABLED` | In-place retry of Anthropic 529 "no reset" overloads before falling back to account cooldown | `true` | `CCFLARE_OVERLOAD_RETRY_ENABLED=false` |
-| `CCFLARE_OVERLOAD_RETRY_MAX_ATTEMPTS` | Total attempts including the original request | `2` | `CCFLARE_OVERLOAD_RETRY_MAX_ATTEMPTS=3` |
+| `CCFLARE_OVERLOAD_RETRY_MAX_ATTEMPTS` | Total attempts including the original request: a whole number from 1 to 10. A fraction is truncated, a value above 10 is capped at 10, and anything below 1 or not a finite number uses the default. To turn the retry off, set `CCFLARE_OVERLOAD_RETRY_ENABLED=false` | `2` | `CCFLARE_OVERLOAD_RETRY_MAX_ATTEMPTS=3` |
 | `CCFLARE_OVERLOAD_RETRY_BASE_MS` | Overload retry backoff base in ms; `0` = no sleep | `750` | `CCFLARE_OVERLOAD_RETRY_BASE_MS=500` |
 | `CCFLARE_OVERLOAD_RETRY_MAX_MS` | Overload retry backoff ceiling in ms | `3000` | `CCFLARE_OVERLOAD_RETRY_MAX_MS=5000` |
 | `CCFLARE_OVERLOAD_COOLDOWN_MS` | Fixed per-account cooldown after a 529 (overloaded) response with no Retry-After header. Unlike 429 cooldowns it never ramps with a streak; pairs with a single-flight recovery probe that admits exactly one request once the cooldown expires, as long as another account is available to defer to — if every account in the pool is currently suppressed, the request runs ungated instead | `10000` (10s) | `CCFLARE_OVERLOAD_COOLDOWN_MS=15000` |
@@ -1345,9 +1347,9 @@ watch -n 5 'curl -s http://localhost:8080/api/accounts | jq ".[] | select(.autoF
 HoV Router performs validation on:
 
 1. **Strategy names**: Must be one of the valid strategy options (validated by `isValidStrategy`)
-2. **Numeric values**: Parsed and validated as integers/floats
+2. **Numeric values**: Parsed and validated as integers/floats; the retry settings are held to their ranges (see the [options table](#complete-options-table))
 3. **Port ranges**: Should be valid port numbers (1-65535)
-4. **File permissions**: Config directory is created with appropriate permissions
+4. **File permissions**: The config file holds credentials, so it is kept owner-only (`0600`) when it is loaded and saved. A config directory the server creates gets `0700`; an existing directory is left as it is. Neither is changed on Windows
 
 ### Validation Errors
 

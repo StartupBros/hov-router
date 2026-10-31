@@ -2,7 +2,7 @@
 
 - **Upstream:** https://github.com/tombii/better-ccflare
 - **Fork type:** Product fork with intentional hard divergence
-- **Sync cadence:** Manual, pinned source integration when an upstream release is worth adopting; targeted cherry-picks otherwise
+- **Sync cadence:** Manual, pinned source integration when an upstream release is worth adopting; targeted cherry-picks otherwise. To port fixes from the wider fork network rather than from a release, follow [the fork-network survey method](docs/solutions/workflow-issues/survey-the-fork-network-then-check-each-port-applies-here.md)
 - **Current sync record:** [PR #339](https://github.com/StartupBros-com/better-ccflare/pull/339), the [v3.5.78 resolution inventory](docs/plans/2026-09-09-issue-338-v3.5.78-resolution-inventory.json), and its [generated ledger](docs/plans/2026-09-09-issue-338-v3.5.78-resolution-ledger.md)
 
 This repository is not a mirror. It substantially rewrites routing, provider,

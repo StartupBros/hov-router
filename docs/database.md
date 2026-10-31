@@ -654,16 +654,16 @@ cp better-ccflare.db better-ccflare.db.backup
 [ -f better-ccflare.db-shm ] && cp better-ccflare.db-shm better-ccflare.db.backup-shm
 ```
 
-2. **Online Backup**: While the server is running, use `VACUUM INTO`. It writes one consistent, compacted snapshot in a single read transaction, and the target file must not already exist:
+2. **Online Backup**: While the server is running, use `VACUUM INTO`. It writes one consistent, compacted snapshot in a single read transaction, and the target file must not already exist. The snapshot holds the same plaintext tokens as the database, but SQLite creates it with the default `0644` mode under a typical umask, so set `umask 077` first to make it owner-only:
 ```bash
-sqlite3 better-ccflare.db ".timeout 30000" "VACUUM INTO 'better-ccflare-snapshot.db'"
+(umask 077 && sqlite3 better-ccflare.db ".timeout 30000" "VACUUM INTO 'better-ccflare-snapshot.db'")
 ```
 Do not use the sqlite3 `.backup` command on a running server. SQLite restarts an online backup whenever another connection writes to the source, and the proxy writes continuously, so a large `.backup` can run for hours without finishing. The snapshot is written in rollback-journal mode; when the server opens a restored copy, `configureSqlite` switches it back to WAL unless `walMode` is disabled.
 
-3. **Automated Backups**: Schedule the same `VACUUM INTO` command with cron or a system scheduler, giving each run a new dated target:
+3. **Automated Backups**: Schedule the same `VACUUM INTO` command with cron or a system scheduler, giving each run a new dated target and keeping the same `umask 077`:
 ```bash
 # Daily snapshot (cron needs % escaped as \%)
-0 2 * * * sqlite3 /path/to/better-ccflare.db ".timeout 30000" "VACUUM INTO '/backups/better-ccflare-$(date +\%Y\%m\%d).db'"
+0 2 * * * umask 077 && sqlite3 /path/to/better-ccflare.db ".timeout 30000" "VACUUM INTO '/backups/better-ccflare-$(date +\%Y\%m\%d).db'"
 ```
 
 ### Maintenance Operations
@@ -722,9 +722,9 @@ Key metrics to monitor:
    - Using OS-level file encryption
    - Restricting file permissions
 
-2. **Access Control**: Ensure proper file permissions:
+2. **Access Control**: At startup the server sets `0600` on the database, its `-wal`, `-shm` and `-journal` files, and any `better-ccflare.db.backup.*` file beside it, including the backup a migration writes. A database directory it creates gets `0700`; an existing directory is left as it is. A failed `chmod` logs a warning and does not stop startup, and nothing is changed on Windows. Copies or snapshots kept anywhere else are yours to protect: create them under `umask 077`, as in the backup commands above, and restrict an existing data directory yourself:
 ```bash
-chmod 600 better-ccflare.db
+chmod 700 ~/.config/better-ccflare
 ```
 
 3. **SQL Injection**: The codebase uses parameterized queries throughout, providing protection against SQL injection.
