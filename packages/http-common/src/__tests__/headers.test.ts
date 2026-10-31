@@ -6,8 +6,54 @@ import {
 	GUARD_REQUEST_ID_HEADER,
 	sanitizeProxyHeaders,
 	sanitizeRequestHeaders,
+	sanitizeResponseHeaders,
 	withSanitizedProxyHeaders,
 } from "../headers";
+
+// Ported from SijanC147/better-ccflare headers.test.ts (13115ce94519).
+describe("sanitizeResponseHeaders", () => {
+	test("drops credential-bearing response headers", () => {
+		const out = sanitizeResponseHeaders({
+			"set-cookie": "session=abc; HttpOnly",
+			authorization: "Bearer upstream-token",
+			"proxy-authenticate": "Basic realm=proxy",
+			"www-authenticate": "Bearer realm=api",
+			"content-type": "application/json",
+		});
+		expect(out).toEqual({ "content-type": "application/json" });
+	});
+
+	test("matches header names case-insensitively", () => {
+		// Headers lowercases names, but the persisted object is also built from
+		// plain records, so the strip cannot assume lowercase.
+		const out = sanitizeResponseHeaders({
+			"Set-Cookie": "session=abc",
+			"X-Request-Id": "req_1",
+		});
+		expect(out).toEqual({ "X-Request-Id": "req_1" });
+	});
+
+	test("keeps the rate-limit headers the collector and dashboard read", () => {
+		// Overage detection and the usage-window display read these names.
+		// Widening the strip list to cover them would silently disable both.
+		const out = sanitizeResponseHeaders({
+			"anthropic-ratelimit-unified-overage-in-use": "true",
+			"anthropic-ratelimit-unified-overage-status": "active",
+			"set-cookie": "session=abc",
+		});
+		expect(out).toEqual({
+			"anthropic-ratelimit-unified-overage-in-use": "true",
+			"anthropic-ratelimit-unified-overage-status": "active",
+		});
+	});
+
+	test("returns a new object and does not mutate the input", () => {
+		const input = { "set-cookie": "session=abc", accept: "*/*" };
+		const out = sanitizeResponseHeaders(input);
+		expect(out).not.toBe(input);
+		expect(input["set-cookie"]).toBe("session=abc");
+	});
+});
 
 // P1 spoofing (proxy side): x-better-ccflare-pool-status is a reserved,
 // guard-trusted signal. If an upstream provider response could carry it
