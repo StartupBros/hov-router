@@ -3252,6 +3252,8 @@ describe("catalog-role Codex route profiles", () => {
 
 	function installCodexRoleUpstream(
 		initial: readonly string[] = NEXT_GENERATION,
+		/** Answers the Nth (1-based) response request; undefined sends the default success. */
+		respond?: (attempt: number) => Response | undefined,
 	) {
 		let catalog: readonly string[] = initial;
 		let catalogFailure: "rejects" | "hangs" | null = null;
@@ -3283,6 +3285,8 @@ describe("catalog-role Codex route profiles", () => {
 					});
 				}
 				responses.push(request.clone());
+				const answer = respond?.(responses.length);
+				if (answer) return answer;
 				return new Response(
 					`event: response.completed\ndata: ${JSON.stringify({
 						type: "response.completed",
@@ -4102,6 +4106,63 @@ describe("catalog-role Codex route profiles", () => {
 				"gpt-6.1-sol",
 				"gpt-6.1-sol",
 			]);
+		});
+
+		it("keeps the line's model when Codex replays after rejecting retained reasoning", async () => {
+			// The replay runs the provider transform again, which on its own maps
+			// the request to the account's sonnet slot (Astra). The replay must still
+			// send the model the attempt was admitted with.
+			const account = makeRoleAccount("line-pool-reasoning-replay");
+			const harness = makeLineContext([account]);
+			const upstream = installCodexRoleUpstream(NEXT_GENERATION, (attempt) =>
+				attempt === 1
+					? Response.json(
+							{
+								error: {
+									message:
+										"The encrypted content for item rs_bound could not be verified. Reason: Encrypted content could not be decrypted or parsed.",
+								},
+							},
+							{ status: 400 },
+						)
+					: undefined,
+			);
+			await publish(upstream, account, harness.ctx, SOL_FIRST);
+
+			const routed = await send(
+				harness.ctx,
+				LINE_PICKER,
+				{},
+				{
+					messages: [
+						{ role: "user", content: "initial" },
+						{
+							role: "assistant",
+							content: [
+								{ type: "text", text: "before" },
+								{
+									type: "redacted_thinking",
+									data: "bccfr1.rs_bound.encrypted-payload",
+								},
+								{ type: "text", text: "after" },
+							],
+						},
+						{ role: "user", content: "continue" },
+					],
+				},
+			);
+
+			expect(routed.response.status, routed.text).toBe(200);
+			expect(await upstreamModels(upstream.responses)).toEqual([
+				"gpt-6.1-sol",
+				"gpt-6.1-sol",
+			]);
+			const replay = await fetchedJson(upstream.responses[1]?.clone());
+			expect(
+				(replay.input as Array<{ type?: string }>).some(
+					(item) => item.type === "reasoning",
+				),
+			).toBe(false);
 		});
 
 		it("fails closed without a retry hint when no own catalog lists the line", async () => {
