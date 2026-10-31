@@ -39,9 +39,21 @@ self.onmessage = (event: MessageEvent<IntegrityCheckRequest>) => {
 	let db: Database | undefined;
 	try {
 		db = new Database(dbPath, { readonly: true });
+		// busy_timeout goes first: PRAGMA cache_size reads the database header,
+		// and without a busy handler that first read can fail with "database is
+		// locked" while a WAL-mode file is being recovered.
 		db.exec(
 			`PRAGMA busy_timeout = ${Math.max(0, Math.trunc(Number(busyTimeoutMs) || 10000))}`,
 		);
+		// Memory-bound this connection. It is a separate handle, so the main
+		// connection's PRAGMAs do not apply and bun:sqlite's defaults would
+		// memory-map most of the file while quick_check / integrity_check
+		// read every page, which can OOM a memory-limited container. Same
+		// settings as vacuum-worker.ts; all three are valid on a readonly
+		// handle and do not change what the checks report.
+		db.exec("PRAGMA mmap_size = 0");
+		db.exec("PRAGMA cache_size = -2000");
+		db.exec("PRAGMA temp_store = FILE");
 
 		if (kind === "quick") {
 			// quick_check returns a single row: "ok" or a problem description.
