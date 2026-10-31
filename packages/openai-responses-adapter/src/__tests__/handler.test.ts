@@ -114,7 +114,10 @@ describe("handleResponsesRequest", () => {
 		});
 
 		it("still accepts a string model", async () => {
-			const { resp } = await post({ model: "claude-haiku-4-5", input: "hello" });
+			const { resp } = await post({
+				model: "claude-haiku-4-5",
+				input: "hello",
+			});
 			expect(resp.status).toBe(200);
 		});
 	});

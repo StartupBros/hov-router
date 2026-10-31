@@ -201,7 +201,10 @@ describe("SessionDrainSoonestStrategy", () => {
 			]),
 		} as RequestMeta;
 
-		const ordered = await strategy.select([coldEarlier, criticalLater], request);
+		const ordered = await strategy.select(
+			[coldEarlier, criticalLater],
+			request,
+		);
 
 		expect(ordered.map((account) => account.id)).toEqual([
 			"critical-later",
