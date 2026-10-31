@@ -75,7 +75,8 @@ start. The end-to-end gap differs from it by the later request's duration minus 
 one's, which can go either way. Rows are ordered by end, not start.
 
 A new measurement should take `timestamp - COALESCE(response_time_ms, 0)` as the start and
-`timestamp` as the end, order rows by start, and split the gap start to start. A comparison
+`timestamp` as the end, order rows by start, and split the gap start to start, as Query 3c
+in "The queries" does. A comparison
 against a figure below must either recompute that figure the same way or apply the original
 reading to both windows.
 
@@ -190,8 +191,8 @@ because the denominator grows faster. The post-#510 comparison under both readin
 
 ### The queries
 
-Queries 1 and 2 read the window `[start_ms, end_ms)` from one `VALUES` row; Query 3 reads it
-from the one-row temp table `p`. The values below are the pre-#510 baseline window,
+Queries 1 and 2 read the window `[start_ms, end_ms)` from one `VALUES` row; Queries 3, 3c and 4 read
+it from the one-row temp table `p`. The values in Queries 1 to 3c are the pre-#510 baseline window,
 2026-10-01 19:13:49 UTC to 2026-10-15 19:13:49 UTC. It ends at the deploy: the deploy script
 rewrote the production pin at 19:13:49 UTC, 51 seconds after PR #510 merged. Run each with
 `sqlite3 -readonly ~/.config/better-ccflare/better-ccflare.db < query.sql`.
@@ -405,6 +406,198 @@ FROM par, base
 GROUP BY 1, 2 ORDER BY 1, 2;
 ```
 
+Query 3c is Query 3 under the corrected timestamp reading (see the timestamp note), and it
+reports both gap buckets. It reproduces this doc's corrected figures for to-higher-band
+remaps (kinds 4 and 5):
+
+| Window | Under 5 minutes | 5–60 minutes |
+|---|---:|---:|
+| Baseline | 117 (19.84M) | 36 (5.56M) |
+| Post-#510 | 327 (46.57M) | 124 (17.37M) |
+
+For the post-#510 window, set `p` to `1792091629000, 1793301229000`. It took about 45 seconds
+per window on the production database on 2026-10-31.
+
+```sql
+.headers on
+.mode column
+-- Query 3c: Query 3 under the corrected timestamp reading, for both gap buckets.
+-- start = timestamp - response_time_ms, end = timestamp. Rows are ordered by start, a pair
+-- is sequential when no earlier request of the partition ends after this one starts, and the
+-- idle gap runs start to start, which is the warm-owner hold's clock.
+-- Window: [start_ms, end_ms) on save time. Edit the p row only. Temp tables work under -readonly.
+CREATE TEMP TABLE p AS SELECT 1790882029000 start_ms, 1792091629000 end_ms;
+
+CREATE TEMP TABLE rc AS
+WITH b AS (
+  SELECT r.id, r.client_session_id sid, r.model,
+         r.timestamp - COALESCE(r.response_time_ms, 0) st, r.timestamp en,
+         r.account_used acct, COALESCE(r.failover_attempts, 0) fa,
+         COALESCE(r.input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)
+           + COALESCE(r.cache_creation_input_tokens, 0) total,
+         COALESCE(r.cache_read_input_tokens, 0) cr,
+         COALESCE(r.cache_creation_input_tokens, 0) cc
+  FROM requests r JOIN accounts a ON a.id = r.account_used, p
+  WHERE a.provider = 'anthropic' AND r.success = 1
+    AND r.client_session_id IS NOT NULL
+    AND r.timestamp >= p.start_ms AND r.timestamp < p.end_ms
+)
+SELECT *, LAG(acct) OVER w prev_acct, LAG(st) OVER w prev_st,
+       MAX(en) OVER (PARTITION BY sid, model ORDER BY st, id
+                     ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) prior_end
+FROM b WINDOW w AS (PARTITION BY sid, model ORDER BY st, id);
+
+CREATE TEMP TABLE sq AS
+SELECT id, sid, model, st, acct, prev_acct, total, cr, cc, st - prev_st gap
+FROM rc
+WHERE prev_acct IS NOT NULL AND fa = 0 AND (prior_end IS NULL OR prior_end <= st)
+  AND st - prev_st < 3600000;
+
+CREATE TEMP TABLE snap AS
+SELECT account_id, timestamp / 3600000 hb, MAX(utilization) u, MAX(resets_at) rs
+FROM usage_snapshots, p
+WHERE window_key = 'seven_day'
+  AND timestamp >= p.start_ms - 86400000 AND timestamp < p.end_ms
+GROUP BY 1, 2;
+
+CREATE TEMP TABLE sw AS
+WITH rated AS (
+  SELECT sq.*, CASE WHEN gap < 300000 THEN 'a <5m' ELSE 'b 5-60m' END g,
+         (100 - so.u) / MAX((so.rs - sq.st) / 3600000.0, 0.01) rate_old,
+         (100 - sn.u) / MAX((sn.rs - sq.st) / 3600000.0, 0.01) rate_new
+  FROM sq
+  LEFT JOIN snap so ON so.account_id = sq.prev_acct AND so.hb = sq.st / 3600000
+  LEFT JOIN snap sn ON sn.account_id = sq.acct AND sn.hb = sq.st / 3600000
+)
+SELECT g, id, sid, model, st, acct, prev_acct, total, cr, cc,
+  CASE WHEN acct = prev_acct THEN 'same'
+       WHEN rate_old IS NULL OR rate_new IS NULL THEN 'unknown'
+       WHEN (CASE WHEN rate_new >= 4 THEN 5 WHEN rate_new >= 2 THEN 4 WHEN rate_new >= 1 THEN 3
+                  WHEN rate_new >= 0.5 THEN 2 WHEN rate_new >= 0.25 THEN 1 ELSE 0 END)
+          > (CASE WHEN rate_old >= 4 THEN 5 WHEN rate_old >= 2 THEN 4 WHEN rate_old >= 1 THEN 3
+                  WHEN rate_old >= 0.5 THEN 2 WHEN rate_old >= 0.25 THEN 1 ELSE 0 END)
+       THEN 'to-higher-band' ELSE 'same-or-lower-band' END cls
+FROM rated;
+
+-- Baseline per bucket: mean cache writes of same-account sequential pairs. The rate
+-- denominator is every sequential non-failover pair of the bucket.
+CREATE TEMP TABLE base AS
+SELECT g, AVG(CASE WHEN cls = 'same' THEN cc END) b, COUNT(*) pairs FROM sw GROUP BY g;
+DELETE FROM sw WHERE cls = 'same';
+
+-- Candidate parents: every successful Anthropic request of those sessions, saved from three
+-- hours before the window, because a long request is saved well after it starts.
+CREATE TEMP TABLE cand AS
+SELECT r.id, r.client_session_id sid, r.model,
+       r.timestamp - COALESCE(r.response_time_ms, 0) st, r.timestamp en, r.account_used acct,
+       COALESCE(r.input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)
+         + COALESCE(r.cache_creation_input_tokens, 0) total
+FROM requests r JOIN accounts a ON a.id = r.account_used, p
+WHERE a.provider = 'anthropic' AND r.success = 1
+  AND r.timestamp >= p.start_ms - 10800000 AND r.timestamp < p.end_ms
+  AND r.client_session_id IN (SELECT DISTINCT sid FROM sw);
+CREATE INDEX temp.cand_sm ON cand(sid, model, st);
+
+-- Conversation parent: the latest earlier request in the same session and model that had
+-- finished by this one's start and whose prompt total this one extends by at most 10% + 20k.
+CREATE TEMP TABLE par AS
+SELECT s.*,
+  (SELECT q.acct FROM cand q
+   WHERE q.sid = s.sid AND q.model = s.model AND q.st < s.st AND q.st >= s.st - 3600000
+     AND q.en <= s.st AND q.id <> s.id
+     AND q.total <= s.total AND s.total <= q.total * 1.10 + 20000
+   ORDER BY q.st DESC LIMIT 1) parent_acct
+FROM sw s;
+
+SELECT par.g, cls,
+  CASE WHEN parent_acct = acct THEN '1 not a remap: parent already on the new account'
+       WHEN cr >= 0.5 * total THEN '2 not a remap: new account already warm'
+       WHEN parent_acct IS NULL THEN '3 not a remap: no continuation parent'
+       WHEN parent_acct = prev_acct THEN '4 remap: off the previous account'
+       ELSE '5 remap: off a third account' END kind,
+  COUNT(*) n,
+  ROUND(1000.0 * COUNT(*) / base.pairs, 2) per_1k_pairs,
+  ROUND(SUM(MAX(cc - base.b, 0)) / 1e6, 2) excess_M,
+  ROUND(SUM(MAX(cc - base.b, 0)) / base.pairs) excess_per_pair,
+  ROUND(base.b) baseline_per_req,
+  base.pairs pairs
+FROM par JOIN base ON base.g = par.g
+GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;
+```
+
+Query 4 classifies affinity-lane owner transitions from the `affinityLane` records that
+every routing summary has carried since #661. With the window shown, it produced the
+lane-record counts in "Result for the post-#510 window", in under a second. Read its classes
+within these limits:
+
+- **End-of-request state.** Each record is the lane's state when a request ended. Requests
+  that overlap on one lane interleave, so ordering by `observedAt` can pair records out of
+  order.
+- **Idle time can be overstated.** `asg - pasg` overstates the old owner's idle time when a
+  request that selected it was still running.
+- **Class 5 is mixed.** It holds both failovers and fresh assignments after an expired or
+  evicted entry, because both change the owner without setting `upgradedAt`.
+- **Classes 4c and 4e are ambiguous.** They are the patterns a hold that failed to engage
+  would leave, but a tier or fallback-rung recovery leaves 4e too. The records cannot tell
+  those apart, or a pace-band outclass from a tier or rung one. Issue #663 tracks recording
+  that.
+- **Dropped rows leave gaps.** A turn whose row the async writer dropped leaves a gap in the
+  lane's sequence.
+
+```sql
+.headers on
+.mode column
+-- Query 4: classify affinity-lane owner transitions from the affinityLane records that every
+-- routing summary carries since #661 (first backend start writing them: 2026-10-30 23:06:11 UTC,
+-- processStartedAt 1793401571642). Each record is the lane's owner state at the end of one
+-- request, so diffing it against the lane's previous record shows what changed in between.
+-- Window: [start_ms, end_ms) on save time. Edit the p row only. Temp tables work under -readonly.
+CREATE TEMP TABLE p AS SELECT 1793401571642 start_ms, 1793414310000 end_ms;
+
+CREATE TEMP TABLE lr AS
+SELECT r.id, a.provider prov,
+  json_extract(r.routing_attempt_summary, '$.processStartedAt') ps,
+  json_extract(r.routing_attempt_summary, '$.affinityLane.digest') dg,
+  json_extract(r.routing_attempt_summary, '$.affinityLane.observedAt') obs,
+  json_extract(r.routing_attempt_summary, '$.affinityLane.owner.candidateId') cand,
+  json_extract(r.routing_attempt_summary, '$.affinityLane.owner.assignedAt') asg,
+  json_extract(r.routing_attempt_summary, '$.affinityLane.owner.upgradedAt') upg,
+  json_extract(r.routing_attempt_summary, '$.affinityLane.owner.pressureHoldSince') phs,
+  json_extract(r.routing_attempt_summary, '$.affinityLane.owner.fallbackCandidateId') fb
+FROM requests r LEFT JOIN accounts a ON a.id = r.account_used, p
+WHERE r.timestamp >= p.start_ms AND r.timestamp < p.end_ms
+  AND instr(r.routing_attempt_summary, '"affinityLane"') > 0;
+
+CREATE TEMP TABLE tr AS
+SELECT *, LAG(cand) OVER w pcand, LAG(asg) OVER w pasg, LAG(phs) OVER w pphs,
+       LAG(ps) OVER w pps, LAG(obs) OVER w pobs
+FROM lr WHERE dg IS NOT NULL
+WINDOW w AS (PARTITION BY dg ORDER BY obs, id);
+
+-- An owner change is a changed candidate id. An outclass sets upgradedAt equal to the new
+-- assignedAt; a failover, or a fresh assignment after an expired or evicted entry, leaves it
+-- unset. asg - pasg is the old owner's idle time on the hold's clock; asg - pphs is how long
+-- the hold had run.
+SELECT prov,
+  CASE WHEN pobs IS NULL THEN '0 first record of lane in window'
+       WHEN cand IS NULL THEN '1 tombstone'
+       WHEN pcand IS NULL THEN '2 install after tombstone'
+       WHEN cand = pcand AND phs IS NOT NULL THEN '3a kept, warm hold'
+       WHEN cand = pcand AND fb IS NOT NULL THEN '3b kept, fallback serving'
+       WHEN cand = pcand THEN '3c kept'
+       WHEN upg IS NULL THEN '5 owner changed, no upgradedAt'
+       WHEN upg <> asg THEN '6 owner changed, upgradedAt <> assignedAt'
+       WHEN pphs IS NOT NULL AND asg - pphs >= 1800000 THEN '4a outclass, hold at 30 min cap'
+       WHEN pphs IS NOT NULL AND asg - pasg >= 300000 THEN '4b outclass, hold released at 5 min idle'
+       WHEN pphs IS NOT NULL THEN '4c outclass, held owner active < 5 min'
+       WHEN asg - pasg >= 300000 THEN '4d outclass, owner idle >= 5 min, no hold'
+       ELSE '4e outclass, owner active < 5 min, no hold' END cls,
+  CASE WHEN ps IS NULL OR pps IS NULL THEN 'n/a'
+       WHEN ps <> pps THEN 'straddles a start' ELSE 'same process' END proc,
+  COUNT(*) n
+FROM tr GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;
+```
+
 ## Why This Matters
 
 Each filter changes the decision the number supports. Sized from the raw count, the
@@ -540,7 +733,7 @@ router's own banding to Query 3's split, and assigns each row to the first class
 3. Compare Query 3's to-higher-band remap rows (kinds 4 and 5), not Query 2's row counts.
    Use the per-1,000-pairs rate and the excess per pair, because traffic volume changes.
    The baseline is 1.19 remaps per 1,000 pairs and 163 excess tokens per pair under the
-   original reading, or 0.86 and 146 under the corrected one (see the timestamp note).
+   original reading, or 0.86 and 146 under the corrected one (Query 3c; see the timestamp note).
    Compare like with like.
 4. Count upstream starts in the post-deploy window and set them beside the baseline's 56
    (over the 12.8 days of the baseline window that the journal retained).
@@ -591,8 +784,8 @@ Measured 2026-10-30 over the step 2 window.
   can belong to another lane. A remap in the under-five-minute bucket can therefore be a lane
   that was idle for longer. This alone does not explain a rise, since both windows mix lanes
   this way.
-- **The first lane records show the hold engaging.** This is a first pass over the
-  `affinityLane` records of the 3.5 hours after the 2026-10-30 23:06 UTC start.
+- **The first lane records show the hold engaging.** Query 4 read the `affinityLane`
+  records saved in the 3.5 hours after the 2026-10-30 23:06 UTC start.
   - 482 records kept the owner under an active hold.
   - Each record's owner was diffed against the lane's previous record. That found 37
     owner changes on Anthropic lanes, all outclass moves (`upgradedAt` equal to `assignedAt`):
@@ -604,7 +797,7 @@ Measured 2026-10-30 over the step 2 window.
     the pattern a hold that failed to engage would leave. Three and a half hours is a small
     sample, and no lane records exist for the 2026-10-15 to 10-29 window.
   - What raised the 2026-10-15 to 10-29 rate is not recorded in the `requests` table.
-    Issue #663 tracks recording it, starting with a classifier over these records.
+    Issue #663 tracks recording it, starting with Query 4 over a longer window.
 
 ## Related
 
