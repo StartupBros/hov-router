@@ -2474,10 +2474,14 @@ OAuth tokens will need to be re-authenticated.
 			return;
 		}
 
+		// The worker's own connection would otherwise commit at the compile
+		// default (FULL), fsyncing the WAL inside the writer-slot hold whatever
+		// durability this connection was configured for.
 		const result = await this.maintenanceOwner.run({
 			dbPath: this.resolvedDbPath,
 			pages,
 			kind: "vacuum",
+			synchronous: this.dbConfig.synchronous,
 		});
 		if (result.ok) {
 			this.incVacuumConsecutiveSkips = 0;
