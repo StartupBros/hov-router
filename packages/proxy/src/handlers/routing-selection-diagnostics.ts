@@ -6,6 +6,7 @@ import type {
 	RoutingSelectionStage,
 	RoutingSelectionStageEvidence,
 } from "@better-ccflare/types/request";
+import { readForcedAccountHeader } from "../force-account-header";
 
 /**
  * Shared bounds for request-local routing diagnostics. These values are
@@ -288,7 +289,7 @@ function currentRoutingConstraints(
 	return {
 		forcedRoute:
 			meta.forcedAccountId != null ||
-			meta.headers?.has("x-better-ccflare-account-id") === true,
+			readForcedAccountHeader(meta.headers) !== null,
 		capabilityProfile:
 			meta.routeProfileSelection === "capability" ||
 			meta.routeProfileSelection === "implicit-codex",
