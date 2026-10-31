@@ -3844,6 +3844,22 @@ describe("prewarmed native catalogs", () => {
 		expect(await service.status(scope)).toEqual(before);
 	});
 
+	it("treats an empty exact-account header as no account override", async () => {
+		// An empty value is present to has() but "" to get(), and the selector's
+		// force decision reads get(), so it forces nothing. It must not count as
+		// a conflicting hard route either.
+		await (await send()).text();
+		await flush();
+		const response = await send(
+			request(undefined, { "x-better-ccflare-account-id": "" }),
+		);
+		expect(response.status).toBe(200);
+		await response.text();
+		await flush();
+		expect(sends).toHaveLength(2);
+		expect(sends[1]).toEqual(sends[0]);
+	});
+
 	it.each([
 		"principal",
 		"session",

@@ -46,6 +46,7 @@ import {
 	isClaudeCodeSubagent,
 } from "./claude-code-request";
 import { getCodexAutoCatalogEvidence } from "./codex-model-catalog";
+import { readForcedAccountHeader } from "./force-account-header";
 import {
 	isAnthropicDegradedSendDenied,
 	isPreparedProxyAccountResponse,
@@ -522,7 +523,7 @@ export async function routeQualityRequest(input: {
 			return null;
 		}
 		if (
-			req.headers.has("x-better-ccflare-account-id") ||
+			readForcedAccountHeader(req.headers) !== null ||
 			model?.startsWith("claude-bccf-route-") ||
 			body.getModel()?.startsWith("claude-bccf-route-")
 		)

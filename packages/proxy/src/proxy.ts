@@ -84,6 +84,7 @@ import {
 	resolveImplicitCodexRoute,
 } from "./codex-implicit-route";
 import { reportCatalogRoleRouteFailClosed } from "./codex-model-catalog";
+import { readForcedAccountHeader } from "./force-account-header";
 import {
 	type AgentInterceptResult,
 	createContextAdmissionTracker,
@@ -1612,7 +1613,7 @@ async function handleProxyCoreImpl(
 				: "no_eligible_candidates";
 		const forcedRoute =
 			requestMeta.forcedAccountId != null ||
-			requestMeta.headers?.has("x-better-ccflare-account-id") === true;
+			readForcedAccountHeader(requestMeta.headers) !== null;
 		return {
 			mode: existing?.mode ?? ctx.implicitFallbackPolicy?.mode ?? "off",
 			structuralCandidateCount,
@@ -1903,6 +1904,7 @@ async function handleProxyCoreImpl(
 			originalEligible: originalWebSearchHelperEligible,
 			body: finalParsedBody,
 			resolution: modelRouteResolution,
+			// Presence, not value: an empty header also disables the helper (#645).
 			publicForceAccount: req.headers.has("x-better-ccflare-account-id"),
 		});
 	}
@@ -2642,7 +2644,7 @@ async function handleProxyCoreImpl(
 		: null;
 	const requestedForcedAccountId =
 		requestMeta.forcedAccountId?.trim() ||
-		req.headers.get("x-better-ccflare-account-id")?.trim() ||
+		readForcedAccountHeader(req.headers) ||
 		null;
 	const successfullyForceRouted =
 		requestedForcedAccountId !== null &&
