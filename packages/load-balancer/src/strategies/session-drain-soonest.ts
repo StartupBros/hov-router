@@ -184,7 +184,12 @@ export class SessionDrainSoonestStrategy extends SessionAffinityStrategy {
 		if (reset === null || reset === undefined || !Number.isFinite(reset)) {
 			return null;
 		}
-		return reset > now ? reset : null;
+		if (reset <= now) return null;
+		// Providers report the same reset instant with up to ~1.5s of jitter that
+		// can straddle a minute boundary. Round to the nearest minute so the reset
+		// only decides the order when the minutes differ, and the later criteria
+		// (active session, preference, utilization) still break near-ties.
+		return Math.round(reset / 60_000) * 60_000;
 	}
 
 	private isEligibleAutoFallback(account: Account, now: number): boolean {

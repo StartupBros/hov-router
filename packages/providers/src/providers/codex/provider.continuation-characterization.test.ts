@@ -227,7 +227,7 @@ describe("Codex transform — subagent (Task) tool_result fidelity", () => {
 			expect((o.output as string).length).toBeGreaterThan(0);
 	});
 
-	test("non-text image tool_result uses a bounded placeholder", async () => {
+	test("image tool_result travels as input_image, not a placeholder", async () => {
 		const body = await transform({
 			model: "claude-opus-4-8",
 			max_tokens: 10,
@@ -259,10 +259,13 @@ describe("Codex transform — subagent (Task) tool_result fidelity", () => {
 			],
 		});
 		const out = outputs(body.input)[0];
-		expect(out?.output).toBe(
-			"[image content not supported in Codex tool results]",
-		);
-		expect(out?.output).not.toContain("AAAA");
+		expect(out?.output).toEqual([
+			{
+				type: "input_image",
+				image_url: "data:image/png;base64,AAAA",
+				detail: "high",
+			},
+		]);
 	});
 
 	test("tool_reference result blocks are preserved as JSON", async () => {

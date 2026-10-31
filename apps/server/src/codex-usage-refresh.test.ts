@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { usageCache } from "@better-ccflare/providers";
 import type { Account } from "@better-ccflare/types";
-import { refreshCodexUsageFromMetadata } from "./server";
+import {
+	formatUsageWindowDisplay,
+	refreshCodexUsageFromMetadata,
+} from "./server";
 
 const originalFetch = globalThis.fetch;
 const account = {
@@ -240,5 +243,20 @@ describe("manual Codex metadata refresh (fake transport)", () => {
 			),
 		).toBeNull();
 		expect(usageCache.getSnapshot(account.id)).toBeNull();
+	});
+});
+
+describe("formatUsageWindowDisplay", () => {
+	// The ping refresh path reads UsageData windows, which are null when Codex
+	// did not report the window. A missing window is unknown, not 0% used.
+	it("shows an unreported window as unavailable rather than 0%", () => {
+		expect(formatUsageWindowDisplay(null)).toBe("unavailable");
+		expect(formatUsageWindowDisplay(undefined)).toBe("unavailable");
+	});
+
+	it("shows a reported utilization, including zero, as a percentage", () => {
+		expect(formatUsageWindowDisplay(0)).toBe("0%");
+		expect(formatUsageWindowDisplay(42)).toBe("42%");
+		expect(formatUsageWindowDisplay(100)).toBe("100%");
 	});
 });

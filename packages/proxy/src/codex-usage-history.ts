@@ -42,10 +42,11 @@ export function resetCodexUsageHistoryThrottle(): void {
 
 /**
  * Keep only windows that carry both a real percentage and a real reset.
- * `parseCodexUsageHeaders` fills a window missing from the headers with
- * `{ utilization: defaultUtilization, resets_at: null }`, so a `resets_at` of
- * null is the tell for a synthetic window. Recording those would poison the
- * history with zeros that read as "nothing was used this week".
+ * The filter is "no reset was recorded", not "this window is synthetic".
+ * `parseCodexUsageHeaders` returns `null` for a window upstream never reported,
+ * and a null value is rejected by the object check below. What this still drops
+ * is a genuinely reported window whose reset header was absent or unparseable:
+ * a history row with no reset cannot be placed on a window boundary.
  */
 function realWindows(usage: Record<string, unknown>): Record<string, unknown> {
 	const out: Record<string, unknown> = {};

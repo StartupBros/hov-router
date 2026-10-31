@@ -7,7 +7,10 @@ import {
 	registerManagedTerminal,
 	signManagedTiming,
 } from "../../../scripts/ccflare-managed-timing.mjs";
-import { createManagedIngress } from "./managed-ingress";
+import {
+	createManagedIngress,
+	malformedRequestUrlResponse,
+} from "./managed-ingress";
 
 const secret = randomBytes(32),
 	nonce = "a".repeat(32),
@@ -339,4 +342,52 @@ test("committed non-stream Responses compact closes with typed accepted failure"
 		"Accepted request deadline expired",
 	);
 	expect(cause).toBe("accepted_request_deadline");
+});
+
+// Bun hands the fetch handler a bare path as req.url for a Host-less HTTP/1.0
+// request, and `new Request()` refuses to build one, so fake it.
+function hostLessRequest(): Request {
+	return {
+		url: "/board.cgi?cmd=x",
+		method: "GET",
+		headers: new Headers(),
+	} as unknown as Request;
+}
+test("malformedRequestUrlResponse is a 400 invalid_request_error", async () => {
+	const response = malformedRequestUrlResponse();
+	expect(response.status).toBe(400);
+	expect(response.headers.get("content-type")).toBe("application/json");
+	expect(await response.json()).toEqual({
+		type: "error",
+		error: {
+			type: "invalid_request_error",
+			message: "Malformed request URL",
+		},
+	});
+});
+test("a Host-less request is answered 400 and never reaches the handler when managed", async () => {
+	const f = fixture();
+	let calls = 0;
+	const response = await f.ingress(hostLessRequest(), async () => {
+		calls++;
+		return new Response("done");
+	});
+	expect(response.status).toBe(400);
+	expect(calls).toBe(0);
+});
+test("a Host-less request is answered 400 and never reaches the handler when unmanaged", async () => {
+	const ingress = createManagedIngress({
+		enabled: false,
+		generation: 1,
+		candidateNonce: "",
+		ingressNonce: "",
+		sourceSha: "",
+	});
+	let calls = 0;
+	const response = await ingress(hostLessRequest(), async () => {
+		calls++;
+		return new Response("done");
+	});
+	expect(response.status).toBe(400);
+	expect(calls).toBe(0);
 });

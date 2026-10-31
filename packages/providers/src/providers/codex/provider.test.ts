@@ -10391,8 +10391,64 @@ describe("parseCodexUsageHeaders", () => {
 
 		expect(parseCodexUsageHeaders(headers)).toEqual({
 			five_hour: { utilization: 12, resets_at: null },
-			seven_day: { utilization: 0, resets_at: null },
+			// Upstream reported no weekly window, so the slot is null rather than a
+			// fabricated zero.
+			seven_day: null,
 		});
+	});
+});
+
+describe("parseCodexUsageHeaders absent windows", () => {
+	const bothWindows = () =>
+		new Headers({
+			"x-codex-primary-used-percent": "11",
+			"x-codex-primary-window-minutes": "10080",
+			"x-codex-primary-reset-at": "1775000000",
+			"x-codex-secondary-used-percent": "4",
+			"x-codex-secondary-window-minutes": "300",
+			"x-codex-secondary-reset-at": "1774600000",
+		});
+
+	const weeklyOnly = () =>
+		new Headers({
+			"x-codex-primary-used-percent": "87",
+			"x-codex-primary-window-minutes": "10080",
+			"x-codex-primary-reset-at": "1775000000",
+		});
+
+	it("reports both windows when upstream reported both", () => {
+		const usage = parseCodexUsageHeaders(bothWindows());
+		expect(usage?.five_hour).toEqual({
+			utilization: 4,
+			resets_at: new Date(1774600000 * 1000).toISOString(),
+		});
+		expect(usage?.seven_day).toEqual({
+			utilization: 11,
+			resets_at: new Date(1775000000 * 1000).toISOString(),
+		});
+	});
+
+	it("leaves five_hour null when upstream reported only the weekly window", () => {
+		const usage = parseCodexUsageHeaders(weeklyOnly());
+		expect(usage?.five_hour).toBeNull();
+		expect(usage?.seven_day).toEqual({
+			utilization: 87,
+			resets_at: new Date(1775000000 * 1000).toISOString(),
+		});
+	});
+
+	it("keeps both keys present so the usage-throttling shape guard still matches", () => {
+		const usage = parseCodexUsageHeaders(weeklyOnly());
+		expect(usage).not.toBeNull();
+		expect("five_hour" in (usage as object)).toBe(true);
+		expect("seven_day" in (usage as object)).toBe(true);
+	});
+
+	it("does not fabricate a window from a non-zero defaultUtilization", () => {
+		const usage = parseCodexUsageHeaders(weeklyOnly(), {
+			defaultUtilization: 100,
+		});
+		expect(usage?.five_hour).toBeNull();
 	});
 });
 

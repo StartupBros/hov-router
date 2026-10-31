@@ -19,6 +19,7 @@ import {
 	intervalManager,
 	MemoryMonitor,
 	NETWORK,
+	parseRequestUrl,
 	registerCleanup,
 	registerDisposable,
 	setForceAccountModel,
@@ -142,7 +143,10 @@ import {
 	formatEventLoopStallReport,
 } from "./event-loop-stall-monitor";
 import { createHostCounterReader } from "./host-counters";
-import { createManagedIngress } from "./managed-ingress";
+import {
+	createManagedIngress,
+	malformedRequestUrlResponse,
+} from "./managed-ingress";
 import {
 	describeRetentionSweepStop,
 	type RetentionSweepPacer,
@@ -276,6 +280,16 @@ export async function persistForwardOnlyCodexRateLimitReset(
 	);
 }
 
+/**
+ * Dashboard and log text for one usage window. A window Codex did not report
+ * is unknown, so it reads "unavailable" rather than a fabricated 0%.
+ */
+export function formatUsageWindowDisplay(
+	utilization: number | null | undefined,
+): string {
+	return utilization == null ? "unavailable" : `${utilization}%`;
+}
+
 /** Refresh metadata without consuming inference quota; null requests the ping fallback. */
 export async function refreshCodexUsageFromMetadata(
 	account: Account,
@@ -387,8 +401,8 @@ export async function refreshCodexUsageFromMetadata(
 			typeof weekly.utilization === "number"
 				? weekly.utilization
 				: null;
-		const fiveHourDisplay = fiveHour === null ? "unavailable" : `${fiveHour}%`;
-		const sevenDayDisplay = sevenDay === null ? "unavailable" : `${sevenDay}%`;
+		const fiveHourDisplay = formatUsageWindowDisplay(fiveHour);
+		const sevenDayDisplay = formatUsageWindowDisplay(sevenDay);
 		// The free endpoint reports quota utilization but knows nothing of
 		// live cooldowns on the responses endpoint (429/529 set
 		// rate_limited_until via real traffic). The old ping-based path
@@ -2316,11 +2330,16 @@ export default async function startServer(options?: {
 			true,
 		);
 
-		const fiveHour = fetchResult.data.five_hour?.utilization ?? 0;
-		const sevenDay = fetchResult.data.seven_day?.utilization ?? 0;
+		// A window Codex did not report is null (unknown), never 0% used.
+		const fiveHour = formatUsageWindowDisplay(
+			fetchResult.data.five_hour?.utilization,
+		);
+		const sevenDay = formatUsageWindowDisplay(
+			fetchResult.data.seven_day?.utilization,
+		);
 		const isRateLimited = fetchResult.response.status === 429;
 		log.info(
-			`Codex usage refreshed for '${account.name}' via ${pingModel}: 5h=${fiveHour}%, 7d=${sevenDay}%${
+			`Codex usage refreshed for '${account.name}' via ${pingModel}: 5h=${fiveHour}, 7d=${sevenDay}${
 				isRateLimited ? " (rate-limited)" : ""
 			}`,
 		);
@@ -2330,8 +2349,8 @@ export default async function startServer(options?: {
 		// otherwise the operator sees "refreshed successfully" while the
 		// account is fully exhausted. See tombii's PR #219 review note.
 		const message = isRateLimited
-			? `Usage refreshed for '${account.name}' — account is rate limited (5h: ${fiveHour}%, 7d: ${sevenDay}%).`
-			: `Usage refreshed for '${account.name}' (5h: ${fiveHour}%, 7d: ${sevenDay}%).`;
+			? `Usage refreshed for '${account.name}' — account is rate limited (5h: ${fiveHour}, 7d: ${sevenDay}).`
+			: `Usage refreshed for '${account.name}' (5h: ${fiveHour}, 7d: ${sevenDay}).`;
 
 		return {
 			success: true,
@@ -2403,7 +2422,10 @@ export default async function startServer(options?: {
 				: {}),
 			async fetch(original: Request): Promise<Response> {
 				return managedIngress(original, async (req) => {
-					const url = new URL(req.url);
+					// Host-less scanner requests leave req.url as a bare path that
+					// new URL() rejects; answer 400 before any routing.
+					const url = parseRequestUrl(req.url);
+					if (!url) return malformedRequestUrlResponse();
 
 					// Serve the dashboard SPA + static assets BEFORE the
 					// authentication-gated API router. The dashboard shell is

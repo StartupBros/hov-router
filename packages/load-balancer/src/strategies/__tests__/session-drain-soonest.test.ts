@@ -140,6 +140,78 @@ describe("SessionDrainSoonestStrategy", () => {
 		]);
 	});
 
+	it("treats weekly resets under a minute apart as a tie that falls to the next criterion", async () => {
+		// Providers report the same reset instant with jitter that can straddle a
+		// minute boundary; raw milliseconds would let it outrank the later
+		// criteria. Strict mode ranks by utilization once the reset ties.
+		const strict = new SessionDrainSoonestStrategy(undefined, "strict");
+		strict.initialize(store);
+		const boundary =
+			Math.ceil((Date.now() + 2 * 60 * 60 * 1000) / 60_000) * 60_000;
+		const earlierBusier = makeAccount({ id: "earlier-busier", priority: 0 });
+		const laterIdler = makeAccount({ id: "later-idler", priority: 0 });
+		store.weeklyResets.set("earlier-busier", boundary - 368);
+		store.weeklyResets.set("later-idler", boundary + 319);
+		store.utilization.set("earlier-busier", 80);
+		store.utilization.set("later-idler", 10);
+
+		const ordered = await strict.select([earlierBusier, laterIdler], meta());
+
+		expect(ordered.map((account) => account.id)).toEqual([
+			"later-idler",
+			"earlier-busier",
+		]);
+	});
+
+	it("still orders by weekly reset when the resets are a full minute apart", async () => {
+		const strict = new SessionDrainSoonestStrategy(undefined, "strict");
+		strict.initialize(store);
+		const boundary =
+			Math.ceil((Date.now() + 2 * 60 * 60 * 1000) / 60_000) * 60_000;
+		const earlierBusier = makeAccount({ id: "earlier-busier", priority: 0 });
+		const laterIdler = makeAccount({ id: "later-idler", priority: 0 });
+		store.weeklyResets.set("earlier-busier", boundary);
+		store.weeklyResets.set("later-idler", boundary + 60_000);
+		store.utilization.set("earlier-busier", 80);
+		store.utilization.set("later-idler", 10);
+
+		const ordered = await strict.select([laterIdler, earlierBusier], meta());
+
+		expect(ordered.map((account) => account.id)).toEqual([
+			"earlier-busier",
+			"later-idler",
+		]);
+	});
+
+	it("lets a higher pace band outrank an earlier weekly reset", async () => {
+		const boundary =
+			Math.ceil((Date.now() + 2 * 60 * 60 * 1000) / 60_000) * 60_000;
+		const coldEarlier = makeAccount({ id: "cold-earlier", priority: 0 });
+		const criticalLater = makeAccount({ id: "critical-later", priority: 0 });
+		store.weeklyResets.set("cold-earlier", boundary);
+		store.weeklyResets.set("critical-later", boundary + 24 * 60 * 60 * 1000);
+		const request = {
+			...meta(),
+			quotaPressureByAccountId: new Map([
+				["cold-earlier", { band: "cold" as const, comparisonKey: "weekly" }],
+				[
+					"critical-later",
+					{ band: "critical" as const, comparisonKey: "weekly" },
+				],
+			]),
+		} as RequestMeta;
+
+		const ordered = await strategy.select(
+			[coldEarlier, criticalLater],
+			request,
+		);
+
+		expect(ordered.map((account) => account.id)).toEqual([
+			"critical-later",
+			"cold-earlier",
+		]);
+	});
+
 	it("keeps unknown or stale resets behind known future resets", async () => {
 		const now = Date.now();
 		const known = makeAccount({ id: "known", priority: 0 });

@@ -28,6 +28,15 @@ function captureWarnings(fn: () => void): LogEvent[] {
 	return captured;
 }
 
+/**
+ * A request carrying tool history must also define tools, or the translator
+ * rewrites that history as text. Fixtures that assert the tool_use and
+ * tool_result blocks themselves carry this.
+ */
+const HISTORY_TOOLS: ResponsesRequest["tools"] = [
+	{ type: "function", name: "lookup", parameters: {} },
+];
+
 describe("translateRequestToAnthropic", () => {
 	test("simple user message → single messages entry", () => {
 		const req: ResponsesRequest = {
@@ -76,6 +85,7 @@ describe("translateRequestToAnthropic", () => {
 	test("function_call item appended to assistant message", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "message",
@@ -105,6 +115,7 @@ describe("translateRequestToAnthropic", () => {
 	test("function_call_output → new user message with tool_result", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "function_call_output",
@@ -124,6 +135,7 @@ describe("translateRequestToAnthropic", () => {
 	test("mixed conversation: user, assistant+function_call, function_call_output, user", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "message",
@@ -499,6 +511,7 @@ describe("translateRequestToAnthropic", () => {
 	test("function_call with invalid JSON arguments falls back to {}", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "function_call",
@@ -525,6 +538,7 @@ describe("translateRequestToAnthropic", () => {
 		// back to `{}` on the parse failure) even after the field-name fix.
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "custom_tool_call",
@@ -546,6 +560,7 @@ describe("translateRequestToAnthropic", () => {
 	test("custom_tool_call_output → user message with tool_result", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "custom_tool_call_output",
@@ -697,6 +712,7 @@ describe("translateRequestToAnthropic", () => {
 		};
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "message",
@@ -751,6 +767,7 @@ describe("translateRequestToAnthropic", () => {
 	test("local_shell_call_output with call_id → tool_result tool_use_id === call_id", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "local_shell_call_output",
@@ -771,6 +788,7 @@ describe("translateRequestToAnthropic", () => {
 	test("local_shell_call_output with only id (no call_id) → tool_result tool_use_id === id", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "local_shell_call_output",
@@ -878,6 +896,7 @@ describe("translateRequestToAnthropic", () => {
 	test("reasoning after an assistant tool_use is dropped, not merged in as a thinking or extra tool_use block", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				// Establishes a trailing assistant message so the planted-negative
 				// assertions below run against real content — a bare reasoning item
@@ -1045,6 +1064,7 @@ describe("translateRequestToAnthropic", () => {
 	test("local_shell_call missing its action still emits a tool_use with an empty-object input", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "local_shell_call",
@@ -1064,6 +1084,7 @@ describe("translateRequestToAnthropic", () => {
 	test("local_shell_call with a non-object action coerces input to an empty object", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "local_shell_call",
@@ -1252,6 +1273,7 @@ describe("translateRequestToAnthropic", () => {
 	test("local_shell_call with a non-string call_id falls back to the string id", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "local_shell_call",
@@ -1535,6 +1557,7 @@ describe("translateRequestToAnthropic", () => {
 	test("function_call with a grammar-invalid call_id emits a sanitized tool_use id", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "function_call",
@@ -1556,6 +1579,7 @@ describe("translateRequestToAnthropic", () => {
 	test("function_call/function_call_output pairing survives id sanitization — both sides map to the same emitted id", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "function_call",
@@ -1586,6 +1610,7 @@ describe("translateRequestToAnthropic", () => {
 	test("function_call with an already-grammar-valid call_id is emitted unchanged", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "function_call",
@@ -1624,6 +1649,7 @@ describe("translateRequestToAnthropic", () => {
 		expect(new Set(collidingInput.map((i) => i.call_id)).size).toBe(count);
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: collidingInput,
 		};
 		const result = translateRequestToAnthropic(req);
@@ -2014,6 +2040,7 @@ describe("translateRequestToAnthropic", () => {
 	test("keeps only the first call and result for a repeated original function call_id", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "function_call",
@@ -2055,6 +2082,7 @@ describe("translateRequestToAnthropic", () => {
 	test("deduplicates original IDs across function, custom, and local-shell call variants", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "function_call",
@@ -2089,6 +2117,7 @@ describe("translateRequestToAnthropic", () => {
 	test("keeps one sanitized pair when an invalid original ID is repeated", () => {
 		const req: ResponsesRequest = {
 			model: "claude-3-5-sonnet-20241022",
+			tools: HISTORY_TOOLS,
 			input: [
 				{
 					type: "function_call",

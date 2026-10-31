@@ -157,7 +157,7 @@ export {
 } from "./throttle-utils";
 export { TtlCache } from "./ttl-cache";
 export * from "./usage-windows";
-export { levenshteinDistance } from "./utils";
+export { levenshteinDistance, parseRequestUrl } from "./utils";
 export {
 	MAX_MODEL_MAPPING_CANDIDATES,
 	patterns,

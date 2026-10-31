@@ -397,6 +397,12 @@ export async function handleResponsesRequest(
 			],
 		};
 	}
+	// A missing model is left to the downstream handling unchanged; only a
+	// present non-string model is a client error (it would otherwise crash the
+	// translator's model.toLowerCase()).
+	if (body.model !== undefined && typeof body.model !== "string") {
+		return openAiRequestError(400, "model must be a string");
+	}
 	if (body.input.length > MAX_RESPONSES_INPUT_ITEMS) {
 		return openAiRequestError(413, "Too many input items");
 	}

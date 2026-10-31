@@ -267,8 +267,12 @@ export function parseCodexUsageHeaders(
 		return null;
 	}
 
+	// Absent is null, never zeroed: a window upstream did not report is not a
+	// window at zero percent. The key stays present (not omitted) because
+	// usage-throttling.ts gates on `"five_hour" in data && "seven_day" in data`
+	// and reads this object raw out of usageCache.
 	return {
-		five_hour: fiveHour ?? { utilization: defaultUtilization, resets_at: null },
-		seven_day: sevenDay ?? { utilization: defaultUtilization, resets_at: null },
+		five_hour: fiveHour ?? null,
+		seven_day: sevenDay ?? null,
 	};
 }

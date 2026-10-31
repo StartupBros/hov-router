@@ -396,6 +396,34 @@ describe("getUsageThrottleUntil", () => {
 		expect(throttleUntil).toBeGreaterThan(now);
 	});
 
+	it("still throttles a weekly-only Codex payload whose five_hour is null", () => {
+		const now = Date.UTC(2026, 3, 28, 12, 0, 0);
+		const resetAt = new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString();
+
+		const throttleUntil = getUsageThrottleUntil(
+			{
+				five_hour: null,
+				seven_day: { utilization: 100, resets_at: resetAt },
+			},
+			{ fiveHourEnabled: true, weeklyEnabled: true },
+			now,
+		);
+
+		expect(throttleUntil).not.toBeNull();
+		expect(throttleUntil).toBeGreaterThan(now);
+	});
+
+	it("does not throttle on a null window alone", () => {
+		const now = Date.UTC(2026, 3, 28, 12, 0, 0);
+		expect(
+			getUsageThrottleUntil(
+				{ five_hour: null, seven_day: null },
+				{ fiveHourEnabled: true, weeklyEnabled: true },
+				now,
+			),
+		).toBeNull();
+	});
+
 	it("does not throttle when usage is below the pacing line", () => {
 		const now = Date.UTC(2026, 3, 28, 12, 0, 0);
 		const resetAt = new Date(now + 30 * 60 * 1000).toISOString();
