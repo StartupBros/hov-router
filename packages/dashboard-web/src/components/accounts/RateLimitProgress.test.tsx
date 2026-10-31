@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, setSystemTime } from "bun:test";
 import type {
 	AnthropicUsageData,
 	MinimaxUsageData,
+	XaiUsageData,
 } from "@better-ccflare/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RateLimitProgress } from "./RateLimitProgress";
@@ -669,5 +670,27 @@ describe("RateLimitProgress codex extras: code-review row + live countdowns", ()
 		expect(html).toContain("resetting…");
 		expect(html).not.toContain("Ready to refresh");
 		expect(html).not.toContain("resetting… until refresh");
+	});
+});
+
+describe("RateLimitProgress undefined utilization", () => {
+	it("renders N/A, not 'undefined%', when an xAI credits object has no utilization", () => {
+		// `usage.utilization` is declared `number | null`, but usage data crosses
+		// a JSON boundary through a cast, so a credits object that predates the
+		// field yields `undefined`. `undefined !== null` counted the row as
+		// available and printed "undefined%".
+		const reset = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+		const html = renderToStaticMarkup(
+			<RateLimitProgress
+				provider="xai"
+				resetIso={reset}
+				usageUtilization={null}
+				usageData={{ credits: { resets_at: reset } } as unknown as XaiUsageData}
+				showWeekly
+			/>,
+		);
+
+		expect(html).not.toContain("undefined");
+		expect(html).toContain("N/A");
 	});
 });
