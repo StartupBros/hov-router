@@ -59,6 +59,7 @@ import {
 	getCodexCatalogRoleTarget,
 	getKnownCodexModels,
 } from "../codex-model-catalog";
+import { readForcedAccountHeader } from "../force-account-header";
 import { evaluateServerToolReplayEligibility } from "../server-tool-replay-eligibility";
 import {
 	createNativeAnthropicToolRoutingError,
@@ -2485,7 +2486,7 @@ export function isImplicitCodexDiscoveryEligible(
 ): boolean {
 	if (
 		meta.forcedAccountId?.trim() ||
-		meta.headers?.get("x-better-ccflare-account-id") ||
+		readForcedAccountHeader(meta.headers) ||
 		!isAccountEligibleForRouteIntent(account, meta, ctx) ||
 		isProviderExcludedForRequest(account, getExcludedProviders(meta))
 	) {
@@ -2592,7 +2593,7 @@ function setImplicitFallbackSelectionDiagnostics(
 	const existing = meta.routingSelectionDiagnostics;
 	const forcedRoute =
 		meta.forcedAccountId != null ||
-		meta.headers?.has("x-better-ccflare-account-id") === true;
+		readForcedAccountHeader(meta.headers) !== null;
 	const exactPolicyExclusion = policy.mode === "enforce" && eligible === 0;
 	const diagnostics: RoutingSelectionDiagnostics = {
 		mode: policy.mode,
@@ -3389,6 +3390,8 @@ export function isWebSearchHelperCandidateAdmitted(
 			scope.profile.publicModelId,
 			scope.profile,
 		) ||
+		// Presence, not value: any public force header, even an empty one,
+		// keeps the subscription helper off (#645 fail-closed opt-in).
 		meta.headers?.has("x-better-ccflare-account-id") ||
 		!isWebSearchHelperAccountInScope(scope, account.id) ||
 		!isAccountAvailable(account) ||
@@ -3464,9 +3467,7 @@ async function selectAccountsForRequestInternal(
 	// fail-closed semantics as the public header. Never silently choose between
 	// conflicting directives: doing so would make the selected account depend on
 	// an implementation detail instead of either caller's explicit intent.
-	const publicForcedAccountId = meta.headers?.get(
-		"x-better-ccflare-account-id",
-	);
+	const publicForcedAccountId = readForcedAccountHeader(meta.headers);
 	const serverForcedAccountId = meta.forcedAccountId?.trim();
 	const capabilityProfileRoute = isCapabilityRouteSelection(
 		meta.routeProfileSelection,
