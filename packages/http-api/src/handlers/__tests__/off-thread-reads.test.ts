@@ -14,10 +14,13 @@ import { join } from "node:path";
 import type { Config } from "@better-ccflare/config";
 import { normalizeProviderUsageWindows } from "@better-ccflare/core";
 import { DatabaseOperations } from "@better-ccflare/database";
+import { usageCache } from "@better-ccflare/providers";
+import type { AccountResponse } from "@better-ccflare/types";
 import { OffThreadReader } from "../../../../database/src/off-thread-reader";
 import { ExternalUsageRepository } from "../../../../database/src/repositories/external-usage.repository";
 import { AlertService } from "../../services/alerts";
 import type { APIContext } from "../../types";
+import { createAccountsListHandler } from "../accounts";
 import { createAnalyticsHandler } from "../analytics";
 import { createStatsHandler } from "../stats";
 
@@ -249,6 +252,68 @@ describe("heavy read result equivalence", () => {
 			{ timestamp: "vote-1", account_id: "a2", attribution_basis: "vote" },
 			{ timestamp: "vote-2", account_id: "a2", attribution_basis: "vote" },
 		]);
+	});
+	it("recovers Codex usage from stored payload headers on the reader", async () => {
+		const adapter = db.getAdapter();
+		const resetAt = Math.floor(NOW / 1000) + 3600;
+		const payload = (headers: Record<string, string>) =>
+			JSON.stringify({
+				response: { status: 200, headers },
+				meta: { timestamp: NOW - 60_000 },
+			});
+		const codexHeaders = (fiveHour: number, sevenDay: number) => ({
+			"x-codex-primary-window-minutes": "300",
+			"x-codex-primary-used-percent": String(fiveHour),
+			"x-codex-primary-reset-at": String(resetAt),
+			"x-codex-secondary-window-minutes": "10080",
+			"x-codex-secondary-used-percent": String(sevenDay),
+			"x-codex-secondary-reset-at": String(resetAt + 3 * 86400),
+		});
+		// a1's newest request carries the headers. a2's newest has none, so the
+		// scan must walk to the next row. a3 has no payloads at all.
+		for (const [id, json] of [
+			["0-1-0", payload(codexHeaders(12, 34))],
+			["0-2-0", payload({})],
+			["0-2-1", payload(codexHeaders(5, 56))],
+		])
+			await adapter.run(
+				"INSERT INTO request_payloads (id,json,timestamp) VALUES (?,?,?)",
+				[id, json, NOW - 60_000],
+			);
+		const ids = ["a1", "a2", "a3"];
+		const handler = createAccountsListHandler(db, {
+			getUsageThrottlingFiveHourEnabled: () => false,
+			getUsageThrottlingWeeklyEnabled: () => false,
+		} as unknown as Config);
+		const usage = async () => {
+			// After a restart the cache is empty, which is what sends the handler to
+			// the stored payloads.
+			for (const id of ids) usageCache.delete(id);
+			const accounts = (await (await handler()).json()) as AccountResponse[];
+			return ids.map(
+				(id) => accounts.find((account) => account.id === id)?.usageData,
+			);
+		};
+		try {
+			const main = await usage();
+			expect(main[0]).toMatchObject({
+				five_hour: { utilization: 12 },
+				seven_day: { utilization: 34 },
+			});
+			expect(main[1]).toMatchObject({ seven_day: { utilization: 56 } });
+			expect(main[2]).toBeNull();
+			adapter.setOffThreadReader(reader);
+			const mainQuery = spyOn(adapter, "query");
+			const readerAll = spyOn(reader, "all");
+			const worker = await usage();
+			expect(JSON.stringify(worker)).toBe(JSON.stringify(main));
+			const payloadRead = ([sql]: unknown[]) =>
+				/FROM request_payloads/.test(String(sql));
+			expect(mainQuery.mock.calls.filter(payloadRead)).toEqual([]);
+			expect(readerAll.mock.calls.filter(payloadRead)).toHaveLength(3);
+		} finally {
+			for (const id of ids) usageCache.delete(id);
+		}
 	});
 	it("preserves the alerts exhaustion projection after a synchronously committed snapshot", async () => {
 		const adapter = db.getAdapter();

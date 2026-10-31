@@ -219,7 +219,13 @@ async function getCachedOrPersistedCodexUsage(
 			return normalizedCache;
 		}
 	}
-	const rows = await db.query<{ json: string; timestamp: number | null }>(
+	// On the reader thread (#606). After a restart the cache is empty, and on the
+	// main thread this read of a cold page cache was the top statement in the
+	// event-loop stall (19-86 s) that froze the proxy at every backend start.
+	const rows = await db.queryOffThread<{
+		json: string;
+		timestamp: number | null;
+	}>(
 		`SELECT rp.json, COALESCE(rp.timestamp, r.timestamp) as timestamp
 		 FROM request_payloads rp
 		 JOIN requests r ON rp.id = r.id
