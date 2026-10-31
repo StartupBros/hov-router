@@ -349,9 +349,10 @@ recovery rules still apply. An existing Anthropic owner gets a bounded hold
 across the same change: it stays while it served the session's previous turn
 less than 5 minutes ago, for at most 30 minutes, then moves to the higher-band
 account. Owners from providers other than Codex and Anthropic move at once, and
-`session-drain-soonest-strict` is unchanged. The map remains process-local with an idle TTL; restarts and new
-session/lane identities can produce new assignments (see [affinity lifetime
-limits](load-balancing.md#account-and-client-stickiness)).
+`session-drain-soonest-strict` is unchanged. The map remains process-local with an idle TTL. A backend start restores it,
+best-effort, from recent `affinityLane` records; an abandoned restore, helper
+lanes and new session/lane identities can still produce new assignments (see
+[affinity lifetime limits](load-balancing.md#account-and-client-stickiness)).
 
 For Anthropic accounts specifically, a past-reset `rate_limit_reset` that would otherwise sort as "stale telemetry" is also cleared proactively: `accounts.rate_limit_reset_at` (set whenever `rate_limit_reset` is written) lets a compare-and-set update (`clearStaleRateLimitReset`) reset `rate_limit_status`/`rate_limit_reset` back to `allowed` the moment usage polling observes zero utilization with no active weekly window — an out-of-band weekly reset the account's own reset timestamp hadn't caught up to yet. This reduces how often the ranking above has to fall back to "unknown" for an Anthropic account whose window has genuinely rolled over. See [Automatic Recovery](auto-refresh.md#troubleshooting) for the polling side of this.
 

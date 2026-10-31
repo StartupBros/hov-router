@@ -601,8 +601,14 @@ held.
 
 Client/lane affinity is held in a bounded, process-local map, separate from the
 account session counters in the database. An active lane refreshes its idle TTL
-(default five hours), but a restart, strategy replacement, expired or evicted
-entry, or changed session/lane identity can require a new assignment. Sticky
+(default five hours). Each request also records its lane's owner in its routing
+summary, and a backend start rebuilds the map from the records still within the
+TTL before it routes proxied requests; `/health` reports the outcome under
+`routing.affinityRestore`. The restore is best-effort and covers ordinary and
+route-profile lanes under `session-affinity` and sticky `session-drain-soonest`.
+A new assignment can still follow a restore abandoned at its 3-second budget or
+20,000-record cap, a child-home, quality or web-search helper lane, strategy
+replacement, an expired or evicted entry, or a changed session/lane identity. Sticky
 routing therefore preserves an eligible owner within that lifetime; it is not a
 durable account lock or a guarantee that the upstream still has a cached prefix.
 
