@@ -282,14 +282,16 @@ Product Contract preservation: unchanged except that the six Deferred-to-Plannin
 
 - KTD8. **One redemption per dialog, enforced by a stored request id.** (session-settled: user-directed — chosen over "redeem plus opt-in auto-use" and "see only": each irreversible spend stays a person's decision; inherited from the Key Decision that governs R8–R12.) The dialog mints a UUID v4 when it opens and sends it with every attempt, as the Codex TUI does. The server stores a `codex_reset_redemptions` row keyed by that id before it calls OpenAI, then answers by this table. A partial unique index on `account_id`, limited to rows in `pending`, `unknown` or `retryable`, makes the open-row check atomic. The insert ignores conflicts and its affected-row count picks the winner, so two dialogs or two processes cannot both pass. The loser reads the open row and answers 409. A request id reused with a different account or credit id is a conflict. Both rules follow `packages/database/src/repositories/device-setup-job.repository.ts:432-455`. State changes are conditional on the stored state. The endpoint accepts only `Content-Type: application/json` and answers 415 otherwise. A cross-site page can then send it only after a CORS preflight, which this server never answers because it sets no `Access-Control-*` headers. The dashboard already sends that header (`packages/dashboard-web/src/api.ts:289`). Implements R8, R10, R11.
 
+  The server checks these rows in order, and the first match answers. A retry of a stored id is therefore never refused by the R8 gate. On a single-credit account whose answer was lost, the refreshed applicable count may already read 0, and the retry must still resend so it can record the outcome.
+
   | The server finds | It answers |
   |---|---|
-  | Counts stale, or applicable count 0 | 409 with the R8 reason; nothing sent |
-  | No row for the id, and no open row on the account | Inserts `pending`, then calls OpenAI |
   | A row for the id in `done` or `refused` | The stored outcome; nothing sent |
   | A row for the id in `pending`, younger than 60 seconds | 409, redemption in progress |
-  | A row for the id in `pending` older than 60 seconds, `unknown` or `retryable` | Resends the same id and credit id |
+  | A row for the id in `pending` older than 60 seconds, `unknown` or `retryable` | Resends the same id and credit id, whatever the counts now say |
   | A different id while the account has a `pending`, `unknown` or `retryable` row | 409 naming the open id, which the dialog adopts |
+  | No row for the id and no open row, with counts stale or applicable count 0 | 409 with the R8 reason; nothing sent |
+  | No row for the id and no open row, with fresh counts and applicable count above 0 | Inserts `pending`, then calls OpenAI |
 
 - KTD9. **Redemption goes through one registered redeemer that owns token access.** A valid token needs the server's `proxyContext` (`getValidAccessToken`, `server.ts:2197-2220`), which http-api handlers never receive. The force-reset handler falls back to the token stored in the database (`packages/http-api/src/handlers/accounts.ts:3652-3664`); redemption never does, because a stale token on an irreversible spend is wrong. `registerCodexResetRedeemer` sits beside `registerCodexUsageRefresher` (`packages/proxy/src/handlers/token-manager.ts:1261`), but the redeemer registry holds one entry. Dispatch calls exactly that redeemer and never falls through to another, unlike `refreshCodexUsageForAccount`, which tries each registered server in turn (`token-manager.ts:1282-1300`). The server registers it where it registers the usage refresher (`server.ts:2197`) and unregisters it in `stopPeriodicWork` (`server.ts:3277`). With no redeemer registered, as during a backend handoff, the endpoint answers 503 "nothing was sent; try again". After `reset` or `already_redeemed`, the bridge records the outcome first, then awaits `usageCache.refreshNow`, as the force-reset handler does (`packages/http-api/src/handlers/accounts.ts:3649`). It tolerates `refreshNow` returning false. Implements R13, R14.
 - KTD10. **The consume call mirrors the Codex client.** The bridge sends `POST {base}/wham/rate-limit-reset-credits/consume` with `{redeem_request_id, credit_id}`. The credit id is the soonest-expiring available credit from the stored list, with no-expiry credits last, and is stored on the row so a retry reuses it. When the list is empty the key is omitted rather than sent as null. Headers come from KTD2's builder; there is no idempotency header; the timeout is 10 seconds. The body of a non-2xx answer is never logged or shown. The row stores no headers or bodies, and the endpoint builds its answer from the row's fields, never from OpenAI's JSON. Implements R11, R12.
@@ -332,10 +334,10 @@ Product Contract preservation: unchanged except that the six Deferred-to-Plannin
   - **Eligibility:** the wave must hold at least one non-baseline credit, and its newest credit must have been first seen less than 24 hours ago, so turning the destination on late never announces old waves.
 
   Implements R19.
-- KTD18. **Reminders cover every wave, including waves held at rollout.** (session-settled: user-approved — chosen over reminding only for announced waves: AE8 applies to the waves already held, and members hold their own credits.) A wave's expiry is the earliest `expires_at` among its credits, whatever their status. The 3-day reminder is claimed from expiry minus 3 days until expiry minus 1 day; the 1-day reminder from expiry minus 1 day until expiry. A reminder whose window passed while the router was down is not sent late. Implements R20.
+- KTD18. **Reminders cover every wave, including waves held at rollout.** (session-settled: user-approved — chosen over reminding only for announced waves: AE8 applies to the waves already held, and members hold their own credits.) A wave's expiry is the earliest `expires_at` among its credits, whatever their status. Each reminder is claimed only within 6 hours after its lead point: the 3-day reminder from expiry minus 3 days, the 1-day reminder from expiry minus 1 day. A reminder whose claim window passed while the router was down, or before the destination was turned on, is not sent late, so a "3 days" notice never posts with a day and a half left. Implements R20.
 - KTD19. **Early resets come from the usage-window ledger's `early_reset` rows.** (session-settled: user-approved — chosen over a new detector: the ledger already classifies rollovers for Codex and Anthropic accounts; idle accounts and 5-hour-only resets go undetected.) Each pass:
   1. Reads `usage_windows` rows with `grant_type = 'early_reset'` that opened in the last 60 minutes and are at least 10 minutes old, joined to `accounts` for the provider. `codex` maps to Codex; `anthropic` and `claude-oauth` map to Claude (`packages/types/src/account.ts:435`).
-  2. Drops a row explained by either of these on the same account in the prior 24 hours: a router redemption in any state except `refused`, or a credit that vanished as redeemed.
+  2. Drops a row explained by either of these on the same account, at any time from the start of that account's previous `usage_windows` row until this pass: a router redemption in any state except `refused`, or a credit that vanished as redeemed. A fixed lookback would miss the cause. The ledger skips a freshly reset account until its first use (`usage-window-ledger.ts:270-284`) and dates the new row from that use (`:340`), so the row can open a day or more after the redemption that caused it. The cost is one blind spot: a genuine early reset in the same window as a redemption that reset nothing goes unannounced.
   3. When two or more distinct accounts remain for a provider, claims `early:<provider>:<earliest remaining row's start minute>`, unless an early notice for that provider was claimed in the prior 6 hours.
 
   The ledger itself is unchanged (`packages/http-api/src/services/usage-window-ledger.ts:308`). Rather than add an index to an existing table, the query bounds `started_at` and accepts a once-a-minute scan of the window ledger, which holds one row per account window. Implements R21.
@@ -345,12 +347,12 @@ Product Contract preservation: unchanged except that the six Deferred-to-Plannin
   - 5xx or a network error: back off exponentially from 1 minute, capped at 30 minutes.
   - Any other status: give up and raise one operational alert of a new type, `member_notice_delivery_failed`, through the existing alert service, with no address in its text.
 
-  A notice also gives up when it expires: a grant notice 24 hours after its claim, a reminder at its wave's expiry, an early notice 1 hour after its claim. Response bodies are never logged. The member sender is its own small function, because `deliverAlertWebhook` (`packages/http-api/src/services/alerts.ts:1211`) is fire-and-forget and returns no status. It reuses `isDiscordWebhookUrl` (`alerts.ts:902`) and the alert User-Agent, and follows the alert path's redaction rule. That rule never puts a URL-parse or fetch error message into a log, since both embed the full address (`alerts.ts:1220-1226`, `:1253`). The alert path itself is unchanged. Implements R17, R22.
+  A notice also gives up when it expires: a grant notice 24 hours after its claim, a reminder when its KTD18 claim window closes, an early notice 1 hour after its claim. Response bodies are never logged. The member sender is its own small function, because `deliverAlertWebhook` (`packages/http-api/src/services/alerts.ts:1211`) is fire-and-forget and returns no status. It reuses `isDiscordWebhookUrl` (`alerts.ts:902`) and the alert User-Agent, and follows the alert path's redaction rule. That rule never puts a URL-parse or fetch error message into a log, since both embed the full address (`alerts.ts:1220-1226`, `:1253`). The alert path itself is unchanged. Implements R17, R22.
 - KTD21. **One scheduler pass per minute, started and stopped with the server's periodic work.** It follows the pattern of `startExternalCodexScheduler` (`packages/proxy/src/external-codex-scheduler.ts:3`): single-flight, interval timer, stop function. The pass function lives in `packages/http-api/src/services/member-notices.ts`; only the timer, start and stop sit in `server.ts`, and nothing is imported from the proxy package for the pattern. The server starts it with its other periodic jobs and stops it in `stopPeriodicWork` (`server.ts:3277`). Each pass detects grant waves, reminders and early resets, then delivers. Implements R19, R20, R21, R22.
 
 **Storage**
 
-- KTD22. **A write that gates an external effect is committed before the effect.** The four new repositories write only through methods that return an affected-row count: `runWithChanges`, `runReturningOne` and `runBatchWithChanges` (`packages/database/src/repositories/base.repository.ts:35-46`, `packages/database/src/adapters/bun-sql-adapter.ts:449-512`). Two other write paths are excluded:
+- KTD22. **A write that gates an external effect is committed before the effect.** The three new repositories (reset credits with their state rows, redemptions, member notices) write only through methods that return an affected-row count: `runWithChanges`, `runReturningOne` and `runBatchWithChanges` (`packages/database/src/repositories/base.repository.ts:35-46`, `packages/database/src/adapters/bun-sql-adapter.ts:449-512`). Two other write paths are excluded:
   - the async writer, which queues writes on a timer and drops them when its queue is full;
   - `adapter.transaction()`, which on SQLite runs its body outside any transaction (`bun-sql-adapter.ts:518-536`).
 
@@ -612,7 +614,9 @@ Waits on: nothing. No deployment must be live first.
   - A card renders AE2's values without "applies now".
   - A card renders AE3 as stale with the last values, not zero.
   - A credit with no expiry renders "does not expire".
+  - A custom-endpoint Codex card renders "not tracked", not a count of 0.
   - The summary lists the accounts where a reset applies now.
+  - The summary marks its total as including stale values when any account is stale.
 - **Verification:** both component suites pass, and the dashboard builds.
 
 ### PR2: Redeem a banked reset
@@ -672,6 +676,8 @@ Waits on: PR1 merged first (merge order only). No deployment must be live first.
   - A lost answer followed by a retry resends the same id and credit id, and at most one credit is spent (AE5).
   - A different id while the account has an open row gets 409 naming the open id.
   - A `pending` row left by a crash between the insert and the outcome is retried with the same request id and credit id, and the spend is reported from the count.
+  - On a single-credit account whose answer was lost, a retry with the same id after the refreshed applicable count reached 0 calls OpenAI once, records the outcome and reports the spend from the count.
+  - A retry with the same id while the counts are stale resends instead of answering 409.
   - After a `done` redemption and a refreshed applicable count of 0, a new id gets 409 and no call.
   - A request with `Content-Type: text/plain` gets 415 and no call.
   - An account with applicable count 0 gets 409 with the R8 reason and no call (AE2).
@@ -697,6 +703,8 @@ Waits on: PR1 merged first (merge order only). No deployment must be live first.
   - A retry sends the same id; closing and reopening mints a new one.
   - Each outcome in KTD10's table renders its R12 sentence, and the refusal shows the `/usage` pointer.
   - A 409 naming an open id makes the next retry use that id.
+  - A 409 "redemption in progress" and a 503 "nothing was sent; try again" each render their message and keep the same id for the retry.
+  - The result renders "a credit was spent", "no credit was spent" or "not confirmed yet" from the response's spend field (KTD11).
 - **Verification:** both component suites pass, and the dashboard builds.
 
 ### PR3: Member notices
@@ -708,8 +716,8 @@ Waits on: PR1 and PR2 merged first (merge order only; PR3 reads credits, waves a
 - **Goal:** Store notice claims and resolve the member destination without exposing it.
 - **Requirements:** R16, R17, R22; KTD13, KTD14, KTD16, KTD20, KTD22.
 - **Dependencies:** U1.
-- **Files:** `packages/database/src/migrations.ts`, `packages/database/src/migrations-pg.ts`, `packages/database/src/repositories/member-notices.repository.ts` (new), `packages/database/src/database-operations.ts`, `packages/database/src/__tests__/member-notices-migrations.test.ts` (new), `packages/database/src/migrations-pg.test.ts`, `packages/config/src/index.ts`, `packages/config/src/alerts-config.test.ts`, `packages/http-api/src/services/alerts.ts`, `packages/http-api/src/handlers/__tests__/alerts-cache-health-config.test.ts`.
-- **Approach:** The table is keyed by notice key. It holds kind, provider, content, claim time, delivery time, attempts, next attempt time, lease expiry, last status and give-up time. Add the config getter next to `getAlertWebhookUrl` (`index.ts:2669`). `getAlertsConfig` (`alerts.ts:198`) adds the state only.
+- **Files:** `packages/database/src/migrations.ts`, `packages/database/src/migrations-pg.ts`, `packages/database/src/repositories/member-notices.repository.ts` (new), `packages/database/src/database-operations.ts`, `packages/database/src/__tests__/member-notices-migrations.test.ts` (new), `packages/database/src/migrations-pg.test.ts`, `packages/config/src/index.ts`, `packages/config/src/alerts-config.test.ts`, `packages/http-api/src/services/alerts.ts`, `packages/http-api/src/handlers/__tests__/alerts-cache-health-config.test.ts`, `apps/server/src/server.ts`.
+- **Approach:** The table is keyed by notice key. It holds kind, provider, content, claim time, delivery time, attempts, next attempt time, lease expiry, last status and give-up time. Add the config getter next to `getAlertWebhookUrl` (`index.ts:2669`). `getAlertsConfig` (`alerts.ts:198`) adds the state only. At startup the server logs KTD14's fixed-text warning once when the state is `blocked_same_as_alert_webhook`.
 - **Patterns:** U1; `getAlertWebhookUrl`.
 - **Test scenarios:**
   - Both databases create the table on fresh and existing schemas.
@@ -733,8 +741,12 @@ Waits on: PR1 and PR2 merged first (merge order only; PR3 reads credits, waves a
   - Baseline waves produce no grant claim (AE4).
   - A wave expiring 2026-11-30 gets a 3-day and a 1-day claim, including when the router redeemed its own credits from it (AE8).
   - A credit with no expiry gets no reminder.
+  - Turning the destination on 36 hours before a wave's expiry claims no 3-day reminder and claims the 1-day reminder at expiry minus 1 day.
+  - A router down from expiry minus 3 days until 7 hours later sends no 3-day reminder when it comes back.
   - Turning the destination on after a wave's first sighting is 24 hours old claims no grant notice.
   - An early row explained by a router redemption or a credit redeemed from the Codex CLI produces no claim (AE9).
+  - Two accounts redeemed, left idle 30 hours, then used open early rows that the redemptions still explain: no claim (AE9).
+  - A credit that vanished as redeemed at the same poll that opens its account's early row explains that row.
   - Two Anthropic accounts with early rows within 60 minutes produce one Claude claim; one account produces none (AE10).
   - A second early event for a provider within 6 hours produces no claim.
   - With the destination `off` or blocked, nothing is claimed.
@@ -800,3 +812,15 @@ Fixtures use the shapes in Research That Shapes the Plan, with ids, emails and a
 | PR1 | U1–U6 pass; a Codex card and the fleet summary render real counts, expiry, "applies now" and stale states |
 | PR2 | U7–U10 pass; a confirmed redemption against a mocked upstream spends at most one credit across retries and reports spend from the count |
 | PR3 | U11–U13 pass; with the member address unset, no notice is claimed; with it set to a mocked webhook, each event posts once |
+
+---
+
+## Deferred / Open Questions
+
+Entries here are review items left for the author. They do not block implementation.
+
+### From 2026-11-02 review
+
+- **Spend judged from the count alone can report the wrong result when a grant, an expiry or a Codex CLI redemption lands mid-check** — KTD11. Whether a credit was spent comes from the count, not the reply (P2, adversarial-document-reviewer, confidence 75)
+
+  The operator can be told "no credit was spent" after a real spend, or "a credit was spent" after nothing happened, on an irreversible action. A grant wave arriving between the before and after count reads hides a spend; an expiry or a Codex CLI redemption in the same interval fakes one. The redemption row already stores the credit it targeted, so a credit-list read after the refresh could judge spend by whether that credit left `available`, falling back to the count only when the read fails. The operator approved judging spend from the count, so changing the method is the operator's decision.
