@@ -499,7 +499,10 @@ describe("off-thread writer fault lifecycle", () => {
 describe("DatabaseOperations writer thread", () => {
 	it("routes repository writes and heartbeats through the writer, and retirement keeps it attached", async () => {
 		const file = tempDb();
-		const ops = new DatabaseOperations(file, { synchronous: "NORMAL" });
+		const ops = new DatabaseOperations(file, {
+			synchronous: "NORMAL",
+			mmapSize: 8 * 1024 * 1024,
+		});
 		cleanups.push(() => ops.close());
 		await ops.initializeAsync();
 		expect(ops.startWriterThread()).toBe(true);
@@ -515,6 +518,13 @@ describe("DatabaseOperations writer thread", () => {
 		});
 		expect(await adapter.runReturningOne("PRAGMA cache_size")).toEqual({
 			cache_size: -16384,
+		});
+		// The main connection keeps its mapping; the writer gets none.
+		expect(adapter.getSQLiteDb().query("PRAGMA mmap_size").get()).toEqual({
+			mmap_size: 8 * 1024 * 1024,
+		});
+		expect(await adapter.runReturningOne("PRAGMA mmap_size")).toEqual({
+			mmap_size: 0,
 		});
 
 		await ops.setAgentPreference("agent-1", "model-a");

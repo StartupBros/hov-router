@@ -739,10 +739,16 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		this.offThreadWriter = new OffThreadWriter({
 			dbPath,
 			busyTimeoutMs: this.dbConfig.busyTimeoutMs ?? 10000,
-			// The main connection's settings, except a 16 MiB page cache: the
-			// writer only walks the B-tree paths its inserts touch, and a second
-			// 256 MiB cache would add to the native RSS high-water (#337).
-			pragmas: connectionPragmas({ ...this.dbConfig, cacheSize: -16384 }),
+			// The main connection's settings, except a 16 MiB page cache and no
+			// mmap: the writer only walks the B-tree paths its inserts touch, and
+			// a second 256 MiB cache or mapping would add to the native RSS
+			// high-water (#337). The other workers run mmap_size=0 for the same
+			// reason.
+			pragmas: connectionPragmas({
+				...this.dbConfig,
+				cacheSize: -16384,
+				mmapSize: 0,
+			}),
 			embeddedCode: EMBEDDED_READER_WORKER_CODE,
 			sourceUrl: new URL("./reader-worker.ts", import.meta.url).href,
 		});

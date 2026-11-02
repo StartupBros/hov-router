@@ -5,15 +5,18 @@
  *
  * Why it can regress: a commit from another connection changes the WAL, so
  * the main connection's next read transaction discards its whole page cache
- * (256 MiB by default) and re-reads pages from the OS. Writes on the main
- * connection never invalidate its own cache.
+ * (256 MiB by default) and re-reads pages from the OS. The same reset unmaps
+ * its mmap region, so the next reads also re-fault the mapped pages. Writes on
+ * the main connection invalidate neither.
  *
  * Consumer: the #676 PR's evidence, and whoever weighs a cache mitigation or
  * changes which reads stay on the main thread. Delete it when the writer
  * thread is removed or a test bounds the read regression.
  *
  * Workload, from a fixed seed: a fresh temp DB in the production schema and
- * default connection settings (DatabaseOperations), prefilled with `--rows`
+ * the runtime config's connection settings (NORMAL, 256 MiB cache, `--mmap-mb`
+ * of mmap, default 256; the writer gets them with a 16 MiB cache and no mmap,
+ * as startWriterThread does), prefilled with `--rows`
  * requests over 7 days. Each phase runs for `--seconds`: a write load of
  * `--write-hz` requests per second (INSERT, then an UPDATE of the same row
  * once the INSERT resolves, un-awaited as the proxy does), main-thread reads
@@ -30,7 +33,7 @@
  * Never opens the live database; writes only under a fresh /tmp directory,
  * deleted at exit. A temp file on this host is not the production disk.
  *
- * Run: bun run bench/writer-thread-read-latency.ts [--rows 200000] [--write-hz 20] [--seconds 5] [--rounds 4]
+ * Run: bun run bench/writer-thread-read-latency.ts [--rows 200000] [--write-hz 20] [--seconds 5] [--rounds 4] [--mmap-mb 256]
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,6 +57,23 @@ const ROWS = flag("rows", 200_000);
 const WRITE_HZ = flag("write-hz", 20);
 const SECONDS = flag("seconds", 5);
 const ROUNDS = flag("rounds", 4);
+// MiB of mmap on the main connection; 0 turns it off. Defaults to the runtime
+// config's 256 MiB (packages/config), which is what `--serve` runs.
+const MMAP_MB = (() => {
+	const index = process.argv.indexOf("--mmap-mb");
+	if (index < 0) return 256;
+	const value = Number(process.argv[index + 1]);
+	if (!Number.isSafeInteger(value) || value < 0)
+		throw new Error("--mmap-mb needs a non-negative integer");
+	return value;
+})();
+// The runtime config's database defaults (packages/config/src/index.ts).
+const DB_CONFIG = {
+	busyTimeoutMs: 5000,
+	cacheSize: -262144,
+	synchronous: "NORMAL" as const,
+	mmapSize: MMAP_MB * 1024 * 1024,
+};
 const READ_INTERVAL_MS = 20;
 const LAG_INTERVAL_MS = 10;
 const MODELS = ["opus", "sonnet", "haiku", "glm", "gpt", "deepseek"];
@@ -120,7 +140,7 @@ type Sample = {
 
 const dir = mkdtempSync(join(tmpdir(), "ccflare-writer-bench-"));
 const dbPath = join(dir, "bench.db");
-const ops = new DatabaseOperations(dbPath);
+const ops = new DatabaseOperations(dbPath, DB_CONFIG);
 const adapter = ops.getAdapter();
 const db = adapter.getSQLiteDb();
 const ids: string[] = [];
@@ -137,13 +157,10 @@ db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
 
 const writer = new OffThreadWriter({
 	dbPath,
-	busyTimeoutMs: 10_000,
-	pragmas: connectionPragmas({
-		busyTimeoutMs: 10_000,
-		cacheSize: -16384,
-		synchronous: "FULL",
-		mmapSize: 0,
-	}),
+	busyTimeoutMs: DB_CONFIG.busyTimeoutMs,
+	// As startWriterThread: the main connection's settings, a 16 MiB cache
+	// and no mmap.
+	pragmas: connectionPragmas({ ...DB_CONFIG, cacheSize: -16384, mmapSize: 0 }),
 	embeddedCode: "",
 	sourceUrl: resolve(import.meta.dir, "../packages/database/src/reader-worker.ts"),
 	info: () => {},
@@ -254,6 +271,7 @@ try {
 			rounds: ROUNDS,
 			mainCacheSize: db.query("PRAGMA cache_size").get(),
 			mainSynchronous: db.query("PRAGMA synchronous").get(),
+			mainMmapSize: db.query("PRAGMA mmap_size").get(),
 			bun: Bun.version,
 		},
 	};
