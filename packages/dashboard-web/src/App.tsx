@@ -122,7 +122,7 @@ export function App() {
 				path: "/accounts",
 				element: <AccountsTab />,
 				title: "Account Management",
-				subtitle: "Manage your OAuth accounts and settings",
+				subtitle: "Provider accounts, usage limits and routing settings",
 			},
 			{
 				path: "/usage-history",

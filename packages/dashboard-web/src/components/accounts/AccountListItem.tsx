@@ -3,6 +3,7 @@ import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
 	AlertCircle,
 	Edit2,
+	Ellipsis,
 	Globe,
 	Hash,
 	KeyRound,
@@ -23,6 +24,13 @@ import {
 import { OAuthTokenStatusWithBoundary } from "../OAuthTokenStatus";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import { Switch } from "../ui/switch";
 import type { AccountFamilyRoutingState } from "./account-routing";
 import { pauseStatusDisplay } from "./pause-status";
@@ -53,6 +61,32 @@ function formatPauseReason(reason: string | null): string | null {
 function formatRoutingFamily(family: string): string {
 	return family.charAt(0).toUpperCase() + family.slice(1);
 }
+
+type StatusTone = "ok" | "warning" | "bad" | "muted";
+
+const STATUS_PILL_CLASS =
+	"inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium";
+
+const STATUS_TONE_CLASS: Record<StatusTone, string> = {
+	ok: "bg-green-500/10 text-green-600 dark:text-green-400",
+	warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+	bad: "bg-destructive/10 text-destructive",
+	muted: "bg-muted text-muted-foreground",
+};
+
+function rateLimitStatusTone(status: string): StatusTone {
+	const lower = status.toLowerCase();
+	if (lower.startsWith("allowed_warning")) return "warning";
+	if (lower.startsWith("allowed")) return "ok";
+	return "bad";
+}
+
+// The accounts API sends "-" (and some add-account responses "No active
+// session") when nothing is active; neither carries information worth a slot.
+const EMPTY_SESSION_INFO = new Set(["", "-", "No active session"]);
+
+/** Label + switch pair used in the per-account settings row. */
+const SETTING_CLASS = "flex items-center gap-2 whitespace-nowrap";
 
 /**
  * Codex-only usage extras (plan_type, credits_balance) come from the free
@@ -128,7 +162,7 @@ export function CodexCreditDrainControl({
 	onToggle: (account: Account) => void;
 }) {
 	return (
-		<div className="flex items-center gap-2">
+		<div className={SETTING_CLASS}>
 			<span className="text-xs text-muted-foreground">Drain credits:</span>
 			<Switch
 				checked={account.codexCreditDrainEnabled ?? false}
@@ -163,7 +197,7 @@ export function PublicValueControl({
 }) {
 	const enabled = account.publicValueEnabled ?? false;
 	return (
-		<div className="flex items-center gap-2">
+		<div className={SETTING_CLASS}>
 			<span className="text-xs text-muted-foreground">Public value:</span>
 			<Switch
 				checked={enabled}
@@ -184,6 +218,7 @@ export function PublicValueControl({
 					size="sm"
 					className="h-6 px-1"
 					onClick={() => onEditLabel(account)}
+					aria-label="Edit public label"
 					title="Edit public label"
 				>
 					<Edit2 className="h-3 w-3" />
@@ -276,336 +311,131 @@ export function AccountListItem({
 		bedrockCrossRegionMode = account.crossRegionMode || "geographic";
 	}
 
+	const pauseReasonLabel = formatPauseReason(account.pauseReason);
+	const showRateLimitStatus =
+		!presenter.isPaused && presenter.rateLimitStatus !== "OK";
+	const sessionInfo = presenter.sessionInfo;
+	const showSessionInfo = !EMPTY_SESSION_INFO.has(sessionInfo);
+	const modelMappingCount = account.modelMappings
+		? Object.keys(account.modelMappings).length
+		: 0;
+	const canRefreshUsage =
+		account.provider === "anthropic" || account.provider === "codex";
+	// One re-authentication path per provider, same gates as before.
+	const reauth =
+		account.provider === "qwen" && onReauth
+			? {
+					handler: onReauth,
+					title: "Re-authenticate this Qwen account (preserves all metadata)",
+				}
+			: account.provider === "anthropic" &&
+					account.hasRefreshToken &&
+					onAnthropicReauth
+				? {
+						handler: onAnthropicReauth,
+						title:
+							"Re-authenticate this Anthropic account (preserves all metadata)",
+					}
+				: account.provider === "codex" && onCodexReauth
+					? {
+							handler: onCodexReauth,
+							title:
+								"Re-authenticate this Codex account (preserves all metadata)",
+						}
+					: null;
+	const showAutoFeatures = providerSupportsAutoFeatures(account.provider);
+	const showPlanBilling = providerSupportsCustomBilling(account.provider);
+	const showAutoPause =
+		account.provider === "anthropic" && Boolean(onAutoPauseOnOverageToggle);
+	const showCreditDrain =
+		account.provider === "codex" && Boolean(onCodexCreditDrainToggle);
+	const showPeakHoursPause =
+		account.provider === "zai" && Boolean(onPeakHoursPauseToggle);
+	const hasSettings =
+		showAutoFeatures ||
+		showPlanBilling ||
+		showAutoPause ||
+		showCreditDrain ||
+		Boolean(onPublicValueToggle) ||
+		showPeakHoursPause;
+
 	return (
-		<div
-			className={`p-4 border rounded-lg transition-colors space-y-4 ${
+		<article
+			aria-label={account.name}
+			className={`space-y-3 rounded-lg border p-4 transition-colors ${
 				isPrimary
 					? "border-primary bg-primary/5 shadow-sm"
 					: "border-border hover:border-muted-foreground/50"
 			}`}
 		>
-			<div className="flex items-center justify-between">
-				<div className="flex items-center gap-4">
-					<div>
-						<div className="flex items-center gap-2">
-							<p className="font-medium">{account.name}</p>
-							{isPrimary && (
-								<span className="px-2 py-0.5 text-xs font-medium bg-primary text-primary-foreground rounded-full">
-									Primary
-								</span>
-							)}
-							<span className="px-2 py-0.5 text-xs font-medium bg-secondary text-secondary-foreground rounded-full">
-								Priority: {account.priority}
-							</span>
-							{codexUsageExtras?.plan_type && (
-								<span className="px-2 py-0.5 text-xs font-medium bg-secondary text-secondary-foreground rounded-full">
-									{codexUsageExtras.plan_type}
-								</span>
-							)}
-							<OAuthTokenStatusWithBoundary
-								accountName={account.name}
-								hasRefreshToken={account.hasRefreshToken}
-							/>
-							{providerSupportsAutoFeatures(account.provider) && (
-								<>
-									<div className="flex items-center gap-2">
-										<span className="text-xs text-muted-foreground">
-											Auto-fallback:
-										</span>
-										<Switch
-											checked={account.autoFallbackEnabled}
-											onCheckedChange={() => onAutoFallbackToggle(account)}
-											title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
-										/>
-									</div>
-									<div className="flex items-center gap-2">
-										<span className="text-xs text-muted-foreground">
-											Auto-refresh:
-										</span>
-										<Switch
-											checked={account.autoRefreshEnabled}
-											onCheckedChange={() => onAutoRefreshToggle(account)}
-											title="Automatically sends a minimal message when the usage window resets to avoid cold-start latency. Does not affect OAuth token refreshing."
-										/>
-									</div>
-								</>
-							)}
-							{providerSupportsCustomBilling(account.provider) && (
-								<div className="flex items-center gap-2">
-									<span className="text-xs text-muted-foreground">
-										Plan billing:
-									</span>
-									<Switch
-										checked={account.billingType === "plan"}
-										onCheckedChange={() => onBillingTypeToggle(account)}
-										title="Toggle plan billing for this account"
-									/>
-								</div>
-							)}
-							{account.provider === "anthropic" &&
-								onAutoPauseOnOverageToggle && (
-									<div className="flex items-center gap-2">
-										<span className="text-xs text-muted-foreground">
-											Auto-pause on overage:
-										</span>
-										<Switch
-											checked={account.autoPauseOnOverageEnabled ?? false}
-											onCheckedChange={() =>
-												onAutoPauseOnOverageToggle(account)
-											}
-											title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when usage window resets."
-										/>
-									</div>
-								)}
-							{account.provider === "codex" && onCodexCreditDrainToggle && (
-								<CodexCreditDrainControl
-									account={account}
-									onToggle={onCodexCreditDrainToggle}
-								/>
-							)}
-							{onPublicValueToggle && (
-								<PublicValueControl
-									account={account}
-									onToggle={onPublicValueToggle}
-									onEditLabel={onPublicValueEditLabel}
-								/>
-							)}
-							{account.provider === "zai" && onPeakHoursPauseToggle && (
-								<div className="flex items-center gap-2">
-									<span className="text-xs text-muted-foreground">
-										Peak hours pause:
-									</span>
-									<Switch
-										checked={account.peakHoursPauseEnabled ?? false}
-										onCheckedChange={() => onPeakHoursPauseToggle(account)}
-										title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
-									/>
-								</div>
-							)}
-						</div>
-						<div className="flex items-center gap-2">
-							<p className="text-sm text-muted-foreground">
-								{account.provider}
-							</p>
-							{account.provider === "bedrock" && bedrockProfile && (
-								<>
-									<span className="text-sm text-muted-foreground">•</span>
-									<p className="text-sm text-muted-foreground">
-										Profile: {bedrockProfile}
-									</p>
-									{bedrockRegion && (
-										<>
-											<span className="text-sm text-muted-foreground">•</span>
-											<div
-												className="flex items-center gap-1"
-												title={`Region: ${bedrockRegion}`}
-											>
-												<Globe className="h-3 w-3 text-muted-foreground" />
-												<p className="text-sm text-muted-foreground">
-													{bedrockRegion}
-												</p>
-											</div>
-										</>
-									)}
-									{bedrockCrossRegionMode && (
-										<>
-											<span className="text-sm text-muted-foreground">•</span>
-											<p
-												className="text-sm text-muted-foreground"
-												title="Cross-region inference mode"
-											>
-												{bedrockCrossRegionMode}
-											</p>
-										</>
-									)}
-								</>
-							)}
-						</div>
-					</div>
-					<div className="flex items-center gap-2">
-						{presenter.isRateLimited && (
-							<span title="Account is rate-limited - requests will be rejected until the limit resets">
-								<AlertCircle className="h-4 w-4 text-yellow-600" />
+			{/* Identity on the left, actions on the right; wraps instead of overflowing. */}
+			<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+				<div className="min-w-0 flex-1 space-y-1">
+					<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<h4 className="font-medium leading-tight [overflow-wrap:anywhere]">
+							{account.name}
+						</h4>
+						{isPrimary && (
+							<span className="px-2 py-0.5 text-xs font-medium bg-primary text-primary-foreground rounded-full">
+								Primary
 							</span>
 						)}
-						<span className="text-sm">{presenter.requestCount} requests</span>
-						<span className="text-sm text-muted-foreground">
-							{presenter.sessionInfo}
+						<span className="whitespace-nowrap rounded-full bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums text-secondary-foreground">
+							Priority {account.priority}
 						</span>
-						{codexCreditsBalance !== null && (
-							<span className="text-sm text-muted-foreground">
-								{codexCreditsBalance.toLocaleString()} credits
+						{codexUsageExtras?.plan_type && (
+							<span className="px-2 py-0.5 text-xs font-medium bg-secondary text-secondary-foreground rounded-full">
+								{codexUsageExtras.plan_type}
 							</span>
 						)}
-						{reauthRequired ? (
-							<Badge
-								variant="destructive"
-								title="Refresh token invalid — re-authenticate"
-							>
-								Re-authentication required
-							</Badge>
-						) : (
-							presenter.isPaused && (
-								<span className="text-sm text-muted-foreground">
-									Paused
-									{formatPauseReason(account.pauseReason)
-										? ` (${formatPauseReason(account.pauseReason)})`
-										: ""}
+						<OAuthTokenStatusWithBoundary
+							accountName={account.name}
+							hasRefreshToken={account.hasRefreshToken}
+						/>
+					</div>
+					{/* No bullet separators: they strand at line ends when this wraps. */}
+					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+						<span>{account.provider}</span>
+						{account.provider === "bedrock" && bedrockProfile && (
+							<>
+								<span className="whitespace-nowrap">
+									Profile: {bedrockProfile}
 								</span>
-							)
+								{bedrockRegion && (
+									<span
+										className="inline-flex items-center gap-1 whitespace-nowrap"
+										title={`Region: ${bedrockRegion}`}
+									>
+										<Globe className="h-3 w-3" />
+										{bedrockRegion}
+									</span>
+								)}
+								{bedrockCrossRegionMode && (
+									<span title="Cross-region inference mode">
+										{bedrockCrossRegionMode}
+									</span>
+								)}
+							</>
 						)}
-						{!presenter.isPaused && presenter.rateLimitStatus !== "OK" && (
+						{account.provider !== "bedrock" && account.customEndpoint && (
 							<span
-								className={`text-sm ${
-									presenter.rateLimitStatus
-										.toLowerCase()
-										.startsWith("allowed_warning")
-										? "text-amber-600"
-										: presenter.rateLimitStatus
-													.toLowerCase()
-													.startsWith("allowed")
-											? "text-green-600"
-											: "text-destructive"
-								}`}
+								className="inline-flex items-center gap-1 whitespace-nowrap"
+								title={`Custom endpoint: ${account.customEndpoint}`}
 							>
-								{presenter.rateLimitStatus}
+								<Globe className="h-3 w-3" />
+								custom endpoint
 							</span>
 						)}
-						{staleLockDetected && (
-							<span
-								className="text-sm text-amber-600"
-								title="Stale lock detected: usage data shows available capacity but account is still rate-limited"
-							>
-								Stale lock detected
-							</span>
-						)}
-						{isUsageThrottled && (
-							<span
-								className="text-sm text-amber-600"
-								title="Usage throttling is delaying requests for this account until pacing catches up"
-							>
-								Usage throttled
+						{modelMappingCount > 0 && (
+							<span className="inline-flex items-center gap-1 whitespace-nowrap">
+								<Hash className="h-3 w-3" />
+								{modelMappingCount} model{" "}
+								{modelMappingCount === 1 ? "mapping" : "mappings"}
 							</span>
 						)}
 					</div>
 				</div>
-				<div className="flex items-center gap-2">
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={() => onRename(account)}
-						title="Rename account"
-					>
-						<Edit2 className="h-4 w-4" />
-					</Button>
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={() => onPriorityChange(account)}
-						title="Change account priority"
-					>
-						<Zap className="h-4 w-4" />
-					</Button>
-					{onCustomEndpointChange && (
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => onCustomEndpointChange(account)}
-							title={
-								account.customEndpoint
-									? `Custom endpoint: ${account.customEndpoint}`
-									: "Set custom endpoint"
-							}
-						>
-							<Globe
-								className={`h-4 w-4 ${
-									account.customEndpoint ? "text-primary" : ""
-								}`}
-							/>
-						</Button>
-					)}
-					{onModelMappingsChange && (
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => onModelMappingsChange(account)}
-							title={
-								account.modelMappings
-									? `Model mappings configured (${Object.keys(account.modelMappings).length} mappings)`
-									: "Configure model mappings"
-							}
-						>
-							<Hash
-								className={`h-4 w-4 ${
-									account.modelMappings ? "text-primary" : ""
-								}`}
-							/>
-						</Button>
-					)}
-					{account.provider === "qwen" && onReauth && (
-						<Button
-							variant={reauthRequired ? "default" : "ghost"}
-							size="sm"
-							className={reauthRequired ? "gap-1 text-xs" : ""}
-							onClick={() => onReauth(account)}
-							title="Re-authenticate this Qwen account (preserves all metadata)"
-						>
-							<KeyRound className="h-4 w-4" />
-							{reauthRequired && "Re-authenticate"}
-						</Button>
-					)}
-					{account.provider === "anthropic" &&
-						account.hasRefreshToken &&
-						onAnthropicReauth && (
-							<Button
-								variant={reauthRequired ? "default" : "ghost"}
-								size="sm"
-								className={reauthRequired ? "gap-1 text-xs" : ""}
-								onClick={() => onAnthropicReauth(account)}
-								title="Re-authenticate this Anthropic account (preserves all metadata)"
-							>
-								<KeyRound className="h-4 w-4" />
-								{reauthRequired && "Re-authenticate"}
-							</Button>
-						)}
-					{account.provider === "codex" && onCodexReauth && (
-						<Button
-							variant={reauthRequired ? "default" : "ghost"}
-							size="sm"
-							className={reauthRequired ? "gap-1 text-xs" : ""}
-							onClick={() => onCodexReauth(account)}
-							title="Re-authenticate this Codex account (preserves all metadata)"
-						>
-							<KeyRound className="h-4 w-4" />
-							{reauthRequired && "Re-authenticate"}
-						</Button>
-					)}
-					{(account.provider === "anthropic" ||
-						account.provider === "codex") && (
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-8 gap-1 text-xs"
-							disabled={isRefreshingUsage}
-							onClick={async () => {
-								setIsRefreshingUsage(true);
-								try {
-									await onRefreshUsage(account);
-								} finally {
-									setIsRefreshingUsage(false);
-								}
-							}}
-							title={
-								account.provider === "codex"
-									? "Refresh usage data (free ChatGPT usage endpoint; falls back to a minimal quota-consuming request on custom endpoints or when the free endpoint fails)"
-									: "Refresh usage data (restarts usage polling and refreshes token if expired)"
-							}
-						>
-							<RefreshCw
-								className={`h-3.5 w-3.5 ${isRefreshingUsage ? "animate-spin" : ""}`}
-							/>
-						</Button>
-					)}
+				<div className="flex shrink-0 flex-wrap items-center gap-1">
 					{showForceReset && (
 						<Button
 							variant="outline"
@@ -622,10 +452,50 @@ export function AccountListItem({
 							Force Reset
 						</Button>
 					)}
+					{reauth && reauthRequired && (
+						<Button
+							variant="default"
+							size="sm"
+							className="gap-1 text-xs"
+							onClick={() => reauth.handler(account)}
+							title={reauth.title}
+						>
+							<KeyRound className="h-4 w-4" />
+							Re-authenticate
+						</Button>
+					)}
+					{canRefreshUsage && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-8 w-8 p-0"
+							disabled={isRefreshingUsage}
+							onClick={async () => {
+								setIsRefreshingUsage(true);
+								try {
+									await onRefreshUsage(account);
+								} finally {
+									setIsRefreshingUsage(false);
+								}
+							}}
+							aria-label="Refresh usage"
+							title={
+								account.provider === "codex"
+									? "Refresh usage data (free ChatGPT usage endpoint; falls back to a minimal quota-consuming request on custom endpoints or when the free endpoint fails)"
+									: "Refresh usage data (restarts usage polling and refreshes token if expired)"
+							}
+						>
+							<RefreshCw
+								className={`h-3.5 w-3.5 ${isRefreshingUsage ? "animate-spin" : ""}`}
+							/>
+						</Button>
+					)}
 					<Button
 						variant="ghost"
 						size="sm"
+						className="h-8 w-8 p-0"
 						onClick={() => onPauseToggle(account)}
+						aria-label={account.paused ? "Resume account" : "Pause account"}
 						title={account.paused ? "Resume account" : "Pause account"}
 					>
 						{account.paused ? (
@@ -634,11 +504,217 @@ export function AccountListItem({
 							<Pause className="h-4 w-4" />
 						)}
 					</Button>
-					<Button variant="ghost" size="sm" onClick={() => onRemove(account)}>
-						<Trash2 className="h-4 w-4" />
-					</Button>
+					{/* modal={false}: every item opens a Radix dialog, and a modal menu
+					    closing underneath one can leave pointer-events disabled on body. */}
+					<DropdownMenu modal={false}>
+						<DropdownMenuTrigger asChild>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-8 w-8 p-0"
+								aria-label={`More actions for ${account.name}`}
+								title="More actions"
+							>
+								<Ellipsis className="h-4 w-4" />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-52">
+							<DropdownMenuItem
+								className="gap-2"
+								onSelect={() => onRename(account)}
+							>
+								<Edit2 className="h-4 w-4" />
+								Rename…
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								className="gap-2"
+								onSelect={() => onPriorityChange(account)}
+							>
+								<Zap className="h-4 w-4" />
+								Change priority…
+							</DropdownMenuItem>
+							{onCustomEndpointChange && (
+								<DropdownMenuItem
+									className="gap-2"
+									onSelect={() => onCustomEndpointChange(account)}
+								>
+									<Globe className="h-4 w-4" />
+									Custom endpoint…
+								</DropdownMenuItem>
+							)}
+							{onModelMappingsChange && (
+								<DropdownMenuItem
+									className="gap-2"
+									onSelect={() => onModelMappingsChange(account)}
+								>
+									<Hash className="h-4 w-4" />
+									Model mappings…
+								</DropdownMenuItem>
+							)}
+							{reauth && !reauthRequired && (
+								<DropdownMenuItem
+									className="gap-2"
+									onSelect={() => reauth.handler(account)}
+								>
+									<KeyRound className="h-4 w-4" />
+									Re-authenticate…
+								</DropdownMenuItem>
+							)}
+							<DropdownMenuSeparator />
+							<DropdownMenuItem
+								className="gap-2 text-destructive focus:text-destructive"
+								onSelect={() => onRemove(account)}
+							>
+								<Trash2 className="h-4 w-4" />
+								Remove account…
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 				</div>
 			</div>
+
+			{/* Status first, then counters. */}
+			<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+				{reauthRequired ? (
+					<Badge
+						variant="destructive"
+						title="Refresh token invalid — re-authenticate"
+					>
+						Re-authentication required
+					</Badge>
+				) : (
+					presenter.isPaused && (
+						<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
+							{pauseReasonLabel ? `Paused (${pauseReasonLabel})` : "Paused"}
+						</span>
+					)
+				)}
+				{showRateLimitStatus && (
+					<span
+						className={`${STATUS_PILL_CLASS} ${
+							STATUS_TONE_CLASS[rateLimitStatusTone(presenter.rateLimitStatus)]
+						}`}
+					>
+						<span
+							aria-hidden="true"
+							className="h-1.5 w-1.5 rounded-full bg-current"
+						/>
+						{presenter.rateLimitStatus}
+					</span>
+				)}
+				{presenter.isRateLimited && (
+					<span title="Account is rate-limited - requests will be rejected until the limit resets">
+						<AlertCircle className="h-4 w-4 text-yellow-600" />
+					</span>
+				)}
+				{staleLockDetected && (
+					<span
+						className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
+						title="Stale lock detected: usage data shows available capacity but account is still rate-limited"
+					>
+						Stale lock detected
+					</span>
+				)}
+				{isUsageThrottled && (
+					<span
+						className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
+						title="Usage throttling is delaying requests for this account until pacing catches up"
+					>
+						Usage throttled
+					</span>
+				)}
+				<span className="whitespace-nowrap tabular-nums text-muted-foreground">
+					{presenter.requestCount.toLocaleString()} requests
+				</span>
+				{showSessionInfo && (
+					<span className="whitespace-nowrap tabular-nums text-muted-foreground">
+						{sessionInfo}
+					</span>
+				)}
+				{codexCreditsBalance !== null && (
+					<span className="whitespace-nowrap tabular-nums text-muted-foreground">
+						{codexCreditsBalance.toLocaleString()} credits
+					</span>
+				)}
+			</div>
+
+			{hasSettings && (
+				<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+					{showAutoFeatures && (
+						<>
+							<div className={SETTING_CLASS}>
+								<span className="text-xs text-muted-foreground">
+									Auto-fallback:
+								</span>
+								<Switch
+									checked={account.autoFallbackEnabled}
+									onCheckedChange={() => onAutoFallbackToggle(account)}
+									title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
+								/>
+							</div>
+							<div className={SETTING_CLASS}>
+								<span className="text-xs text-muted-foreground">
+									Auto-refresh:
+								</span>
+								<Switch
+									checked={account.autoRefreshEnabled}
+									onCheckedChange={() => onAutoRefreshToggle(account)}
+									title="Automatically sends a minimal message when the usage window resets to avoid cold-start latency. Does not affect OAuth token refreshing."
+								/>
+							</div>
+						</>
+					)}
+					{showPlanBilling && (
+						<div className={SETTING_CLASS}>
+							<span className="text-xs text-muted-foreground">
+								Plan billing:
+							</span>
+							<Switch
+								checked={account.billingType === "plan"}
+								onCheckedChange={() => onBillingTypeToggle(account)}
+								title="Toggle plan billing for this account"
+							/>
+						</div>
+					)}
+					{showAutoPause && onAutoPauseOnOverageToggle && (
+						<div className={SETTING_CLASS}>
+							<span className="text-xs text-muted-foreground">
+								Auto-pause on overage:
+							</span>
+							<Switch
+								checked={account.autoPauseOnOverageEnabled ?? false}
+								onCheckedChange={() => onAutoPauseOnOverageToggle(account)}
+								title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when usage window resets."
+							/>
+						</div>
+					)}
+					{showCreditDrain && onCodexCreditDrainToggle && (
+						<CodexCreditDrainControl
+							account={account}
+							onToggle={onCodexCreditDrainToggle}
+						/>
+					)}
+					{onPublicValueToggle && (
+						<PublicValueControl
+							account={account}
+							onToggle={onPublicValueToggle}
+							onEditLabel={onPublicValueEditLabel}
+						/>
+					)}
+					{showPeakHoursPause && onPeakHoursPauseToggle && (
+						<div className={SETTING_CLASS}>
+							<span className="text-xs text-muted-foreground">
+								Peak hours pause:
+							</span>
+							<Switch
+								checked={account.peakHoursPauseEnabled ?? false}
+								onCheckedChange={() => onPeakHoursPauseToggle(account)}
+								title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
+							/>
+						</div>
+					)}
+				</div>
+			)}
 			{routingStates.length > 0 && (
 				<section aria-label="Family routing" className="space-y-2">
 					<p className="text-xs font-medium text-muted-foreground">
@@ -778,6 +854,6 @@ export function AccountListItem({
 					showWeekly={providerShowsWeeklyUsage(account.provider)}
 				/>
 			)}
-		</div>
+		</article>
 	);
 }
