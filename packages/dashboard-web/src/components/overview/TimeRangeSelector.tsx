@@ -25,7 +25,7 @@ export function TimeRangeSelector({ value, onChange }: TimeRangeSelectorProps) {
 		<div className="flex items-center gap-2">
 			<Clock className="h-4 w-4 text-muted-foreground" />
 			<Select value={value} onValueChange={onChange}>
-				<SelectTrigger className="w-[150px]">
+				<SelectTrigger className="w-[150px]" aria-label="Time range">
 					<SelectValue />
 				</SelectTrigger>
 				<SelectContent>

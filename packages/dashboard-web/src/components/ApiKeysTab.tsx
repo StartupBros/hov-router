@@ -275,7 +275,9 @@ export function ApiKeysTab() {
 			<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 				<Card>
 					<CardHeader className="pb-2">
-						<CardTitle className="text-base font-medium">Total Keys</CardTitle>
+						<p className="text-base font-medium leading-none tracking-tight">
+							Total Keys
+						</p>
 					</CardHeader>
 					<CardContent>
 						<div className="text-2xl font-bold">{stats?.total || 0}</div>
@@ -283,7 +285,9 @@ export function ApiKeysTab() {
 				</Card>
 				<Card>
 					<CardHeader className="pb-2">
-						<CardTitle className="text-base font-medium">Active Keys</CardTitle>
+						<p className="text-base font-medium leading-none tracking-tight">
+							Active Keys
+						</p>
 					</CardHeader>
 					<CardContent>
 						<div className="text-2xl font-bold text-green-600">
@@ -293,9 +297,9 @@ export function ApiKeysTab() {
 				</Card>
 				<Card>
 					<CardHeader className="pb-2">
-						<CardTitle className="text-base font-medium">
+						<p className="text-base font-medium leading-none tracking-tight">
 							Inactive Keys
-						</CardTitle>
+						</p>
 					</CardHeader>
 					<CardContent>
 						<div className="text-2xl font-bold text-muted-foreground">
@@ -306,7 +310,7 @@ export function ApiKeysTab() {
 			</div>
 
 			{/* Header with Create Button */}
-			<div className="flex items-center justify-between">
+			<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 				<div>
 					<h2 className="text-xl font-semibold">API Keys</h2>
 					<p className="text-muted-foreground">
@@ -366,8 +370,8 @@ export function ApiKeysTab() {
 											</Label>
 										</div>
 										{isFirstKey ? (
-											<div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-												<div className="flex items-center gap-2 text-yellow-800">
+											<div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg dark:bg-yellow-900/20 dark:border-yellow-800 dark:text-yellow-300">
+												<div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300">
 													<AlertTriangle className="h-4 w-4" />
 													<span className="text-sm">
 														First API key must be admin to prevent lockout from
@@ -376,8 +380,8 @@ export function ApiKeysTab() {
 												</div>
 											</div>
 										) : isAdminKey ? (
-											<div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-												<div className="flex items-center gap-2 text-yellow-800">
+											<div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg dark:bg-yellow-900/20 dark:border-yellow-800 dark:text-yellow-300">
+												<div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300">
 													<AlertTriangle className="h-4 w-4" />
 													<span className="text-sm">
 														Admin keys can manage accounts, view analytics, and
@@ -474,16 +478,16 @@ export function ApiKeysTab() {
 							{apiKeys.map((key) => (
 								<div
 									key={key.id}
-									className="flex items-center justify-between p-4 border rounded-lg"
+									className="flex flex-col gap-3 p-4 border rounded-lg sm:flex-row sm:items-center sm:justify-between"
 								>
-									<div className="flex-1">
-										<div className="flex items-center gap-2">
-											<h3 className="font-medium">{key.name}</h3>
+									<div className="min-w-0 flex-1">
+										<div className="flex flex-wrap items-center gap-2">
+											<h3 className="font-medium break-all">{key.name}</h3>
 											<div
 												className={`px-2 py-1 rounded text-xs font-medium ${
 													key.isActive
-														? "bg-green-100 text-green-800"
-														: "bg-gray-100 text-gray-600"
+														? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+														: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
 												}`}
 											>
 												{key.isActive ? "Active" : "Disabled"}
@@ -495,8 +499,8 @@ export function ApiKeysTab() {
 															type="button"
 															className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium cursor-pointer hover:opacity-80 ${
 																key.role === "admin"
-																	? "bg-amber-100 text-amber-800"
-																	: "bg-blue-100 text-blue-800"
+																	? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+																	: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
 															}`}
 															disabled={updateRoleMutation.isPending}
 														>
@@ -524,8 +528,8 @@ export function ApiKeysTab() {
 												<div
 													className={`px-2 py-1 rounded text-xs font-medium ${
 														key.role === "admin"
-															? "bg-amber-100 text-amber-800"
-															: "bg-blue-100 text-blue-800"
+															? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+															: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
 													}`}
 													title="First API key must remain admin"
 												>
@@ -556,17 +560,20 @@ export function ApiKeysTab() {
 											{key.usageCount !== 1 ? "s" : ""}
 										</div>
 									</div>
-									<div className="flex items-center gap-2">
+									<div className="flex shrink-0 items-center gap-2">
 										<CopyButton
 											variant="outline"
 											size="sm"
 											value={key.prefixLast8}
+											title={`Copy key ending ${key.prefixLast8}`}
 										/>
 										<Button
 											variant="outline"
 											size="sm"
 											onClick={() => handleToggleKey(key, !key.isActive)}
 											disabled={toggleKeyMutation.isPending}
+											aria-label={`${key.isActive ? "Disable" : "Enable"} ${key.name}`}
+											title={key.isActive ? "Disable key" : "Enable key"}
 										>
 											{key.isActive ? (
 												<ToggleLeft className="h-4 w-4" />
@@ -579,6 +586,8 @@ export function ApiKeysTab() {
 											size="sm"
 											onClick={() => handleDeleteKey(key)}
 											disabled={deleteKeyMutation.isPending}
+											aria-label={`Delete ${key.name}`}
+											title="Delete key"
 										>
 											<Trash2 className="h-4 w-4 text-destructive" />
 										</Button>
@@ -623,12 +632,12 @@ export function ApiKeysTab() {
 								/>
 							</div>
 						</div>
-						<div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-							<div className="flex items-center gap-2 text-yellow-800">
+						<div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg dark:bg-yellow-900/20 dark:border-yellow-800 dark:text-yellow-300">
+							<div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300">
 								<AlertTriangle className="h-5 w-5" />
 								<span className="font-medium">Important:</span>
 							</div>
-							<p className="text-sm text-yellow-700 mt-1">
+							<p className="text-sm text-yellow-700 dark:text-yellow-300/90 mt-1">
 								Save this API key in a secure location. You won't be able to see
 								it again after closing this dialog.
 							</p>

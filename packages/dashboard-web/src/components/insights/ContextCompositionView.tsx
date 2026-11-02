@@ -536,7 +536,10 @@ export const ContextCompositionView = React.memo(
 										value={String(sessionIndex)}
 										onValueChange={setSelectedSession}
 									>
-										<SelectTrigger className="w-full sm:w-[340px]">
+										<SelectTrigger
+											className="w-full sm:w-[340px]"
+											aria-label="Growth session"
+										>
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>

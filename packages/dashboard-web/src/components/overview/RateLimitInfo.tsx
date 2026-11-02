@@ -1,5 +1,7 @@
 import type { AccountResponse } from "@better-ccflare/types";
 import { AlertCircle } from "lucide-react";
+import { formatShortDuration } from "../../lib/utils";
+import { formatRateLimitStatus } from "../accounts/rate-limit-helpers";
 import {
 	Card,
 	CardContent,
@@ -37,12 +39,11 @@ export function RateLimitInfo({ accounts }: RateLimitInfoProps) {
 							? new Date(account.rateLimitReset)
 							: null;
 						const now = new Date();
+						// A reset already in the past is a stale snapshot: say nothing
+						// rather than "Resets in m" next to a time that has gone by.
 						const timeUntilReset = resetTime
-							? Math.max(0, resetTime.getTime() - now.getTime())
-							: null;
-						const minutesLeft = timeUntilReset
-							? Math.ceil(timeUntilReset / 60000)
-							: null;
+							? resetTime.getTime() - now.getTime()
+							: 0;
 
 						const statusLower = account.rateLimitStatus.toLowerCase();
 						const isHardLimit =
@@ -62,17 +63,17 @@ export function RateLimitInfo({ accounts }: RateLimitInfoProps) {
 									<div>
 										<p className="font-medium">{account.name}</p>
 										<p className="text-sm text-muted-foreground">
-											{account.rateLimitStatus}
+											{formatRateLimitStatus(account.rateLimitStatus)}
 											{account.rateLimitRemaining !== null &&
 												` • ${account.rateLimitRemaining} requests remaining`}
 										</p>
 									</div>
 								</div>
 								<div className="text-right">
-									{resetTime && (
+									{resetTime && timeUntilReset > 0 && (
 										<>
 											<p className="text-sm font-medium">
-												Resets in {minutesLeft}m
+												Resets in {formatShortDuration(timeUntilReset)}
 											</p>
 											<p className="text-xs text-muted-foreground">
 												{resetTime.toLocaleTimeString(undefined, {

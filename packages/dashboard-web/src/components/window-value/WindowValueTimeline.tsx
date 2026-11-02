@@ -163,7 +163,7 @@ function DeltaChip({ delta }: { delta: number }) {
 		<span
 			className={
 				isNerf
-					? "shrink-0 rounded bg-destructive/15 px-1 py-0.5 text-[10px] font-medium text-destructive"
+					? "shrink-0 rounded bg-destructive/15 px-1 py-0.5 text-[10px] font-medium text-red-700 dark:text-red-300"
 					: "shrink-0 rounded bg-emerald-500/10 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
 			}
 		>

@@ -452,6 +452,7 @@ export function AgentEditDialog({
 									value={modelValue}
 									onValueChange={setModelValue}
 									placeholder="Select a model"
+									ariaLabel="Default Model (agent file)"
 									defaultItem={{
 										label: "Inherit (session model)",
 										badgeLabel: "Inherited",

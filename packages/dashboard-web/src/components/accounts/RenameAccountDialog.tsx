@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "../ui/button";
 import {
 	Dialog,
@@ -28,6 +28,7 @@ export function RenameAccountDialog({
 }: RenameAccountDialogProps) {
 	const [newName, setNewName] = useState(currentName);
 	const [error, setError] = useState("");
+	const errorId = useId();
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
@@ -82,8 +83,18 @@ export function RenameAccountDialog({
 								placeholder="Enter new account name"
 								autoFocus
 								disabled={isLoading}
+								aria-invalid={error ? true : undefined}
+								aria-describedby={error ? errorId : undefined}
 							/>
-							{error && <p className="text-sm text-destructive">{error}</p>}
+							{error && (
+								<p
+									id={errorId}
+									role="alert"
+									className="text-sm text-destructive"
+								>
+									{error}
+								</p>
+							)}
 						</div>
 					</div>
 					<DialogFooter>

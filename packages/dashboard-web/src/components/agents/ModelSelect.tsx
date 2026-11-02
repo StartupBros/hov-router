@@ -23,6 +23,7 @@ interface ModelSelectProps {
 	disabled?: boolean;
 	placeholder?: string;
 	triggerClassName?: string;
+	ariaLabel?: string;
 	/**
 	 * When provided, renders a first SelectItem for
 	 * `AGENT_DEFAULT_MODEL_SENTINEL` — the "leave unset / fall back to
@@ -44,13 +45,17 @@ export function ModelSelect({
 	disabled,
 	placeholder,
 	triggerClassName,
+	ariaLabel,
 	defaultItem,
 }: ModelSelectProps) {
 	const modelOptions = useModelOptions();
 
 	return (
 		<Select value={value} onValueChange={onValueChange} disabled={disabled}>
-			<SelectTrigger className={triggerClassName}>
+			<SelectTrigger
+				className={triggerClassName}
+				aria-label={ariaLabel ?? "Model"}
+			>
 				<SelectValue placeholder={placeholder} />
 			</SelectTrigger>
 			<SelectContent>

@@ -61,7 +61,7 @@ export function UsageHistoryTab() {
 		<div className="space-y-4">
 			<div className="flex gap-3">
 				<Select value={selected} onValueChange={setAccountId}>
-					<SelectTrigger className="w-64">
+					<SelectTrigger className="w-64" aria-label="Account">
 						<SelectValue placeholder="Select account" />
 					</SelectTrigger>
 					<SelectContent>
@@ -75,7 +75,7 @@ export function UsageHistoryTab() {
 					</SelectContent>
 				</Select>
 				<Select value={range} onValueChange={setRange}>
-					<SelectTrigger className="w-28">
+					<SelectTrigger className="w-28" aria-label="Time range">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>

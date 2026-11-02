@@ -29,9 +29,9 @@ export function MetricCard({
 	subRows,
 }: MetricCardProps) {
 	const trendElement = trend !== "flat" && change !== undefined && (
-		<div
+		<span
 			className={`flex items-center gap-1 text-sm font-medium ${
-				trend === "up" ? "text-success" : "text-destructive"
+				trend === "up" ? "text-success" : "text-red-600 dark:text-red-400"
 			}`}
 		>
 			{trend === "up" ? (
@@ -40,7 +40,7 @@ export function MetricCard({
 				<TrendingDown className="h-4 w-4" />
 			)}
 			<span>{formatPercentage(Math.abs(change), 0)}</span>
-		</div>
+		</span>
 	);
 
 	return (
@@ -51,10 +51,14 @@ export function MetricCard({
 					{trendPeriod && trendElement ? (
 						<Popover>
 							<PopoverTrigger asChild>
-								<div className="flex items-center gap-1 cursor-help">
+								<button
+									type="button"
+									className="flex items-center gap-1 cursor-help rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								>
 									{trendElement}
 									<Info className="h-3 w-3 text-muted-foreground" />
-								</div>
+									<span className="sr-only">Compared to {trendPeriod}</span>
+								</button>
 							</PopoverTrigger>
 							<PopoverContent className="w-auto p-2 text-xs">
 								<p>Compared to {trendPeriod}</p>
@@ -79,9 +83,12 @@ export function MetricCard({
 								{row.tooltip ? (
 									<Popover>
 										<PopoverTrigger asChild>
-											<span className="font-medium tabular-nums cursor-help">
+											<button
+												type="button"
+												className="inline-flex min-h-6 items-center rounded font-medium tabular-nums cursor-help focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+											>
 												{row.value}
-											</span>
+											</button>
 										</PopoverTrigger>
 										<PopoverContent className="w-auto p-2 text-xs">
 											<p>{row.tooltip}</p>

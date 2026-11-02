@@ -81,9 +81,9 @@ export function ModelAnalytics({
 			{/* Header with title and controls */}
 			<div className="flex items-center justify-between">
 				<div>
-					<h3 className="text-lg font-semibold">Model Performance Analytics</h3>
+					<h2 className="text-lg font-semibold">Model Performance Analytics</h2>
 					<p className="text-sm text-muted-foreground">
-						Comprehensive analysis of model performance, cost, and efficiency
+						Speed, cost, and reliability for each model
 					</p>
 				</div>
 			</div>
@@ -105,9 +105,9 @@ export function ModelAnalytics({
 				<TabsContent value="comparison" className="space-y-4">
 					<Card className="bg-gradient-to-br from-background to-muted/10 border-muted">
 						<CardHeader>
-							<div className="flex items-center justify-between">
+							<div className="flex flex-wrap items-center justify-between gap-4">
 								<div className="space-y-1">
-									<CardTitle className="text-2xl font-bold flex items-center gap-2">
+									<CardTitle className="text-lg sm:text-2xl font-bold flex items-center gap-2">
 										<Zap className="h-6 w-6 text-purple-500" />
 										Model Performance Comparison
 									</CardTitle>
@@ -127,7 +127,7 @@ export function ModelAnalytics({
 										)
 									}
 								>
-									<SelectTrigger className="w-48">
+									<SelectTrigger className="w-48" aria-label="Comparison view">
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
@@ -249,7 +249,7 @@ export function ModelAnalytics({
 													<span className="text-muted-foreground">
 														Error Rate:
 													</span>
-													<span className="font-medium text-green-600">
+													<span className="font-medium text-green-700 dark:text-green-400">
 														{reliable.errorRate.toFixed(2)}%
 													</span>
 												</div>

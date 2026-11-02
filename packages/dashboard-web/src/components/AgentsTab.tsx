@@ -130,7 +130,7 @@ export function AgentsTab() {
 				</CardHeader>
 				<CardContent className="space-y-4">
 					<div>
-						<h4 className="font-medium mb-2">Global Agents</h4>
+						<h3 className="font-medium mb-2">Global Agents</h3>
 						<p className="text-sm text-muted-foreground">
 							To add global agents, create markdown files in the
 							~/.claude/agents/ directory.
@@ -138,7 +138,7 @@ export function AgentsTab() {
 					</div>
 					<Separator />
 					<div>
-						<h4 className="font-medium mb-2">Workspace Agents</h4>
+						<h3 className="font-medium mb-2">Workspace Agents</h3>
 						<p className="text-sm text-muted-foreground">
 							To add workspace-specific agents, create markdown files in your
 							project's .claude/agents/ directory. They should be able to
@@ -148,7 +148,7 @@ export function AgentsTab() {
 					</div>
 					<Separator />
 					<div>
-						<h4 className="font-medium mb-2">Agent Format</h4>
+						<h3 className="font-medium mb-2">Agent Format</h3>
 						<pre className="mt-2 p-4 bg-muted rounded-lg text-xs overflow-x-auto">
 							{`---
 name: My Agent
@@ -251,6 +251,7 @@ Your system prompt content here...`}
 									size="sm"
 									onClick={() => refreshModels.mutate()}
 									disabled={refreshModels.isPending}
+									aria-label="Refresh model list"
 									title="Refresh the live model list from Anthropic"
 								>
 									<RefreshCw
@@ -272,6 +273,7 @@ Your system prompt content here...`}
 										}
 										placeholder="Select a model"
 										triggerClassName="w-full max-w-xs"
+										ariaLabel="Default agent model"
 									/>
 								</div>
 								{setDefaultModel.isPending && (
@@ -311,6 +313,7 @@ Your system prompt content here...`}
 											<ModelSelect
 												value={bulkUpdateModel}
 												onValueChange={setBulkUpdateModel}
+												ariaLabel="Model for all agents"
 											/>
 										</div>
 										<DialogFooter>
@@ -393,7 +396,7 @@ Your system prompt content here...`}
 					{globalAgents.length > 0 && (
 						<div className="space-y-4">
 							<div className="flex items-center gap-2">
-								<h3 className="text-lg font-semibold">Global Agents</h3>
+								<h2 className="text-lg font-semibold">Global Agents</h2>
 								<Badge variant="outline">{globalAgents.length}</Badge>
 							</div>
 							<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -407,7 +410,7 @@ Your system prompt content here...`}
 					{workspaceAgents.length > 0 && (
 						<div className="space-y-4">
 							<div className="flex items-center gap-2">
-								<h3 className="text-lg font-semibold">Workspace Agents</h3>
+								<h2 className="text-lg font-semibold">Workspace Agents</h2>
 								<Badge variant="outline">
 									{filteredWorkspaceAgents.length}
 								</Badge>
@@ -432,7 +435,7 @@ Your system prompt content here...`}
 					{pluginAgents.length > 0 && (
 						<div className="space-y-4">
 							<div className="flex items-center gap-2">
-								<h3 className="text-lg font-semibold">Plugin Agents</h3>
+								<h2 className="text-lg font-semibold">Plugin Agents</h2>
 								<Badge variant="outline">{pluginAgents.length}</Badge>
 							</div>
 							<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

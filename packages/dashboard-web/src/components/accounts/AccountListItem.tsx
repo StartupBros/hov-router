@@ -35,7 +35,10 @@ import { Switch } from "../ui/switch";
 import type { AccountFamilyRoutingState } from "./account-routing";
 import { pauseStatusDisplay } from "./pause-status";
 import { RateLimitProgress } from "./RateLimitProgress";
-import { describeBindingConstraint } from "./rate-limit-helpers";
+import {
+	describeBindingConstraint,
+	formatRateLimitStatus,
+} from "./rate-limit-helpers";
 
 function formatTokenCount(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -68,10 +71,10 @@ const STATUS_PILL_CLASS =
 	"inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium";
 
 const STATUS_TONE_CLASS: Record<StatusTone, string> = {
-	ok: "bg-green-500/10 text-green-600 dark:text-green-400",
-	warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-	bad: "bg-destructive/10 text-destructive",
-	muted: "bg-muted text-muted-foreground",
+	ok: "bg-green-500/10 text-green-800 dark:text-green-400",
+	warning: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+	bad: "bg-destructive/10 text-red-700 dark:text-red-400",
+	muted: "bg-muted text-foreground",
 };
 
 function rateLimitStatusTone(status: string): StatusTone {
@@ -166,12 +169,13 @@ export function CodexCreditDrainControl({
 			<span className="text-xs text-muted-foreground">Drain credits:</span>
 			<Switch
 				checked={account.codexCreditDrainEnabled ?? false}
+				aria-label={`Drain credits for ${account.name}`}
 				onCheckedChange={() => onToggle(account)}
 				title={`Lets ${PRODUCT_NAME} keep routing to this account after its plan window is spent, which spends purchased credits. Applies only while fresh usage data confirms credits are available.`}
 			/>
 			{account.codexCreditDrainServing && (
 				<span
-					className="text-xs font-medium text-amber-600"
+					className="text-xs font-medium text-amber-700 dark:text-amber-400"
 					title="Plan window is spent; requests are being served from purchased credits"
 				>
 					on credits
@@ -201,6 +205,7 @@ export function PublicValueControl({
 			<span className="text-xs text-muted-foreground">Public value:</span>
 			<Switch
 				checked={enabled}
+				aria-label={`Public value for ${account.name}`}
 				onCheckedChange={() => onToggle(account)}
 				title="Publishes this account's subscription value on the public House of Vibe site under a public label (never the account name)."
 			/>
@@ -372,9 +377,9 @@ export function AccountListItem({
 			<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
 				<div className="min-w-0 flex-1 space-y-1">
 					<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-						<h4 className="font-medium leading-tight [overflow-wrap:anywhere]">
+						<h3 className="font-medium leading-tight [overflow-wrap:anywhere]">
 							{account.name}
-						</h4>
+						</h3>
 						{isPrimary && (
 							<span className="px-2 py-0.5 text-xs font-medium bg-primary text-primary-foreground rounded-full">
 								Primary
@@ -599,12 +604,19 @@ export function AccountListItem({
 							aria-hidden="true"
 							className="h-1.5 w-1.5 rounded-full bg-current"
 						/>
-						{presenter.rateLimitStatus}
+						{formatRateLimitStatus(presenter.rateLimitStatus)}
 					</span>
 				)}
 				{presenter.isRateLimited && (
-					<span title="Account is rate-limited - requests will be rejected until the limit resets">
-						<AlertCircle className="h-4 w-4 text-yellow-600" />
+					<span title="Account is rate limited. Requests are rejected until the limit resets.">
+						<AlertCircle
+							className="h-4 w-4 text-yellow-600"
+							aria-hidden="true"
+						/>
+						<span className="sr-only">
+							Account is rate limited. Requests are rejected until the limit
+							resets.
+						</span>
 					</span>
 				)}
 				{staleLockDetected && (
@@ -648,6 +660,7 @@ export function AccountListItem({
 								</span>
 								<Switch
 									checked={account.autoFallbackEnabled}
+									aria-label={`Auto-fallback for ${account.name}`}
 									onCheckedChange={() => onAutoFallbackToggle(account)}
 									title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
 								/>
@@ -658,6 +671,7 @@ export function AccountListItem({
 								</span>
 								<Switch
 									checked={account.autoRefreshEnabled}
+									aria-label={`Auto-refresh for ${account.name}`}
 									onCheckedChange={() => onAutoRefreshToggle(account)}
 									title="Automatically sends a minimal message when the usage window resets to avoid cold-start latency. Does not affect OAuth token refreshing."
 								/>
@@ -671,6 +685,7 @@ export function AccountListItem({
 							</span>
 							<Switch
 								checked={account.billingType === "plan"}
+								aria-label={`Plan billing for ${account.name}`}
 								onCheckedChange={() => onBillingTypeToggle(account)}
 								title="Toggle plan billing for this account"
 							/>
@@ -683,6 +698,7 @@ export function AccountListItem({
 							</span>
 							<Switch
 								checked={account.autoPauseOnOverageEnabled ?? false}
+								aria-label={`Auto-pause on overage for ${account.name}`}
 								onCheckedChange={() => onAutoPauseOnOverageToggle(account)}
 								title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when usage window resets."
 							/>
@@ -708,6 +724,7 @@ export function AccountListItem({
 							</span>
 							<Switch
 								checked={account.peakHoursPauseEnabled ?? false}
+								aria-label={`Peak hours pause for ${account.name}`}
 								onCheckedChange={() => onPeakHoursPauseToggle(account)}
 								title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
 							/>
@@ -716,7 +733,10 @@ export function AccountListItem({
 				</div>
 			)}
 			{routingStates.length > 0 && (
-				<section aria-label="Family routing" className="space-y-2">
+				<section
+					aria-label={`Family routing for ${account.name}`}
+					className="space-y-2"
+				>
 					<p className="text-xs font-medium text-muted-foreground">
 						Family routing
 					</p>

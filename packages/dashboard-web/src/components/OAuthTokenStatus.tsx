@@ -119,7 +119,11 @@ export function OAuthTokenStatus({
 				className="inline-flex items-center ml-2"
 				title="OAuth refresh token status unknown - checking..."
 			>
-				<RefreshCw className="h-4 w-4 text-gray-400 animate-spin" />
+				<RefreshCw
+					className="h-4 w-4 text-gray-400 animate-spin"
+					aria-hidden="true"
+				/>
+				<span className="sr-only">Checking OAuth token status</span>
 			</span>
 		);
 	}
@@ -158,7 +162,10 @@ export function OAuthTokenStatus({
 
 	return (
 		<span className="inline-flex items-center ml-2" title={getTooltip()}>
-			{getIcon()}
+			<span aria-hidden="true" className="inline-flex items-center">
+				{getIcon()}
+			</span>
+			<span className="sr-only">{getTooltip()}</span>
 		</span>
 	);
 }

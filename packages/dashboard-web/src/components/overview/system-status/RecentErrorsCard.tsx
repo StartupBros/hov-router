@@ -41,14 +41,17 @@ export function RecentErrorsCard() {
 	return (
 		<div className="space-y-2">
 			<div className="flex items-center justify-between">
-				<h4 className="text-sm font-medium text-muted-foreground">
+				<h3 className="text-sm font-medium text-muted-foreground">
 					Recent Errors
-				</h4>
+				</h3>
 				<Select
 					value={windowKey}
 					onValueChange={(v) => setWindowKey(v as ErrorWindowKey)}
 				>
-					<SelectTrigger className="w-[140px] h-8 text-xs">
+					<SelectTrigger
+						className="w-[140px] h-8 text-xs"
+						aria-label="Error time window"
+					>
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>

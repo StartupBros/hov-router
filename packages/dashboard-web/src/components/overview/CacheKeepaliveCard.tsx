@@ -44,7 +44,7 @@ export function CacheKeepaliveCard() {
 					value={String(currentValue)}
 					onValueChange={(v) => setTtl.mutate({ ttlMinutes: parseInt(v, 10) })}
 				>
-					<SelectTrigger className="w-48">
+					<SelectTrigger className="w-48" aria-label="Cache Keep-Alive">
 						<SelectValue placeholder="Select TTL..." />
 					</SelectTrigger>
 					<SelectContent>

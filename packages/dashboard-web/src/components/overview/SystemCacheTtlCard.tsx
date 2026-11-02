@@ -27,6 +27,7 @@ export function SystemCacheTtlCard() {
 			<CardContent>
 				<div className="flex items-center gap-3">
 					<Switch
+						aria-label="System Prompt Cache TTL"
 						disabled={isLoading || setTtl.isPending}
 						checked={enabled}
 						onCheckedChange={(checked) => setTtl.mutate(checked)}

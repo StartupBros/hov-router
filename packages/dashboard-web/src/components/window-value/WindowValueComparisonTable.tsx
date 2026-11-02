@@ -80,7 +80,7 @@ function DeltaCell({ delta }: { delta: number | null }) {
 		<span
 			className={
 				delta < 0
-					? "rounded bg-destructive/15 px-1 py-0.5 text-[10px] font-medium text-destructive"
+					? "rounded bg-destructive/15 px-1 py-0.5 text-[10px] font-medium text-red-700 dark:text-red-300"
 					: "rounded bg-emerald-500/10 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
 			}
 		>
@@ -148,7 +148,7 @@ export function WindowValueComparisonTable({
 								const rowClassName = [
 									"border-t border-border",
 									partial
-										? "window-value-row--partial opacity-50 text-muted-foreground"
+										? "window-value-row--partial text-muted-foreground"
 										: "",
 									open ? "window-value-row--open bg-muted/20" : "",
 								]
@@ -183,7 +183,7 @@ export function WindowValueComparisonTable({
 										<td className="whitespace-nowrap px-3 py-2">
 											<span>{grantTypeLabel(window)}</span>
 											{open && (
-												<span className="ml-1 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
+												<span className="ml-1 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-foreground">
 													open
 												</span>
 											)}

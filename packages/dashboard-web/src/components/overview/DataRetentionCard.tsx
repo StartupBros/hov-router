@@ -14,6 +14,7 @@ import {
 	CardTitle,
 } from "../ui/card";
 import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
 
 export function DataRetentionCleanupSummary({
@@ -70,8 +71,11 @@ export function DataRetentionCard() {
 			<CardContent className="space-y-3">
 				<div className="flex items-center gap-2">
 					<div className="flex items-center gap-2">
-						<span className="text-sm font-medium w-28">Payloads</span>
+						<Label htmlFor="retention-payload-days" className="w-28">
+							Payloads
+						</Label>
 						<Input
+							id="retention-payload-days"
 							type="number"
 							min={1}
 							max={365}
@@ -85,6 +89,7 @@ export function DataRetentionCard() {
 					</div>
 					<Button
 						size="sm"
+						aria-label="Save payload retention"
 						disabled={disabled || !validPayload}
 						onClick={() => setRetention.mutate({ payloadDays })}
 					>
@@ -94,8 +99,11 @@ export function DataRetentionCard() {
 
 				<div className="flex items-center gap-2 pt-2">
 					<div className="flex items-center gap-2">
-						<span className="text-sm font-medium w-28">Requests</span>
+						<Label htmlFor="retention-request-days" className="w-28">
+							Requests
+						</Label>
 						<Input
+							id="retention-request-days"
 							type="number"
 							min={1}
 							max={3650}
@@ -109,6 +117,7 @@ export function DataRetentionCard() {
 					</div>
 					<Button
 						size="sm"
+						aria-label="Save request retention"
 						disabled={disabled || !validRequests}
 						onClick={() => setRetention.mutate({ requestDays })}
 					>
@@ -118,19 +127,22 @@ export function DataRetentionCard() {
 
 				<div className="flex items-center justify-between pt-2 pb-1">
 					<div>
-						<p className="text-sm font-medium">Store message payloads</p>
+						<Label htmlFor="retention-store-payloads" className="block">
+							Store message payloads
+						</Label>
 						<p className="text-xs text-muted-foreground">
 							Stores full request/response bodies (conversation text, images) in
 							the database. Disable to reduce database size and lower memory
 							pressure — token counts, costs, and analytics are always saved
 							regardless.
 						</p>
-						<p className="text-xs text-amber-500 mt-0.5">
+						<p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
 							Warning: storing payloads can significantly grow the database size
 							over time.
 						</p>
 					</div>
 					<Switch
+						id="retention-store-payloads"
 						checked={data?.storePayloads ?? true}
 						disabled={isLoading || setRetention.isPending}
 						onCheckedChange={(checked) =>

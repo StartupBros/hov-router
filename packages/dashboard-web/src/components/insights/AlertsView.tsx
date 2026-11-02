@@ -82,7 +82,7 @@ export const AlertsView = React.memo(() => {
 										<Badge
 											variant={alert.acknowledged ? "outline" : "destructive"}
 										>
-											{alert.acknowledged ? "Acked" : "New"}
+											{alert.acknowledged ? "Acknowledged" : "New"}
 										</Badge>
 									</div>
 								</CardHeader>
@@ -91,6 +91,7 @@ export const AlertsView = React.memo(() => {
 									<Button
 										size="sm"
 										variant="ghost"
+										aria-label={`Acknowledge ${alert.title}`}
 										disabled={alert.acknowledged || ack.isPending}
 										onClick={() => void ack.mutateAsync(alert.id)}
 									>

@@ -73,6 +73,21 @@ export function scheduleUpdateChecks(
 	return () => timer.clearInterval(interval);
 }
 
+// Reasons come from the server's update check: `lookup_failed:*` when the
+// release lookup fails, `proven_non_actionable` for a verified build that has
+// no update channel, and every other value (resolveBuildProvenance in
+// packages/core/src/build-provenance.ts) when the build's provenance is
+// missing, conflicting or untrusted.
+export function updateUnavailableMessage(reason: string): string {
+	if (reason.startsWith("lookup_failed")) {
+		return "Couldn't reach the update server. Try again later.";
+	}
+	if (reason === "proven_non_actionable") {
+		return "This build has no automatic update channel.";
+	}
+	return "Couldn't verify where this build came from.";
+}
+
 export function UpdateStatusDetails({
 	status,
 	result,
@@ -127,7 +142,7 @@ export function UpdateStatusDetails({
 	if (status === "unavailable" && result) {
 		return (
 			<p className="mt-1 text-xs text-muted-foreground text-left">
-				{result.reason}
+				{updateUnavailableMessage(result.reason)}
 			</p>
 		);
 	}
@@ -192,7 +207,7 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 		// Add remaining items
 		baseItems.push(
 			{ label: "Agents", icon: Bot, path: "/agents" },
-			{ label: "API Keys", icon: Key, path: "/api-keys" },
+			{ label: "API Keys", icon: Key, path: "/keys" },
 			{ label: "Logs", icon: FileText, path: "/logs" },
 			{ label: "Settings", icon: Settings, path: "/settings" },
 		);
@@ -228,7 +243,7 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 	return (
 		<>
 			{/* Mobile header */}
-			<div className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b px-4 flex items-center justify-between">
+			<header className="lg:hidden fixed top-0 left-0 right-0 z-50 h-16 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b px-4 flex items-center justify-between">
 				<div className="flex items-center gap-3">
 					<BrandMark className="h-6 w-6 text-primary" />
 					<span className="font-semibold text-lg">{PRODUCT_NAME}</span>
@@ -238,6 +253,8 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 					<Button
 						variant="ghost"
 						size="sm"
+						aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+						aria-expanded={isMobileMenuOpen}
 						onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
 					>
 						{isMobileMenuOpen ? (
@@ -247,7 +264,7 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 						)}
 					</Button>
 				</div>
-			</div>
+			</header>
 
 			{/* Mobile menu overlay */}
 			{isMobileMenuOpen && (
@@ -276,9 +293,9 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 								<BrandMark className="h-6 w-6 text-primary" />
 							</div>
 							<div>
-								<h1 className="font-semibold text-lg">{PRODUCT_NAME}</h1>
+								<p className="font-semibold text-lg">{PRODUCT_NAME}</p>
 								<p className="text-xs text-muted-foreground">
-									Powerful proxy for Claude Code
+									Proxy for Claude Code
 								</p>
 							</div>
 						</div>
@@ -292,18 +309,20 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 							const Icon = item.icon;
 							const isActive = location.pathname === item.path;
 							return (
-								<Link
+								<Button
 									key={item.path}
-									to={item.path}
-									onClick={() => setIsMobileMenuOpen(false)}
+									asChild
+									variant={isActive ? "secondary" : "ghost"}
+									className={cn(
+										"w-full justify-start gap-3 transition-all",
+										isActive &&
+											"bg-primary/10 text-primary hover:bg-primary/20",
+									)}
 								>
-									<Button
-										variant={isActive ? "secondary" : "ghost"}
-										className={cn(
-											"w-full justify-start gap-3 transition-all",
-											isActive &&
-												"bg-primary/10 text-primary hover:bg-primary/20",
-										)}
+									<Link
+										to={item.path}
+										aria-current={isActive ? "page" : undefined}
+										onClick={() => setIsMobileMenuOpen(false)}
 									>
 										<Icon className="h-4 w-4" />
 										{item.label}
@@ -312,8 +331,8 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 												{item.badge}
 											</span>
 										)}
-									</Button>
-								</Link>
+									</Link>
+								</Button>
 							);
 						})}
 						{onLogout && (

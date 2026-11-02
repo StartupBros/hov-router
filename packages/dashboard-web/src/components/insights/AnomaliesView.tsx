@@ -185,7 +185,7 @@ function TokenOutlierPanel({
 					<p className="text-sm text-muted-foreground py-4">
 						{totalCount === 0
 							? "Nothing detected above threshold."
-							: `${totalCount} detected; the visible list is empty (data inconsistency).`}
+							: `${totalCount} detected, but the list could not be shown.`}
 					</p>
 				) : (
 					<div className="overflow-x-auto">

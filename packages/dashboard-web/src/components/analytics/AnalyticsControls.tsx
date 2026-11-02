@@ -50,7 +50,7 @@ export function AnalyticsControls({
 					value={timeRange}
 					onValueChange={(v) => setTimeRange(v as TimeRange)}
 				>
-					<SelectTrigger className="w-32">
+					<SelectTrigger className="w-40" aria-label="Time range">
 						<CalendarDays className="h-4 w-4 mr-2" />
 						<SelectValue />
 					</SelectTrigger>
@@ -79,6 +79,7 @@ export function AnalyticsControls({
 				<div className="flex gap-1 bg-muted rounded-md p-1">
 					<Button
 						variant={viewMode === "normal" ? "default" : "ghost"}
+						aria-pressed={viewMode === "normal"}
 						size="sm"
 						className="h-8 px-3"
 						onClick={() => setViewMode("normal")}
@@ -87,6 +88,7 @@ export function AnalyticsControls({
 					</Button>
 					<Button
 						variant={viewMode === "cumulative" ? "default" : "ghost"}
+						aria-pressed={viewMode === "cumulative"}
 						size="sm"
 						className="h-8 px-3"
 						onClick={() => setViewMode("cumulative")}

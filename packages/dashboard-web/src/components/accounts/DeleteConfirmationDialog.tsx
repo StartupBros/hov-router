@@ -1,4 +1,5 @@
 import { AlertCircle } from "lucide-react";
+import { useId } from "react";
 import { Button } from "../ui/button";
 import {
 	Card,
@@ -25,17 +26,26 @@ export function DeleteConfirmationDialog({
 	onConfirm,
 	onCancel,
 }: DeleteConfirmationDialogProps) {
+	const titleId = useId();
+	const descriptionId = useId();
 	return (
 		<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-			<Card className="w-full max-w-md">
+			<Card
+				role="alertdialog"
+				aria-labelledby={titleId}
+				aria-describedby={descriptionId}
+				className="w-full max-w-md"
+			>
 				<CardHeader>
-					<CardTitle>Confirm Account Removal</CardTitle>
-					<CardDescription>This action cannot be undone.</CardDescription>
+					<CardTitle id={titleId}>Confirm Account Removal</CardTitle>
+					<CardDescription id={descriptionId}>
+						This action cannot be undone.
+					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
 					<div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
 						<div className="flex items-center gap-2 text-destructive">
-							<AlertCircle className="h-5 w-5" />
+							<AlertCircle className="h-5 w-5" aria-hidden="true" />
 							<p className="font-medium">Warning</p>
 						</div>
 						<p className="text-sm mt-2">

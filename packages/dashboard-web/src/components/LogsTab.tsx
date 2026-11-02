@@ -167,9 +167,9 @@ export function LogsTab() {
 			case "ERROR":
 				return "text-destructive";
 			case "WARN":
-				return "text-yellow-600";
+				return "text-yellow-700 dark:text-yellow-500";
 			case "INFO":
-				return "text-green-600";
+				return "text-green-700 dark:text-green-500";
 			case "DEBUG":
 				return "text-muted-foreground";
 			default:

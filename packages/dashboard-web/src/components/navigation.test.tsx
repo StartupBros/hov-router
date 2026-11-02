@@ -14,6 +14,7 @@ import {
 	UPDATE_CHECK_INTERVAL_MS,
 	UpdateStatusDetails,
 	type UpdateStatusResponse,
+	updateUnavailableMessage,
 } from "./navigation";
 
 const DEFAULT_GUIDANCE = [
@@ -64,7 +65,7 @@ describe("navigation identity", () => {
 			expect(mobileHeader).toContain('class="lg:hidden ');
 			expect(mobileHeader).toMatch(/<span\b[^>]*>HoV Router<\/span>/);
 			expect(sidebar).toContain("lg:translate-x-0");
-			expect(sidebar).toMatch(/<h1\b[^>]*>HoV Router<\/h1>/);
+			expect(sidebar).toMatch(/<p\b[^>]*>HoV Router<\/p>/);
 			expect(mobileHeader).toContain('data-testid="brand-mark"');
 			expect(sidebar).toContain('data-testid="brand-mark"');
 			expect(html.match(/data-testid="brand-mark"/g)).toHaveLength(2);
@@ -260,5 +261,37 @@ describe("navigation update status", () => {
 			for (const guidance of DEFAULT_GUIDANCE)
 				expect(html).not.toContain(guidance);
 		}
+	});
+});
+
+describe("updateUnavailableMessage", () => {
+	it("maps lookup failures to a reachability message", () => {
+		expect(updateUnavailableMessage("lookup_failed:timeout")).toBe(
+			"Couldn't reach the update server. Try again later.",
+		);
+	});
+
+	it("maps provenance problems to a verification message", () => {
+		for (const reason of [
+			"unknown_distribution",
+			"invalid_source_sha",
+			"missing_source_sha",
+			"missing_producer",
+			"conflicting_source_ref",
+			"missing_update_channel",
+			"incompatible_source_ref",
+			// proven by metadata but rejected by the server's trust check
+			"proven_actionable",
+		]) {
+			expect(updateUnavailableMessage(reason)).toBe(
+				"Couldn't verify where this build came from.",
+			);
+		}
+	});
+
+	it("says there is no update channel only for a proven non-actionable build", () => {
+		expect(updateUnavailableMessage("proven_non_actionable")).toBe(
+			"This build has no automatic update channel.",
+		);
 	});
 });

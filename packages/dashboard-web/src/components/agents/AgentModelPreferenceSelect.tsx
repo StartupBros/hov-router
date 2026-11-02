@@ -56,6 +56,7 @@ export function AgentModelPreferenceSelect({
 			disabled={updatePreference.isPending}
 			placeholder="Inherit (session model)"
 			triggerClassName={triggerClassName}
+			ariaLabel={`Model Preference for ${agent.name}`}
 			defaultItem={modelDefaultItem}
 		/>
 	);

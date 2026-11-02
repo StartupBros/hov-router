@@ -52,7 +52,11 @@ export function AccountList({
 	onCodexReauth,
 }: AccountListProps) {
 	if (!accounts || accounts.length === 0) {
-		return <p className="text-muted-foreground">No accounts configured</p>;
+		return (
+			<p className="text-muted-foreground">
+				No accounts yet. Add one to start routing requests.
+			</p>
+		);
 	}
 
 	return (

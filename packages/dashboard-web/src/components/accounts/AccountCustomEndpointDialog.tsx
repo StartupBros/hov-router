@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { getDefaultEndpointForProvider } from "../../utils/provider-utils";
 import { Button } from "../ui/button";
 import {
@@ -37,6 +37,7 @@ export function AccountCustomEndpointDialog({
 }: AccountCustomEndpointDialogProps) {
 	const [customEndpoint, setCustomEndpoint] = useState("");
 	const [error, setError] = useState<string | null>(null);
+	const errorId = useId();
 
 	// Initialize custom endpoint when dialog opens or account changes
 	useEffect(() => {
@@ -112,12 +113,18 @@ export function AccountCustomEndpointDialog({
 								setError(null);
 							}}
 							placeholder={defaultPlaceholder}
-							className={error ? "border-red-500" : ""}
+							aria-invalid={error ? true : undefined}
+							aria-describedby={error ? errorId : undefined}
+							className={error ? "border-destructive" : ""}
 						/>
 						<p className="text-xs text-muted-foreground">
 							Leave empty to use default endpoint ({defaultPlaceholder})
 						</p>
-						{error && <p className="text-xs text-red-500">{error}</p>}
+						{error && (
+							<p id={errorId} role="alert" className="text-xs text-destructive">
+								{error}
+							</p>
+						)}
 					</div>
 				</div>
 				<DialogFooter>

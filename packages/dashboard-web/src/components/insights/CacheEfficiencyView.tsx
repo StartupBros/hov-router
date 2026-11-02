@@ -40,7 +40,7 @@ function formatSignedCost(value: number): string {
 
 function savingsColorClass(value: number): string {
 	if (value < 0) return "text-destructive";
-	if (value > 0) return "text-green-500";
+	if (value > 0) return "text-green-700 dark:text-green-400";
 	return "";
 }
 

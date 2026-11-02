@@ -168,7 +168,7 @@ export function RoutingCardView({
 							</SelectContent>
 						</Select>
 						<div className="text-xs text-muted-foreground">
-							⚠️ Only session-class strategies are shown. Strategies that spread
+							Only session-class strategies are shown. Strategies that spread
 							individual requests across accounts can trigger Claude's
 							anti-abuse systems and risk account bans.
 						</div>
@@ -190,10 +190,11 @@ export function RoutingCardView({
 								)}
 							</div>
 							<div className="text-sm text-muted-foreground">
-								Exhausted per-model accounts are skipped; remaining eligible
-								accounts can still handle the request. A retryable 503
-								model_pool_exhausted occurs only if capacity filtering leaves no
-								eligible account instead of guaranteed-failure retries.
+								Accounts with no capacity left for the requested model are
+								skipped, and the remaining accounts still handle the request. If
+								none are left, the request fails with a retryable 503
+								(model_pool_exhausted) instead of retrying accounts that are
+								certain to fail.
 							</div>
 						</div>
 						<Switch
@@ -211,12 +212,12 @@ export function RoutingCardView({
 						aria-labelledby="routing-attempt-summary-heading"
 					>
 						<div className="space-y-1">
-							<h4
+							<h3
 								id="routing-attempt-summary-heading"
 								className="text-sm font-medium"
 							>
 								Routing attempts (last 24 hours)
-							</h4>
+							</h3>
 							<p className="text-xs text-muted-foreground">
 								These are upstream routing events, not terminal client failures.
 								Telemetry is post-deployment only; historical routing attempts

@@ -79,7 +79,7 @@ export function AnalyticsFilters({
 
 					{/* Status Filter */}
 					<div className="space-y-2">
-						<Label>Status</Label>
+						<Label htmlFor="analytics-status-filter">Status</Label>
 						<Select
 							value={filters.status}
 							onValueChange={(value) =>
@@ -89,7 +89,7 @@ export function AnalyticsFilters({
 								})
 							}
 						>
-							<SelectTrigger>
+							<SelectTrigger id="analytics-status-filter">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
