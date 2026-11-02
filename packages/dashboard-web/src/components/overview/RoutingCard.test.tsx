@@ -89,12 +89,12 @@ describe("RoutingCardView", () => {
 
 	it("describes the conditional model-pool exhaustion terminal", () => {
 		const html = render({ capacityMode: "exhausted" });
-		expect(html).toContain("per-model accounts are skipped");
 		expect(html).toContain(
-			"remaining eligible accounts can still handle the request",
+			"no capacity left for the requested model are skipped",
 		);
+		expect(html).toContain("the remaining accounts still handle the request");
 		expect(html).toContain(
-			"only if capacity filtering leaves no eligible account",
+			"If none are left, the request fails with a retryable 503",
 		);
 		expect(html).toContain("model_pool_exhausted");
 		expect(html).toContain("503");

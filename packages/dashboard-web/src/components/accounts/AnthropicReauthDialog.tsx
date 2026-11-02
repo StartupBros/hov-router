@@ -144,14 +144,19 @@ export function AnthropicReauthDialog({
 					)}
 
 					{step === "complete" && (
-						<p className="text-sm text-green-600">
-							Re-authentication successful! Tokens updated.
+						<p
+							role="status"
+							className="text-sm text-green-700 dark:text-green-400"
+						>
+							Re-authenticated. Tokens updated.
 						</p>
 					)}
 
 					{step === "error" && (
 						<div className="space-y-2">
-							<p className="text-sm text-destructive">{error}</p>
+							<p role="alert" className="text-sm text-destructive">
+								{error}
+							</p>
 						</div>
 					)}
 				</div>

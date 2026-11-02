@@ -120,7 +120,7 @@ export function AgentCard({ agent }: AgentCardProps) {
 									{agent.model?.includes("opus") && (
 										<Badge variant="secondary" className="text-xs gap-1">
 											<Cpu className="h-3 w-3" />
-											Advanced
+											Premium
 										</Badge>
 									)}
 									{agent.modelSource === "frontmatter" && (
@@ -146,12 +146,13 @@ export function AgentCard({ agent }: AgentCardProps) {
 							size="sm"
 							onClick={() => setEditDialogOpen(true)}
 							disabled={isPluginAgent}
+							aria-label={`Edit ${displayName}`}
 							title={
 								isPluginAgent
 									? "Plugin-managed agents cannot be edited — modify the source plugin instead"
-									: undefined
+									: "Edit agent file"
 							}
-							className="opacity-0 group-hover:opacity-100 transition-opacity disabled:cursor-not-allowed"
+							className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity disabled:cursor-not-allowed"
 						>
 							<Edit3 className="h-4 w-4" />
 						</Button>

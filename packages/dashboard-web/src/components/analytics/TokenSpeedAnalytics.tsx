@@ -83,7 +83,7 @@ export function TokenSpeedAnalytics({
 							{formatTokensPerSecond(maxSpeed)}
 						</div>
 						<p className="text-xs text-muted-foreground">
-							Maximum observed in {timeRange}
+							Maximum observed in the selected time range
 						</p>
 					</CardContent>
 				</Card>

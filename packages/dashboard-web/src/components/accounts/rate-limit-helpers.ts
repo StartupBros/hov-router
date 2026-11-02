@@ -9,6 +9,7 @@
  */
 import { weeklyScopedWindowKey } from "@better-ccflare/core";
 import type { AnthropicUsageData, UsageLimit } from "@better-ccflare/types";
+import { formatShortDuration } from "../../lib/utils";
 
 /** A single progress-bar row rendered by RateLimitProgress. */
 export interface UsageDisplay {
@@ -316,4 +317,17 @@ export function collectAnthropicUsageRows(
 	}
 
 	return rows;
+}
+
+/**
+ * Turn the server's raw rate-limit status ("usage_exhausted (2757m)") into
+ * readable text ("Usage exhausted · resets in 45h 57m").
+ */
+export function formatRateLimitStatus(status: string): string {
+	const match = status.match(/^(.*?)\s*\((\d+)m\)$/);
+	const base = (match ? match[1] : status).replace(/_/g, " ");
+	const label = base.charAt(0).toUpperCase() + base.slice(1);
+	return match
+		? `${label} · resets in ${formatShortDuration(Number(match[2]) * 60000)}`
+		: label;
 }

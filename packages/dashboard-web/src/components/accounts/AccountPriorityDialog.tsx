@@ -86,7 +86,8 @@ export function AccountPriorityDialog({
 						/>
 					</div>
 					<div className="text-sm text-muted-foreground">
-						Current priority: {account?.priority || 0}
+						Current priority: {account?.priority || 0}. Enter a whole number
+						from 0 to 100.
 					</div>
 				</div>
 				<DialogFooter>

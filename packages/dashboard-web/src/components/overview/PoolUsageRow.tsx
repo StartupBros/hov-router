@@ -255,7 +255,7 @@ export function PoolUsageRow({
 												segment.kind,
 												isPrimarySegment,
 											) && (
-												<span className="absolute left-1 top-1 z-10 rounded-sm bg-background/80 px-1 text-[10px] font-medium leading-none text-primary">
+												<span className="absolute left-1 top-1 z-10 rounded-sm bg-background/80 px-1 text-[10px] font-medium leading-none text-orange-700 dark:text-primary">
 													next
 												</span>
 											)}

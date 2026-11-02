@@ -1150,7 +1150,7 @@ export function AccountAddForm({
 
 	return (
 		<div className="space-y-4 mb-6 p-4 border rounded-lg">
-			<h4 className="font-medium">
+			<h3 className="font-medium">
 				{routingStage === "finalizing"
 					? "Finalizing account setup"
 					: routingStage === "outcome"
@@ -1158,7 +1158,7 @@ export function AccountAddForm({
 						: authStep === "form"
 							? "Add New Account"
 							: "Enter Authorization Code"}
-			</h4>
+			</h3>
 			{authStep === "form" &&
 				routingStage !== "finalizing" &&
 				routingStage !== "outcome" && (
@@ -1247,7 +1247,7 @@ export function AccountAddForm({
 							</Select>
 						</div>
 						{newAccount.mode === "codex" && (
-							<div className="space-y-3">
+							<div className="space-y-3" role="status" aria-live="polite">
 								{codexStep === "idle" && (
 									<div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg">
 										<p className="text-sm text-blue-900 dark:text-blue-100 font-medium mb-1">
@@ -1288,7 +1288,7 @@ export function AccountAddForm({
 								{codexStep === "complete" && (
 									<div className="bg-green-50 dark:bg-green-950 p-3 rounded-lg">
 										<p className="text-sm text-green-900 dark:text-green-100 font-medium">
-											Authorization successful! Account added.
+											Authorization complete. Account added.
 										</p>
 									</div>
 								)}
@@ -1315,7 +1315,7 @@ export function AccountAddForm({
 							</div>
 						)}
 						{newAccount.mode === "qwen" && (
-							<div className="space-y-3">
+							<div className="space-y-3" role="status" aria-live="polite">
 								{qwenStep === "idle" && (
 									<div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg">
 										<p className="text-sm text-blue-900 dark:text-blue-100 font-medium mb-1">
@@ -1356,7 +1356,7 @@ export function AccountAddForm({
 								{qwenStep === "complete" && (
 									<div className="bg-green-50 dark:bg-green-950 p-3 rounded-lg">
 										<p className="text-sm text-green-900 dark:text-green-100 font-medium">
-											Authorization successful! Account added.
+											Authorization complete. Account added.
 										</p>
 									</div>
 								)}
@@ -1505,7 +1505,7 @@ export function AccountAddForm({
 											{newAccount.profile &&
 												!newAccount.awsRegion &&
 												!loadingProfiles && (
-													<p className="text-xs text-yellow-600 dark:text-yellow-400">
+													<p className="text-xs text-yellow-700 dark:text-yellow-400">
 														No default region found for this profile. Configure
 														region in ~/.aws/config
 													</p>
@@ -2257,8 +2257,8 @@ export function AccountAddForm({
 													htmlFor={`deepseek-${family}`}
 													className="text-sm"
 												>
-													{family[0].toUpperCase() + family.slice(1)} model
-													(optional)
+													{family[0].toUpperCase() + family.slice(1)} Model
+													(Optional)
 												</Label>
 												<Input
 													id={`deepseek-${family}`}

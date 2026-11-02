@@ -40,29 +40,28 @@ export function RecentErrorRow({
 	const absoluteTime = formatTimestamp(error.latestTimestamp);
 
 	return (
-		// biome-ignore lint/a11y/useSemanticElements: a real <button> would nest the dismiss <Button>, which is invalid HTML and breaks stopPropagation
 		<div
-			role="button"
-			tabIndex={0}
-			onClick={onClick}
-			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					e.preventDefault();
-					onClick();
-				}
-			}}
-			className={`w-full text-left p-3 rounded-lg flex items-start gap-2 cursor-pointer transition-colors hover:bg-opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${bgClass}`}
+			className={`relative w-full text-left p-3 rounded-lg flex items-start gap-2 transition-colors ${bgClass}`}
 		>
-			<Icon className={`h-4 w-4 mt-0.5 shrink-0 ${iconColor}`} />
-			<div className="flex-1 min-w-0">
+			<button
+				type="button"
+				onClick={onClick}
+				aria-label={`View details: ${meta.title}`}
+				title={absoluteTime}
+				className="absolute inset-0 rounded-lg cursor-pointer hover:bg-foreground/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			/>
+			<Icon
+				className={`pointer-events-none h-4 w-4 mt-0.5 shrink-0 ${iconColor}`}
+			/>
+			<div className="pointer-events-none relative flex-1 min-w-0">
 				<p className="text-sm font-medium truncate">{meta.title}</p>
-				<p className="text-xs text-muted-foreground truncate">
+				<p className="text-xs text-foreground/70 truncate">
 					{accountLabel(error)}
 					{error.model ? ` · ${error.model}` : ""}
 					{error.statusCode != null ? ` · ${error.statusCode}` : ""}
 				</p>
 			</div>
-			<div className="flex items-center gap-2 shrink-0">
+			<div className="pointer-events-none relative flex items-center gap-2 shrink-0">
 				{error.occurrenceCount > 1 && (
 					<Badge
 						variant="secondary"
@@ -71,16 +70,13 @@ export function RecentErrorRow({
 						×{error.occurrenceCount}
 					</Badge>
 				)}
-				<span
-					className="text-xs text-muted-foreground whitespace-nowrap"
-					title={absoluteTime}
-				>
+				<span className="text-xs text-foreground/70 whitespace-nowrap">
 					{relativeTime}
 				</span>
 				<Button
 					variant="ghost"
 					size="sm"
-					className="h-7 w-7 p-0"
+					className="pointer-events-auto relative z-10 h-7 w-7 p-0"
 					aria-label="Dismiss error"
 					onClick={(e) => {
 						e.stopPropagation();

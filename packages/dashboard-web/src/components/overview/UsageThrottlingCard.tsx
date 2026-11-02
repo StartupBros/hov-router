@@ -36,6 +36,7 @@ export function UsageThrottlingCard() {
 							</div>
 						</div>
 						<Switch
+							aria-label="5-hour window"
 							disabled={isLoading || setUsageThrottling.isPending}
 							checked={fiveHourEnabled}
 							onCheckedChange={(checked) =>
@@ -55,6 +56,7 @@ export function UsageThrottlingCard() {
 							</div>
 						</div>
 						<Switch
+							aria-label="Weekly window"
 							disabled={isLoading || setUsageThrottling.isPending}
 							checked={weeklyEnabled}
 							onCheckedChange={(checked) =>

@@ -185,7 +185,7 @@ export function RateLimitProgress({
 		return (
 			<div className={cn("space-y-2", className)}>
 				<div className="flex items-center justify-between">
-					<span className="text-xs text-amber-600 dark:text-amber-400">
+					<span className="text-xs text-amber-700 dark:text-amber-400">
 						Rate limited — usage data unavailable
 					</span>
 					<span className="text-xs text-muted-foreground">
@@ -568,10 +568,10 @@ export function RateLimitProgress({
 			)}
 			{hasOrphanThrottledWindow && usageThrottledUntil != null && (
 				<div className="flex items-center justify-between">
-					<span className="text-xs text-amber-600 dark:text-amber-400">
+					<span className="text-xs text-amber-700 dark:text-amber-400">
 						Usage throttling enabled; requests are being delayed
 					</span>
-					<span className="text-xs text-amber-600 dark:text-amber-400">
+					<span className="text-xs text-amber-700 dark:text-amber-400">
 						{(() => {
 							const throttledLabel = formatThrottledUntil(
 								usageThrottledUntil,
@@ -684,12 +684,12 @@ export function RateLimitProgress({
 											className={cn(
 												"text-xs font-medium text-muted-foreground",
 												isWindowThrottled &&
-													"text-amber-600 dark:text-amber-400",
+													"text-amber-700 dark:text-amber-400",
 											)}
 										>
 											{isAvailable ? `${percentage?.toFixed(0)}%` : "N/A"}
 											{usage.isActive && (
-												<span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-red-500 dark:text-red-400">
+												<span className="ml-1.5 text-[11px] font-medium uppercase tracking-wide text-red-700 dark:text-red-400">
 													binding
 												</span>
 											)}
@@ -719,6 +719,7 @@ export function RateLimitProgress({
 										</div>
 										<Progress
 											value={isAvailable ? percentage : 0}
+											aria-label={`${windowLabel} usage`}
 											className="h-2"
 											indicatorClassName={
 												isWindowThrottled
@@ -750,10 +751,10 @@ export function RateLimitProgress({
 									</div>
 									{isWindowThrottled && throttleDisplayUntil && (
 										<div className="flex items-center justify-between">
-											<span className="text-xs text-amber-600 dark:text-amber-400">
+											<span className="text-xs text-amber-700 dark:text-amber-400">
 												Usage throttling enabled; requests are being delayed
 											</span>
-											<span className="text-xs text-amber-600 dark:text-amber-400">
+											<span className="text-xs text-amber-700 dark:text-amber-400">
 												{(() => {
 													const throttledLabel = formatThrottledUntil(
 														throttleDisplayUntil,
@@ -868,6 +869,7 @@ export function RateLimitProgress({
 							{pct != null && (
 								<Progress
 									value={Math.min(100, Math.max(0, pct))}
+									aria-label="Overage credits"
 									className="h-2"
 								/>
 							)}

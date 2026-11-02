@@ -16,10 +16,10 @@
 	--secondary: hsl(240 4.8% 95.9%);
 	--secondary-foreground: hsl(240 5.9% 10%);
 	--muted: hsl(240 4.8% 95.9%);
-	--muted-foreground: hsl(240 3.8% 46.1%);
+	--muted-foreground: hsl(240 3.8% 44%);
 	--accent: hsl(24 89% 56%); /* ccflare Orange */
 	--accent-foreground: hsl(0 0% 100%);
-	--destructive: hsl(0 84.2% 60.2%);
+	--destructive: hsl(0 72% 45%);
 	--destructive-foreground: hsl(0 0% 98%);
 	--border: hsl(240 5.9% 90%);
 	--input: hsl(240 5.9% 90%);
@@ -40,7 +40,7 @@
 	--secondary: hsl(220 13% 18%);
 	--secondary-foreground: hsl(0 0% 95%);
 	--muted: hsl(220 13% 18%);
-	--muted-foreground: hsl(220 9% 55%);
+	--muted-foreground: hsl(220 9% 60%);
 	--accent: hsl(24 89% 56%); /* ccflare Orange */
 	--accent-foreground: hsl(0 0% 100%);
 	--destructive: hsl(0 84.2% 60.2%);
@@ -158,11 +158,11 @@
 
 	/* Success/Error/Warning colors */
 	.text-success {
-		@apply text-green-600 dark:text-green-400;
+		@apply text-green-700 dark:text-green-400;
 	}
 
 	.text-warning {
-		@apply text-yellow-600 dark:text-yellow-400;
+		@apply text-yellow-700 dark:text-yellow-400;
 	}
 
 	.bg-success {

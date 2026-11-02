@@ -5,6 +5,7 @@ import {
 	collectAnthropicUsageRows,
 	describeBindingConstraint,
 	displayLabel,
+	formatRateLimitStatus,
 	formatWindowName,
 	isUsageWindow,
 	isWeeklyWindow,
@@ -450,5 +451,24 @@ describe("describeBindingConstraint", () => {
 			"five_hour",
 		);
 		expect(display?.resetAtMs).toBeNull();
+	});
+});
+
+describe("formatRateLimitStatus", () => {
+	it("humanizes the enum and converts minutes to a duration", () => {
+		expect(formatRateLimitStatus("usage_exhausted (2757m)")).toBe(
+			"Usage exhausted · resets in 45h 57m",
+		);
+		expect(formatRateLimitStatus("allowed (1433m)")).toBe(
+			"Allowed · resets in 23h 53m",
+		);
+		expect(formatRateLimitStatus("Rate limited (3m)")).toBe(
+			"Rate limited · resets in 3m",
+		);
+	});
+
+	it("leaves statuses without a countdown readable", () => {
+		expect(formatRateLimitStatus("usage_exhausted")).toBe("Usage exhausted");
+		expect(formatRateLimitStatus("OK")).toBe("OK");
 	});
 });

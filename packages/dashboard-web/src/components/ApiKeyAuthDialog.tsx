@@ -70,7 +70,10 @@ export function ApiKeyAuthDialog({
 
 					<div className="space-y-4 py-4">
 						{displayError && (
-							<div className="rounded-md border border-destructive bg-destructive/10 p-3">
+							<div
+								role="alert"
+								className="rounded-md border border-destructive bg-destructive/10 p-3"
+							>
 								<div className="flex items-center gap-2">
 									<AlertCircle className="h-4 w-4 text-destructive" />
 									<p className="text-sm text-destructive">{displayError}</p>

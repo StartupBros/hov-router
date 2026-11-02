@@ -252,6 +252,7 @@ export function ProviderModelDefaultsDialog() {
 														variant="ghost"
 														size="sm"
 														title={providerFieldResetTitle(field)}
+														aria-label={providerFieldResetTitle(field)}
 														onClick={() =>
 															handleReset(provider.provider, field.family)
 														}

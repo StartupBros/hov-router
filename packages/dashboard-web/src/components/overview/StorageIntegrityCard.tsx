@@ -87,7 +87,10 @@ export function StorageIntegrityCard() {
 			description += " — quick check timed out (skipped)";
 		}
 		badgeNode = (
-			<Badge variant="default" className="bg-success">
+			<Badge
+				variant="default"
+				className="bg-success text-green-800 dark:text-green-300"
+			>
 				Healthy
 			</Badge>
 		);

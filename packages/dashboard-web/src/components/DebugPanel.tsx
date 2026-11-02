@@ -1,3 +1,4 @@
+import { Bug } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -56,8 +57,10 @@ export function DebugPanel() {
 				onClick={() => setIsVisible(true)}
 				className="fixed bottom-4 right-4 z-50"
 				size="sm"
+				variant="outline"
 			>
-				🐛 Debug
+				<Bug className="h-4 w-4 mr-1.5" aria-hidden="true" />
+				Debug
 			</Button>
 		);
 	}
@@ -67,9 +70,9 @@ export function DebugPanel() {
 			case "error":
 				return "text-destructive";
 			case "warn":
-				return "text-yellow-600";
+				return "text-yellow-700 dark:text-yellow-400";
 			case "info":
-				return "text-blue-600";
+				return "text-blue-600 dark:text-blue-400";
 			case "debug":
 				return "text-muted-foreground";
 			default:
@@ -82,7 +85,12 @@ export function DebugPanel() {
 			<CardHeader className="pb-2">
 				<div className="flex items-center justify-between">
 					<CardTitle className="text-sm">Debug Panel</CardTitle>
-					<Button onClick={() => setIsVisible(false)} variant="ghost" size="sm">
+					<Button
+						onClick={() => setIsVisible(false)}
+						variant="ghost"
+						size="sm"
+						aria-label="Close debug panel"
+					>
 						✕
 					</Button>
 				</div>

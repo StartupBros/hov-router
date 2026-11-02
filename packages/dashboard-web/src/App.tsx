@@ -100,7 +100,7 @@ export function App() {
 					</Suspense>
 				),
 				title: "Analytics",
-				subtitle: "Deep dive into your usage patterns and trends",
+				subtitle: "Usage patterns and trends over time",
 			},
 			{
 				path: "/insights",
@@ -151,7 +151,7 @@ export function App() {
 				subtitle: "Discover and manage Claude Code agents",
 			},
 			{
-				path: "/api-keys",
+				path: "/keys",
 				element: <ApiKeysTab />,
 				title: "API Key Management",
 				subtitle: "Generate and manage API keys for authentication",
@@ -160,7 +160,7 @@ export function App() {
 				path: "/logs",
 				element: <LogsTab />,
 				title: "System Logs",
-				subtitle: "Real-time system logs and debugging information",
+				subtitle: "Live system logs",
 			},
 			{
 				path: "/settings",
@@ -418,6 +418,10 @@ export function App() {
 												element={route.element}
 											/>
 										))}
+										<Route
+											path="/api-keys"
+											element={<Navigate to="/keys" replace />}
+										/>
 										<Route path="*" element={<Navigate to="/" replace />} />
 									</Routes>
 								</div>

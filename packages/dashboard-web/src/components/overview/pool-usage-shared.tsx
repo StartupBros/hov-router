@@ -32,7 +32,7 @@ export function headlineColor(average: number | null): string | undefined {
 	if (average == null) return undefined;
 	if (average < 60) return "text-success";
 	if (average < 80) return "text-warning";
-	return "text-destructive";
+	return "text-red-600 dark:text-red-400";
 }
 
 export function groupExcluded(
@@ -128,7 +128,9 @@ export function atRiskBadge(
 		return { label: null, colorClass: null };
 	}
 	const colorClass =
-		willRunOutCount >= capacityCount ? "text-destructive" : "text-warning";
+		willRunOutCount >= capacityCount
+			? "text-red-600 dark:text-red-400"
+			: "text-warning";
 	return {
 		label: `${willRunOutCount} of ${capacityCount} will run out`,
 		colorClass,
@@ -169,7 +171,7 @@ export function PoolUsagePopover({ result, window }: PoolUsagePopoverProps) {
 			<PopoverTrigger asChild>
 				<button
 					type="button"
-					className="flex items-center gap-1 text-xs text-muted-foreground cursor-help focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+					className="flex min-h-6 items-center gap-1 text-xs text-muted-foreground cursor-help focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
 					onClick={(event) => event.stopPropagation()}
 				>
 					<span className="tabular-nums">
