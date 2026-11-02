@@ -219,6 +219,14 @@ applies right now. Credits arrive in grant waves that reach many accounts within
 A redemption rolls the windows over early, so the usage-window ledger cannot tell it from a
 provider's own early reset (shown as a "bonus reset") unless the redemption is recorded.
 
+### Member notice
+
+A post to House of Vibe members about a provider event: a banked-reset grant wave, a wave
+nearing its expiry, or limits that appear to have reset early. It goes only to the member
+destination, never to the alert webhook, and never names an account or carries per-account
+counts or fleet totals. Operational alerts are the opposite: they go to the operator and name
+accounts.
+
 ### Affinity lane
 
 The unit to which session affinity pins an owner account: one client session's traffic for
