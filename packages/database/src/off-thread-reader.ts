@@ -1,5 +1,9 @@
 import { Logger } from "@better-ccflare/logger";
 import {
+	BatchExpectedChangesError,
+	type BatchStatement,
+} from "./adapters/batch-statement";
+import {
 	fingerprintSql,
 	SLOW_SQL_STATEMENT_MS,
 } from "./sqlite-statement-timing";
@@ -28,6 +32,7 @@ export interface OffThreadReaderOptions {
 	info?: (message: string) => void;
 }
 
+/** The worker could not take the request; running it on the main thread is safe. */
 export class OffThreadReaderUnavailableError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -35,12 +40,25 @@ export class OffThreadReaderUnavailableError extends Error {
 	}
 }
 
-type PendingRead = {
-	mode: "all" | "get";
+/**
+ * A write reached the worker, then the worker faulted or stopped answering.
+ * It may or may not have committed, so it must not be re-run anywhere. Never
+ * an OffThreadReaderUnavailableError, and the message never names a SQLite
+ * lock error, so neither the adapter fallback nor withDatabaseRetry repeats it.
+ */
+export class OffThreadWriteOutcomeUnknownError extends Error {
+	constructor(cause: string) {
+		super(`off-thread write outcome unknown (${cause}); not retried`);
+		this.name = "OffThreadWriteOutcomeUnknownError";
+	}
+}
+
+type PendingRequest = {
+	mode: string;
 	sql: string;
 	resolve: (result: unknown) => void;
 	reject: (error: Error) => void;
-	timer: ReturnType<typeof setTimeout>;
+	timer?: ReturnType<typeof setTimeout>;
 };
 type Lease = {
 	worker: ReaderWorker;
@@ -52,31 +70,63 @@ type Lease = {
 	retireTimer?: ReturnType<typeof setTimeout>;
 	resolveRetired?: () => void;
 };
+type ErrorDetail = {
+	message: string;
+	name: string;
+	code?: string;
+	errno?: number;
+	batch?: {
+		statementIndex: number;
+		expectedChanges: number;
+		actualChanges: number;
+	};
+};
 
-let loggedReady = false;
+const loggedReady = new Set<string>();
+
+function rehydrate(detail: ErrorDetail): Error {
+	if (detail.batch)
+		return new BatchExpectedChangesError(
+			detail.batch.statementIndex,
+			detail.batch.expectedChanges,
+			detail.batch.actualChanges,
+		);
+	return Object.assign(new Error(detail.message), {
+		name: detail.name,
+		...(detail.code === undefined ? {} : { code: detail.code }),
+		...(detail.errno === undefined ? {} : { errno: detail.errno }),
+	});
+}
 
 /** A lazy read-only SQLite connection whose statements never run on the serving thread. */
 export class OffThreadReader {
-	private lease?: Lease;
-	private readonly pending = new Map<number, PendingRead>();
-	private nextId = 0;
-	private faults = 0;
-	private closed = false;
-	private closePromise?: Promise<void>;
-	private served = 0;
-	private readonly warn: (message: string) => void;
-	private readonly info: (message: string) => void;
-	private readonly readTimeoutMs: number;
-	private readonly readyTimeoutMs: number;
-	private readonly maxSpawns: number;
+	protected lease?: Lease;
+	protected readonly pending = new Map<number, PendingRequest>();
+	protected nextId = 0;
+	protected faults = 0;
+	protected closed = false;
+	protected closePromise?: Promise<void>;
+	protected served = 0;
+	protected readonly warn: (message: string) => void;
+	protected readonly info: (message: string) => void;
+	protected readonly readTimeoutMs: number;
+	protected readonly readyTimeoutMs: number;
+	protected readonly maxSpawns: number;
 
-	constructor(private readonly options: OffThreadReaderOptions) {
+	constructor(protected readonly options: OffThreadReaderOptions) {
 		const log = new Logger("OffThreadSql");
 		this.warn = options.warn ?? ((message) => log.warn(message));
 		this.info = options.info ?? ((message) => log.info(message));
 		this.readTimeoutMs = options.readTimeoutMs ?? 120_000;
 		this.readyTimeoutMs = options.readyTimeoutMs ?? 10_000;
 		this.maxSpawns = options.maxSpawns ?? 3;
+	}
+
+	protected get label(): string {
+		return "reader";
+	}
+	protected get fallbackNoun(): string {
+		return "reads";
 	}
 
 	get readsServed(): number {
@@ -126,7 +176,15 @@ export class OffThreadReader {
 		});
 	}
 
-	private spawn(): Lease {
+	protected openPayload(): Record<string, unknown> {
+		return {
+			kind: "open",
+			dbPath: this.options.dbPath,
+			busyTimeoutMs: this.options.busyTimeoutMs,
+		};
+	}
+
+	protected spawn(): Lease {
 		let url: string | undefined;
 		let worker: ReaderWorker;
 		try {
@@ -177,11 +235,7 @@ export class OffThreadReader {
 		);
 		try {
 			worker.unref?.();
-			worker.postMessage({
-				kind: "open",
-				dbPath: this.options.dbPath,
-				busyTimeoutMs: this.options.busyTimeoutMs,
-			});
+			worker.postMessage(this.openPayload());
 		} catch (error) {
 			this.fault("open postMessage failed", error, lease);
 		}
@@ -198,10 +252,12 @@ export class OffThreadReader {
 		if (message.kind === "ready") {
 			clearTimeout(lease.readyTimer);
 			lease.resolveReady();
-			if (!loggedReady) {
-				loggedReady = true;
+			for (const warning of (message.warnings as string[] | undefined) ?? [])
+				this.warn(`off-thread ${this.label} setting not applied: ${warning}`);
+			if (!loggedReady.has(this.label)) {
+				loggedReady.add(this.label);
 				this.info(
-					`Off-thread reader ready (${lease.url ? "embedded" : "source"} worker)`,
+					`Off-thread ${this.label} ready (${lease.url ? "embedded" : "source"} worker)`,
 				);
 			}
 			return;
@@ -211,61 +267,74 @@ export class OffThreadReader {
 			return;
 		}
 		if (message.kind !== "result") return;
-		const read = this.pending.get(message.id as number);
-		if (!read) return;
+		const request = this.pending.get(message.id as number);
+		if (!request) return;
 		this.pending.delete(message.id as number);
-		clearTimeout(read.timer);
+		clearTimeout(request.timer);
 		if (Number(message.ms) >= SLOW_SQL_STATEMENT_MS)
 			this.warn(
-				`Slow off-thread SQL: ${Math.round(Number(message.ms))}ms ${read.mode} ${fingerprintSql(read.sql)}`,
+				`Slow off-thread SQL: ${Math.round(Number(message.ms))}ms ${request.mode} ${fingerprintSql(request.sql)}`,
 			);
+		this.settle(lease, request, message);
+	}
+
+	protected settle(
+		_lease: Lease,
+		read: PendingRequest,
+		message: Record<string, unknown>,
+	): void {
 		if (message.ok) {
 			this.served++;
 			read.resolve(read.mode === "all" ? message.rows : (message.row ?? null));
-		} else {
-			const detail = message.error as {
-				message: string;
-				name: string;
-				code?: string;
-			};
-			const error =
-				detail.code === "SQLITE_BUSY"
-					? new OffThreadReaderUnavailableError(detail.message)
-					: Object.assign(new Error(detail.message), {
-							name: detail.name,
-							...(detail.code === undefined ? {} : { code: detail.code }),
-						});
-			read.reject(error);
+			return;
 		}
+		const detail = message.error as ErrorDetail;
+		read.reject(
+			detail.code === "SQLITE_BUSY"
+				? new OffThreadReaderUnavailableError(detail.message)
+				: rehydrate({
+						message: detail.message,
+						name: detail.name,
+						code: detail.code,
+					}),
+		);
 	}
 
-	private fault(
+	/** What a request that already reached the worker is rejected with on a fault. */
+	protected pendingFaultError(
+		_cause: string,
+		unavailable: OffThreadReaderUnavailableError,
+	): Error {
+		return unavailable;
+	}
+
+	protected fault(
 		cause: string,
 		error: unknown,
 		lease?: Lease,
 	): OffThreadReaderUnavailableError {
 		const unavailable = new OffThreadReaderUnavailableError(
-			`off-thread reader ${cause}: ${error instanceof Error ? error.message : String(error)}`,
+			`off-thread ${this.label} ${cause}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 		if (lease && this.lease !== lease) return unavailable;
 		this.warn(unavailable.message);
 		this.faults++;
 		if (lease) {
 			lease.rejectReady(unavailable);
-			this.rejectPending(unavailable);
+			this.rejectPending(this.pendingFaultError(cause, unavailable));
 			this.destroy(lease);
 		}
 		if (this.faults === this.maxSpawns)
 			this.warn(
-				"falling back to main-thread reads for the rest of this process",
+				`falling back to main-thread ${this.fallbackNoun} for the rest of this process`,
 			);
 		return unavailable;
 	}
 
-	private rejectPending(error: Error): void {
-		for (const read of this.pending.values()) {
-			clearTimeout(read.timer);
-			read.reject(error);
+	protected rejectPending(error: Error): void {
+		for (const request of this.pending.values()) {
+			clearTimeout(request.timer);
+			request.reject(error);
 		}
 		this.pending.clear();
 	}
@@ -288,17 +357,19 @@ export class OffThreadReader {
 		if (this.closePromise) return this.closePromise;
 		this.closed = true;
 		const error = new OffThreadReaderUnavailableError(
-			"off-thread reader closed",
+			`off-thread ${this.label} closed`,
 		);
 		this.rejectPending(error);
+		this.closePromise = this.retire(error);
+		return this.closePromise;
+	}
+
+	protected retire(error: Error): Promise<void> {
 		const lease = this.lease;
-		if (!lease) {
-			this.closePromise = Promise.resolve();
-			return this.closePromise;
-		}
+		if (!lease) return Promise.resolve();
 		clearTimeout(lease.readyTimer);
 		lease.rejectReady(error);
-		this.closePromise = new Promise<void>((resolve) => {
+		return new Promise<void>((resolve) => {
 			lease.resolveRetired = resolve;
 			lease.retireTimer = setTimeout(resolve, 1000);
 			try {
@@ -307,6 +378,240 @@ export class OffThreadReader {
 				resolve();
 			}
 		}).then(() => this.destroy(lease));
+	}
+}
+
+export interface WorkerPragma {
+	sql: string;
+	bestEffort?: boolean;
+}
+
+export interface OffThreadWriterOptions
+	extends Omit<OffThreadReaderOptions, "readTimeoutMs"> {
+	/** Per-connection PRAGMAs, in order; the main connection's own settings. */
+	pragmas: WorkerPragma[];
+	/** How long the worker keeps retrying one SQLITE_BUSY write. Default 10 min. */
+	busyRetryMs?: number;
+	/** Fault the worker after this long with writes pending and none settling. */
+	writeTimeoutMs?: number;
+	/** Bound on the drain at close before pending writes become outcome-unknown. */
+	closeDrainMs?: number;
+}
+
+/**
+ * The single writer connection, on its own thread (#676). Writes are posted in
+ * call order and the worker runs them one at a time, so they commit in that
+ * order. A write the worker never received rejects with
+ * OffThreadReaderUnavailableError and is safe to run elsewhere; once posted,
+ * a fault rejects it with OffThreadWriteOutcomeUnknownError instead.
+ */
+export class OffThreadWriter extends OffThreadReader {
+	private watchdog?: ReturnType<typeof setTimeout>;
+	private readonly busyRetryMs: number;
+	private readonly writeTimeoutMs: number;
+	private readonly closeDrainMs: number;
+	private closeRequested = false;
+
+	constructor(private readonly writerOptions: OffThreadWriterOptions) {
+		super(writerOptions);
+		this.busyRetryMs = writerOptions.busyRetryMs ?? 10 * 60_000;
+		this.writeTimeoutMs =
+			writerOptions.writeTimeoutMs ?? this.busyRetryMs + 60_000;
+		this.closeDrainMs = writerOptions.closeDrainMs ?? 5_000;
+	}
+
+	protected override get label(): string {
+		return "writer";
+	}
+	protected override get fallbackNoun(): string {
+		return "writes";
+	}
+
+	get writesServed(): number {
+		return this.served;
+	}
+
+	/** Run one statement; resolves with the outer statement's changes(). */
+	run(sql: string, params: unknown[] = []): Promise<number> {
+		return this.write("run", sql, params) as Promise<number>;
+	}
+	/** Run one statement and return its first row (INSERT ... RETURNING). */
+	runGet<R>(sql: string, params: unknown[] = []): Promise<R | null> {
+		return this.write("get", sql, params) as Promise<R | null>;
+	}
+	/** Run statements in one transaction; resolves with each one's changes(). */
+	batch(statements: BatchStatement[]): Promise<number[]> {
+		return this.write(
+			"batch",
+			statements[0]?.sql ?? "",
+			[],
+			statements,
+		) as Promise<number[]>;
+	}
+
+	protected override openPayload(): Record<string, unknown> {
+		return {
+			...super.openPayload(),
+			access: "write",
+			pragmas: this.writerOptions.pragmas,
+			busyRetryMs: this.busyRetryMs,
+		};
+	}
+
+	private async write(
+		mode: "run" | "get" | "batch",
+		sql: string,
+		params: unknown[],
+		statements?: BatchStatement[],
+	): Promise<unknown> {
+		while (true) {
+			if (this.closeRequested) {
+				// Earlier writes are draining; let them commit before this one runs
+				// anywhere else, so the caller's fallback keeps submission order.
+				await this.close();
+				throw new OffThreadReaderUnavailableError("off-thread writer closed");
+			}
+			if (this.faults >= this.maxSpawns)
+				throw new OffThreadReaderUnavailableError(
+					"off-thread writer spawn budget exhausted",
+				);
+			let lease: Lease;
+			try {
+				lease = this.lease ?? this.spawn();
+				await lease.ready;
+			} catch {
+				// fault() counted it; retry until the spawn budget runs out.
+				continue;
+			}
+			if (this.closeRequested || this.lease !== lease) continue;
+			return this.post(lease, mode, sql, params, statements);
+		}
+	}
+
+	private post(
+		lease: Lease,
+		mode: "run" | "get" | "batch",
+		sql: string,
+		params: unknown[],
+		statements?: BatchStatement[],
+	): Promise<unknown> {
+		return new Promise((resolve, reject) => {
+			const id = ++this.nextId;
+			try {
+				lease.worker.postMessage({
+					kind: "write",
+					id,
+					mode,
+					sql,
+					params,
+					...(statements ? { statements } : {}),
+				});
+			} catch (error) {
+				// Not cloneable, so the worker never saw it: fail only this request.
+				reject(error instanceof Error ? error : new Error(String(error)));
+				return;
+			}
+			this.pending.set(id, { mode, sql, resolve, reject });
+			if (!this.watchdog) this.armWatchdog(lease);
+		});
+	}
+
+	private armWatchdog(lease: Lease): void {
+		clearTimeout(this.watchdog);
+		this.watchdog = setTimeout(() => {
+			this.watchdog = undefined;
+			this.fault(
+				"write timeout",
+				`no write settled for ${this.writeTimeoutMs}ms`,
+				lease,
+			);
+		}, this.writeTimeoutMs);
+		(this.watchdog as { unref?: () => void }).unref?.();
+	}
+	private clearWatchdog(): void {
+		clearTimeout(this.watchdog);
+		this.watchdog = undefined;
+	}
+
+	protected override settle(
+		lease: Lease,
+		request: PendingRequest,
+		message: Record<string, unknown>,
+	): void {
+		// Progress: a live worker earns back its spawn budget.
+		this.faults = 0;
+		if (this.pending.size > 0) this.armWatchdog(lease);
+		else this.clearWatchdog();
+		if (message.ok) {
+			this.served++;
+			request.resolve(message.value ?? null);
+		} else {
+			request.reject(rehydrate(message.error as ErrorDetail));
+		}
+		this.notifyIdle();
+	}
+
+	protected override pendingFaultError(cause: string): Error {
+		return new OffThreadWriteOutcomeUnknownError(cause);
+	}
+
+	protected override rejectPending(error: Error): void {
+		this.clearWatchdog();
+		super.rejectPending(error);
+		this.notifyIdle();
+	}
+
+	private idle?: { promise: Promise<void>; resolve: () => void };
+	private whenIdle(): Promise<void> {
+		if (this.pending.size === 0) return Promise.resolve();
+		if (!this.idle) {
+			let resolve!: () => void;
+			const promise = new Promise<void>((done) => {
+				resolve = done;
+			});
+			this.idle = { promise, resolve };
+		}
+		return this.idle.promise;
+	}
+	private notifyIdle(): void {
+		if (this.pending.size > 0 || !this.idle) return;
+		this.idle.resolve();
+		this.idle = undefined;
+	}
+
+	/** Stop taking writes, let posted ones finish (bounded), then retire. */
+	override close(): Promise<void> {
+		if (this.closePromise) return this.closePromise;
+		this.closeRequested = true;
+		this.closePromise = this.drain().then(() => {
+			this.closed = true;
+			this.rejectPending(
+				new OffThreadWriteOutcomeUnknownError("writer closed during drain"),
+			);
+			return this.retire(
+				new OffThreadReaderUnavailableError("off-thread writer closed"),
+			);
+		});
 		return this.closePromise;
+	}
+
+	private async drain(): Promise<void> {
+		const lease = this.lease;
+		if (!lease || this.pending.size === 0) return;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timedOut = new Promise<boolean>((resolve) => {
+			timer = setTimeout(() => resolve(true), this.closeDrainMs);
+		});
+		const expired = await Promise.race([
+			this.whenIdle().then(() => false),
+			timedOut,
+		]);
+		clearTimeout(timer);
+		if (expired)
+			this.fault(
+				"close drain timeout",
+				`${this.pending.size} write(s) still pending after ${this.closeDrainMs}ms`,
+				lease,
+			);
 	}
 }

@@ -64,6 +64,28 @@ describe("heartbeat loop retirement", () => {
 			await stop();
 		}
 	});
+	it("starts no tick while its owner is closing", async () => {
+		let closing = true;
+		const calls: string[] = [];
+		const adapter = {
+			run: async (sql: string) => {
+				calls.push(sql.startsWith("DELETE") ? "delete" : "write");
+			},
+		} as unknown as BunSqlAdapter;
+		const stop = startHeartbeatLoop(adapter, {
+			intervalMs: 1,
+			isClosing: () => closing,
+		});
+		try {
+			await turns();
+			expect(calls).toEqual([]);
+			closing = false;
+			await turns();
+			expect(calls).toContain("write");
+		} finally {
+			await stop();
+		}
+	});
 	it("holds unresolved write ownership after its finite stop budget", async () => {
 		const writing = deferred();
 		const calls: string[] = [];

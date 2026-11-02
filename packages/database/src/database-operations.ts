@@ -72,7 +72,11 @@ import {
 	runStartupGuard,
 	startHeartbeatLoop,
 } from "./multi-instance-guard";
-import { OffThreadReader } from "./off-thread-reader";
+import {
+	OffThreadReader,
+	OffThreadWriter,
+	type WorkerPragma,
+} from "./off-thread-reader";
 import { resolveDbPath } from "./paths";
 import {
 	AccountRepository,
@@ -227,6 +231,54 @@ function validateSqliteConfig(config: DatabaseConfig): void {
 }
 
 /**
+ * The settings SQLite keeps per connection, so every read-write connection on
+ * the database file needs them. A connection opened anywhere else (a worker)
+ * otherwise runs Bun's compile defaults: synchronous=FULL and a 1000-page
+ * autocheckpoint (#624, #669). Shared by the main connection and the writer
+ * thread; validated by `validateSqliteConfig()` before it gets here.
+ */
+export function connectionPragmas(config: DatabaseConfig): WorkerPragma[] {
+	const pragmas: WorkerPragma[] = [];
+	// Set busy timeout for lock handling
+	if (config.busyTimeoutMs !== undefined)
+		pragmas.push({ sql: `PRAGMA busy_timeout = ${config.busyTimeoutMs}` });
+	if (config.cacheSize !== undefined)
+		pragmas.push({ sql: `PRAGMA cache_size = ${config.cacheSize}` });
+	// Synchronous mode (more conservative for distributed filesystems). Default
+	// to FULL for safety, mirroring `validateSqliteConfig()`'s defaulting.
+	pragmas.push({
+		sql: `PRAGMA synchronous = ${config.synchronous === undefined ? "FULL" : config.synchronous}`,
+	});
+	// Memory-mapped I/O. `mmap_size = 0` is the SQLite-defined way to *disable*
+	// mmap, so 0 is a meaningful setting, not "no preference". Gating this on
+	// `> 0` once let the default `mmapSize: 0` fall through to bun:sqlite's
+	// built-in default (~15 GiB observed on a 15 GiB DB), which maps the whole
+	// file; a full-DB VACUUM then walked every page and the cgroup OOM-killed
+	// the process. Issue it whenever the operator specified a value.
+	if (config.mmapSize !== undefined)
+		pragmas.push({
+			sql: `PRAGMA mmap_size = ${config.mmapSize}`,
+			bestEffort: true,
+		});
+	// Additional optimizations for distributed filesystems
+	pragmas.push(
+		{ sql: "PRAGMA temp_store = MEMORY" },
+		{ sql: "PRAGMA foreign_keys = ON" },
+		// WAL checkpointing is handled entirely OFF the serving thread.
+		// Autocheckpoint runs a synchronous PASSIVE checkpoint inside the
+		// committing connection whenever the WAL crosses the threshold; because
+		// PASSIVE can't reset the WAL while any reader holds frames, the WAL
+		// grows large and each such checkpoint did hundreds of ms of synchronous
+		// I/O on the main thread (~250-290ms "Event loop blocked" WARNs). With
+		// autocheckpoint off, the off-thread optimize tick reclaims the WAL via
+		// wal_checkpoint(TRUNCATE) with busy_timeout=0 (see runOptimize in
+		// incremental-vacuum-worker.ts).
+		{ sql: "PRAGMA wal_autocheckpoint = 0" },
+	);
+	return pragmas;
+}
+
+/**
  * Apply SQLite pragmas for optimal performance on distributed filesystems.
  *
  * Assumes `config` has already passed `validateSqliteConfig()` — called by
@@ -280,41 +332,6 @@ function configureSqlite(db: Database, config: DatabaseConfig): void {
 			}
 		}
 
-		// Set busy timeout for lock handling
-		if (config.busyTimeoutMs !== undefined) {
-			db.run(`PRAGMA busy_timeout = ${config.busyTimeoutMs}`);
-		}
-
-		// Configure cache size
-		if (config.cacheSize !== undefined) {
-			db.run(`PRAGMA cache_size = ${config.cacheSize}`);
-		}
-
-		// Set synchronous mode (more conservative for distributed filesystems).
-		// Default to FULL for safety — already validated by
-		// `validateSqliteConfig()`, so this mirrors its defaulting exactly.
-		const syncMode =
-			config.synchronous === undefined ? "FULL" : config.synchronous;
-		db.run(`PRAGMA synchronous = ${syncMode}`);
-
-		// Configure memory-mapped I/O. `mmap_size = 0` is the SQLite-defined
-		// way to *disable* mmap, so the value 0 is a meaningful setting — not
-		// "no preference". Previously this branch was gated on `> 0`, which
-		// meant the default `mmapSize: 0` silently fell through and bun:sqlite
-		// used its built-in default (~15 GiB observed on a 15 GiB DB). That
-		// memory-maps the entire file, which is invisible until something
-		// walks every page — e.g. a full-DB VACUUM — at which point the
-		// resident set explodes and the cgroup OOM-kills the process. Treat
-		// `mmapSize` as "issue the PRAGMA whenever the operator has specified
-		// a value, including 0".
-		if (config.mmapSize !== undefined) {
-			try {
-				db.run(`PRAGMA mmap_size = ${config.mmapSize}`);
-			} catch (error) {
-				console.warn("Failed to set mmap_size:", error);
-			}
-		}
-
 		// Set page size (only effective before any data is written, or after VACUUM)
 		if (config.pageSize !== undefined) {
 			const currentPageSize = (
@@ -325,22 +342,14 @@ function configureSqlite(db: Database, config: DatabaseConfig): void {
 			}
 		}
 
-		// Additional optimizations for distributed filesystems
-		db.run("PRAGMA temp_store = MEMORY");
-		db.run("PRAGMA foreign_keys = ON");
-
-		// WAL checkpointing is handled entirely OFF the main thread: disable
-		// autocheckpoint on this (the main, writer) connection. Autocheckpoint
-		// runs a synchronous PASSIVE checkpoint inside the committing connection
-		// whenever the WAL crosses the threshold; because PASSIVE can't reset the
-		// WAL while any reader (analytics worker, usage pollers) holds frames, the
-		// WAL grows large and each such checkpoint does hundreds of ms of
-		// synchronous I/O on the main thread, freezing the event loop (observed
-		// as ~250-290ms "Event loop blocked" WARNs). With autocheckpoint off, the
-		// off-thread optimize tick reclaims the WAL via wal_checkpoint(TRUNCATE)
-		// with busy_timeout=0, which never blocks the loop (see runOptimize in
-		// incremental-vacuum-worker.ts).
-		db.run("PRAGMA wal_autocheckpoint = 0");
+		for (const pragma of connectionPragmas(config)) {
+			try {
+				db.run(pragma.sql);
+			} catch (error) {
+				if (!pragma.bestEffort) throw error;
+				console.warn(`Failed to apply ${pragma.sql}:`, error);
+			}
+		}
 	} catch (error) {
 		console.error("Database configuration failed:", error);
 		throw new Error(`Failed to configure SQLite database: ${error}`, {
@@ -471,6 +480,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private compactionOwner: MaintenanceWorkerOwner;
 	private closePromise?: Promise<void>;
 	private offThreadReader?: OffThreadReader;
+	private offThreadWriter?: OffThreadWriter;
 	private closing = false;
 
 	constructor(
@@ -696,7 +706,54 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		await runStartupGuard(this.adapter, { mode });
 		// Start the heartbeat loop so this instance's row is refreshed
 		// while it lives. The stopper is invoked from close().
-		this.heartbeatStop = startHeartbeatLoop(this.adapter);
+		this.heartbeatStop = startHeartbeatLoop(this.adapter, {
+			isClosing: () => this.closing,
+		});
+	}
+
+	/**
+	 * Move adapter writes onto their own SQLite connection in a worker (#676).
+	 * A commit's fsync, and any wait for another connection's write lock, then
+	 * blocks that thread instead of the serving event loop. From here on the
+	 * main connection is `query_only`, so call this after startup maintenance
+	 * that writes through the raw handle (bootstrapAutoVacuum). Needs WAL:
+	 * without it the two connections lock each other out on every commit.
+	 * Opt out with BETTER_CCFLARE_DB_WRITER_WORKER=0. Returns whether writes
+	 * now run off-thread.
+	 */
+	startWriterThread(): boolean {
+		if (this.offThreadWriter) return this.adapter.writerAttached();
+		const db = this.sqliteDb;
+		const dbPath = this.resolvedDbPath;
+		if (this.closing || !db || !dbPath || dbPath === ":memory:") return false;
+		if (
+			["0", "false", "off"].includes(
+				process.env.BETTER_CCFLARE_DB_WRITER_WORKER?.toLowerCase() ?? "",
+			)
+		)
+			return false;
+		const journal = db
+			.query<{ journal_mode: string }, []>("PRAGMA journal_mode")
+			.get()?.journal_mode;
+		if (journal?.toLowerCase() !== "wal") return false;
+		this.offThreadWriter = new OffThreadWriter({
+			dbPath,
+			busyTimeoutMs: this.dbConfig.busyTimeoutMs ?? 10000,
+			// The main connection's settings, except a 16 MiB page cache and no
+			// mmap: the writer only walks the B-tree paths its inserts touch, and
+			// a second 256 MiB cache or mapping would add to the native RSS
+			// high-water (#337). The other workers run mmap_size=0 for the same
+			// reason.
+			pragmas: connectionPragmas({
+				...this.dbConfig,
+				cacheSize: -16384,
+				mmapSize: 0,
+			}),
+			embeddedCode: EMBEDDED_READER_WORKER_CODE,
+			sourceUrl: new URL("./reader-worker.ts", import.meta.url).href,
+		});
+		this.adapter.setWriter(this.offThreadWriter);
+		return true;
 	}
 
 	setRuntimeConfig(runtime: RuntimeConfig): void {
@@ -1560,6 +1617,13 @@ OAuth tokens will need to be re-authenticated.
 		await this.accounts.rename(accountId, newName);
 	}
 
+	/**
+	 * Not visible to other reads until the returned promise settles: with the
+	 * writer thread, SQLite commits it there rather than inside this call. The
+	 * load-balancer callers don't await it and mirror the reset onto their
+	 * in-memory account instead; a request that reads the row in between can
+	 * reset the session again a few ms later.
+	 */
 	async resetAccountSession(
 		accountId: string,
 		timestamp: number,
@@ -2175,6 +2239,13 @@ OAuth tokens will need to be re-authenticated.
 		this.sqliteDb?.exec("PRAGMA busy_timeout = 0");
 		const stopHeartbeat = this.heartbeatStop;
 		this.heartbeatStop = null;
+		// Drain the writer thread first, so queued writes land before the
+		// heartbeat DELETE and the main connection is writable for close.
+		try {
+			await this.adapter.retireWriter();
+		} catch (error) {
+			console.warn("Off-thread writer retirement failed", error);
+		}
 		// Stop every trigger synchronously before awaiting retirement. Each
 		// pending owner must positively settle; ambiguity holds adapter close
 		// until the supervisor reaps the process instead of allowing replacement.

@@ -134,7 +134,7 @@ export class ExternalUsageRepository extends BaseRepository<ExternalUsageEvent> 
 	}
 
 	async getSources(): Promise<ExternalUsageSource[]> {
-		const rows = await this.query<{
+		const rows = await this.queryOffThread<{
 			path: string;
 			size: number;
 			mtime_ns: string;

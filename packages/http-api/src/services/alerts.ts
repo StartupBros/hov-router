@@ -1983,13 +1983,12 @@ export class AlertService {
 		const windowStartMs =
 			computeWindowStartMs(resetsAtMs, windowKey) ??
 			timestamp - USAGE_WINDOW_HISTORY_FALLBACK_LOOKBACK_MS;
-		// Bound the query at `timestamp` so the current poll is represented
-		// EXACTLY once regardless of insert/evaluate ordering: on SQLite the
-		// caller's un-awaited recordUsageSnapshot commits synchronously before
-		// the worker read is posted, so it still sees the snapshot. Reading
-		// that row PLUS the push below would
-		// double-count the current point and bias the regression (pro-gate
-		// cross-model finding).
+		// Bound the query below `timestamp` so the current poll is represented
+		// EXACTLY once regardless of insert/evaluate ordering: the caller's
+		// un-awaited recordUsageSnapshot may or may not have committed by the
+		// time this read runs (on SQLite it commits on the writer thread).
+		// Reading that row PLUS the push below would double-count the current
+		// point and bias the regression (pro-gate cross-model finding).
 		//
 		// Aggregate into 5-minute buckets (last sample time, mean utilization)
 		// so the regression input is bounded (~2016 rows for a 7d window) even
@@ -2127,7 +2126,7 @@ export class AlertService {
 	}
 
 	async listAlerts(limit = 100): Promise<AlertEvent[]> {
-		const rows = await this.db.query<AlertRow>(
+		const rows = await this.db.queryOffThread<AlertRow>(
 			`SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?`,
 			[Math.max(1, Math.min(500, Math.round(limit)))],
 		);

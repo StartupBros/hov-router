@@ -631,6 +631,13 @@ describe("CLI Integration Tests", () => {
 		// --serve once opened the database before the server passed its runtime
 		// config, so production ran synchronous=FULL with mmap off (#606). The
 		// factory now refuses that order, so a regression fails startup here.
+		//
+		// The mmap check runs with the writer thread off. With it on, each
+		// writer commit (a heartbeat, within a second of startup) makes the main
+		// connection unmap the file at its next read transaction, and the map
+		// returns only on a later page fetch, so /proc/<pid>/maps cannot show
+		// it reliably. The open order the check guards is settled before the
+		// writer starts, and the next test covers startup with the writer on.
 		it("opens the database with the server's runtime config", async () => {
 			const dir = mkdtempSync(join(tmpdir(), "ccflare-cli-serve-"));
 			const dbPath = join(dir, "serve.db");
@@ -644,6 +651,7 @@ describe("CLI Integration Tests", () => {
 						NODE_ENV: "test",
 						BETTER_CCFLARE_DB_PATH: dbPath,
 						XDG_CONFIG_HOME: dir,
+						BETTER_CCFLARE_DB_WRITER_WORKER: "0",
 					},
 				},
 			);
@@ -679,6 +687,61 @@ describe("CLI Integration Tests", () => {
 						.some((line) => line.endsWith(` ${dbPath}`));
 					expect(mapped).toBe(true);
 				}
+			} finally {
+				proc.kill();
+				if (!exited) await new Promise((resolve) => proc.on("close", resolve));
+				rmSync(dir, { recursive: true, force: true });
+			}
+		}, 30000);
+
+		it("starts the SQLite writer thread by default (#676)", async () => {
+			const dir = mkdtempSync(join(tmpdir(), "ccflare-cli-serve-writer-"));
+			const dbPath = join(dir, "serve.db");
+			const port = 40000 + (process.pid % 20000);
+			const env: Record<string, string | undefined> = {
+				...process.env,
+				NODE_ENV: "test",
+				BETTER_CCFLARE_DB_PATH: dbPath,
+				XDG_CONFIG_HOME: dir,
+				LOG_LEVEL: "info",
+			};
+			delete env.BETTER_CCFLARE_DB_WRITER_WORKER;
+			const proc = spawn(
+				"bun",
+				["run", CLI_PATH, "--serve", "--port", `${port}`],
+				{ env },
+			);
+			let output = "";
+			proc.stdout?.on("data", (data) => {
+				output += data.toString();
+			});
+			proc.stderr?.on("data", (data) => {
+				output += data.toString();
+			});
+			let exited = false;
+			proc.on("close", () => {
+				exited = true;
+			});
+			try {
+				let answered = false;
+				for (let i = 0; i < 150 && !exited && !answered; i++) {
+					await Bun.sleep(100);
+					answered = await fetch(`http://127.0.0.1:${port}/health`)
+						.then(() => true)
+						.catch(() => false);
+				}
+				expect({ answered, output: answered ? "" : output }).toEqual({
+					answered: true,
+					output: "",
+				});
+				// The ready line is logged when the worker answers its open.
+				for (
+					let i = 0;
+					i < 50 && !output.includes("Off-thread writer ready");
+					i++
+				)
+					await Bun.sleep(100);
+				expect(output).toContain("Off-thread writer ready");
 			} finally {
 				proc.kill();
 				if (!exited) await new Promise((resolve) => proc.on("close", resolve));
