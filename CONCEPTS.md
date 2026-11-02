@@ -204,6 +204,21 @@ are refused once a plan window reads full even while the provider still reports 
 allowed: the provider's allowed flag can lag its usage percentage, and the request that
 crosses the line is billed to credits.
 
+### Banked reset
+
+A free credit a provider grants to an account that, when redeemed, resets the account's usage
+windows ahead of schedule. Unlike credit drain, it buys no paid usage; it restores plan
+capacity.
+*Avoid:* bonus reset
+
+OpenAI calls it a rate limit reset credit. Redeeming one resets the Codex 5-hour window and,
+on Pro, the weekly window, and moves the weekly reset date to about 7 days after redemption.
+Each credit expires 30 days after its grant, and OpenAI reports per account whether one
+applies right now. Credits arrive in grant waves that reach many accounts within minutes.
+
+A redemption rolls the windows over early, so the usage-window ledger cannot tell it from a
+provider's own early reset (shown as a "bonus reset") unless the redemption is recorded.
+
 ### Affinity lane
 
 The unit to which session affinity pins an owner account: one client session's traffic for

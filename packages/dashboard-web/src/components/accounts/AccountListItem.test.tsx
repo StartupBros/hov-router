@@ -752,6 +752,88 @@ describe("AccountListItem public value toggle", () => {
 	});
 });
 
+describe("AccountListItem row layout", () => {
+	function render(account: Account) {
+		return renderToStaticMarkup(
+			<AccountListItem
+				account={account}
+				{...requiredHandlers}
+				onCustomEndpointChange={noop}
+				onModelMappingsChange={noop}
+			/>,
+		);
+	}
+
+	it("surfaces a custom endpoint and the mapping count as visible chips", () => {
+		const html = render(
+			makeAccount({
+				provider: "openai-compatible",
+				customEndpoint: "https://gateway.example/v1",
+				modelMappings: { opus: "a", sonnet: "b" },
+			}),
+		);
+		expect(html).toContain("custom endpoint");
+		expect(html).toContain(
+			'title="Custom endpoint: https://gateway.example/v1"',
+		);
+		expect(html).toContain("2 model mappings");
+	});
+
+	it("uses the singular for one mapping and omits both chips when unset", () => {
+		expect(render(makeAccount({ modelMappings: { opus: "a" } }))).toContain(
+			"1 model mapping<",
+		);
+		const bare = render(makeAccount());
+		expect(bare).not.toContain("custom endpoint");
+		expect(bare).not.toContain("model mapping");
+	});
+
+	it("shows Bedrock profile details instead of a raw endpoint chip", () => {
+		const html = render(
+			makeAccount({
+				provider: "bedrock",
+				customEndpoint: "bedrock:dev-profile:us-east-1",
+			}),
+		);
+		expect(html).toContain("Profile: dev-profile");
+		expect(html).toContain("us-east-1");
+		expect(html).not.toContain("custom endpoint");
+	});
+
+	it("hides the API's empty session placeholders but keeps an active session", () => {
+		for (const sessionInfo of ["-", "No active session", ""]) {
+			const html = render(makeAccount({ sessionInfo }));
+			expect(html).not.toContain(">-<");
+			expect(html).not.toContain("No active session");
+		}
+		expect(render(makeAccount({ sessionInfo: "Active: 12 reqs" }))).toContain(
+			"Active: 12 reqs",
+		);
+	});
+
+	it("groups request counts with thousands separators", () => {
+		expect(render(makeAccount({ requestCount: 949516 }))).toContain(
+			"949,516 requests",
+		);
+	});
+
+	it("gives every icon-only action an accessible name", () => {
+		const paused = render(makeAccount({ name: "max-a", paused: true }));
+		expect(paused).toContain('aria-label="Resume account"');
+		expect(paused).toContain('aria-label="More actions for max-a"');
+		expect(paused).toContain('aria-label="Refresh usage"');
+		expect(render(makeAccount({ paused: false }))).toContain(
+			'aria-label="Pause account"',
+		);
+	});
+
+	it("keeps the closed overflow menu's actions out of the row markup", () => {
+		const html = render(makeAccount());
+		expect(html).not.toContain("Remove account");
+		expect(html).not.toContain("Rename…");
+	});
+});
+
 function findSwitchByTitle(
 	node: unknown,
 	titlePart: string,
