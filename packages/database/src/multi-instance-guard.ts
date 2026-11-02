@@ -431,6 +431,12 @@ export function startHeartbeatLoop(
 		intervalMs?: number;
 		now?: () => number;
 		settlementTimeoutMs?: number;
+		/**
+		 * True once the owner has begun closing. A tick that starts then would
+		 * miss the draining writer and busy-retry on the main connection, which
+		 * close has set to busy_timeout=0, holding stop() past its bound.
+		 */
+		isClosing?: () => boolean;
 	} = {},
 ): () => Promise<void> {
 	const intervalMs = options.intervalMs ?? HEARTBEAT_INTERVAL_MS;
@@ -445,7 +451,7 @@ export function startHeartbeatLoop(
 	let inFlight: Promise<void> | null = null;
 	let stopPromise: Promise<void> | null = null;
 	const timer = setInterval(() => {
-		if (stopped || inFlight) return;
+		if (stopped || inFlight || options.isClosing?.()) return;
 		// Keep one tracked mutation. A slow retry must not multiply timer jobs.
 		inFlight = writeHeartbeat(adapter, now())
 			.catch((err) => {

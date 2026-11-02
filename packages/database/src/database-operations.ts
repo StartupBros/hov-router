@@ -706,7 +706,9 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		await runStartupGuard(this.adapter, { mode });
 		// Start the heartbeat loop so this instance's row is refreshed
 		// while it lives. The stopper is invoked from close().
-		this.heartbeatStop = startHeartbeatLoop(this.adapter);
+		this.heartbeatStop = startHeartbeatLoop(this.adapter, {
+			isClosing: () => this.closing,
+		});
 	}
 
 	/**
