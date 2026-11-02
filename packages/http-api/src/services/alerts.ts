@@ -2127,7 +2127,7 @@ export class AlertService {
 	}
 
 	async listAlerts(limit = 100): Promise<AlertEvent[]> {
-		const rows = await this.db.query<AlertRow>(
+		const rows = await this.db.queryOffThread<AlertRow>(
 			`SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?`,
 			[Math.max(1, Math.min(500, Math.round(limit)))],
 		);

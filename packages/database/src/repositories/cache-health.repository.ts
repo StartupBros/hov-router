@@ -138,7 +138,7 @@ export class CacheHealthRepository extends BaseRepository<CacheHealthState> {
 			endMs - startMs > DAY_MS
 		)
 			throw new Error("Invalid cache health query window");
-		const rows = await this.query<BucketRow>(
+		const rows = await this.queryOffThread<BucketRow>(
 			cacheHealthBucketQuery(this.adapter.isSQLite),
 			[startMs, endMs],
 		);

@@ -17,6 +17,7 @@ import { DatabaseOperations } from "@better-ccflare/database";
 import { usageCache } from "@better-ccflare/providers";
 import type { AccountResponse } from "@better-ccflare/types";
 import { OffThreadReader } from "../../../../database/src/off-thread-reader";
+import { CacheHealthRepository } from "../../../../database/src/repositories/cache-health.repository";
 import { ExternalUsageRepository } from "../../../../database/src/repositories/external-usage.repository";
 import { AlertService } from "../../services/alerts";
 import type { APIContext } from "../../types";
@@ -30,6 +31,27 @@ let dir: string;
 let db: DatabaseOperations;
 let reader: OffThreadReader;
 const others: DatabaseOperations[] = [];
+
+function alertConfig(): Config {
+	const store = new Map<string, unknown>();
+	return Object.assign(new EventEmitter(), {
+		getAlertDailySpendUsd: () => 0,
+		getAlertTokensPerHour: () => 0,
+		getAlertRequestTokens: () => 0,
+		getAlertUsageWindowThresholdPercent: () => 90,
+		getAlertAnomalyEnabled: () => false,
+		getAlertAnomalyIntervalMinutes: () => 15,
+		getAlertAnomalyBaselineWindowMinutes: () => 60,
+		getAlertAnomalyLoopMinRequests: () => 25,
+		getAlertCooldownMinutes: () => 60,
+		getAlertWebhookUrl: () => "",
+		get: (key: string, fallback?: unknown) =>
+			store.has(key) ? store.get(key) : fallback,
+		set: (key: string, value: unknown) => {
+			store.set(key, value);
+		},
+	}) as unknown as Config;
+}
 
 beforeEach(async () => {
 	dir = mkdtempSync(join(tmpdir(), "ccflare-off-thread-equivalence-"));
@@ -323,24 +345,7 @@ describe("heavy read result equivalence", () => {
 				"INSERT INTO usage_snapshots (account_id,timestamp,window_key,utilization,resets_at) VALUES ('a1',?,'five_hour',?,?)",
 				[NOW - (60 - i * 10) * 60_000, 50 + i * 5, resetsAt],
 			);
-		const store = new Map<string, unknown>();
-		const config = Object.assign(new EventEmitter(), {
-			getAlertDailySpendUsd: () => 0,
-			getAlertTokensPerHour: () => 0,
-			getAlertRequestTokens: () => 0,
-			getAlertUsageWindowThresholdPercent: () => 90,
-			getAlertAnomalyEnabled: () => false,
-			getAlertAnomalyIntervalMinutes: () => 15,
-			getAlertAnomalyBaselineWindowMinutes: () => 60,
-			getAlertAnomalyLoopMinRequests: () => 25,
-			getAlertCooldownMinutes: () => 60,
-			getAlertWebhookUrl: () => "",
-			get: (key: string, fallback?: unknown) =>
-				store.has(key) ? store.get(key) : fallback,
-			set: (key: string, value: unknown) => {
-				store.set(key, value);
-			},
-		}) as unknown as Config;
+		const config = alertConfig();
 		const windows = normalizeProviderUsageWindows(
 			{
 				five_hour: {
@@ -369,9 +374,79 @@ describe("heavy read result equivalence", () => {
 		).toHaveLength(1);
 		await adapter.run("DELETE FROM alerts");
 		adapter.setOffThreadReader(reader);
-		const before = reader.readsServed;
+		const readerAll = spyOn(reader, "all");
 		expect(JSON.stringify(await evaluate())).toBe(JSON.stringify(main));
-		expect(reader.readsServed - before).toBe(1);
+		// The projection's snapshot read, then the alert history read.
+		expect(
+			readerAll.mock.calls.map(([sql]) =>
+				/FROM usage_snapshots/.test(String(sql))
+					? "snapshots"
+					: /FROM alerts ORDER BY timestamp DESC/.test(String(sql))
+						? "history"
+						: String(sql),
+			),
+		).toEqual(["snapshots", "history"]);
+	});
+	it("runs the alert history, scanner source and cache-health bucket reads on the reader", async () => {
+		const adapter = db.getAdapter();
+		// Fixture requests carry no account generation; fence them to the
+		// accounts' generation so the bucket aggregate has rows to compare.
+		await adapter.run("UPDATE requests SET account_generation = 0");
+		for (let i = 0; i < 3; i++)
+			await adapter.run(
+				"INSERT INTO alerts (id,timestamp,type,severity,title,message,value,threshold,account,acknowledged) VALUES (?,?,'daily_spend','warning',?,?,?,10,'Account 1',?)",
+				[
+					`alert-${i}`,
+					NOW - i * 60_000,
+					`Alert ${i}`,
+					`message ${i}`,
+					i,
+					i % 2,
+				],
+			);
+		const external = new ExternalUsageRepository(adapter);
+		for (const path of ["/rollouts/a.jsonl", "/rollouts/b.jsonl"])
+			await external.saveSource({
+				path,
+				size: path.length,
+				mtimeNs: "1700000000000000000",
+				sessionId: `session-${path}`,
+				parentId: null,
+				sessionTimestamp: "2027-01-15T08:00:00Z",
+				lastScannedAt: NOW,
+			});
+		const cacheHealth = new CacheHealthRepository(adapter);
+		const service = new AlertService(adapter, alertConfig());
+		const readAll = async () => ({
+			alerts: await service.listAlerts(),
+			sources: await external.getSources(),
+			buckets: await cacheHealth.fetchBuckets(NOW - 6 * 600_000, NOW),
+		});
+		try {
+			const main = await readAll();
+			expect(main.alerts.map((alert) => alert.id)).toEqual([
+				"alert-0",
+				"alert-1",
+				"alert-2",
+			]);
+			expect(main.sources).toHaveLength(2);
+			expect(main.buckets.length).toBeGreaterThan(0);
+			adapter.setOffThreadReader(reader);
+			const mainQuery = spyOn(adapter, "query");
+			const readerAll = spyOn(reader, "all");
+			expect(JSON.stringify(await readAll())).toBe(JSON.stringify(main));
+			for (const moved of [
+				/FROM alerts ORDER BY timestamp DESC/,
+				/FROM external_usage_sources/,
+				/WITH source AS/,
+			]) {
+				const matches = ([sql]: unknown[]) => moved.test(String(sql));
+				expect(mainQuery.mock.calls.filter(matches)).toEqual([]);
+				expect(readerAll.mock.calls.filter(matches)).toHaveLength(1);
+			}
+		} finally {
+			service.stop();
+		}
 	});
 	it("wires file-backed databases by default and honors every opt-out spelling", async () => {
 		const wired = new DatabaseOperations(join(dir, "test.db"));
