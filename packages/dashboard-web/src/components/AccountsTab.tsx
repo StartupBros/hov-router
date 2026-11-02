@@ -797,11 +797,14 @@ export function AccountsTab() {
 			)}
 
 			<Card>
-				<CardHeader>
-					<div className="flex items-center justify-between">
+				{/* Tighter padding on phones: rows are cards inside this card. */}
+				<CardHeader className="p-4 sm:p-6">
+					<div className="flex items-center justify-between gap-4">
 						<div>
 							<CardTitle>Accounts</CardTitle>
-							<CardDescription>Manage your Claude accounts</CardDescription>
+							<CardDescription>
+								Every provider account the router can send requests to
+							</CardDescription>
 						</div>
 						{!adding && (
 							<Button onClick={() => setAdding(true)} size="sm">
@@ -811,7 +814,7 @@ export function AccountsTab() {
 						)}
 					</div>
 				</CardHeader>
-				<CardContent>
+				<CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
 					{adding && (
 						<AccountAddForm
 							onAddAccount={handleAddAccount}
