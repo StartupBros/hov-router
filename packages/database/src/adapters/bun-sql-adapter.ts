@@ -1,10 +1,23 @@
 import type { Database } from "bun:sqlite";
 import type { SQL } from "bun";
 import { OffThreadReaderUnavailableError } from "../off-thread-reader";
+import {
+	assertExpectedChanges,
+	BatchExpectedChangesError,
+	type BatchStatement,
+} from "./batch-statement";
 
 interface SqlReader {
 	all<R>(sql: string, params: unknown[]): Promise<R[]>;
 	get<R>(sql: string, params: unknown[]): Promise<R | null>;
+}
+
+/** The off-thread writer as the adapter sees it (see OffThreadWriter). */
+export interface SqlWriter {
+	run(sql: string, params: unknown[]): Promise<number>;
+	runGet<R>(sql: string, params: unknown[]): Promise<R | null>;
+	batch(statements: BatchStatement[]): Promise<number[]>;
+	close(): Promise<void>;
 }
 
 /**
@@ -125,41 +138,7 @@ export function getCleanupBatchSize(): number {
 	return Number.isInteger(requested) && requested > 0 ? requested : 200;
 }
 
-export interface BatchStatement {
-	sql: string;
-	params?: unknown[];
-	expectedChanges?: number;
-}
-
-export class BatchExpectedChangesError extends Error {
-	constructor(
-		readonly statementIndex: number,
-		readonly expectedChanges: number,
-		readonly actualChanges: number,
-	) {
-		super(
-			`Batch statement ${statementIndex + 1} expected ${expectedChanges} change(s), got ${actualChanges}`,
-		);
-		this.name = "BatchExpectedChangesError";
-	}
-}
-
-function assertExpectedChanges(
-	statement: BatchStatement,
-	actualChanges: number,
-	index: number,
-): void {
-	if (
-		statement.expectedChanges !== undefined &&
-		actualChanges !== statement.expectedChanges
-	) {
-		throw new BatchExpectedChangesError(
-			index,
-			statement.expectedChanges,
-			actualChanges,
-		);
-	}
-}
+export { BatchExpectedChangesError, type BatchStatement };
 
 /**
  * Unified SQL adapter that abstracts over bun:sqlite (sync) and Bun.SQL/PostgreSQL (async).
@@ -173,9 +152,65 @@ function assertExpectedChanges(
  */
 export class BunSqlAdapter {
 	private offThreadReader?: SqlReader;
+	private writer?: SqlWriter;
 
 	setOffThreadReader(reader: SqlReader | undefined): void {
 		this.offThreadReader = reader;
+	}
+
+	/**
+	 * Route run/runWithChanges/runBatchWithChanges/runReturningOne to an
+	 * off-thread writer (SQLite only, #676). While one is attached the main
+	 * connection is `PRAGMA query_only`, so a write that bypasses the adapter
+	 * fails loudly (SQLITE_READONLY) instead of racing the writer's order.
+	 */
+	setWriter(writer: SqlWriter | undefined): void {
+		if (!this.isSQLite || !this.sqliteDb) return;
+		this.writer = writer;
+		this.sqliteDb.exec(`PRAGMA query_only = ${writer ? 1 : 0}`);
+	}
+
+	/**
+	 * True while a writer is attached. The main connection is then query_only,
+	 * so every write must go through the adapter, which falls back to the main
+	 * connection itself if the writer cannot take it.
+	 */
+	writerAttached(): boolean {
+		return this.writer !== undefined;
+	}
+
+	/** Drain and stop the writer, then hand writes back to this connection. */
+	async retireWriter(): Promise<void> {
+		const writer = this.writer;
+		if (!writer) return;
+		try {
+			await writer.close();
+		} finally {
+			if (this.writer === writer) this.setWriter(undefined);
+		}
+	}
+
+	/**
+	 * Run `offThread` on the writer when one is attached. Only a write the
+	 * worker never received comes back as OffThreadReaderUnavailableError; that
+	 * detaches the writer for good and runs `onMain` here. Any other error,
+	 * including an outcome-unknown write, propagates: re-running it could apply
+	 * it twice.
+	 */
+	private async viaWriter<T>(
+		offThread: (writer: SqlWriter) => Promise<T>,
+		onMain: () => Promise<T>,
+	): Promise<T> {
+		const writer = this.writer;
+		if (writer) {
+			try {
+				return await offThread(writer);
+			} catch (error) {
+				if (!(error instanceof OffThreadReaderUnavailableError)) throw error;
+				if (this.writer === writer) this.setWriter(undefined);
+			}
+		}
+		return onMain();
 	}
 
 	/** SELECTs only; never use for reads of uncommitted writes in a main-thread transaction. */
@@ -405,11 +440,16 @@ export class BunSqlAdapter {
 	): Promise<R | null> {
 		if (this.isSQLite && this.sqliteDb) {
 			const db = this.sqliteDb;
-			const result = await this.withBusyRetry(() =>
-				// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-				db.query<R, any[]>(sqlStr).get(...(params as any[])),
+			return this.viaWriter(
+				(writer) => writer.runGet<R>(sqlStr, params),
+				async () => {
+					const result = await this.withBusyRetry(() =>
+						// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+						db.query<R, any[]>(sqlStr).get(...(params as any[])),
+					);
+					return (result as R) ?? null;
+				},
 			);
-			return (result as R) ?? null;
 		}
 		if (!this.sql) {
 			throw new Error("SQL client not available for returning DML");
@@ -430,8 +470,12 @@ export class BunSqlAdapter {
 	async run(sqlStr: string, params: unknown[] = []): Promise<void> {
 		if (this.isSQLite && this.sqliteDb) {
 			const db = this.sqliteDb;
-			// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-			await this.withBusyRetry(() => db.run(sqlStr, params as any[]));
+			// run() resolves to void, so the two paths' results are not compared.
+			await this.viaWriter<unknown>(
+				(writer) => writer.run(sqlStr, params),
+				// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+				() => this.withBusyRetry(() => db.run(sqlStr, params as any[])),
+			);
 			return;
 		}
 		const pgQuery = this.pgSql(sqlStr);
@@ -452,17 +496,22 @@ export class BunSqlAdapter {
 	): Promise<number> {
 		if (this.isSQLite && this.sqliteDb) {
 			const db = this.sqliteDb;
-			return this.withBusyRetry(() => {
-				// `db.run().changes` includes writes made by AFTER triggers. The SQL
-				// changes() function reports only the outer statement, which is the
-				// portable count checked by the PostgreSQL path and repository CAS.
-				// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-				db.run(sqlStr, params as any[]);
-				return (
-					db.query<{ changes: number }, []>("SELECT changes() AS changes").get()
-						?.changes ?? 0
-				);
-			});
+			return this.viaWriter(
+				(writer) => writer.run(sqlStr, params),
+				() =>
+					this.withBusyRetry(() => {
+						// `db.run().changes` includes writes made by AFTER triggers. The SQL
+						// changes() function reports only the outer statement, which is the
+						// portable count checked by the PostgreSQL path and repository CAS.
+						// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+						db.run(sqlStr, params as any[]);
+						return (
+							db
+								.query<{ changes: number }, []>("SELECT changes() AS changes")
+								.get()?.changes ?? 0
+						);
+					}),
+			);
 		}
 		const pgQuery = this.pgSql(sqlStr);
 		const result = await this.withPgTimeout(
@@ -479,18 +528,22 @@ export class BunSqlAdapter {
 	async runBatchWithChanges(statements: BatchStatement[]): Promise<number[]> {
 		if (this.isSQLite && this.sqliteDb) {
 			const db = this.sqliteDb;
-			return this.withBusyRetry(() =>
-				db.transaction(() => {
-					const changesQuery = db.query<{ changes: number }, []>(
-						"SELECT changes() AS changes",
-					);
-					return statements.map((statement, index) => {
-						db.run(statement.sql, (statement.params ?? []) as never[]);
-						const actualChanges = changesQuery.get()?.changes ?? 0;
-						assertExpectedChanges(statement, actualChanges, index);
-						return actualChanges;
-					});
-				})(),
+			return this.viaWriter(
+				(writer) => writer.batch(statements),
+				() =>
+					this.withBusyRetry(() =>
+						db.transaction(() => {
+							const changesQuery = db.query<{ changes: number }, []>(
+								"SELECT changes() AS changes",
+							);
+							return statements.map((statement, index) => {
+								db.run(statement.sql, (statement.params ?? []) as never[]);
+								const actualChanges = changesQuery.get()?.changes ?? 0;
+								assertExpectedChanges(statement, actualChanges, index);
+								return actualChanges;
+							});
+						})(),
+					),
 			);
 		}
 		if (!this.sql) throw new Error("SQL client not available for transaction");

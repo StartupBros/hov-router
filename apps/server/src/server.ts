@@ -1619,6 +1619,10 @@ export default async function startServer(options?: {
 			);
 			throw err;
 		}
+		// From here on, adapter writes commit on a worker thread and the main
+		// connection is query_only (#676). After the bootstrap above, which
+		// writes through the raw handle.
+		dbOps.startWriterThread();
 	}
 
 	// Start periodic integrity scheduler. The startup `PRAGMA integrity_check`

@@ -149,9 +149,7 @@ export async function writeHeartbeat(
 ): Promise<void> {
 	const dialect = adapter.isSQLite ? "sqlite" : "postgres";
 	if (adapter.isSQLite) {
-		const db = adapter.getSQLiteDb();
-		db.run(
-			`INSERT INTO instance_heartbeats (
+		const sql = `INSERT INTO instance_heartbeats (
 				instance_id, hostname, pid, started_at, last_heartbeat,
 				node_version, db_dialect
 			) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -160,17 +158,19 @@ export async function writeHeartbeat(
 				hostname = excluded.hostname,
 				pid = excluded.pid,
 				node_version = excluded.node_version,
-				db_dialect = excluded.db_dialect`,
-			[
-				THIS_INSTANCE_ID,
-				THIS_HOSTNAME,
-				THIS_PID,
-				now,
-				now,
-				THIS_NODE_VERSION,
-				dialect,
-			],
-		);
+				db_dialect = excluded.db_dialect`;
+		const params = [
+			THIS_INSTANCE_ID,
+			THIS_HOSTNAME,
+			THIS_PID,
+			now,
+			now,
+			THIS_NODE_VERSION,
+			dialect,
+		];
+		// The main connection is query_only while the writer thread owns writes.
+		if (adapter.writerAttached()) await adapter.run(sql, params);
+		else adapter.getSQLiteDb().run(sql, params);
 	} else {
 		await adapter.run(
 			`INSERT INTO instance_heartbeats (
@@ -236,7 +236,13 @@ export async function clearHeartbeat(
 	adapter: BunSqlAdapter,
 	nonblocking = false,
 ): Promise<void> {
-	if (adapter.isSQLite) {
+	if (adapter.isSQLite && adapter.writerAttached()) {
+		// The writer thread waits out the lock, never the serving thread, so the
+		// caller's settlement timeout bounds this without a nonblocking DELETE.
+		await adapter.run("DELETE FROM instance_heartbeats WHERE instance_id = ?", [
+			THIS_INSTANCE_ID,
+		]);
+	} else if (adapter.isSQLite) {
 		const db = adapter.getSQLiteDb();
 		// A Promise timeout cannot interrupt SQLite's synchronous busy handler.
 		// Only the retirement DELETE is nonblocking; serving requests retain their timeout.
@@ -481,7 +487,11 @@ export function startHeartbeatLoop(
 			}
 		};
 		stopPromise = (async () => {
-			if (inFlight) await settle(inFlight);
+			// The writer thread commits in posting order, so a DELETE posted now
+			// lands after an in-flight tick. Waiting for the tick first would skip
+			// the DELETE whenever the write queue outlasts the settlement bound.
+			if (inFlight && !(adapter.isSQLite && adapter.writerAttached()))
+				await settle(inFlight);
 			// The row cannot be resurrected by a still-owned heartbeat after deletion.
 			// A pending cleanup also holds adapter close; an ordinary settled failure
 			// is best-effort and the stale row expires naturally.

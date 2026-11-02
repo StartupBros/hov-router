@@ -5,9 +5,11 @@ import type { Database } from "bun:sqlite";
  *
  * Every bun:sqlite call on the main connection is synchronous, so a slow
  * statement freezes the whole event loop. The repositories go through
- * BunSqlAdapter, but ~176 call sites use the raw handle directly (the
- * accounts API handler among them), so timing is applied to the handle
- * itself where DatabaseOperations opens it. That one place covers both.
+ * BunSqlAdapter, but many reads use the raw handle directly (the accounts
+ * API handler among them), so timing is applied to the handle itself where
+ * DatabaseOperations opens it. That one place covers both. Once the writer
+ * thread is attached (#676) adapter writes leave this handle; the
+ * off-thread transport warns about its own slow statements.
  *
  * Two outputs:
  * - `onSlow` fires for any single statement or transaction at or above the
