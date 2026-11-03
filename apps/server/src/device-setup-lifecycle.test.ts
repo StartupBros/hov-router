@@ -27,6 +27,10 @@ class MockUsageWindowLedger {
 		};
 	}
 }
+class MockCodexResetCreditObserver {
+	async observeSnapshot() {}
+	async observeUsageData() {}
+}
 const restorePendingRotations = mock(async () => 0);
 
 mock.module("@better-ccflare/http-api", () => ({
@@ -34,6 +38,7 @@ mock.module("@better-ccflare/http-api", () => ({
 	AlertService: MockHttpApiService,
 	APIRouter: MockHttpApiService,
 	AuthService: MockHttpApiService,
+	CodexResetCreditObserver: MockCodexResetCreditObserver,
 	UsageWindowLedger: MockUsageWindowLedger,
 	classifyAuthPath: () => null,
 	createServerDeviceSetupCoordinator: () => ({
@@ -48,6 +53,11 @@ mock.module("@better-ccflare/openai-responses-adapter", () => ({
 mock.module("@better-ccflare/providers", () => ({
 	CODEX_DEFAULT_ENDPOINT: "https://example.invalid",
 	CODEX_PING_MODEL: "test-model",
+	fetchCodexResetCredits: async () => ({
+		ok: false,
+		reason: "network",
+		status: null,
+	}),
 	fetchCodexUsageData: async () => null,
 	fetchCodexUsageOnDemand: async () => null,
 	extractWeeklyResetTime: () => null,
