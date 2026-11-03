@@ -43,6 +43,7 @@ import type {
 	UsageHistoryResponse,
 } from "@better-ccflare/types";
 import { API_LIMITS, API_TIMEOUT } from "./constants";
+import { type HealthVerdict, parseHealthVerdict } from "./lib/health-verdict";
 
 // Re-export types with dashboard-specific aliases for backward compatibility
 export type Account = AccountResponse & {
@@ -370,6 +371,25 @@ class API extends HttpClient {
 			`/api/stats/recent-errors?errorsSinceHours=${errorsSinceHours}`,
 		);
 		return response.recentErrors;
+	}
+
+	/**
+	 * The router's health verdict, or null when /health gave none.
+	 *
+	 * Uses fetch directly: /health answers 503 for every verdict except ok,
+	 * and this.get throws (and retries) on any non-2xx, which would discard
+	 * exactly the bodies that matter.
+	 */
+	async getHealth(): Promise<HealthVerdict | null> {
+		try {
+			const response = await fetch("/health", {
+				headers: { Accept: "application/json" },
+				signal: AbortSignal.timeout(API_TIMEOUT),
+			});
+			return parseHealthVerdict(await response.json());
+		} catch {
+			return null;
+		}
 	}
 
 	async getStats(opts?: {

@@ -10,6 +10,7 @@ export const queryKeys = {
 		errorsSinceHours !== undefined
 			? ([...queryKeys.all, "stats", { errorsSinceHours }] as const)
 			: ([...queryKeys.all, "stats"] as const),
+	health: () => [...queryKeys.all, "health"] as const,
 	// Under "stats" so the stats reset's invalidation covers it.
 	recentErrors: (errorsSinceHours: number) =>
 		[...queryKeys.all, "stats", "recent-errors", { errorsSinceHours }] as const,
