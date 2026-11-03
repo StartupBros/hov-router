@@ -369,11 +369,13 @@ export function AccountListItem({
 					: "border-border hover:border-muted-foreground/50"
 			}`}
 		>
-			{/* Identity on the left, actions on the right; wraps instead of overflowing. */}
+			{/* Identity on the left, actions on the right. The identity column claims
+			    8rem first, so on a narrow card the actions drop below the name
+			    instead of squeezing it into a sliver. */}
 			<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-				<div className="min-w-0 flex-1 space-y-1">
+				<div className="min-w-0 flex-[1_1_8rem] space-y-1">
 					<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-						<h3 className="font-medium leading-tight [overflow-wrap:anywhere]">
+						<h3 className="min-w-0 break-words font-medium leading-tight">
 							{account.name}
 						</h3>
 						{isPrimary && (
@@ -436,7 +438,7 @@ export function AccountListItem({
 						)}
 					</div>
 				</div>
-				<div className="flex shrink-0 flex-wrap items-center gap-1">
+				<div className="ml-auto flex shrink-0 flex-wrap items-center gap-1">
 					{showForceReset && (
 						<Button
 							variant="outline"
