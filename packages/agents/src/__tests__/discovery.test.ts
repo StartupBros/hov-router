@@ -131,6 +131,32 @@ describe("AgentRegistry — model parsing and empty-prompt guard", () => {
 		expect(agent.model).toBe(LATEST_OPUS_MODEL);
 	});
 
+	// Files written on Windows (CRLF, sometimes a UTF-8 BOM) used to fail with
+	// "missing required fields (name, description)": each frontmatter line kept
+	// its trailing \r, so no `key: value` line matched.
+	it("loads a CRLF agent file", async () => {
+		fs.writeFileSync(
+			path.join(agentsDir, "agent-crlf.md"),
+			"---\r\nname: CRLF Agent\r\ndescription: written on Windows\r\nmodel: opus\r\n---\r\n\r\nYou are a test agent.\r\nSecond line.\r\n",
+		);
+		const agent = await findAgentById("agent-crlf");
+		expect(agent.name).toBe("CRLF Agent");
+		expect(agent.description).toBe("written on Windows");
+		expect(agent.model).toBe(LATEST_OPUS_MODEL);
+		expect(agent.systemPrompt).not.toContain("\r");
+		expect(agent.systemPrompt).toContain("You are a test agent.\nSecond line.");
+	});
+
+	it("loads an agent file that starts with a UTF-8 BOM", async () => {
+		fs.writeFileSync(
+			path.join(agentsDir, "agent-bom.md"),
+			"﻿---\r\nname: BOM Agent\r\ndescription: has a BOM\r\n---\r\n\r\nYou are a test agent.\r\n",
+		);
+		const agent = await findAgentById("agent-bom");
+		expect(agent.name).toBe("BOM Agent");
+		expect(agent.description).toBe("has a BOM");
+	});
+
 	it("invalid/garbage model value → null, no throw", async () => {
 		writeAgent(
 			"agent-garbage.md",

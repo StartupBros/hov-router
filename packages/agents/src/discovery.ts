@@ -134,7 +134,12 @@ export class AgentRegistry {
 				description: "agent file",
 				...(additionalAllowedPaths && { additionalAllowedPaths }),
 			});
-			const content = await readFile(safePath, "utf-8");
+			// Normalize Windows line endings and a leading UTF-8 BOM. With CRLF,
+			// every frontmatter line kept its \r, no `key: value` line matched,
+			// and the file was dropped as "missing required fields".
+			const content = (await readFile(safePath, "utf-8"))
+				.replace(/^﻿/, "")
+				.replace(/\r\n/g, "\n");
 
 			// Extract frontmatter manually
 			const frontmatterMatch = content.match(
