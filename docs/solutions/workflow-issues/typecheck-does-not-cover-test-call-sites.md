@@ -1,5 +1,5 @@
 ---
-title: A green typecheck does not prove callers are safe — test files are excluded
+title: A green typecheck does not prove callers are safe — the root script excludes test files
 date: 2026-08-13
 category: workflow-issues
 module: shared-persistence-contracts
@@ -32,7 +32,7 @@ tags:
   - baseline-diff
 ---
 
-# A green typecheck does not prove callers are safe — test files are excluded
+# A green typecheck does not prove callers are safe — the root script excludes test files
 
 ## Context
 
@@ -255,9 +255,11 @@ been checked by hand — which is the whole point of this document.
 
 A second config — `tsconfig.typecheck.json` that `include`s test files, run as its own
 `tsc --noEmit -p` step — would have caught all four stale call sites at authoring time on
-both PRs. Nothing in the tree does this today. It is a candidate, not a decision: test
-files use looser typing patterns (mocks, `as any`), so enabling it will surface a wave of
-pre-existing noise that needs triage before the step can gate anything.
+both PRs. One package does this now: the root `typecheck` script chains
+`tsc --noEmit -p packages/dashboard-web`, whose tsconfig includes the dashboard's test
+files, so a stale dashboard fixture fails the required CI job (#696). The other packages
+are not covered yet. Add one to the chain only once its own tests typecheck clean, or the
+chain fails on inherited errors instead of new drift.
 
 ## Related
 

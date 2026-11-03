@@ -28,6 +28,8 @@ function mkAccount(partial: Partial<AccountResponse>): AccountResponse {
 		lastUsed: null,
 		created: new Date(NOW).toISOString(),
 		paused: false,
+		requiresReauth: false,
+		pauseReason: null,
 		tokenStatus: "valid",
 		tokenExpiresAt: null,
 		rateLimitStatus: "OK",
@@ -55,6 +57,7 @@ function mkAccount(partial: Partial<AccountResponse>): AccountResponse {
 		modelFallbacks: null,
 		billingType: null,
 		sessionStats: null,
+		isPrimary: false,
 		...partial,
 	};
 }

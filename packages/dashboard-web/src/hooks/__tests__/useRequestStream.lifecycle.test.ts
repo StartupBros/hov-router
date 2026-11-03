@@ -319,13 +319,15 @@ describe("useRequestStream lifecycle", () => {
 			requests: [{ id: "live" }],
 			detailsMap: new Map([["live", { id: "live", statusCode: 200 }]]),
 		});
-		const before = queryClient.getQueryData(queryKeys.requests(1));
+		const before = queryClient.getQueryData<unknown>(queryKeys.requests(1));
 		const sequence = getRequestsSseSeq();
 		currentSource().message({
 			type: "summary",
 			payload: { id: "evicted", statusCode: 200, success: true },
 		});
-		expect(queryClient.getQueryData(queryKeys.requests(1))).toBe(before);
+		expect(queryClient.getQueryData<unknown>(queryKeys.requests(1))).toBe(
+			before,
+		);
 		expect(getRequestsSseSeq()).toBe(sequence + 1);
 		unmount();
 	});

@@ -244,6 +244,7 @@ describe("family conversion preview projection", () => {
 			scope: "family",
 			family: "opus",
 			managed_model: LATEST_MODEL_BY_FAMILY.opus,
+			policy_managed_model: LATEST_MODEL_BY_FAMILY.opus,
 			effective: current,
 			proposals: [
 				{
@@ -254,6 +255,7 @@ describe("family conversion preview projection", () => {
 					route_class: "oauth-subscription",
 					existing_rule_id: null,
 					managed_model: LATEST_MODEL_BY_FAMILY.opus,
+					policy_managed_model: LATEST_MODEL_BY_FAMILY.opus,
 					tier_source: "account_priority",
 					high_confidence: true,
 					selected_by_default: true,

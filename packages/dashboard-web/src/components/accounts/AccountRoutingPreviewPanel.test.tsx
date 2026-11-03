@@ -55,6 +55,7 @@ function preview(
 		route_class: "oauth-subscription",
 		existing_rule_id: null,
 		managed_model: `claude-${family}-latest`,
+		policy_managed_model: `claude-${family}-latest`,
 		tier_source: "account_priority",
 		high_confidence: highConfidence,
 		selected_by_default: highConfidence,
@@ -67,6 +68,7 @@ function preview(
 		scope: "account",
 		family,
 		managed_model: proposal.managed_model,
+		policy_managed_model: proposal.policy_managed_model,
 		proposals: [proposal],
 		effective,
 	};

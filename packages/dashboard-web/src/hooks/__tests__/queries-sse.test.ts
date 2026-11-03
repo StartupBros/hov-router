@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as reactQuery from "@tanstack/react-query";
 import { api } from "../../api";
 import { captureRequestUpdates } from "../useRequestStream";
+import { makeRequestSummary } from "./request-summary-fixture";
 
 const queryClient = new reactQuery.QueryClient();
 
@@ -23,14 +24,13 @@ type Options = reactQuery.FetchQueryOptions<{
 	refetchOnWindowFocus?: boolean;
 };
 const summary = (id: string) =>
-	({
+	makeRequestSummary({
 		id,
-		timestamp: 1,
 		statusCode: 200,
 		success: true,
 		inputTokens: 0,
 		outputTokens: 0,
-	}) as Awaited<ReturnType<typeof api.getRequestsSummary>>[number];
+	});
 afterEach(() => {
 	sequence = 0;
 	queryClient.clear();
