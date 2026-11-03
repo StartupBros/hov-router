@@ -86,22 +86,20 @@ describe("CodexResetCreditObserver", () => {
 
 	const repo = () => dbOps.getCodexResetCreditsRepository();
 
+	const scriptedRead = async (accountId: string) => {
+		reads.push(accountId);
+		const queue = answers.get(accountId) ?? [];
+		const next = queue.shift();
+		if (!next) throw new Error(`no scripted list answer for ${accountId}`);
+		return next;
+	};
+
 	beforeEach(async () => {
 		dbOps = new DatabaseOperations(":memory:", { walMode: false });
 		clock = START;
 		reads = [];
 		answers = new Map();
-		observer = new CodexResetCreditObserver(
-			dbOps,
-			async (accountId) => {
-				reads.push(accountId);
-				const queue = answers.get(accountId) ?? [];
-				const next = queue.shift();
-				if (!next) throw new Error(`no scripted list answer for ${accountId}`);
-				return next;
-			},
-			() => clock,
-		);
+		observer = new CodexResetCreditObserver(dbOps, scriptedRead, () => clock);
 		for (const id of ["acct-1", "acct-2", "acct-3"]) {
 			await seedAccount(dbOps, id);
 		}
@@ -272,6 +270,83 @@ describe("CodexResetCreditObserver", () => {
 		expect(old?.vanishReason).toBe("account_changed");
 		expect(fresh?.isBaseline).toBe(true);
 		expect((await repo().getState("acct-1"))?.baselineAt).toBe(clock);
+	});
+
+	it("re-reads the list when a reauthentication changes the ChatGPT account and the counts do not", async () => {
+		let identity: string | null = "user-a";
+		const watched = new CodexResetCreditObserver(
+			dbOps,
+			scriptedRead,
+			() => clock,
+			async () => identity,
+		);
+		answer("acct-1", listed([credit("old", WAVE_ONE)], "user-a"));
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		const before = (await repo().getState("acct-1"))?.chatgptAccountHash;
+
+		clock += 5 * MINUTE;
+		identity = "user-b";
+		answer("acct-1", listed([credit("new", WAVE_TWO)], "user-b"));
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		expect(reads).toHaveLength(2);
+		expect((await repo().getState("acct-1"))?.chatgptAccountHash).not.toBe(
+			before,
+		);
+		const all = await repo().listCredits("acct-1", { includeVanished: true });
+		expect(all.find((c) => c.creditId === "old")?.vanishReason).toBe(
+			"account_changed",
+		);
+
+		// Once the stored identity matches, unchanged counts stop re-reading.
+		clock += 5 * MINUTE;
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		expect(reads).toHaveLength(2);
+	});
+
+	it("keeps the retry floor when the ChatGPT account changes while the list read is failing", async () => {
+		let identity: string | null = "user-a";
+		const watched = new CodexResetCreditObserver(
+			dbOps,
+			scriptedRead,
+			() => clock,
+			async () => identity,
+		);
+		answer("acct-1", listed([credit("old", WAVE_ONE)], "user-a"));
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		clock += 7 * HOUR;
+		answer("acct-1", FAILED);
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		expect(reads).toHaveLength(2);
+
+		clock += MINUTE;
+		identity = "user-b";
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		expect(reads).toHaveLength(2);
+
+		clock += 15 * MINUTE;
+		answer("acct-1", listed([credit("new", WAVE_TWO)], "user-b"));
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		expect(reads).toHaveLength(3);
+		const all = await repo().listCredits("acct-1", { includeVanished: true });
+		expect(all.find((c) => c.creditId === "old")?.vanishReason).toBe(
+			"account_changed",
+		);
+	});
+
+	it("does not re-read when the stored credential's account cannot be read", async () => {
+		const watched = new CodexResetCreditObserver(
+			dbOps,
+			scriptedRead,
+			() => clock,
+			async () => {
+				throw new Error("database is locked");
+			},
+		);
+		answer("acct-1", listed([credit("c1", WAVE_ONE)], "user-a"));
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		clock += 5 * MINUTE;
+		await watched.observeUsageData("acct-1", counts(1, 1));
+		expect(reads).toHaveLength(1);
 	});
 
 	it("makes one list read for two concurrent observations of one account", async () => {

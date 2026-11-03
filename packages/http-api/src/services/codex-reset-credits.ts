@@ -28,6 +28,11 @@ export type CodexResetCreditListReader = (
 	accountId: string,
 ) => Promise<CodexResetCreditListResult>;
 
+/** Names the ChatGPT account a router account's stored credential belongs to. */
+export type CodexResetCreditIdentityReader = (
+	accountId: string,
+) => Promise<string | null>;
+
 interface ObservedCounts {
 	present: boolean;
 	availableCount: number | null;
@@ -160,6 +165,7 @@ export class CodexResetCreditObserver {
 		private readonly dbOps: DatabaseOperations,
 		private readonly readList: CodexResetCreditListReader,
 		private readonly now: () => number = Date.now,
+		private readonly readIdentity?: CodexResetCreditIdentityReader,
 	) {}
 
 	private get repo() {
@@ -199,15 +205,51 @@ export class CodexResetCreditObserver {
 			});
 		}
 
+		const listDue = shouldReadList(previous, counts, live, at);
+		const accountChanged =
+			!listDue &&
+			(await this.credentialAccountChanged(accountId, previous, counts));
 		// No await between the check and the claim: one read per account.
 		if (this.inFlight.has(accountId)) return;
-		if (!shouldReadList(previous, counts, live, at)) return;
+		if (!listDue && !accountChanged) return;
 		this.inFlight.add(accountId);
 		try {
 			await this.readAndApply(accountId, counts);
 		} finally {
 			this.inFlight.delete(accountId);
 		}
+	}
+
+	/**
+	 * True when the stored credential now names a different ChatGPT account
+	 * than the last list read did, as after a reauthentication with unchanged
+	 * counts. A failing list keeps its retry floor instead.
+	 */
+	private async credentialAccountChanged(
+		accountId: string,
+		previous: CodexResetCreditState | null,
+		counts: ObservedCounts,
+	): Promise<boolean> {
+		if (!this.readIdentity || !counts.present) return false;
+		if (
+			previous?.chatgptAccountHash == null ||
+			previous.listFailingSince != null
+		) {
+			return false;
+		}
+		let chatgptAccountId: string | null;
+		try {
+			chatgptAccountId = await this.readIdentity(accountId);
+		} catch (error) {
+			log.warn(
+				`Could not read the ChatGPT account for account ${accountId}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return false;
+		}
+		return (
+			chatgptAccountId != null &&
+			hashChatGptAccountId(chatgptAccountId) !== previous.chatgptAccountHash
+		);
 	}
 
 	private async readAndApply(

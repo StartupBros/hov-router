@@ -414,25 +414,34 @@ export function mapWhamUsageResponse(
 		data.code_review_resets_at = codeReview.resets_at;
 	}
 
-	const resetCredits = body.rate_limit_reset_credits;
-	if (
-		resetCredits &&
-		typeof resetCredits === "object" &&
-		!Array.isArray(resetCredits)
-	) {
-		data.reset_credits_available_count = nonNegativeIntegerOrNull(
-			resetCredits.available_count,
-		);
-		data.reset_credits_applicable_count = nonNegativeIntegerOrNull(
-			resetCredits.applicable_available_count,
-		);
-		data.reset_credits_present = true;
-	}
+	applyResetCreditCounts(data, body);
 
 	const facts = subscriptionFacts(body, fiveHour, sevenDay);
 	data.codex_subscription = facts;
 	decodedFacts.set(data, facts);
 	return data;
+}
+
+/** Copies banked reset counts onto usage data; a missing or non-object field adds nothing. */
+function applyResetCreditCounts(
+	data: UsageData,
+	body: WhamUsageResponse,
+): void {
+	const resetCredits = body.rate_limit_reset_credits;
+	if (
+		!resetCredits ||
+		typeof resetCredits !== "object" ||
+		Array.isArray(resetCredits)
+	) {
+		return;
+	}
+	data.reset_credits_available_count = nonNegativeIntegerOrNull(
+		resetCredits.available_count,
+	);
+	data.reset_credits_applicable_count = nonNegativeIntegerOrNull(
+		resetCredits.applicable_available_count,
+	);
+	data.reset_credits_present = true;
 }
 
 export function nonNegativeIntegerOrNull(value: unknown): number | null {
@@ -577,11 +586,11 @@ export async function fetchCodexUsageData(
 		const hasRateLimitState =
 			typeof body.rate_limit?.allowed === "boolean" ||
 			typeof body.rate_limit?.limit_reached === "boolean";
-		const data =
-			mapWhamUsageResponse(body) ??
-			(accountId && hasRateLimitState
-				? { codex_subscription: subscriptionFacts(body, null, null) }
-				: null);
+		let data = mapWhamUsageResponse(body);
+		if (!data && accountId && hasRateLimitState) {
+			data = { codex_subscription: subscriptionFacts(body, null, null) };
+			applyResetCreditCounts(data, body);
+		}
 		const facts = data && decodedFacts.get(data);
 		if (data && facts && accountId && !controller.signal.aborted) {
 			acquisitions.set(data, {

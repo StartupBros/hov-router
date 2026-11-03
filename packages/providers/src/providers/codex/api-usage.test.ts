@@ -379,6 +379,28 @@ describe("fetchCodexUsageData", () => {
 		expect((await fetchCodexUsageData(ACCOUNT_TOKEN)).data).toBeNull();
 	});
 
+	it("keeps reset counts from a recognized windowless response", async () => {
+		globalThis.fetch = mock(async () =>
+			Response.json({
+				rate_limit: { allowed: true, limit_reached: false },
+				rate_limit_reset_credits: {
+					available_count: 2,
+					applicable_available_count: 2,
+				},
+			}),
+		) as unknown as typeof fetch;
+		const result = await fetchCodexUsageData(
+			ACCOUNT_TOKEN,
+			undefined,
+			"acct-123",
+		);
+		expect(result.data?.reset_credits_available_count).toBe(2);
+		expect(result.data?.reset_credits_applicable_count).toBe(2);
+		expect(result.data?.reset_credits_present).toBe(true);
+		expect(result.data?.five_hour).toBeUndefined();
+		expect((await fetchCodexUsageData(ACCOUNT_TOKEN)).data).toBeNull();
+	});
+
 	it("retries at the flipped path on a 404 and succeeds within the same call", async () => {
 		const calls: string[] = [];
 		const fetchMock = mock(async (input: RequestInfo | URL) => {

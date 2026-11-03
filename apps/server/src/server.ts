@@ -60,6 +60,7 @@ import {
 	CODEX_DEFAULT_ENDPOINT,
 	CODEX_PING_MODEL,
 	type CodexSubscriptionFacts,
+	extractChatGptAccountId,
 	extractWeeklyResetTime,
 	fetchCodexResetCredits,
 	fetchCodexUsageData,
@@ -2166,6 +2167,15 @@ export default async function startServer(options?: {
 			}
 			const accessToken = await getValidAccessToken(account, proxyContext);
 			return fetchCodexResetCredits(accessToken);
+		},
+		Date.now,
+		// The stored token names the ChatGPT account without a network call, so
+		// a reauthentication to another account is caught on the next poll.
+		async (accountId) => {
+			const account = await dbOps.getAccount(accountId);
+			return account?.access_token
+				? extractChatGptAccountId(account.access_token)
+				: null;
 		},
 	);
 
