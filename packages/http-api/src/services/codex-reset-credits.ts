@@ -33,13 +33,13 @@ export type CodexResetCreditIdentityReader = (
 	accountId: string,
 ) => Promise<string | null>;
 
-interface ObservedCounts {
+export interface ObservedCounts {
 	present: boolean;
 	availableCount: number | null;
 	applicableCount: number | null;
 }
 
-function readResetCreditCounts(data: unknown): ObservedCounts {
+export function readResetCreditCounts(data: unknown): ObservedCounts {
 	const record =
 		data && typeof data === "object" ? (data as Record<string, unknown>) : {};
 	if (record.reset_credits_present !== true) {
@@ -324,23 +324,35 @@ export class CodexResetCreditObserver {
 		const vanished: Record<CodexResetCreditVanishReason, string[]> = {
 			expired: [],
 			redeemed_elsewhere: [],
+			redeemed_by_router: [],
 			account_changed: [],
 		};
-		for (const credit of live) {
-			if (listedIds.has(credit.creditId)) continue;
-			const reason =
-				credit.expiresAt != null && credit.expiresAt <= at
+		const gone = live.filter((credit) => !listedIds.has(credit.creditId));
+		// A router redemption OpenAI reported as spending the credit explains
+		// its departure better than the expiry or "somewhere else".
+		const byRouter = new Set(
+			await this.dbOps
+				.getCodexResetRedemptionsRepository()
+				.findRouterRedeemedCreditIds(
+					accountId,
+					gone.map((credit) => credit.creditId),
+				),
+		);
+		for (const credit of gone) {
+			const reason = byRouter.has(credit.creditId)
+				? "redeemed_by_router"
+				: credit.expiresAt != null && credit.expiresAt <= at
 					? "expired"
 					: "redeemed_elsewhere";
 			vanished[reason].push(credit.creditId);
 		}
-		await this.repo.markVanished(accountId, vanished.expired, at, "expired");
-		await this.repo.markVanished(
-			accountId,
-			vanished.redeemed_elsewhere,
-			at,
+		for (const reason of [
+			"expired",
 			"redeemed_elsewhere",
-		);
+			"redeemed_by_router",
+		] as const) {
+			await this.repo.markVanished(accountId, vanished[reason], at, reason);
+		}
 
 		await this.repo.recordListSuccess(accountId, {
 			at,

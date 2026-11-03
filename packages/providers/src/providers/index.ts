@@ -17,6 +17,9 @@ export {
 export { BedrockProvider, parseBedrockConfig } from "./bedrock/index";
 export type {
 	CodexClientIdentity,
+	CodexResetConsumeClassification,
+	CodexResetConsumeRequest,
+	CodexResetConsumeResult,
 	CodexResetCredit,
 	CodexResetCreditListResult,
 	CodexUsageRefreshFetchResult,
@@ -41,6 +44,8 @@ export {
 	CodexOAuthProvider,
 	CodexProvider,
 	classifyCodexModelFamily,
+	classifyCodexResetConsume,
+	consumeCodexResetCredit,
 	deriveCodexExplicitBreakpointBucket,
 	extractChatGptAccountId,
 	fetchCodexResetCredits,

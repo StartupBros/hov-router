@@ -1241,11 +1241,28 @@ class UsageCache {
 	 * Returns false when no polling/token provider is configured or when the fetch fails.
 	 * A refresh whose registration was stopped or replaced mid-flight reports
 	 * failure rather than publishing a result for a generation that is gone.
+	 *
+	 * A fetch already in flight is normally reused. With `awaitInFlight`, that
+	 * fetch is awaited and a new one runs, for callers that just changed what
+	 * the provider will report and need a read that started after the change.
 	 */
-	async refreshNow(accountId: string): Promise<boolean> {
+	async refreshNow(
+		accountId: string,
+		options: { awaitInFlight?: boolean } = {},
+	): Promise<boolean> {
 		const registration = this.registrations.get(accountId);
 		if (!registration) {
 			return false;
+		}
+
+		if (options.awaitInFlight) {
+			const inFlight = this.inFlightFetches.get(accountId);
+			if (inFlight?.registration === registration) {
+				await inFlight.promise.catch(() => undefined);
+				if (!this.isCurrent(registration)) return false;
+				// Never let the next read join the fetch that predates the caller.
+				this.clearInFlight(registration, inFlight.promise);
+			}
 		}
 
 		const { success } = await this.fetchRegistration(registration);

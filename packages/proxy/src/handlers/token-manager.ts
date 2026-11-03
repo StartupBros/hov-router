@@ -11,6 +11,8 @@ import {
 } from "@better-ccflare/core";
 import { Logger } from "@better-ccflare/logger";
 import {
+	type CodexResetConsumeRequest,
+	type CodexResetConsumeResult,
 	getProvider,
 	type TokenRefreshResult,
 } from "@better-ccflare/providers";
@@ -1278,10 +1280,26 @@ export function unregisterCodexUsageRefresher(serverId: string): void {
  * first successful outcome — we never fan-out because every call costs a
  * real codex request. Concurrent callers for the same accountId share a
  * single in-flight promise.
+ *
+ * With `awaitInFlight`, a refresh already in flight is awaited first and not
+ * reused, for callers that just changed what Codex will report and need a
+ * read that started after the change.
  */
 export async function refreshCodexUsageForAccount(
 	accountId: string,
+	options: { awaitInFlight?: boolean } = {},
 ): Promise<CodexUsageRefreshOutcome> {
+	if (options.awaitInFlight) {
+		const stale = codexUsageInflight.get(accountId);
+		if (stale) {
+			await stale.catch(() => undefined);
+			// A refresh started after the stale one settled began after the
+			// caller's change, so joining it is fine; the stale one never is.
+			if (codexUsageInflight.get(accountId) === stale) {
+				codexUsageInflight.delete(accountId);
+			}
+		}
+	}
 	const existing = codexUsageInflight.get(accountId);
 	if (existing) {
 		log.debug(`Reusing in-flight codex usage refresh for account ${accountId}`);
@@ -1331,6 +1349,78 @@ export async function refreshCodexUsageForAccount(
 		codexUsageInflight.delete(accountId);
 	});
 	return promise;
+}
+
+/** Why a redemption request never left this process. */
+export type CodexResetNotSentReason =
+	| "no_redeemer"
+	| "account_not_found"
+	| "not_codex"
+	| "custom_endpoint"
+	| "token_unavailable";
+
+/**
+ * `sent: false` guarantees nothing reached OpenAI. `sent: true` carries what
+ * the consume call learned, which may itself be unclear (timeout, network).
+ */
+export type CodexResetRedeemDispatch =
+	| { sent: false; reason: CodexResetNotSentReason }
+	| { sent: true; result: CodexResetConsumeResult };
+
+export type CodexResetRedeemer = (
+	accountId: string,
+	request: CodexResetConsumeRequest,
+) => Promise<CodexResetRedeemDispatch>;
+
+// One slot, unlike the usage refreshers: a redemption is an irreversible
+// spend, so dispatch reaches exactly the registered server or nobody.
+let codexResetRedeemer: {
+	serverId: string;
+	redeem: CodexResetRedeemer;
+} | null = null;
+
+/**
+ * Register the server's reset redeemer. It owns token access through the
+ * server's proxy context; a later registration replaces an earlier one.
+ */
+export function registerCodexResetRedeemer(
+	serverId: string,
+	redeem: CodexResetRedeemer,
+): void {
+	codexResetRedeemer = { serverId, redeem };
+}
+
+/** Clear the slot, but only if `serverId` still holds it. */
+export function unregisterCodexResetRedeemer(serverId: string): void {
+	if (codexResetRedeemer?.serverId === serverId) {
+		codexResetRedeemer = null;
+	}
+}
+
+export function hasCodexResetRedeemer(): boolean {
+	return codexResetRedeemer !== null;
+}
+
+/**
+ * Redeem one banked reset through the registered redeemer. Never falls
+ * through to another server. A redeemer that throws may already have sent the
+ * request, so that is reported as an unclear (network) outcome; its message is
+ * never logged because it can carry the token.
+ */
+export async function redeemCodexResetCreditForAccount(
+	accountId: string,
+	request: CodexResetConsumeRequest,
+): Promise<CodexResetRedeemDispatch> {
+	const slot = codexResetRedeemer;
+	if (!slot) return { sent: false, reason: "no_redeemer" };
+	try {
+		return await slot.redeem(accountId, request);
+	} catch {
+		log.warn(
+			`Reset redemption for account ${accountId} threw on server ${slot.serverId}; outcome unclear`,
+		);
+		return { sent: true, result: { kind: "network" } };
+	}
 }
 
 /**

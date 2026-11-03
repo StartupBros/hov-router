@@ -127,6 +127,9 @@ export {
 } from "./degraded-owner-overlay";
 export { startExternalCodexScheduler } from "./external-codex-scheduler";
 export {
+	type CodexResetNotSentReason,
+	type CodexResetRedeemDispatch,
+	type CodexResetRedeemer,
 	type CodexUsageRefreshOutcome,
 	checkAllAccountsHealth,
 	checkRefreshTokenHealth,
@@ -141,10 +144,13 @@ export {
 	getUsageThrottleStatus,
 	getUsageThrottleUntil,
 	getValidAccessToken,
+	hasCodexResetRedeemer,
 	isRefreshTokenLikelyExpired,
 	markAccountTokensFresh,
+	redeemCodexResetCreditForAccount,
 	refreshCodexUsageForAccount,
 	registerAutoRefreshTrackingClearer,
+	registerCodexResetRedeemer,
 	registerCodexUsageRefresher,
 	registerPollingRestarter,
 	registerRefreshClearer,
@@ -154,6 +160,7 @@ export {
 	type TokenHealthReport,
 	type TokenHealthStatus,
 	unregisterAutoRefreshTrackingClearer,
+	unregisterCodexResetRedeemer,
 	unregisterCodexUsageRefresher,
 	unregisterPollingRestarter,
 	unregisterRefreshClearer,
