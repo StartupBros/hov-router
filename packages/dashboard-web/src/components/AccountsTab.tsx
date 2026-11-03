@@ -11,6 +11,7 @@ import {
 	useForceResetRateLimit,
 	useManagedRoutingInvalidation,
 	usePauseAccount,
+	useRedeemReset,
 	useRefreshUsage,
 	useRemoveAccount,
 	useRenameAccount,
@@ -35,6 +36,7 @@ import {
 	PublicValueDialog,
 	QwenReauthDialog,
 	RenameAccountDialog,
+	UseResetDialog,
 } from "./accounts";
 import type { AccountCreationIdentity } from "./accounts/AccountAddForm";
 import {
@@ -252,6 +254,7 @@ export function AccountsTab() {
 	const resumeAccount = useResumeAccount();
 	const forceResetRateLimit = useForceResetRateLimit();
 	const refreshUsage = useRefreshUsage();
+	const redeemReset = useRedeemReset();
 	const renameAccount = useRenameAccount();
 	const updatePriority = useUpdateAccountPriority();
 	const updateAutoRefresh = useUpdateAccountAutoRefresh();
@@ -325,6 +328,9 @@ export function AccountsTab() {
 		isOpen: false,
 		account: null,
 	});
+	// The account as it was when Use reset was opened. A refetch after the
+	// answer must not unmount the dialog that is showing it.
+	const [useResetAccount, setUseResetAccount] = useState<Account | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
 	const accountCreationCallbacks = createAccountCreationCallbacks(
 		api,
@@ -876,6 +882,7 @@ export function AccountsTab() {
 						onReauth={handleReauth}
 						onAnthropicReauth={handleAnthropicReauth}
 						onCodexReauth={handleCodexReauth}
+						onUseReset={setUseResetAccount}
 					/>
 				</CardContent>
 			</Card>
@@ -1003,6 +1010,17 @@ export function AccountsTab() {
 					)
 				}
 			/>
+			{useResetAccount && (
+				// Keyed by account: each opening mints its own request id.
+				<UseResetDialog
+					key={useResetAccount.id}
+					account={useResetAccount}
+					redeem={(accountId, requestId) =>
+						redeemReset.mutateAsync({ accountId, requestId })
+					}
+					onClose={() => setUseResetAccount(null)}
+				/>
+			)}
 		</div>
 	);
 }

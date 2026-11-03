@@ -12,3 +12,4 @@ export { PublicValueDialog } from "./PublicValueDialog";
 export { QwenReauthDialog } from "./QwenReauthDialog";
 export { RateLimitProgress } from "./RateLimitProgress";
 export { RenameAccountDialog } from "./RenameAccountDialog";
+export { UseResetDialog } from "./UseResetDialog";

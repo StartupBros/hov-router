@@ -270,3 +270,71 @@ describe("BankedResetsStatus", () => {
 		expect(visible).not.toContain("Redeem reset");
 	});
 });
+
+describe("BankedResetsStatus Use reset button (R8)", () => {
+	function withButton(resets: BankedResets): string {
+		return renderToStaticMarkup(
+			<BankedResetsStatus
+				resets={resets}
+				accountName="codex-pro-1"
+				now={NOW}
+				onUseReset={() => {}}
+			/>,
+		);
+	}
+
+	/** The Use reset button's markup, or null when it is not rendered. */
+	function button(html: string): string | null {
+		const match = html.match(/<button\b[^>]*>Use reset<\/button>/);
+		return match ? match[0] : null;
+	}
+
+	/** The disabled attribute, not the disabled: style variants in its class. */
+	const DISABLED = /\sdisabled=""/;
+
+	it("is not rendered unless the card asks for it", () => {
+		expect(button(render(held))).toBeNull();
+	});
+
+	it("is enabled on a fresh count where OpenAI says a reset would work", () => {
+		const html = withButton(held);
+		const tag = button(html);
+		expect(tag).not.toBeNull();
+		expect(tag).not.toMatch(DISABLED);
+		// Described by the detail line, which says it is optional and final.
+		const describedBy = tag?.match(/aria-describedby="([^"]+)"/)?.[1];
+		expect(describedBy).toBeDefined();
+		expect(html).toContain(`<p id="${describedBy}"`);
+		expect(text(html)).not.toMatch(BANNED);
+	});
+
+	it("is disabled when OpenAI says none would work; the detail line says so", () => {
+		const html = withButton({ ...held, appliesNow: false });
+		expect(button(html)).toMatch(DISABLED);
+		expect(text(html)).toContain(
+			"OpenAI says none of these would work on this account right now.",
+		);
+	});
+
+	it("is disabled on a stale count and says a fresh count is needed", () => {
+		for (const appliesNow of [true, false]) {
+			const html = withButton({ ...held, appliesNow, stale: true });
+			expect(button(html)).toMatch(DISABLED);
+			expect(text(html)).toContain(
+				"Last read Nov 3, 14:05 UTC. The router has not been able to refresh it. Use reset needs a fresh count.",
+			);
+		}
+	});
+
+	it("is not rendered when no reset is held, the count is unknown, or the account is not tracked", () => {
+		for (const resets of [
+			{ ...held, availableCount: 0, applicableCount: 0 },
+			{ ...held, availableCount: null, applicableCount: null },
+			{ ...held, tracked: false },
+		]) {
+			const html = withButton(resets);
+			expect(button(html)).toBeNull();
+			expect(text(html)).not.toContain("fresh count");
+		}
+	});
+});

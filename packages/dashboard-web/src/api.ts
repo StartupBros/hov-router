@@ -44,6 +44,7 @@ import type {
 } from "@better-ccflare/types";
 import { API_LIMITS, API_TIMEOUT } from "./constants";
 import { type HealthVerdict, parseHealthVerdict } from "./lib/health-verdict";
+import { type RedeemResetAnswer, sendRedeemReset } from "./lib/redeem-reset";
 
 // Re-export types with dashboard-specific aliases for backward compatibility
 export type Account = AccountResponse & {
@@ -442,6 +443,26 @@ class API extends HttpClient {
 
 	async getBankedResets(): Promise<BankedResetsSummary> {
 		return this.get<BankedResetsSummary>("/api/banked-resets");
+	}
+
+	/**
+	 * Sends one banked-reset redemption and returns whatever came back. Uses
+	 * fetch directly: this.post throws and retries on any non-2xx, and a 409's
+	 * reason and open request id are what the dialog shows. Nothing here
+	 * retries; only the operator's click sends.
+	 */
+	async redeemReset(
+		accountId: string,
+		requestId: string,
+	): Promise<RedeemResetAnswer> {
+		return sendRedeemReset(accountId, requestId, {
+			fetch: (input, init) => fetch(input, init),
+			apiKey: this.getApiKey(),
+			onUnauthorized: () => {
+				this.logger.warn("401 Unauthorized - dispatching auth required event");
+				window.dispatchEvent(new CustomEvent("auth-required"));
+			},
+		});
 	}
 
 	async initAddAccount(data: {
