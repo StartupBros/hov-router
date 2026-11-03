@@ -1,5 +1,4 @@
 import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
-import type { BankedResets } from "@better-ccflare/types";
 import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
 	AlertCircle,
@@ -34,16 +33,20 @@ import {
 } from "../ui/dropdown-menu";
 import { Switch } from "../ui/switch";
 import type { AccountFamilyRoutingState } from "./account-routing";
-import {
-	describeBankedResetExpiry,
-	formatBankedResetExpiry,
-} from "./BankedResetsSummary";
+import { BankedResetsStatus } from "./BankedResetsStatus";
 import { pauseStatusDisplay } from "./pause-status";
 import { RateLimitProgress } from "./RateLimitProgress";
 import {
 	describeBindingConstraint,
 	formatRateLimitStatus,
 } from "./rate-limit-helpers";
+import {
+	STATUS_PILL_CLASS,
+	STATUS_TONE_CLASS,
+	type StatusTone,
+} from "./status-tones";
+
+export { BankedResetsStatus } from "./BankedResetsStatus";
 
 function formatTokenCount(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -69,18 +72,6 @@ function formatPauseReason(reason: string | null): string | null {
 function formatRoutingFamily(family: string): string {
 	return family.charAt(0).toUpperCase() + family.slice(1);
 }
-
-type StatusTone = "ok" | "warning" | "bad" | "muted";
-
-const STATUS_PILL_CLASS =
-	"inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium";
-
-const STATUS_TONE_CLASS: Record<StatusTone, string> = {
-	ok: "bg-green-500/10 text-green-800 dark:text-green-400",
-	warning: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-	bad: "bg-destructive/10 text-red-700 dark:text-red-400",
-	muted: "bg-muted text-foreground",
-};
 
 function rateLimitStatusTone(status: string): StatusTone {
 	const lower = status.toLowerCase();
@@ -187,70 +178,6 @@ export function CodexCreditDrainControl({
 				</span>
 			)}
 		</div>
-	);
-}
-
-export function BankedResetsStatus({ resets }: { resets: BankedResets }) {
-	if (!resets.tracked) {
-		return (
-			<span
-				className="whitespace-nowrap text-muted-foreground"
-				title="This account uses a custom endpoint, which does not report banked resets"
-			>
-				Banked resets: not tracked
-			</span>
-		);
-	}
-	const count = resets.availableCount;
-	if (count === null) {
-		return (
-			<span
-				className="whitespace-nowrap text-muted-foreground"
-				title="No usage poll has reported banked resets for this account yet"
-			>
-				Banked resets: unknown
-			</span>
-		);
-	}
-	return (
-		<span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-			<span className="whitespace-nowrap tabular-nums text-muted-foreground">
-				{count} banked {count === 1 ? "reset" : "resets"}
-			</span>
-			{count > 0 && resets.soonestExpiresAt !== null && (
-				<span
-					className="whitespace-nowrap text-muted-foreground"
-					title={describeBankedResetExpiry(resets.soonestExpiresAt)}
-				>
-					expires {formatBankedResetExpiry(resets.soonestExpiresAt)}
-				</span>
-			)}
-			{count > 0 && resets.doesNotExpire && (
-				<span className="whitespace-nowrap text-muted-foreground">
-					does not expire
-				</span>
-			)}
-			{resets.appliesNow && (
-				<span
-					className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.ok}`}
-					title="OpenAI says a banked reset would apply to this account right now"
-				>
-					applies now
-				</span>
-			)}
-			{resets.stale && (
-				<span
-					className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
-					title={
-						resets.observedAt !== null
-							? `Last read ${new Date(resets.observedAt).toLocaleString()}; these are the last known values`
-							: "These are the last known values"
-					}
-				>
-					stale
-				</span>
-			)}
-		</span>
 	);
 }
 
@@ -717,10 +644,14 @@ export function AccountListItem({
 						{codexCreditsBalance.toLocaleString()} credits
 					</span>
 				)}
-				{account.provider === "codex" && account.bankedResets && (
-					<BankedResetsStatus resets={account.bankedResets} />
-				)}
 			</div>
+
+			{account.provider === "codex" && account.bankedResets && (
+				<BankedResetsStatus
+					resets={account.bankedResets}
+					accountName={account.name}
+				/>
+			)}
 
 			{hasSettings && (
 				<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
