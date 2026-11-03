@@ -366,6 +366,95 @@ export interface BankedResetsSummary {
 	trackedAccounts: number;
 }
 
+/**
+ * Where one redemption request stands. `pending`, `unknown` and `retryable`
+ * are open: the account takes no other request id until the open one closes.
+ * `abandoned` is set only by an account merge that found two open requests.
+ */
+export type CodexResetRedemptionState =
+	| "pending"
+	| "unknown"
+	| "retryable"
+	| "done"
+	| "refused"
+	| "abandoned";
+
+/** What the result sentence says happened (R12). */
+export type RedeemResetOutcome =
+	| "reset"
+	| "already_redeemed"
+	| "nothing_to_reset"
+	| "no_credit"
+	/** OpenAI's answer was lost or unclear; retrying with the same id is safe. */
+	| "unclear"
+	/** OpenAI asked for a retry (401 or 429); nothing is known to be spent. */
+	| "retry"
+	/** OpenAI refused the router's request; use `/usage` in the Codex CLI. */
+	| "refused"
+	/** Closed by an account merge; the outcome is unknown. */
+	| "abandoned";
+
+/**
+ * Whether a credit was spent, judged from the available count before the
+ * request and after the refresh that follows it (KTD11). `not_confirmed`
+ * means no fresh count arrived, or OpenAI reported a reset the count does
+ * not show yet.
+ */
+export type RedeemResetSpend = "spent" | "not_spent" | "not_confirmed";
+
+export interface RedeemResetRequest {
+	/** UUID v4 minted when the confirmation opens; reused on every retry. */
+	requestId: string;
+}
+
+/** 200 body of `POST /api/accounts/:id/redeem-reset`. */
+export interface RedeemResetResponse {
+	requestId: string;
+	accountId: string;
+	state: CodexResetRedemptionState;
+	outcome: RedeemResetOutcome;
+	/** Windows OpenAI reported resetting, when it answered 200. */
+	windowsReset: number | null;
+	/** Present once the request reached `done`; null otherwise. */
+	spend: RedeemResetSpend | null;
+	availableBefore: number | null;
+	availableAfter: number | null;
+	requestedAt: number;
+	completedAt: number | null;
+}
+
+/** `reason` on every non-200 body of the redeem endpoint. */
+export type RedeemResetErrorReason =
+	/** 409: this request id is being sent right now. */
+	| "in_progress"
+	/** 409: another request id is open on this account; adopt `openRequestId`. */
+	| "open_request"
+	/** 409: OpenAI applies no reset to this account right now (R8). */
+	| "not_applicable"
+	/** 409: the counts are too old to say whether a reset applies. */
+	| "counts_stale"
+	/** 409: this request id was used for a different account. */
+	| "request_conflict"
+	/** 503: no request reached OpenAI; retry with the same id. */
+	| "not_sent"
+	/** 415: the body was not sent as application/json. */
+	| "unsupported_media_type"
+	/** 400: the body has no valid UUID v4 `requestId`. */
+	| "invalid_request"
+	/** 400: only Codex subscription accounts hold banked resets. */
+	| "not_codex"
+	/** 404 */
+	| "account_not_found";
+
+export interface RedeemResetErrorBody {
+	error: string;
+	reason: RedeemResetErrorReason;
+	/** Set with `open_request`. */
+	openRequestId?: string;
+	/** Set with `in_progress` and `not_sent`. */
+	requestId?: string;
+}
+
 // API response type - what clients receive
 export interface AccountResponse {
 	id: string;
