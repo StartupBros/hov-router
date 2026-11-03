@@ -11,7 +11,8 @@ import type {
 	SystemStatusView,
 } from "./describeSystemStatus";
 
-const TONE_STYLE: Record<
+/** Tint and icon per tone, shared with the sidebar's status line. */
+export const SYSTEM_STATUS_TONE: Record<
 	SystemStatusTone,
 	{ container: string; icon: LucideIcon; iconClass: string }
 > = {
@@ -22,7 +23,8 @@ const TONE_STYLE: Record<
 		iconClass: "text-warning",
 	},
 	down: {
-		container: "bg-destructive/10",
+		// /10 put the muted detail text at 4.42:1 in light mode; /5 clears 4.5:1.
+		container: "bg-destructive/5",
 		icon: XCircle,
 		iconClass: "text-destructive",
 	},
@@ -35,7 +37,7 @@ const TONE_STYLE: Record<
 
 /** The overview's status line. Tone sets the icon and tint; the title says it. */
 export function SystemStatusBanner({ view }: { view: SystemStatusView }) {
-	const { container, icon: Icon, iconClass } = TONE_STYLE[view.tone];
+	const { container, icon: Icon, iconClass } = SYSTEM_STATUS_TONE[view.tone];
 	return (
 		<div
 			role="status"

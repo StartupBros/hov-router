@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { createUpdateStatusService } from "../../../http-api/src/handlers/version";
 import * as themeContext from "../contexts/theme-context";
+import { queryKeys } from "../lib/query-keys";
 import {
 	Navigation,
 	requestUpdateStatus,
@@ -76,6 +77,48 @@ describe("navigation identity", () => {
 		} finally {
 			theme.mockRestore();
 			queryClient.clear();
+		}
+	});
+
+	it("words the sidebar status from /health instead of a static all-clear", () => {
+		const theme = spyOn(themeContext, "useTheme").mockReturnValue({
+			theme: "light",
+			setTheme: () => {},
+		});
+		const render = (health: unknown) => {
+			const queryClient = new QueryClient();
+			queryClient.setQueryData(queryKeys.health(), health);
+			try {
+				return renderToStaticMarkup(
+					<QueryClientProvider client={queryClient}>
+						<MemoryRouter>
+							<Navigation />
+						</MemoryRouter>
+					</QueryClientProvider>,
+				).split("<aside")[1];
+			} finally {
+				queryClient.clear();
+			}
+		};
+		try {
+			const degraded = render({
+				status: "degraded",
+				pool: {
+					configured: 1,
+					routable: 0,
+					paused: 0,
+					rate_limited: 1,
+					usage_exhausted: 0,
+					next_available_at: "2026-11-02T15:45:00.000Z",
+				},
+			});
+			expect(degraded).toContain("No account can route right now");
+			expect(degraded).not.toMatch(/all systems operational/i);
+			const unknown = render(null);
+			expect(unknown).toContain("Status unknown");
+			expect(unknown).not.toMatch(/all systems operational/i);
+		} finally {
+			theme.mockRestore();
 		}
 	});
 

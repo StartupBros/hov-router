@@ -20,11 +20,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useAlerts } from "../hooks/queries";
+import { useAlerts, useHealth } from "../hooks/queries";
 import { cn } from "../lib/utils";
 import { version } from "../lib/version";
 import { BrandMark } from "./BrandMark";
 import { CopyButton } from "./CopyButton";
+import { describeSystemStatus } from "./overview/system-status/describeSystemStatus";
+import { SYSTEM_STATUS_TONE } from "./overview/system-status/SystemStatusBanner";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui/button";
 import { Separator } from "./ui/separator";
@@ -176,6 +178,9 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 		null,
 	);
 	const { data: alertData } = useAlerts();
+	const status = describeSystemStatus(useHealth().data);
+	const { icon: StatusIcon, iconClass: statusIconClass } =
+		SYSTEM_STATUS_TONE[status.tone];
 	const unacknowledgedCount = alertData?.unacknowledgedCount ?? 0;
 	const location = useLocation();
 	const isMountedRef = useRef(true);
@@ -356,11 +361,14 @@ export function Navigation({ onLogout }: NavigationProps = {}) {
 					<div className="p-4 space-y-4">
 						<div className="rounded-lg bg-muted/50 p-3">
 							<div className="flex items-center gap-2 text-sm">
-								<Zap className="h-4 w-4 text-primary" />
+								<StatusIcon
+									className={cn("h-4 w-4", statusIconClass)}
+									aria-hidden="true"
+								/>
 								<span className="font-medium">Status</span>
 							</div>
 							<p className="mt-1 text-xs text-muted-foreground">
-								All systems operational
+								{status.title}
 							</p>
 						</div>
 
