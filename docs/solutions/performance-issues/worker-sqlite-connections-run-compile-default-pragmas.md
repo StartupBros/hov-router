@@ -1,6 +1,7 @@
 ---
 title: A SQLite connection a worker opens itself runs Bun's compile defaults, not the runtime config
 date: 2026-10-31
+last_updated: 2026-11-02
 category: performance-issues
 module: database-maintenance-workers
 problem_type: performance_issue
@@ -31,7 +32,7 @@ tags:
 
 ## Problem
 
-`configureSqlite()` in `packages/database/src/database-operations.ts` applies the configured pragmas to the main connection only. Those are `db_synchronous`, the page cache, mmap, `wal_autocheckpoint = 0` and the busy timeout. Every other `new Database(path)` starts at bun:sqlite's compile defaults instead: `synchronous=FULL` (2), `wal_autocheckpoint=1000` and `busy_timeout` 0. That includes a maintenance worker's connection, which cannot see the runtime config, and a CLI probe. Some of these sites set their own `busy_timeout` afterwards. Before #669, none of them set `synchronous`. Nothing errors and nothing logs the difference. The cost appears only as latency, or as memory.
+`configureSqlite()` in `packages/database/src/database-operations.ts` applies the configured pragmas to the main connection. Those are `db_synchronous`, the page cache, mmap, `wal_autocheckpoint = 0` and the busy timeout. Since #686 the per-connection part of that list lives in `connectionPragmas()`, and one other connection gets it too: the writer thread, which `startWriterThread()` starts on `--serve`. It receives the same pragmas with a 16 MiB page cache and mmap off. Every other `new Database(path)` starts at bun:sqlite's compile defaults instead: `synchronous=FULL` (2), `wal_autocheckpoint=1000` and `busy_timeout` 0. That includes a maintenance worker's connection, which cannot see the runtime config, and a CLI probe. Some of these sites set their own `busy_timeout` afterwards. Before #669, none of them set `synchronous`. Nothing errors and nothing logs the difference. The cost appears only as latency, or as memory.
 
 This class has now bitten three times:
 
@@ -129,9 +130,14 @@ A chunk is one autocommit write transaction. Under FULL, the second connection w
 
 **For every `new Database(` outside `configureSqlite()`, decide each pragma explicitly.** Set `synchronous`, `busy_timeout`, `wal_autocheckpoint`, `mmap_size`, `cache_size` and `temp_store`, or write down why the compile default is right for that connection. The memory set alone is not enough: the vacuum workers copied it, and `synchronous` is the one that cost latency.
 
-**Decide the open flags too.** Bun's default flags create a missing file. A worker that does not own the database opens it through `openExistingDatabase` (`packages/database/src/open-existing-database.ts`), which fails with "database file missing at <path>" instead (#668).
+**Decide the open flags too.** Bun's default flags create a missing file. A worker that does not own the database opens it through `openExistingDatabase` (`packages/database/src/open-existing-database.ts`), which fails with "database file missing at <path>" instead (#668). The writer thread does not use that helper. It opens with `{ readwrite: true, create: false }` directly in `reader-worker.ts`, which has the same effect but a different error message.
 
-**Pass config values in the worker request** and validate them before opening the database. A worker cannot read the runtime config, and a hard-coded value drifts from `db_synchronous`.
+**Pass config values in the worker request** and validate them before opening the database. A worker cannot read the runtime config, and a hard-coded value drifts from `db_synchronous`. There are two working patterns:
+
+- **#669, the vacuum worker:** the request carries the mode, and the worker validates it itself.
+- **#686, the writer thread:** the main process validates the config with `validateSqliteConfig()` and renders it with `connectionPragmas()`. It overrides only what should differ, and the worker runs each statement before its first write.
+
+For a new read-write connection, follow the writer thread's pattern, so that a pragma added later reaches both connections.
 
 **Report the applied value back and test it.** `packages/database/src/__tests__/incremental-vacuum-sync-mode.test.ts` asserts the level the worker reports, for OFF, NORMAL and FULL. It also covers a request with no field and a refused injected value.
 
@@ -144,15 +150,16 @@ A chunk is one autocommit write transaction. Under FULL, the second connection w
 
 `bench/incremental-vacuum-hold.ts` implements this. Timing `exec` alone includes work done after the lock is released, such as the roughly 36 ms autocheckpoint. On a noisy host, interleave the series round-robin and trust the paired comparison over percentile drift. In this run the variance envelope escalated (48% and 135% p95 drift) while 100/100 pairs agreed.
 
-**Inventory at this revision.** Every non-test `new Database(` site, excluding the generated inline workers:
+**Inventory, updated for #686 on 2026-11-02.** Every non-test `new Database(` site, excluding the generated inline workers:
 
 | site | mode | on `--serve` | `synchronous` |
 |---|---|---|---|
-| `database-operations.ts` constructor | read-write | yes | `configureSqlite()` |
+| `database-operations.ts` constructor | read-write; `query_only` once the writer thread attaches (`packages/database/src/adapters/bun-sql-adapter.ts` `setWriter`) | yes | `configureSqlite()` |
+| `reader-worker.ts`, write access (the writer thread, #686) | read-write, existing file only | yes, every adapter write after `startWriterThread()` (`apps/server/src/server.ts`) | `connectionPragmas()`, the main connection's value |
 | `incremental-vacuum-worker.ts` `runIncrementalVacuum` | read-write, existing file only | yes, adaptive vacuum after retention cleanup | from the request since #669 |
 | `incremental-vacuum-worker.ts` `runOptimize` | read-write, existing file only | yes, every minute (the `wal-checkpoint` job in `apps/server/src/server.ts`) | compile default, FULL |
 | `vacuum-worker.ts` | read-write, existing file only | no; full VACUUM from the CLI compact command | compile default, FULL |
-| `reader-worker.ts` | readonly | yes, dashboard reads | n/a |
+| `reader-worker.ts`, read access | readonly | yes, dashboard reads | n/a |
 | `integrity-check-worker.ts` | readonly | yes, the integrity scheduler | n/a |
 | `analyze-performance.ts` | readonly | no, CLI | n/a |
 | `packages/cli-commands/src/commands/stats.ts` `checkWriterLockAvailable` | read-write, `BEGIN IMMEDIATE` then `ROLLBACK` | no, CLI | n/a, never commits |
@@ -160,12 +167,13 @@ A chunk is one autocommit write transaction. Under FULL, the second connection w
 Notes on the inventory:
 
 - **`runOptimize` is the known leftover.** It runs `PRAGMA optimize` and `PRAGMA wal_checkpoint(TRUNCATE)` at FULL with `busy_timeout=0`, so a busy tick skips rather than blocks. Its cost at FULL is unmeasured and it was deliberately left unchanged. The pragma docs suggest the cost is small: a WAL checkpoint syncs the same way under NORMAL and FULL, and FULL adds a sync only to commits, which this kind makes only on a tick where `PRAGMA optimize` runs ANALYZE. Measure it with the second-connection probe before changing it.
-- **`wal_autocheckpoint` stays at the default 1000 on the vacuum worker's connection**, while the main connection sets 0. The baseline measured that checkpoint outside the hold.
+- **`wal_autocheckpoint` stays at the default 1000 on the vacuum worker's connection**, while the main connection sets 0. The baseline measured that checkpoint outside the hold. On `--serve`, request writes now commit on the writer thread, which also sets 0 through `connectionPragmas()`.
 
 ## Related Issues
 
 - #669: vacuum chunks run at the configured `synchronous` mode (this fix).
 - #624: `--serve` opens the database with the server's config (the main-connection instance).
+- #686: adapter writes commit on a writer thread that receives the main connection's pragmas through `connectionPragmas()`. Opt out with `BETTER_CCFLARE_DB_WRITER_WORKER=0` (`docs/reference.md`).
 - Upstream tombii/better-ccflare PR #231: mmap on the main connection. Its trap is recorded for the worker connection in `vacuum-worker.ts`.
 - #613 (open): the retention-backlog stall, and the source of the derived ~2.8 s per-chunk figure.
 - #668: on 2026-10-28 the production vacuum worker read `auto_vacuum=0` at the database path while the main-side gate passed. The config directory had been deleted under the running backend. When it reappeared, the worker's default-flag open created an empty file at the path, while the main connection kept writing to the deleted original. Fixed by opening worker connections existing-only.
