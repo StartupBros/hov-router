@@ -136,6 +136,14 @@ mock.module("@better-ccflare/proxy", () => {
 		unregisterCodexUsageRefresher: () => {},
 		unregisterPollingRestarter: () => {},
 		unregisterRefreshClearer: () => {},
+		upstreamTransportTracker: {
+			snapshot: () => ({
+				windowMs: 300_000,
+				unreachableAfter: 5,
+				unreachable: [],
+				providers: {},
+			}),
+		},
 	};
 });
 
