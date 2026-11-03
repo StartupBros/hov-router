@@ -386,6 +386,56 @@ function ensureServerToolReplayIssuanceSchema(db: Database): void {
 	`);
 }
 
+function ensureCodexResetCreditsSchema(db: Database): void {
+	// One row per Codex account. Cascades with the account.
+	db.run(`
+		CREATE TABLE IF NOT EXISTS codex_reset_credit_state (
+			account_id TEXT PRIMARY KEY,
+			available_count INTEGER,
+			applicable_available_count INTEGER,
+			counts_present INTEGER NOT NULL DEFAULT 0,
+			counts_observed_at INTEGER,
+			listed_available_count INTEGER,
+			listed_applicable_count INTEGER,
+			last_list_success_at INTEGER,
+			last_list_attempt_at INTEGER,
+			list_failing_since INTEGER,
+			baseline_at INTEGER,
+			chatgpt_account_hash TEXT,
+			updated_at INTEGER NOT NULL,
+			FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+		)
+	`);
+	// One row per (account, credit). No FK: history outlives a removed account.
+	db.run(`
+		CREATE TABLE IF NOT EXISTS codex_reset_credits (
+			account_id TEXT NOT NULL,
+			credit_id TEXT NOT NULL,
+			reset_type TEXT,
+			status TEXT NOT NULL,
+			granted_at INTEGER,
+			expires_at INTEGER,
+			title TEXT,
+			description TEXT,
+			first_seen_at INTEGER NOT NULL,
+			last_seen_at INTEGER NOT NULL,
+			is_baseline INTEGER NOT NULL DEFAULT 0,
+			wave_id TEXT,
+			vanished_at INTEGER,
+			vanish_reason TEXT,
+			PRIMARY KEY (account_id, credit_id)
+		)
+	`);
+	db.run(
+		`CREATE INDEX IF NOT EXISTS idx_codex_reset_credits_account_status
+		 ON codex_reset_credits(account_id, status)`,
+	);
+	db.run(
+		`CREATE INDEX IF NOT EXISTS idx_codex_reset_credits_wave
+		 ON codex_reset_credits(wave_id)`,
+	);
+}
+
 function ensureRoutingAttemptsSchema(db: Database): void {
 	db.run(`
 		CREATE TABLE IF NOT EXISTS routing_attempts (
@@ -658,6 +708,7 @@ export function ensureSchema(db: Database): void {
 	);
 	ensureQualityRouteSchema(db);
 	ensureServerToolReplayIssuanceSchema(db);
+	ensureCodexResetCreditsSchema(db);
 
 	// Create agent_preferences table for storing user-defined agent settings
 	db.run(`
@@ -1581,6 +1632,29 @@ function collapseAccountDuplicatesPreservingState(db: Database): void {
 					`UPDATE device_setup_jobs SET account_id = ? WHERE account_id IN (${placeholders})`,
 				)
 				.run(survivor.survivor_id, ...discardedIds);
+
+			// codex_reset_credits has no FK, so a missed repoint would leave rows
+			// pointing at a deleted id. Its PRIMARY KEY (account_id, credit_id)
+			// can collide when duplicates saw the same credit, so drop discarded
+			// rows another row in the merged set already covers (survivor first,
+			// else the lowest account id), then repoint the rest.
+			db.prepare(
+				`DELETE FROM codex_reset_credits
+				 WHERE account_id IN (${placeholders})
+				   AND EXISTS (
+				     SELECT 1 FROM codex_reset_credits AS keeper
+				     WHERE keeper.credit_id = codex_reset_credits.credit_id
+				       AND keeper.account_id <> codex_reset_credits.account_id
+				       AND (
+				         keeper.account_id = ?
+				         OR (keeper.account_id IN (${placeholders})
+				             AND keeper.account_id < codex_reset_credits.account_id)
+				       )
+				   )`,
+			).run(...discardedIds, survivor.survivor_id, ...discardedIds);
+			db.prepare(
+				`UPDATE codex_reset_credits SET account_id = ? WHERE account_id IN (${placeholders})`,
+			).run(survivor.survivor_id, ...discardedIds);
 
 			const deleted = db
 				.prepare(`DELETE FROM accounts WHERE id IN (${placeholders})`)

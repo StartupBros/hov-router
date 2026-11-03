@@ -111,6 +111,12 @@ export {
 	type RoutingAttemptSummaryWindow,
 } from "./repositories/routing-attempt.repository";
 export {
+	type CodexResetCreditRow,
+	type CodexResetCreditState,
+	type CodexResetCreditVanishReason,
+	CodexResetCreditsRepository,
+} from "./repositories/codex-reset-credits.repository";
+export {
 	type ReserveReplayIssuanceRangeInput,
 	SERVER_TOOL_REPLAY_ISSUANCE_MAX,
 	SERVER_TOOL_REPLAY_ISSUANCE_RESERVATION_MAX,

@@ -1021,6 +1021,173 @@ describe.skipIf(!livePgAvailable)(
 			}
 		});
 
+		it("creates the codex reset credit tables on a fresh schema and on an upgrade that lacked them", async () => {
+			const { SQL } = await import("bun");
+			const { BunSqlAdapter } = await import("./adapters/bun-sql-adapter");
+			const { ensureSchemaPg, runMigrationsPg } = await import(
+				"./migrations-pg"
+			);
+
+			// biome-ignore lint/style/noNonNullAssertion: guarded by describe.skipIf(!livePgAvailable)
+			const sqlClient = new SQL({ url: process.env.DATABASE_URL! });
+			const adapter = new BunSqlAdapter(sqlClient, false);
+
+			const inspect = async () => {
+				const cols = await adapter.query<{
+					table_name: string;
+					column_name: string;
+					data_type: string;
+				}>(
+					`SELECT table_name, column_name, data_type FROM information_schema.columns
+					 WHERE table_name IN ('codex_reset_credit_state', 'codex_reset_credits')`,
+				);
+				const keys = await adapter.query<{
+					table_name: string;
+					constraint_type: string;
+				}>(
+					`SELECT table_name, constraint_type FROM information_schema.table_constraints
+					 WHERE table_name IN ('codex_reset_credit_state', 'codex_reset_credits')
+					   AND constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')`,
+				);
+				const idx = await adapter.query<{ indexname: string }>(
+					`SELECT indexname FROM pg_indexes
+					 WHERE indexname IN ('idx_codex_reset_credits_account_status', 'idx_codex_reset_credits_wave')`,
+				);
+				return { cols, keys, idx };
+			};
+			const expectShape = async () => {
+				const { cols, keys, idx } = await inspect();
+				const type = (table: string, column: string) =>
+					cols.find((c) => c.table_name === table && c.column_name === column)
+						?.data_type;
+				expect(type("codex_reset_credit_state", "counts_observed_at")).toBe(
+					"bigint",
+				);
+				expect(type("codex_reset_credit_state", "counts_present")).toBe(
+					"integer",
+				);
+				expect(type("codex_reset_credits", "granted_at")).toBe("bigint");
+				expect(type("codex_reset_credits", "is_baseline")).toBe("integer");
+				const kinds = (table: string) =>
+					keys
+						.filter((k) => k.table_name === table)
+						.map((k) => k.constraint_type)
+						.sort();
+				expect(kinds("codex_reset_credit_state")).toEqual([
+					"FOREIGN KEY",
+					"PRIMARY KEY",
+				]);
+				expect(kinds("codex_reset_credits")).toEqual(["PRIMARY KEY"]);
+				expect(idx.map((i) => i.indexname).sort()).toEqual([
+					"idx_codex_reset_credits_account_status",
+					"idx_codex_reset_credits_wave",
+				]);
+			};
+
+			try {
+				await ensureSchemaPg(adapter);
+				await runMigrationsPg(adapter);
+				await expectShape();
+
+				// Upgrade path: a database that predates the tables.
+				await adapter.unsafe(`DROP TABLE IF EXISTS codex_reset_credits`);
+				await adapter.unsafe(`DROP TABLE IF EXISTS codex_reset_credit_state`);
+				expect((await inspect()).cols).toHaveLength(0);
+				await runMigrationsPg(adapter);
+				await expectShape();
+
+				// The repository's upserts and the nearest-wave lookup run on PostgreSQL.
+				const { CodexResetCreditsRepository } = await import(
+					"./repositories/codex-reset-credits.repository"
+				);
+				const repo = new CodexResetCreditsRepository(adapter);
+				await adapter.run(`DELETE FROM accounts WHERE id = 'rcpg-1'`);
+				await adapter.run(
+					`INSERT INTO accounts (id, name, provider, created_at) VALUES ('rcpg-1', 'rcpg-1', 'codex', 1)`,
+				);
+				const grant = 1_793_477_045_410;
+				expect(
+					await repo.recordCounts("rcpg-1", {
+						availableCount: 2,
+						applicableCount: 1,
+						countsPresent: true,
+						observedAt: grant + 10,
+					}),
+				).toBe(1);
+				await repo.recordListFailure("rcpg-1", grant + 20);
+				await repo.recordListFailure("rcpg-1", grant + 30);
+				expect((await repo.getState("rcpg-1"))?.listFailingSince).toBe(
+					grant + 20,
+				);
+				await repo.recordListSuccess("rcpg-1", {
+					at: grant + 40,
+					listedAvailableCount: 2,
+					listedApplicableCount: 1,
+					chatgptAccountHash: "h",
+					baselineAt: grant + 40,
+				});
+				await repo.recordListSuccess("rcpg-1", {
+					at: grant + 50,
+					listedAvailableCount: 2,
+					listedApplicableCount: 1,
+					chatgptAccountHash: "h",
+					baselineAt: null,
+				});
+				const state = await repo.getState("rcpg-1");
+				expect(state).toMatchObject({
+					availableCount: 2,
+					applicableCount: 1,
+					countsPresent: true,
+					countsObservedAt: grant + 10,
+					listFailingSince: null,
+					lastListSuccessAt: grant + 50,
+					baselineAt: grant + 40,
+				});
+				const row = {
+					accountId: "rcpg-1",
+					creditId: "rcpg-credit",
+					resetType: null,
+					status: "available",
+					grantedAt: grant,
+					expiresAt: grant + 30 * 86_400_000,
+					title: null,
+					description: null,
+					firstSeenAt: grant + 40,
+					lastSeenAt: grant + 40,
+					isBaseline: true,
+					waveId: "codex:2026-10-31T20:04Z",
+					vanishedAt: null,
+					vanishReason: null,
+				};
+				expect(await repo.insertCreditIfAbsent(row)).toBe(1);
+				expect(await repo.insertCreditIfAbsent(row)).toBe(0);
+				expect(
+					await repo.findWaveIdNearGrant(grant + 17 * 60_000, 3_600_000),
+				).toBe("codex:2026-10-31T20:04Z");
+				expect(
+					await repo.findWaveIdNearGrant(grant + 26 * 3_600_000, 3_600_000),
+				).toBeNull();
+				expect(
+					await repo.markVanished(
+						"rcpg-1",
+						["rcpg-credit"],
+						grant + 60,
+						"expired",
+					),
+				).toBe(1);
+				expect(
+					await repo.listCredits("rcpg-1", { includeVanished: false }),
+				).toEqual([]);
+				await adapter.run(`DELETE FROM accounts WHERE id = 'rcpg-1'`);
+				expect(await repo.getState("rcpg-1")).toBeNull();
+				await adapter.run(
+					`DELETE FROM codex_reset_credits WHERE account_id = 'rcpg-1'`,
+				);
+			} finally {
+				await adapter.close();
+			}
+		});
+
 		it("creates the published-label unique index and repairs duplicate published labels fail-closed", async () => {
 			const { SQL } = await import("bun");
 			const { BunSqlAdapter } = await import("./adapters/bun-sql-adapter");
