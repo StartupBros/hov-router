@@ -64,6 +64,13 @@ export {
 	type CodexResetCreditVanishReason,
 } from "./repositories/codex-reset-credits.repository";
 export {
+	type CodexResetRedemptionRow,
+	type CodexResetRedemptionRowState,
+	CodexResetRedemptionsRepository,
+	type InsertPendingResult,
+	OPEN_REDEMPTION_STATES,
+} from "./repositories/codex-reset-redemptions.repository";
+export {
 	type CreateDeviceSetupJobInput,
 	type CreateDeviceSetupJobResult,
 	DEVICE_SETUP_JOB_STATUSES,

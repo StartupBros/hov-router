@@ -214,6 +214,56 @@ describe("CodexResetCreditObserver", () => {
 		expect(reason("keep")).toBeNull();
 	});
 
+	it("records a credit a router redemption reported spending as redeemed by the router", async () => {
+		answer(
+			"acct-1",
+			listed([
+				credit("mine", WAVE_ONE),
+				credit("theirs", WAVE_TWO),
+				credit("keep", WAVE_TWO),
+			]),
+		);
+		await observer.observeUsageData("acct-1", counts(3, 3));
+
+		const redemptions = dbOps.getCodexResetRedemptionsRepository();
+		const settle = async (
+			requestId: string,
+			creditId: string,
+			code: string,
+		) => {
+			await redemptions.insertPending({
+				requestId,
+				accountId: "acct-1",
+				creditId,
+				chatgptAccountHash: null,
+				availableBefore: 3,
+				at: clock,
+			});
+			await redemptions.recordOutcome(requestId, {
+				attemptedAt: clock,
+				state: "done",
+				code,
+				windowsReset: 1,
+				httpStatus: 200,
+				at: clock,
+			});
+		};
+		await settle("req-1", "mine", "reset");
+		// A router request OpenAI said reset nothing does not claim the credit.
+		await settle("req-2", "theirs", "nothing_to_reset");
+
+		clock += MINUTE;
+		answer("acct-1", listed([credit("keep", WAVE_TWO)]));
+		await observer.observeUsageData("acct-1", counts(1, 1));
+
+		const all = await repo().listCredits("acct-1", { includeVanished: true });
+		const reason = (id: string) =>
+			all.find((c) => c.creditId === id)?.vanishReason;
+		expect(reason("mine")).toBe("redeemed_by_router");
+		expect(reason("theirs")).toBe("redeemed_elsewhere");
+		expect(reason("keep")).toBeNull();
+	});
+
 	it("keeps the last known values after a failed read and marks them stale after twelve hours", async () => {
 		answer("acct-1", listed([credit("c1", WAVE_ONE), credit("c2", WAVE_TWO)]));
 		await observer.observeUsageData("acct-1", counts(2, 2));

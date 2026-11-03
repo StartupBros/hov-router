@@ -11,6 +11,9 @@ import {
 } from "@better-ccflare/core";
 import { Logger } from "@better-ccflare/logger";
 import {
+	type CodexResetConsumeRequest,
+	type CodexResetConsumeResult,
+	chatGptAccountHashOf,
 	getProvider,
 	type TokenRefreshResult,
 } from "@better-ccflare/providers";
@@ -1278,10 +1281,26 @@ export function unregisterCodexUsageRefresher(serverId: string): void {
  * first successful outcome — we never fan-out because every call costs a
  * real codex request. Concurrent callers for the same accountId share a
  * single in-flight promise.
+ *
+ * With `awaitInFlight`, a refresh already in flight is awaited first and not
+ * reused, for callers that just changed what Codex will report and need a
+ * read that started after the change.
  */
 export async function refreshCodexUsageForAccount(
 	accountId: string,
+	options: { awaitInFlight?: boolean } = {},
 ): Promise<CodexUsageRefreshOutcome> {
+	if (options.awaitInFlight) {
+		const stale = codexUsageInflight.get(accountId);
+		if (stale) {
+			await stale.catch(() => undefined);
+			// A refresh started after the stale one settled began after the
+			// caller's change, so joining it is fine; the stale one never is.
+			if (codexUsageInflight.get(accountId) === stale) {
+				codexUsageInflight.delete(accountId);
+			}
+		}
+	}
 	const existing = codexUsageInflight.get(accountId);
 	if (existing) {
 		log.debug(`Reusing in-flight codex usage refresh for account ${accountId}`);
@@ -1331,6 +1350,136 @@ export async function refreshCodexUsageForAccount(
 		codexUsageInflight.delete(accountId);
 	});
 	return promise;
+}
+
+/** Why a redemption request never left this process. */
+export type CodexResetNotSentReason =
+	| "no_redeemer"
+	| "account_not_found"
+	| "not_codex"
+	| "custom_endpoint"
+	| "token_unavailable"
+	/** The token names another ChatGPT account than the request was confirmed for. */
+	| "account_changed";
+
+/**
+ * `sent: false` guarantees nothing reached OpenAI. `sent: true` carries what
+ * the consume call learned, which may itself be unclear (timeout, network).
+ */
+export type CodexResetRedeemDispatch =
+	| { sent: false; reason: CodexResetNotSentReason }
+	| { sent: true; result: CodexResetConsumeResult };
+
+/**
+ * `expectedChatGptAccountHash` is the ChatGPT account the request was
+ * confirmed for. The redeemer sends only while the token it would send names
+ * that same account (`codexTokenNamesAccount`).
+ */
+export type CodexResetRedeemer = (
+	accountId: string,
+	request: CodexResetConsumeRequest,
+	expectedChatGptAccountHash: string | null,
+) => Promise<CodexResetRedeemDispatch>;
+
+/**
+ * Whether `accessToken` names the ChatGPT account hashed as `expected`. Two
+ * nulls match: neither side names an account. Any other difference does not.
+ */
+export function codexTokenNamesAccount(
+	accessToken: string,
+	expected: string | null,
+): boolean {
+	return chatGptAccountHashOf(accessToken) === expected;
+}
+
+// One slot, unlike the usage refreshers: a redemption is an irreversible
+// spend, so dispatch reaches exactly the registered server or nobody.
+let codexResetRedeemer: {
+	serverId: string;
+	redeem: CodexResetRedeemer;
+} | null = null;
+
+/**
+ * Register the server's reset redeemer. It owns token access through the
+ * server's proxy context; a later registration replaces an earlier one.
+ */
+export function registerCodexResetRedeemer(
+	serverId: string,
+	redeem: CodexResetRedeemer,
+): void {
+	codexResetRedeemer = { serverId, redeem };
+}
+
+/** Clear the slot, but only if `serverId` still holds it. */
+export function unregisterCodexResetRedeemer(serverId: string): void {
+	if (codexResetRedeemer?.serverId === serverId) {
+		codexResetRedeemer = null;
+	}
+}
+
+export function hasCodexResetRedeemer(): boolean {
+	return codexResetRedeemer !== null;
+}
+
+/**
+ * Redeem one banked reset through the registered redeemer. Never falls
+ * through to another server. A redeemer that throws may already have sent the
+ * request, so that is reported as an unclear (network) outcome; its message is
+ * never logged because it can carry the token.
+ */
+export async function redeemCodexResetCreditForAccount(
+	accountId: string,
+	request: CodexResetConsumeRequest,
+	expectedChatGptAccountHash: string | null,
+): Promise<CodexResetRedeemDispatch> {
+	const slot = codexResetRedeemer;
+	if (!slot) return { sent: false, reason: "no_redeemer" };
+	try {
+		return await slot.redeem(accountId, request, expectedChatGptAccountHash);
+	} catch {
+		log.warn(
+			`Reset redemption for account ${accountId} threw on server ${slot.serverId}; outcome unclear`,
+		);
+		return { sent: true, result: { kind: "network" } };
+	}
+}
+
+/**
+ * After OpenAI answers a reset redemption with 401, refresh the account's
+ * token so the operator's next attempt sends a new one. getValidAccessToken
+ * keeps returning the rejected token until it nears expiry. Shares the
+ * proxy's reactive-refresh cooldown, so a redemption and a proxied request
+ * never both refresh one account within it. Never throws: a 401 spent
+ * nothing, and the token manager pauses an account whose refresh token was
+ * revoked. Returns whether a refresh completed.
+ */
+export async function refreshTokenAfterRejectedRedemption(
+	account: Account,
+	ctx: ProxyContext,
+	refresh: (
+		account: Account,
+		ctx: ProxyContext,
+	) => Promise<string> = refreshAccessTokenSafe,
+): Promise<boolean> {
+	if (
+		!canAttemptStaleTokenRefresh(account) ||
+		!tryAcquireStaleTokenRefresh(account.id)
+	) {
+		return false;
+	}
+	try {
+		await refresh(account, ctx);
+		log.info(
+			`Reset redemption: refreshed the token for account ${account.name} after OpenAI rejected it`,
+		);
+		return true;
+	} catch {
+		// The error can carry token material; its message is never logged.
+		log.warn(
+			`Reset redemption: could not refresh the token for account ${account.name} after OpenAI rejected it`,
+		);
+		return false;
+	}
 }
 
 /**

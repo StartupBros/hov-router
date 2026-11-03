@@ -15,6 +15,7 @@ import {
 	getPauseAccountMutationOptions,
 	getPreviewFamilyRoutingMutationOptions,
 	getRecentDeviceSetupJobsQueryOptions,
+	getRedeemResetMutationOptions,
 	getRefreshUsageMutationOptions,
 	getRestoreAccountToFamilyMutationOptions,
 	getResumeAccountMutationOptions,
@@ -239,6 +240,23 @@ describe("usage-state mutation invalidation", () => {
 			]);
 		});
 	}
+});
+
+describe("redeem reset mutation", () => {
+	it("refreshes the account views and the banked-resets summary, and never retries", async () => {
+		const { queryClient, invalidateQueries } = createQueryClientSpy();
+		const options = getRedeemResetMutationOptions(queryClient);
+
+		await options.onSuccess();
+
+		expect(invalidatedKeys(invalidateQueries)).toEqual([
+			queryKeys.accounts(),
+			queryKeys.routingEffective(),
+			queryKeys.accountRoutingOverview(),
+			queryKeys.bankedResets(),
+		]);
+		expect(options.retry).toBe(false);
+	});
 });
 
 describe("canonical account mutation invalidation", () => {

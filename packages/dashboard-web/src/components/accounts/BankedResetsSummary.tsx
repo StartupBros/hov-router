@@ -147,12 +147,13 @@ export function BankedResetsSummary({
 			)}
 			{totalAvailable > 0 && (
 				<p
-					data-testid="banked-resets-interim-howto"
+					data-testid="banked-resets-howto"
 					className="text-xs text-muted-foreground"
 				>
-					There is no Use reset button yet. If you choose to use one, open the
-					Codex CLI signed in to that account, run <code>/usage</code> and
-					choose <code>Redeem reset</code>. It cannot be undone.
+					If you choose to use one, press Use reset on that account below. It
+					asks you to confirm first, and using a reset cannot be undone. The
+					Codex CLI signed in to that account can also redeem one: run{" "}
+					<code>/usage</code> and choose <code>Redeem reset</code>.
 				</p>
 			)}
 		</section>

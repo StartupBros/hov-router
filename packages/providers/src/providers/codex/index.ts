@@ -1,8 +1,10 @@
 export {
 	CODEX_WHAM_USAGE_ENDPOINT,
 	CODEX_WHAM_USAGE_FALLBACK_ENDPOINT,
+	chatGptAccountHashOf,
 	extractChatGptAccountId,
 	fetchCodexUsageData,
+	hashChatGptAccountId,
 	mapWhamUsageResponse,
 	nonNegativeIntegerOrNull,
 	resetCodexUsageEndpointForTest,
@@ -52,9 +54,16 @@ export {
 	suppressCodexExplicitCacheBreakpoint,
 } from "./provider";
 export type {
+	CodexResetConsumeClassification,
+	CodexResetConsumeRequest,
+	CodexResetConsumeResult,
 	CodexResetCredit,
 	CodexResetCreditListResult,
 } from "./reset-credits";
-export { fetchCodexResetCredits } from "./reset-credits";
+export {
+	classifyCodexResetConsume,
+	consumeCodexResetCredit,
+	fetchCodexResetCredits,
+} from "./reset-credits";
 export { readCodexTurnStateConfig } from "./turn-state";
 export { parseCodexUsageHeaders } from "./usage";

@@ -324,6 +324,41 @@ async function ensureCodexResetCreditsSchemaPg(
 	);
 }
 
+/** PostgreSQL mirror of SQLite's ensureCodexResetRedemptionsSchema. */
+async function ensureCodexResetRedemptionsSchemaPg(
+	adapter: BunSqlAdapter,
+): Promise<void> {
+	await adapter.unsafe(`
+		CREATE TABLE IF NOT EXISTS codex_reset_redemptions (
+			request_id TEXT PRIMARY KEY,
+			account_id TEXT NOT NULL,
+			credit_id TEXT,
+			chatgpt_account_hash TEXT,
+			state TEXT NOT NULL CHECK (state IN (
+				'pending', 'unknown', 'retryable', 'done', 'refused', 'abandoned'
+			)),
+			code TEXT,
+			windows_reset INTEGER,
+			http_status INTEGER,
+			available_before INTEGER,
+			available_after INTEGER,
+			requested_at BIGINT NOT NULL,
+			attempted_at BIGINT NOT NULL,
+			completed_at BIGINT,
+			attempts INTEGER NOT NULL DEFAULT 1
+		)
+	`);
+	await adapter.unsafe(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_reset_redemptions_open_account
+		 ON codex_reset_redemptions(account_id)
+		 WHERE state IN ('pending', 'unknown', 'retryable')`,
+	);
+	await adapter.unsafe(
+		`CREATE INDEX IF NOT EXISTS idx_codex_reset_redemptions_account_credit
+		 ON codex_reset_redemptions(account_id, credit_id)`,
+	);
+}
+
 /**
  * PostgreSQL mirror of the SQLite usage_windows table (see migrations.ts
  * ensureSchema for rationale). Column names are kept in exact parity with
@@ -920,6 +955,7 @@ export async function ensureSchemaPg(adapter: BunSqlAdapter): Promise<void> {
 	await ensureQualityRouteSchemaPg(adapter);
 	await ensureServerToolReplayIssuanceSchemaPg(adapter);
 	await ensureCodexResetCreditsSchemaPg(adapter);
+	await ensureCodexResetRedemptionsSchemaPg(adapter);
 	await ensureUsageWindowsSchemaPg(adapter);
 
 	// Create agent_preferences table
@@ -1712,6 +1748,35 @@ export async function collapseAccountDuplicatesPreservingStatePg(
 				[survivor.id, ...discardedIds],
 			);
 
+			// codex_reset_redemptions has no FK either. Its partial unique
+			// index allows one open request per account, so two merged
+			// accounts with open requests would collide. Keep one (survivor
+			// first, else the lowest account id) and close the others as
+			// abandoned rather than deleting them: a row is the only record
+			// that a credit may have been spent. Then repoint the rest.
+			const abandonedAtParam = `$${discardedIds.length + 2}`;
+			await adapter.runWithChanges(
+				`UPDATE codex_reset_redemptions
+				 SET state = 'abandoned', completed_at = ${abandonedAtParam}
+				 WHERE account_id IN (${idListPlaceholders})
+				   AND state IN ('pending', 'unknown', 'retryable')
+				   AND EXISTS (
+				     SELECT 1 FROM codex_reset_redemptions AS keeper
+				     WHERE keeper.state IN ('pending', 'unknown', 'retryable')
+				       AND keeper.account_id <> codex_reset_redemptions.account_id
+				       AND (
+				         keeper.account_id = $1
+				         OR (keeper.account_id IN (${idListPlaceholders})
+				             AND keeper.account_id < codex_reset_redemptions.account_id)
+				       )
+				   )`,
+				[survivor.id, ...discardedIds, Date.now()],
+			);
+			await adapter.runWithChanges(
+				`UPDATE codex_reset_redemptions SET account_id = $1 WHERE account_id IN (${idListPlaceholders})`,
+				[survivor.id, ...discardedIds],
+			);
+
 			const idPlaceholders = discardedIds.map((_, i) => `$${i + 1}`).join(",");
 			const deleted = await adapter.runWithChanges(
 				`DELETE FROM accounts WHERE id IN (${idPlaceholders})`,
@@ -2142,6 +2207,7 @@ export async function runMigrationsPg(adapter: BunSqlAdapter): Promise<void> {
 	await ensureQualityRouteSchemaPg(adapter);
 	await ensureServerToolReplayIssuanceSchemaPg(adapter);
 	await ensureCodexResetCreditsSchemaPg(adapter);
+	await ensureCodexResetRedemptionsSchemaPg(adapter);
 	await ensureUsageWindowsSchemaPg(adapter);
 
 	// Performance indexes — mirrors packages/database/src/performance-indexes.ts

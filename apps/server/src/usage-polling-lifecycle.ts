@@ -16,6 +16,7 @@ export interface UsagePollingLifecycleOptions<Timer> {
 }
 
 export interface ServerLifecycleUnregistrars {
+	unregisterCodexResetRedeemer(serverId: string): void;
 	unregisterCodexUsageRefresher(serverId: string): void;
 	unregisterPollingRestarter(serverId: string): void;
 	unregisterRefreshClearer(serverId: string): void;
@@ -27,6 +28,7 @@ export function unregisterServerLifecycleCallbacks(
 	serverId: string,
 	unregistrars: ServerLifecycleUnregistrars,
 ): void {
+	unregistrars.unregisterCodexResetRedeemer(serverId);
 	unregistrars.unregisterCodexUsageRefresher(serverId);
 	unregistrars.unregisterPollingRestarter(serverId);
 	unregistrars.unregisterRefreshClearer(serverId);

@@ -147,6 +147,8 @@ interface AccountListItemProps {
 	onReauth?: (account: Account) => void;
 	onAnthropicReauth?: (account: Account) => void;
 	onCodexReauth?: (account: Account) => void;
+	/** Opens the Use reset confirmation; without it no button is shown. */
+	onUseReset?: (account: Account) => void;
 }
 
 /**
@@ -252,6 +254,7 @@ export function AccountListItem({
 	onReauth,
 	onAnthropicReauth,
 	onCodexReauth,
+	onUseReset,
 }: AccountListItemProps) {
 	const [isRefreshingUsage, setIsRefreshingUsage] = useState(false);
 	const presenter = new AccountPresenter(account);
@@ -652,6 +655,7 @@ export function AccountListItem({
 				<BankedResetsStatus
 					resets={account.bankedResets}
 					accountName={account.name}
+					onUseReset={onUseReset ? () => onUseReset(account) : undefined}
 				/>
 			)}
 

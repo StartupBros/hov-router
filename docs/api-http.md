@@ -584,6 +584,96 @@ Fleet summary of banked Codex resets. Requires the same authentication as the ot
 
 `totalAvailable` counts each ChatGPT account once, from its freshest observation, so two router accounts signed in to one ChatGPT account are not double counted. `soonestExpiresAt` is the earliest expiry across tracked accounts. `appliesNow` lists every account where a reset would apply now. `anyStale` is true when any tracked account is stale, so the total may include old values. Neither route returns the ChatGPT account id or anything derived from it.
 
+#### POST /api/accounts/:accountId/redeem-reset
+
+Spend one banked reset on a Codex subscription account. **A spent reset cannot be given back.** The router never redeems on its own; only this request does, and the dashboard sends it only after the operator confirms. A paused account may redeem. Requires the same authentication as the other `/api` routes.
+
+The request must be sent as `Content-Type: application/json`; anything else gets `415`. A cross-site page can send that content type only after a CORS preflight, which this server never answers.
+
+**Request Body:**
+```json
+{ "requestId": "3f2b8c1e-7a4d-4b9e-9c21-5d6e7f8a9b0c" }
+```
+
+`requestId` is a UUID v4. Mint one when the confirmation opens and send the same id on every retry of that confirmation; the server stores it in lower case. The server records the id before it calls OpenAI and sends it to OpenAI as the redemption's request id, so a retry with the same id never spends a second reset.
+
+**Response (200):**
+```json
+{
+  "requestId": "3f2b8c1e-7a4d-4b9e-9c21-5d6e7f8a9b0c",
+  "accountId": "uuid-here",
+  "state": "done",
+  "outcome": "reset",
+  "windowsReset": 2,
+  "spend": "spent",
+  "availableBefore": 2,
+  "availableAfter": 1,
+  "requestedAt": 1793660000000,
+  "completedAt": 1793660001200
+}
+```
+
+The body is built from the stored record; nothing OpenAI sends back is passed through. The router picks the credit to spend: the soonest-expiring one, with resets that never expire last. A retry reuses that credit.
+
+| OpenAI answers | `state` | `outcome` |
+|---|---|---|
+| 200 `reset` | `done` | `reset` |
+| 200 `already_redeemed` | `done` | `already_redeemed`: an earlier attempt with this id was applied |
+| 200 `nothing_to_reset` | `done` | `nothing_to_reset` |
+| 200 `no_credit` | `done` | `no_credit` |
+| 200 with any other code, 5xx, timeout or network error | `unknown` | `unclear`: retrying with the same id is safe |
+| 401 or 429 | `retryable` | `retry`: after a 401 the router refreshes the account's token, so the next attempt sends a new one |
+| 403 or another 4xx | `refused` | `refused`: use `/usage` and Redeem reset in the Codex CLI instead |
+
+If the server cannot record OpenAI's answer, it replies `200` with `state` `pending` and `outcome` `unclear`. The record stays open, so the same id is resent once it is 60 seconds old.
+
+A request still open when two router accounts are merged is closed as `abandoned`, with outcome `abandoned`: whether it spent a reset is unknown.
+
+The server stores which ChatGPT account the account's token named when the request was recorded, as a hash. Every attempt, first or retry, is sent only while the token still names that ChatGPT account. If the account was signed in to a different ChatGPT account in between, nothing is sent: the request is closed as `abandoned` with outcome `account_changed`, and the server replies `200`. Confirm again with a new id to spend a reset on the account it now signs in to.
+
+After `reset` or `already_redeemed`, when the usage read that follows shows the account has room, the server lifts any rate-limit cooldown it recorded before the attempt, so routing uses the account again without waiting for the old reset time. A limit recorded after the attempt stays, and a paused account stays paused.
+
+`spend` is set once `state` is `done`, and judged from OpenAI's reset count rather than the reply. The server stores the count before the call and reads it again from a usage read that starts after the call:
+
+- `spent`: the count fell.
+- `not_spent`: the count held after `nothing_to_reset` or `no_credit`.
+- `not_confirmed`: no fresh count arrived, or the count held after `reset` or `already_redeemed` and may not show the spend yet.
+
+**How a request is answered** (the first matching row wins):
+
+| The server finds | It answers |
+|---|---|
+| A record for this id that is `done`, `refused` or `abandoned` | `200` with the stored outcome; nothing is sent |
+| A record for this id that is `pending` and under 60 seconds old | `409 in_progress` |
+| A record for this id that is `pending` and older, `unknown` or `retryable` | Resends the same id and credit, whatever the counts now say, unless the account now signs in to a different ChatGPT account |
+| A different id still open on this account | `409 open_request` with `openRequestId`; retry with that id |
+| Counts more than 10 minutes old, or no reset applies now | `409 counts_stale` or `409 not_applicable`; nothing is sent |
+| Otherwise | Records the id as `pending`, then calls OpenAI |
+
+**Errors** carry `{ "error": "...", "reason": "..." }`:
+
+| Status | `reason` | Meaning |
+|---|---|---|
+| `400` | `invalid_request` | The body has no UUID v4 `requestId` |
+| `400` | `not_codex` | Not a Codex subscription account (other providers and custom endpoints hold no banked resets) |
+| `404` | `account_not_found` | Unknown account |
+| `409` | `in_progress` | This id is being sent right now; `requestId` names it |
+| `409` | `open_request` | Another id is open on this account; `openRequestId` names it |
+| `409` | `not_applicable` | A reset would not clear any limit on this account right now |
+| `409` | `counts_stale` | The counts are too old to tell; refresh usage and try again |
+| `409` | `request_conflict` | This id was already used for another account |
+| `415` | `unsupported_media_type` | The body was not sent as `application/json` |
+| `503` | `not_sent` | Nothing reached OpenAI (no running proxy could take the request, or no valid token); retry with the same id |
+| `500` | none | An unexpected failure; the request may have reached OpenAI. Retrying with the same id is safe |
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/api/accounts/uuid-here/redeem-reset \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d "{\"requestId\": \"$(uuidgen | tr 'A-Z' 'a-z')\"}"
+```
+
 #### POST /api/accounts/:accountId/public-value
 
 Publish or unpublish an account on the public subscription value feed (`GET /api/public/subscription-value`) when the server runs with `BETTER_CCFLARE_PUBLIC_SUBSCRIPTIONS=accounts`. Requires admin authentication like other account routes (`401` while an API key is active and the caller is unauthenticated). The default is unpublished.

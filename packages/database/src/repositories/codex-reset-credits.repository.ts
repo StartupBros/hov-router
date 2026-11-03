@@ -2,6 +2,7 @@ import { BaseRepository } from "./base.repository";
 
 export type CodexResetCreditVanishReason =
 	| "redeemed_elsewhere"
+	| "redeemed_by_router"
 	| "expired"
 	| "account_changed";
 

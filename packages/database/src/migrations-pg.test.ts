@@ -1186,6 +1186,185 @@ describe.skipIf(!livePgAvailable)(
 			}
 		});
 
+		it("creates the codex reset redemptions table, keeps one open request per account, and abandons a merge collision", async () => {
+			const { SQL } = await import("bun");
+			const { BunSqlAdapter } = await import("./adapters/bun-sql-adapter");
+			const {
+				ensureSchemaPg,
+				runMigrationsPg,
+				collapseAccountDuplicatesPreservingStatePg,
+			} = await import("./migrations-pg");
+			const { CodexResetRedemptionsRepository } = await import(
+				"./repositories/codex-reset-redemptions.repository"
+			);
+
+			// biome-ignore lint/style/noNonNullAssertion: guarded by describe.skipIf(!livePgAvailable)
+			const sqlClient = new SQL({ url: process.env.DATABASE_URL! });
+			const adapter = new BunSqlAdapter(sqlClient, false);
+			const runId = `pg-redeem-${Date.now()}`;
+			const survivorId = `${runId}-a`;
+			const discardedId = `${runId}-z`;
+			const at = 1_793_477_045_410;
+
+			const expectShape = async () => {
+				const cols = await adapter.query<{
+					column_name: string;
+					data_type: string;
+				}>(
+					`SELECT column_name, data_type FROM information_schema.columns
+					 WHERE table_name = 'codex_reset_redemptions'`,
+				);
+				const type = (column: string) =>
+					cols.find((c) => c.column_name === column)?.data_type;
+				expect(type("requested_at")).toBe("bigint");
+				expect(type("attempted_at")).toBe("bigint");
+				expect(type("completed_at")).toBe("bigint");
+				expect(type("available_before")).toBe("integer");
+				const keys = await adapter.query<{ constraint_type: string }>(
+					`SELECT constraint_type FROM information_schema.table_constraints
+					 WHERE table_name = 'codex_reset_redemptions'
+					   AND constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')`,
+				);
+				expect(keys.map((k) => k.constraint_type)).toEqual(["PRIMARY KEY"]);
+				const idx = await adapter.get<{ indexdef: string }>(
+					`SELECT indexdef FROM pg_indexes
+					 WHERE indexname = 'idx_codex_reset_redemptions_open_account'`,
+				);
+				expect(idx?.indexdef).toContain("UNIQUE");
+				expect(idx?.indexdef).toContain("pending");
+			};
+
+			try {
+				await ensureSchemaPg(adapter);
+				await runMigrationsPg(adapter);
+				await expectShape();
+				await adapter.unsafe(`DROP TABLE IF EXISTS codex_reset_redemptions`);
+				await runMigrationsPg(adapter);
+				await expectShape();
+
+				const repo = new CodexResetRedemptionsRepository(adapter);
+				const pending = (requestId: string, accountId = survivorId) => ({
+					requestId: `${runId}-${requestId}`,
+					accountId,
+					creditId: "credit-a",
+					chatgptAccountHash: "hash-a",
+					availableBefore: 2,
+					at,
+				});
+				const first = await repo.insertPending(pending("r1"));
+				expect(first.result).toBe("created");
+				expect(first.row).toMatchObject({
+					state: "pending",
+					requestedAt: at,
+					attemptedAt: at,
+					availableBefore: 2,
+					attempts: 1,
+				});
+				expect((await repo.insertPending(pending("r1"))).result).toBe("exists");
+				expect(
+					(await repo.insertPending(pending("r1", discardedId))).result,
+				).toBe("conflict");
+				const lost = await repo.insertPending(pending("r2"));
+				expect(lost.result).toBe("lost");
+				expect(lost.row?.requestId).toBe(`${runId}-r1`);
+
+				expect(
+					await repo.recordOutcome(`${runId}-r1`, {
+						attemptedAt: at,
+						state: "unknown",
+						code: null,
+						windowsReset: null,
+						httpStatus: 502,
+						at: at + 1,
+					}),
+				).toBe(1);
+				const claims = await Promise.all([
+					repo.claimResend(`${runId}-r1`, {
+						expectedState: "unknown",
+						expectedAttemptedAt: at,
+						at: at + 2,
+					}),
+					repo.claimResend(`${runId}-r1`, {
+						expectedState: "unknown",
+						expectedAttemptedAt: at,
+						at: at + 2,
+					}),
+				]);
+				expect(claims.sort()).toEqual([0, 1]);
+				expect(
+					await repo.recordOutcome(`${runId}-r1`, {
+						attemptedAt: at + 2,
+						state: "done",
+						code: "reset",
+						windowsReset: 2,
+						httpStatus: 200,
+						at: at + 3,
+					}),
+				).toBe(1);
+				expect(await repo.recordAvailableAfter(`${runId}-r1`, 1)).toBe(1);
+				expect(await repo.findByRequestId(`${runId}-r1`)).toMatchObject({
+					state: "done",
+					code: "reset",
+					availableBefore: 2,
+					availableAfter: 1,
+					completedAt: at + 3,
+					attempts: 2,
+				});
+				expect(
+					await repo.findRouterRedeemedCreditIds(survivorId, [
+						"credit-a",
+						"credit-b",
+					]),
+				).toEqual(["credit-a"]);
+
+				// Two alias-colliding accounts, each with an open request.
+				await adapter.unsafe(
+					`INSERT INTO accounts
+					 (id, name, provider, custom_endpoint, refresh_token, access_token,
+					  created_at, last_used, refresh_token_issued_at)
+					 VALUES ($1, $2, 'meta', NULL, 'r', 'a', $3, NULL, NULL),
+					        ($4, $2, 'muse-spark', NULL, 'r', 'a', $3, NULL, NULL)`,
+					[survivorId, runId, at, discardedId],
+				);
+				expect(
+					(await repo.insertPending(pending("open-a", survivorId))).result,
+				).toBe("created");
+				expect(
+					(await repo.insertPending(pending("open-z", discardedId))).result,
+				).toBe("created");
+				await collapseAccountDuplicatesPreservingStatePg(adapter);
+				const rows = await adapter.query<{
+					request_id: string;
+					account_id: string;
+					state: string;
+				}>(
+					`SELECT request_id, account_id, state FROM codex_reset_redemptions
+					 WHERE request_id LIKE $1 ORDER BY request_id`,
+					[`${runId}-%`],
+				);
+				expect(rows).toEqual([
+					{
+						request_id: `${runId}-open-a`,
+						account_id: survivorId,
+						state: "pending",
+					},
+					{
+						request_id: `${runId}-open-z`,
+						account_id: survivorId,
+						state: "abandoned",
+					},
+					{ request_id: `${runId}-r1`, account_id: survivorId, state: "done" },
+				]);
+			} finally {
+				await adapter.unsafe(
+					`DELETE FROM codex_reset_redemptions WHERE request_id LIKE $1`,
+					[`${runId}-%`],
+				);
+				await adapter.unsafe(`DELETE FROM accounts WHERE name = $1`, [runId]);
+				await adapter.close();
+			}
+		});
+
 		it("creates the published-label unique index and repairs duplicate published labels fail-closed", async () => {
 			const { SQL } = await import("bun");
 			const { BunSqlAdapter } = await import("./adapters/bun-sql-adapter");

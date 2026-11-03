@@ -47,7 +47,7 @@ function text(html: string): string {
 
 function howto(html: string): string | null {
 	const match = html.match(
-		/<p data-testid="banked-resets-interim-howto"[^>]*>([\s\S]*?)<\/p>/,
+		/<p data-testid="banked-resets-howto"[^>]*>([\s\S]*?)<\/p>/,
 	);
 	return match ? match[1] : null;
 }
@@ -176,7 +176,7 @@ describe("BankedResetsSummary", () => {
 		);
 	});
 
-	it("shows the Codex CLI how-to whenever resets are held, as plain text", () => {
+	it("points to Use reset, with the Codex CLI as the other way, whenever resets are held, as plain text", () => {
 		const cases = [
 			summary(),
 			summary({ appliesNow: [usable("codex-pro-1", 2)] }),
@@ -188,7 +188,10 @@ describe("BankedResetsSummary", () => {
 			const visible = text(block ?? "");
 			expect(visible).toContain("/usage");
 			expect(visible).toContain("Redeem reset");
-			expect(visible).toContain("If you choose to use one");
+			expect(visible).toContain(
+				"If you choose to use one, press Use reset on that account below. It asks you to confirm first, and using a reset cannot be undone.",
+			);
+			expect(visible).not.toContain("no Use reset button");
 			expect(visible).not.toMatch(BANNED);
 			expect(block).not.toMatch(/<(a|button)\b|role="(button|link)"/);
 		}

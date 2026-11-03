@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { createHash } from "node:crypto";
 import {
 	CODEX_WHAM_USAGE_ENDPOINT,
 	CODEX_WHAM_USAGE_FALLBACK_ENDPOINT,
+	chatGptAccountHashOf,
 	extractChatGptAccountId,
 	fetchCodexUsageData,
+	hashChatGptAccountId,
 	mapWhamUsageResponse,
 	resetCodexUsageEndpointForTest,
 } from "./api-usage";
@@ -70,6 +73,23 @@ describe("extractChatGptAccountId", () => {
 				}),
 			),
 		).toBeNull();
+	});
+});
+
+describe("ChatGPT account hashes", () => {
+	it("hashes the account id with SHA-256 so the id itself is never stored", () => {
+		expect(hashChatGptAccountId("acct-123")).toBe(
+			createHash("sha256").update("acct-123").digest("hex"),
+		);
+		expect(hashChatGptAccountId("acct-123")).not.toContain("acct-123");
+	});
+
+	it("hashes the account a token names, and gives null for a token that names none", () => {
+		expect(chatGptAccountHashOf(ACCOUNT_TOKEN)).toBe(
+			hashChatGptAccountId("acct-123"),
+		);
+		expect(chatGptAccountHashOf(NO_CLAIM_TOKEN)).toBeNull();
+		expect(chatGptAccountHashOf("not-a-jwt")).toBeNull();
 	});
 });
 

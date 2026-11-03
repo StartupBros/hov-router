@@ -434,6 +434,45 @@ function ensureCodexResetCreditsSchema(db: Database): void {
 	);
 }
 
+/**
+ * One row per redemption request id. No foreign key: the row is the only
+ * record that a credit may have been spent, so it outlives its account.
+ * The partial unique index allows one open request per account.
+ * `chatgpt_account_hash` names the ChatGPT account the request was confirmed
+ * for; a retry is sent only while the token still names that account.
+ */
+function ensureCodexResetRedemptionsSchema(db: Database): void {
+	db.run(`
+		CREATE TABLE IF NOT EXISTS codex_reset_redemptions (
+			request_id TEXT PRIMARY KEY,
+			account_id TEXT NOT NULL,
+			credit_id TEXT,
+			chatgpt_account_hash TEXT,
+			state TEXT NOT NULL CHECK (state IN (
+				'pending', 'unknown', 'retryable', 'done', 'refused', 'abandoned'
+			)),
+			code TEXT,
+			windows_reset INTEGER,
+			http_status INTEGER,
+			available_before INTEGER,
+			available_after INTEGER,
+			requested_at INTEGER NOT NULL,
+			attempted_at INTEGER NOT NULL,
+			completed_at INTEGER,
+			attempts INTEGER NOT NULL DEFAULT 1
+		)
+	`);
+	db.run(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_reset_redemptions_open_account
+		 ON codex_reset_redemptions(account_id)
+		 WHERE state IN ('pending', 'unknown', 'retryable')`,
+	);
+	db.run(
+		`CREATE INDEX IF NOT EXISTS idx_codex_reset_redemptions_account_credit
+		 ON codex_reset_redemptions(account_id, credit_id)`,
+	);
+}
+
 function ensureRoutingAttemptsSchema(db: Database): void {
 	db.run(`
 		CREATE TABLE IF NOT EXISTS routing_attempts (
@@ -707,6 +746,7 @@ export function ensureSchema(db: Database): void {
 	ensureQualityRouteSchema(db);
 	ensureServerToolReplayIssuanceSchema(db);
 	ensureCodexResetCreditsSchema(db);
+	ensureCodexResetRedemptionsSchema(db);
 
 	// Create agent_preferences table for storing user-defined agent settings
 	db.run(`
@@ -1652,6 +1692,32 @@ function collapseAccountDuplicatesPreservingState(db: Database): void {
 			).run(...discardedIds, survivor.survivor_id, ...discardedIds);
 			db.prepare(
 				`UPDATE codex_reset_credits SET account_id = ? WHERE account_id IN (${placeholders})`,
+			).run(survivor.survivor_id, ...discardedIds);
+
+			// codex_reset_redemptions has no FK either. Its partial unique
+			// index allows one open request per account, so two merged
+			// accounts with open requests would collide. Keep one (survivor
+			// first, else the lowest account id) and close the others as
+			// abandoned rather than deleting them: a row is the only record
+			// that a credit may have been spent. Then repoint the rest.
+			db.prepare(
+				`UPDATE codex_reset_redemptions
+				 SET state = 'abandoned', completed_at = ?
+				 WHERE account_id IN (${placeholders})
+				   AND state IN ('pending', 'unknown', 'retryable')
+				   AND EXISTS (
+				     SELECT 1 FROM codex_reset_redemptions AS keeper
+				     WHERE keeper.state IN ('pending', 'unknown', 'retryable')
+				       AND keeper.account_id <> codex_reset_redemptions.account_id
+				       AND (
+				         keeper.account_id = ?
+				         OR (keeper.account_id IN (${placeholders})
+				             AND keeper.account_id < codex_reset_redemptions.account_id)
+				       )
+				   )`,
+			).run(Date.now(), ...discardedIds, survivor.survivor_id, ...discardedIds);
+			db.prepare(
+				`UPDATE codex_reset_redemptions SET account_id = ? WHERE account_id IN (${placeholders})`,
 			).run(survivor.survivor_id, ...discardedIds);
 
 			const deleted = db

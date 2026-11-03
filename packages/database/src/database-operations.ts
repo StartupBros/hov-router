@@ -91,6 +91,7 @@ import {
 	type MarkIncompleteOptions,
 } from "./repositories/cache-flight-recorder.repository";
 import { CodexResetCreditsRepository } from "./repositories/codex-reset-credits.repository";
+import { CodexResetRedemptionsRepository } from "./repositories/codex-reset-redemptions.repository";
 import { ComboRepository } from "./repositories/combo.repository";
 import { DeviceSetupJobRepository } from "./repositories/device-setup-job.repository";
 import { OAuthRepository } from "./repositories/oauth.repository";
@@ -474,6 +475,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private qualityRoutes: QualityRouteRepository;
 	private serverToolReplayIssuance: ServerToolReplayIssuanceRepository;
 	private codexResetCredits: CodexResetCreditsRepository;
+	private codexResetRedemptions: CodexResetRedemptionsRepository;
 	private usageHistory: UsageHistoryRepository;
 	private usageWindows: UsageWindowsRepository;
 	private cacheFlightRecorder: CacheFlightRecorderRepository;
@@ -688,6 +690,9 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			this.adapter,
 		);
 		this.codexResetCredits = new CodexResetCreditsRepository(this.adapter);
+		this.codexResetRedemptions = new CodexResetRedemptionsRepository(
+			this.adapter,
+		);
 		this.usageHistory = new UsageHistoryRepository(this.adapter);
 		this.usageWindows = new UsageWindowsRepository(this.adapter);
 		this.cacheFlightRecorder = new CacheFlightRecorderRepository(this.adapter);
@@ -1362,6 +1367,10 @@ OAuth tokens will need to be re-authenticated.
 		return this.codexResetCredits;
 	}
 
+	getCodexResetRedemptionsRepository(): CodexResetRedemptionsRepository {
+		return this.codexResetRedemptions;
+	}
+
 	// Usage-history operations delegated to repository
 	getUsageHistoryRepository(): UsageHistoryRepository {
 		return this.usageHistory;
@@ -1563,6 +1572,25 @@ OAuth tokens will need to be re-authenticated.
 			},
 			this.retryConfig,
 			"forceResetAccountRateLimit",
+		);
+	}
+
+	/**
+	 * Clear a cooldown whose latest rate limit was observed before
+	 * `observedBefore`; true when one was cleared. A later one is kept.
+	 */
+	async clearRateLimitObservedBefore(
+		accountId: string,
+		observedBefore: number,
+	): Promise<boolean> {
+		return withDatabaseRetry(
+			async () =>
+				(await this.accounts.clearRateLimitStateObservedBefore(
+					accountId,
+					observedBefore,
+				)) > 0,
+			this.retryConfig,
+			"clearRateLimitObservedBefore",
 		);
 	}
 

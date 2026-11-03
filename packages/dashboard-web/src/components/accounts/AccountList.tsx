@@ -26,6 +26,7 @@ interface AccountListProps {
 	onReauth?: (account: Account) => void;
 	onAnthropicReauth?: (account: Account) => void;
 	onCodexReauth?: (account: Account) => void;
+	onUseReset?: (account: Account) => void;
 }
 
 export function AccountList({
@@ -50,6 +51,7 @@ export function AccountList({
 	onReauth,
 	onAnthropicReauth,
 	onCodexReauth,
+	onUseReset,
 }: AccountListProps) {
 	if (!accounts || accounts.length === 0) {
 		return (
@@ -86,6 +88,7 @@ export function AccountList({
 					onReauth={onReauth}
 					onAnthropicReauth={onAnthropicReauth}
 					onCodexReauth={onCodexReauth}
+					onUseReset={onUseReset}
 				/>
 			))}
 		</div>

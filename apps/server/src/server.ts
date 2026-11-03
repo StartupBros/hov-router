@@ -60,6 +60,7 @@ import {
 	CODEX_DEFAULT_ENDPOINT,
 	CODEX_PING_MODEL,
 	type CodexSubscriptionFacts,
+	consumeCodexResetCredit,
 	extractChatGptAccountId,
 	extractWeeklyResetTime,
 	fetchCodexResetCredits,
@@ -84,6 +85,7 @@ import {
 	CacheAffinityOrderer,
 	CacheKeepaliveScheduler,
 	CohortSealService,
+	codexTokenNamesAccount,
 	configurePendingRotationPersistence,
 	createAnthropicDegradedDetailedEventSink,
 	createAnthropicDegradedRuntimeHealth,
@@ -112,7 +114,9 @@ import {
 	QualityRouteService,
 	recordCodexUsageSnapshot,
 	refreshModelCatalog,
+	refreshTokenAfterRejectedRedemption,
 	registerAutoRefreshTrackingClearer,
+	registerCodexResetRedeemer,
 	registerCodexUsageRefresher,
 	registerPollingRestarter,
 	registerRefreshClearer,
@@ -122,6 +126,7 @@ import {
 	startIntegrityScheduler,
 	stopGlobalTokenHealthChecks,
 	unregisterAutoRefreshTrackingClearer,
+	unregisterCodexResetRedeemer,
 	unregisterCodexUsageRefresher,
 	unregisterPollingRestarter,
 	unregisterRefreshClearer,
@@ -2246,6 +2251,52 @@ export default async function startServer(options?: {
 		return true;
 	});
 
+	// Register this server's banked-reset redeemer. It takes its token through
+	// the proxy context, which refreshes one near expiry, and sends nothing
+	// when that fails rather than falling back to the stored token. A 401 from
+	// OpenAI refreshes the token so the next attempt sends a new one. Anything
+	// that stops it before the consume call reports `sent: false`, so the
+	// caller knows nothing reached OpenAI. The token must still name the
+	// ChatGPT account the request was confirmed for; a re-login to another
+	// account sends nothing.
+	registerCodexResetRedeemer(
+		serverId,
+		async (accountId, request, expectedChatGptAccountHash) => {
+			const account = await dbOps.getAccount(accountId);
+			if (!account) return { sent: false, reason: "account_not_found" };
+			if (account.provider !== "codex") {
+				return { sent: false, reason: "not_codex" };
+			}
+			if (
+				!isCodexSubscriptionEndpoint(
+					resolveCodexEndpoint(account.custom_endpoint, account.name),
+				)
+			) {
+				return { sent: false, reason: "custom_endpoint" };
+			}
+			let accessToken: string;
+			try {
+				accessToken = await getValidAccessToken(account, proxyContext);
+			} catch {
+				log.warn(
+					`Reset redemption: no valid access token for account ${account.name}; nothing was sent`,
+				);
+				return { sent: false, reason: "token_unavailable" };
+			}
+			if (!codexTokenNamesAccount(accessToken, expectedChatGptAccountHash)) {
+				log.warn(
+					`Reset redemption: account ${account.name} now signs in to a different ChatGPT account than the request was confirmed for; nothing was sent`,
+				);
+				return { sent: false, reason: "account_changed" };
+			}
+			const result = await consumeCodexResetCredit(accessToken, request);
+			if (result.kind === "http" && result.status === 401) {
+				await refreshTokenAfterRejectedRedemption(account, proxyContext);
+			}
+			return { sent: true, result };
+		},
+	);
+
 	// Register this server's codex usage refresher. Subscription-backend
 	// accounts try the free wham/usage introspection endpoint first (see
 	// fetchCodexUsageData) — no quota consumed. If that yields no data, or
@@ -3342,6 +3393,7 @@ function stopPeriodicWork(): Promise<void> {
 		// racing shutdown must find no callback rather than a null/stale scheduler.
 		if (registeredServerId) {
 			unregisterServerLifecycleCallbacks(registeredServerId, {
+				unregisterCodexResetRedeemer,
 				unregisterCodexUsageRefresher,
 				unregisterPollingRestarter,
 				unregisterRefreshClearer,

@@ -1,9 +1,12 @@
 import type { BankedResets } from "@better-ccflare/types";
+import { useId } from "react";
+import { Button } from "../ui/button";
 import {
 	bankedResetExpiryParts,
 	describeBankedResetExpiry,
 	formatBankedResetObserved,
 } from "./BankedResetsSummary";
+import { resetActionAvailability } from "./reset-redemption-flow";
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from "./status-tones";
 
 export type BankedResetsRowKind =
@@ -83,18 +86,24 @@ function staleDetail(observedAt: number | null): string {
 /**
  * One Codex account's banked resets, in its own block below the status line.
  * Every explanation is visible text; nothing here is green, because a held
- * reset is information, not a prompt to spend it.
+ * reset is information, not a prompt to spend it. With `onUseReset`, an
+ * account holding resets also gets a Use reset button, enabled only when
+ * the router would send the request (R8).
  */
 export function BankedResetsStatus({
 	resets,
 	accountName,
 	now = Date.now(),
+	onUseReset,
 }: {
 	resets: BankedResets;
 	accountName: string;
 	now?: number;
+	onUseReset?: () => void;
 }) {
+	const detailId = useId();
 	const { kind, stale } = bankedResetsRowState(resets);
+	const action = onUseReset ? resetActionAvailability(resets) : null;
 	const count = resets.availableCount;
 	const showsStale = stale && count !== null && kind !== "not_tracked";
 	const holdsResets = kind === "usable" || kind === "not_usable";
@@ -128,6 +137,7 @@ export function BankedResetsStatus({
 	// A stale count keeps its last known number, flagged once by the amber pill
 	// right after it, and the detail line says when it was read.
 	if (showsStale) detail = staleDetail(resets.observedAt);
+	if (action?.shown && action.note) detail = `${detail} ${action.note}`;
 
 	return (
 		// A fieldset is a native group; min-w-0 drops its min-content width so the
@@ -161,9 +171,22 @@ export function BankedResetsStatus({
 					</span>
 				)}
 				{holdsResets && <ExpiryChunk resets={resets} now={now} />}
-				{/* U10: the "Use reset" outline button goes here, last in this row, with ml-auto. */}
+				{action?.shown && (
+					<Button
+						variant="outline"
+						size="sm"
+						className="ml-auto h-7"
+						disabled={!action.enabled}
+						aria-describedby={detailId}
+						onClick={onUseReset}
+					>
+						Use reset
+					</Button>
+				)}
 			</div>
-			<p className="text-xs text-muted-foreground">{detail}</p>
+			<p id={detailId} className="text-xs text-muted-foreground">
+				{detail}
+			</p>
 		</fieldset>
 	);
 }

@@ -155,6 +155,9 @@ describe("UsagePollingLifecycle", () => {
 	it("unregisters every server-keyed lifecycle callback before owner shutdown", () => {
 		const calls: string[] = [];
 		unregisterServerLifecycleCallbacks("server-8080", {
+			unregisterCodexResetRedeemer(serverId) {
+				calls.push(`redeemer:${serverId}`);
+			},
 			unregisterCodexUsageRefresher(serverId) {
 				calls.push(`codex:${serverId}`);
 			},
@@ -170,6 +173,7 @@ describe("UsagePollingLifecycle", () => {
 		});
 
 		expect(calls).toEqual([
+			"redeemer:server-8080",
 			"codex:server-8080",
 			"polling:server-8080",
 			"refresh:server-8080",

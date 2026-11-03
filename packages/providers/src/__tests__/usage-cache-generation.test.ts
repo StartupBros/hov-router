@@ -307,4 +307,68 @@ describe.serial("UsageCache polling generations", () => {
 			expect(fetchCount).toBe(2);
 		},
 	);
+
+	it.serial(
+		"reuses an in-flight fetch by default but awaits it and reads again when asked",
+		async () => {
+			const ACCOUNT_ID = accountId();
+			const first = deferred<Response>();
+			const second = deferred<Response>();
+			let fetchCount = 0;
+			globalThis.fetch = (() => {
+				fetchCount++;
+				return fetchCount === 1 ? first.promise : second.promise;
+			}) as unknown as typeof fetch;
+
+			usageCache.startPolling(ACCOUNT_ID, "token", "codex", 60_000);
+			await waitForMicrotasks();
+			expect(fetchCount).toBe(1);
+
+			// Default: joins the fetch already in flight.
+			const joined = usageCache.refreshNow(ACCOUNT_ID);
+			// awaitInFlight: that fetch may predate the caller's change, so it
+			// must finish and a new one must run.
+			const fresh = usageCache.refreshNow(ACCOUNT_ID, { awaitInFlight: true });
+			await waitForMicrotasks();
+			expect(fetchCount).toBe(1);
+
+			first.resolve(codexResponse(10));
+			expect(await joined).toBe(true);
+			await waitForMicrotasks();
+			expect(fetchCount).toBe(2);
+			expect(usageCache.get(ACCOUNT_ID)).toMatchObject({
+				five_hour: { utilization: 10 },
+			});
+
+			second.resolve(codexResponse(40));
+			expect(await fresh).toBe(true);
+			expect(usageCache.get(ACCOUNT_ID)).toMatchObject({
+				five_hour: { utilization: 40 },
+			});
+		},
+	);
+
+	it.serial(
+		"starts a fetch at once when awaitInFlight finds nothing in flight",
+		async () => {
+			const ACCOUNT_ID = accountId();
+			let fetchCount = 0;
+			globalThis.fetch = (() => {
+				fetchCount++;
+				return Promise.resolve(codexResponse(fetchCount * 10));
+			}) as unknown as typeof fetch;
+
+			usageCache.startPolling(ACCOUNT_ID, "token", "codex", 60_000);
+			await waitForMicrotasks();
+			expect(fetchCount).toBe(1);
+
+			expect(
+				await usageCache.refreshNow(ACCOUNT_ID, { awaitInFlight: true }),
+			).toBe(true);
+			expect(fetchCount).toBe(2);
+			expect(usageCache.get(ACCOUNT_ID)).toMatchObject({
+				five_hour: { utilization: 20 },
+			});
+		},
+	);
 });

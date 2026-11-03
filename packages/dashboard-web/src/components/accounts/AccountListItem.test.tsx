@@ -723,6 +723,27 @@ describe("AccountListItem banked resets", () => {
 			),
 		).not.toContain("Banked resets");
 	});
+
+	it("offers Use reset only when the list is given a handler", () => {
+		// Static markup cannot click, so this covers the pass-through from the
+		// list to the row's status block, not the click itself.
+		const useResetButton = /<button\b[^>]*>Use reset<\/button>/;
+		const accounts = [codex(tracked)];
+		expect(
+			renderToStaticMarkup(
+				<AccountList accounts={accounts} {...requiredHandlers} />,
+			),
+		).not.toMatch(useResetButton);
+		expect(
+			renderToStaticMarkup(
+				<AccountList
+					accounts={accounts}
+					{...requiredHandlers}
+					onUseReset={() => {}}
+				/>,
+			),
+		).toMatch(useResetButton);
+	});
 });
 
 describe("AccountListItem header at phone width", () => {

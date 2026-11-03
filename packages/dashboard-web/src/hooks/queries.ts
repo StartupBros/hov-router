@@ -876,6 +876,35 @@ export const useRefreshUsage = () => {
 	return useMutation(getRefreshUsageMutationOptions(queryClient));
 };
 
+/**
+ * One banked-reset redemption. The answer never throws (lib/redeem-reset),
+ * so every attempt refreshes the account card and the fleet summary, whose
+ * counts the router rereads after OpenAI answers. Never retried: only the
+ * operator's click sends.
+ */
+export const getRedeemResetMutationOptions = (queryClient: QueryClient) => ({
+	mutationFn: ({
+		accountId,
+		requestId,
+	}: {
+		accountId: string;
+		requestId: string;
+	}) => api.redeemReset(accountId, requestId),
+	retry: false as const,
+	// Not awaited: mutateAsync would otherwise hold OpenAI's answer back until
+	// the account list had refetched, while the dialog cannot be closed.
+	// invalidateQueries does not reject on a failed refetch.
+	onSuccess: () => {
+		void invalidateManagedRouting(queryClient, ACCOUNT_ROUTING_INVALIDATION);
+		void queryClient.invalidateQueries({ queryKey: queryKeys.bankedResets() });
+	},
+});
+
+export const useRedeemReset = () => {
+	const queryClient = useQueryClient();
+	return useMutation(getRedeemResetMutationOptions(queryClient));
+};
+
 export const getUpdateAccountPriorityMutationOptions = (
 	queryClient: QueryClient,
 ) => ({
