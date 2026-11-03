@@ -2,8 +2,10 @@
 	"name": "@better-ccflare/agents",
 	"version": "1.0.0",
 	"description": "Agent discovery and management for ccflare",
-	"main": "dist/index.js",
-	"types": "dist/index.d.ts",
+	"main": "./src/index.ts",
+	"exports": {
+		".": "./src/index.ts"
+	},
 	"scripts": {
 		"build": "tsc",
 		"dev": "tsc --watch",

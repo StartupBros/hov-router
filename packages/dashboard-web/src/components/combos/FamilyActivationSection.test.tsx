@@ -205,20 +205,16 @@ describe("FamilyActivationSection managed policy controls", () => {
 	});
 
 	it("keeps the selector authoritative when a different draft model is canceled or rolled back", () => {
-		const liveOptions = [
-			{ id: "claude-opus-4-8", displayName: "Opus 4.8" },
-			{ id: "claude-opus-preview", displayName: "Opus preview" },
-		];
 		const authoritative = assignment({ managed_model: "claude-opus-4-8" });
 
 		// A preview selection is deliberately not an input to this projection.
-		expect(resolveAuthoritativeManagedModel(authoritative, liveOptions)).toBe(
+		expect(resolveAuthoritativeManagedModel(authoritative, "opus")).toBe(
 			"claude-opus-4-8",
 		);
 		expect(
 			resolveAuthoritativeManagedModel(
 				{ ...authoritative, membership_mode: "manual" },
-				liveOptions,
+				"opus",
 			),
 		).toBe("claude-opus-4-8");
 	});

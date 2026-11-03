@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { HttpError } from "@better-ccflare/errors";
 import type { RequestOptions } from "@better-ccflare/http-common";
+import type { RecentErrorGroup } from "@better-ccflare/types";
 import { api } from "./api";
 
 type RequestCall = [url: string, options: RequestOptions];
@@ -430,7 +431,23 @@ describe("dashboard startup API contracts", () => {
 	});
 
 	it("reads one window of recent error groups without the full statistics", async () => {
-		const group = { errorCode: "overloaded", latestRequestId: "r1" };
+		const group: RecentErrorGroup = {
+			errorCode: "overloaded",
+			accountId: "acc-1",
+			accountName: "Account One",
+			provider: "anthropic",
+			occurrenceCount: 1,
+			latestTimestamp: 2,
+			firstTimestamp: 1,
+			latestRequestId: "r1",
+			model: null,
+			statusCode: 529,
+			path: "/v1/messages",
+			failoverAttempts: 0,
+			rateLimitedUntil: null,
+			rateLimitedReason: null,
+			rateLimitedAt: null,
+		};
 		requestMock = mock(async () => ({ recentErrors: [group] }));
 		api.request = requestMock as typeof api.request;
 

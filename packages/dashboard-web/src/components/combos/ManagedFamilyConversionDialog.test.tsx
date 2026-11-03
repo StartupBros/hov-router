@@ -92,6 +92,7 @@ function proposal(
 		route_class: "oauth-subscription",
 		existing_rule_id: null,
 		managed_model: "claude-opus-4-8",
+		policy_managed_model: "claude-opus-4-8",
 		tier_source: "account_priority",
 		high_confidence: true,
 		selected_by_default: true,
@@ -126,6 +127,7 @@ function preview(
 		scope: "family",
 		family: "opus",
 		managed_model: "claude-opus-4-8",
+		policy_managed_model: "claude-opus-4-8",
 		proposals: [proposal(proposalOverrides)],
 		effective: effectiveView(),
 	};
@@ -165,6 +167,7 @@ describe("ManagedFamilyConversionDialog", () => {
 			previewId: "preview-opus-revision-12",
 			proposalId: "proposal-opus-anthropic",
 			managedModel: "claude-opus-4-8",
+			policyManagedModel: "claude-opus-4-8",
 		});
 	});
 
