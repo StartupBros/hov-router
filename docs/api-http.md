@@ -511,6 +511,49 @@ Routing honors the flag only while fresh, poll-verified credit evidence exists (
 
 `GET /api/accounts` returns `codexCreditDrainEnabled` (the setting) and `codexCreditDrainActive` (the setting AND fresh credit evidence, i.e. currently in effect). `codexCreditDrainServing` is true only while the account is active AND an account-wide plan window (`five_hour`/`seven_day`) is spent, i.e. requests are being served from purchased credits right now. While active, a spent window is not reported as `usage_exhausted` or throttled, and `/health` counts the account as routable.
 
+#### Banked resets (Codex)
+
+OpenAI grants ChatGPT accounts banked rate-limit resets that can be redeemed later. HoV Router reads the reset counts from each Codex usage poll and reads the per-credit list only when the counts change or the stored list is stale. Reading never spends a reset.
+
+`GET /api/accounts` adds `bankedResets` to every Codex account. Other providers carry no such field.
+
+```json
+{
+  "tracked": true,
+  "availableCount": 2,
+  "applicableCount": 2,
+  "soonestExpiresAt": 1795996800000,
+  "doesNotExpire": false,
+  "appliesNow": true,
+  "stale": false,
+  "observedAt": 1793660000000
+}
+```
+
+- `availableCount` is OpenAI's count of banked resets, not the length of the credit list.
+- `applicableCount` is how many OpenAI would apply to the account right now. `appliesNow` is true when it is above zero.
+- `soonestExpiresAt` is the earliest expiry among available resets, in epoch milliseconds. `doesNotExpire` is true when resets are held and none of them has an expiry.
+- `stale` is true when the counts are more than 10 minutes old, when the latest poll lacked them, or when list reads have failed for more than 12 hours. A stale account keeps its last values; it never reads as zero. A Codex account with no observation yet is stale with null values.
+- `tracked` is false for a custom-endpoint Codex account, which does not report resets. Its values are null and it is never stale.
+
+#### GET /api/banked-resets
+
+Fleet summary of banked Codex resets. Requires the same authentication as the other `/api` routes (`401` while an API key is active and the caller is unauthenticated).
+
+```json
+{
+  "totalAvailable": 5,
+  "soonestExpiresAt": 1795996800000,
+  "appliesNow": [
+    { "accountId": "uuid-here", "accountName": "codex-pro-1", "applicableCount": 2, "stale": false }
+  ],
+  "anyStale": false,
+  "trackedAccounts": 3
+}
+```
+
+`totalAvailable` counts each ChatGPT account once, from its freshest observation, so two router accounts signed in to one ChatGPT account are not double counted. `soonestExpiresAt` is the earliest expiry across tracked accounts. `appliesNow` lists every account where a reset would apply now. `anyStale` is true when any tracked account is stale, so the total may include old values. Neither route returns the ChatGPT account id or anything derived from it.
+
 #### POST /api/accounts/:accountId/public-value
 
 Publish or unpublish an account on the public subscription value feed (`GET /api/public/subscription-value`) when the server runs with `BETTER_CCFLARE_PUBLIC_SUBSCRIPTIONS=accounts`. Requires admin authentication like other account routes (`401` while an API key is active and the caller is unauthenticated). The default is unpublished.

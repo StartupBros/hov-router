@@ -75,6 +75,7 @@ import {
 	createApiKeysStatsHandler,
 	createApiKeyUpdateRoleHandler,
 } from "./handlers/api-keys";
+import { createBankedResetsSummaryHandler } from "./handlers/banked-resets";
 import {
 	createCodexModelMigrationApplyHandler,
 	createCodexModelMigrationPreviewHandler,
@@ -245,6 +246,7 @@ export class APIRouter {
 			config,
 			getStrategy,
 		);
+		const bankedResetsHandler = createBankedResetsSummaryHandler(dbOps);
 		const accountAddHandler = createAccountAddHandler(dbOps, config);
 		const zaiAccountAddHandler = createZaiAccountAddHandler(dbOps);
 		const minimaxAccountAddHandler = createMinimaxAccountAddHandler(dbOps);
@@ -343,6 +345,7 @@ export class APIRouter {
 			integrityCheckHandler(req),
 		);
 		this.handlers.set("GET:/api/accounts", () => accountsHandler());
+		this.handlers.set("GET:/api/banked-resets", () => bankedResetsHandler());
 		this.handlers.set("POST:/api/accounts", (req) => accountAddHandler(req));
 		this.handlers.set("POST:/api/accounts/zai", (req) =>
 			zaiAccountAddHandler(req),
