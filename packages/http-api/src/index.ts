@@ -9,6 +9,12 @@ export { classifyAuthPath } from "./services/auth-paths";
 // Export services
 export { AuthService } from "./services/auth-service";
 export {
+	assessBankedResets,
+	type BankedResetsAssessment,
+	type CodexResetCreditListReader,
+	CodexResetCreditObserver,
+} from "./services/codex-reset-credits";
+export {
 	createDeviceSetupCoordinator,
 	type DeviceSetupCoordinator,
 	type DeviceSetupCoordinatorDependencies,

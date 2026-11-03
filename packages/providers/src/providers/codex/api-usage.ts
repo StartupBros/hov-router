@@ -65,6 +65,10 @@ interface WhamUsageResponse {
 		unlimited?: boolean | null;
 	} | null;
 	additional_rate_limits?: unknown;
+	rate_limit_reset_credits?: {
+		available_count?: unknown;
+		applicable_available_count?: unknown;
+	} | null;
 }
 
 type CodexFact<T> = T | null | undefined | "invalid";
@@ -410,19 +414,47 @@ export function mapWhamUsageResponse(
 		data.code_review_resets_at = codeReview.resets_at;
 	}
 
+	applyResetCreditCounts(data, body);
+
 	const facts = subscriptionFacts(body, fiveHour, sevenDay);
 	data.codex_subscription = facts;
 	decodedFacts.set(data, facts);
 	return data;
 }
 
-async function requestWhamUsage(
-	endpoint: string,
+/** Copies banked reset counts onto usage data; a missing or non-object field adds nothing. */
+function applyResetCreditCounts(
+	data: UsageData,
+	body: WhamUsageResponse,
+): void {
+	const resetCredits = body.rate_limit_reset_credits;
+	if (
+		!resetCredits ||
+		typeof resetCredits !== "object" ||
+		Array.isArray(resetCredits)
+	) {
+		return;
+	}
+	data.reset_credits_available_count = nonNegativeIntegerOrNull(
+		resetCredits.available_count,
+	);
+	data.reset_credits_applicable_count = nonNegativeIntegerOrNull(
+		resetCredits.applicable_available_count,
+	);
+	data.reset_credits_present = true;
+}
+
+export function nonNegativeIntegerOrNull(value: unknown): number | null {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0
+		? value
+		: null;
+}
+
+export function buildCodexWhamHeaders(
 	accessToken: string,
 	chatgptAccountId: string | null,
-	signal: AbortSignal,
 	userAgent: string,
-): Promise<Response> {
+): Record<string, string> {
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${accessToken}`,
 		Accept: "application/json",
@@ -435,9 +467,23 @@ async function requestWhamUsage(
 		headers["chatgpt-account-id"] = chatgptAccountId;
 		headers["X-Account-Id"] = chatgptAccountId;
 	}
+	return headers;
+}
+
+export function getCodexResetCreditsEndpoint(): string {
+	return resolvedUsageEndpoint.replace(/\/usage$/, "/rate-limit-reset-credits");
+}
+
+async function requestWhamUsage(
+	endpoint: string,
+	accessToken: string,
+	chatgptAccountId: string | null,
+	signal: AbortSignal,
+	userAgent: string,
+): Promise<Response> {
 	return fetch(endpoint, {
 		method: "GET",
-		headers,
+		headers: buildCodexWhamHeaders(accessToken, chatgptAccountId, userAgent),
 		signal,
 	});
 }
@@ -540,11 +586,11 @@ export async function fetchCodexUsageData(
 		const hasRateLimitState =
 			typeof body.rate_limit?.allowed === "boolean" ||
 			typeof body.rate_limit?.limit_reached === "boolean";
-		const data =
-			mapWhamUsageResponse(body) ??
-			(accountId && hasRateLimitState
-				? { codex_subscription: subscriptionFacts(body, null, null) }
-				: null);
+		let data = mapWhamUsageResponse(body);
+		if (!data && accountId && hasRateLimitState) {
+			data = { codex_subscription: subscriptionFacts(body, null, null) };
+			applyResetCreditCounts(data, body);
+		}
 		const facts = data && decodedFacts.get(data);
 		if (data && facts && accountId && !controller.signal.aborted) {
 			acquisitions.set(data, {

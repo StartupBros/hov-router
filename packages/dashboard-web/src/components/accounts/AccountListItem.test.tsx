@@ -11,7 +11,7 @@
  * directory.
  */
 import { describe, expect, it } from "bun:test";
-import type { FullUsageData } from "@better-ccflare/types";
+import type { BankedResets, FullUsageData } from "@better-ccflare/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Account } from "../../api";
 import { AccountList } from "./AccountList";
@@ -662,6 +662,104 @@ describe("AccountListItem Codex credit drain toggle", () => {
 		expect(serving).toContain("on credits");
 		expect(armedOnly).not.toContain("on credits");
 		expect(inactive).not.toContain("on credits");
+	});
+});
+
+describe("AccountListItem banked resets", () => {
+	const NOV_30 = Date.UTC(2026, 10, 30);
+	const tracked: BankedResets = {
+		tracked: true,
+		availableCount: 2,
+		applicableCount: 2,
+		soonestExpiresAt: NOV_30,
+		doesNotExpire: false,
+		appliesNow: true,
+		stale: false,
+		observedAt: Date.now(),
+	};
+
+	function render(account: Account) {
+		return renderToStaticMarkup(
+			<AccountListItem account={account} {...requiredHandlers} />,
+		);
+	}
+
+	function codex(bankedResets: BankedResets | undefined) {
+		return makeAccount({ provider: "codex", paused: false, bankedResets });
+	}
+
+	it("shows held resets, the soonest expiry and applies now", () => {
+		const html = render(codex(tracked));
+		expect(html).toContain("2 banked resets");
+		expect(html).toContain("Nov 30, 2026");
+		expect(html).toContain("applies now");
+		expect(html).not.toContain(">stale<");
+	});
+
+	it("leaves out applies now when no reset applies", () => {
+		const html = render(
+			codex({ ...tracked, applicableCount: 0, appliesNow: false }),
+		);
+		expect(html).toContain("2 banked resets");
+		expect(html).not.toContain("applies now");
+	});
+
+	it("shows a stale account's last values, not zero", () => {
+		const html = render(codex({ ...tracked, stale: true }));
+		expect(html).toContain("2 banked resets");
+		expect(html).toContain(">stale<");
+		expect(html).not.toContain("0 banked resets");
+	});
+
+	it("says a reset with no expiry does not expire", () => {
+		const html = render(
+			codex({
+				...tracked,
+				availableCount: 1,
+				soonestExpiresAt: null,
+				doesNotExpire: true,
+			}),
+		);
+		expect(html).toContain("1 banked reset");
+		expect(html).toContain("does not expire");
+	});
+
+	it("says a custom-endpoint account is not tracked instead of showing 0", () => {
+		const html = render(
+			codex({
+				...tracked,
+				tracked: false,
+				availableCount: null,
+				applicableCount: null,
+				soonestExpiresAt: null,
+				appliesNow: false,
+			}),
+		);
+		expect(html).toContain("not tracked");
+		expect(html).not.toContain("0 banked resets");
+	});
+
+	it("says the count is unknown before the first read", () => {
+		const html = render(
+			codex({
+				...tracked,
+				availableCount: null,
+				applicableCount: null,
+				soonestExpiresAt: null,
+				appliesNow: false,
+				stale: true,
+				observedAt: null,
+			}),
+		);
+		expect(html).toContain("Banked resets: unknown");
+		expect(html).not.toContain("0 banked resets");
+	});
+
+	it("shows nothing for accounts without the field", () => {
+		expect(render(codex(undefined))).not.toContain("banked reset");
+		expect(
+			render(makeAccount({ provider: "anthropic", paused: false })),
+		).not.toContain("anked reset");
 	});
 });
 

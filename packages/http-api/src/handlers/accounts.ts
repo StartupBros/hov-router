@@ -55,6 +55,7 @@ import { isCodexCreditDrainActive } from "@better-ccflare/proxy/usage-throttling
 import type {
 	Account,
 	AnthropicUsageData,
+	BankedResets,
 	FullUsageData,
 	LoadBalancingStrategy,
 	RateLimitReason,
@@ -67,6 +68,7 @@ import {
 import type { AccountResponse } from "../types";
 import { accountCreatedResponse } from "../utils/account-created-response";
 import { labelRevealsAccount } from "./account-public-value";
+import { loadBankedResets } from "./banked-resets";
 import {
 	computeRateLimitStatusDisplay,
 	getRepresentativeUsageResetMs,
@@ -465,6 +467,16 @@ export function createAccountsListHandler(
 			)
 			.catch(() => new Map());
 
+		const bankedResetsById = await loadBankedResets(dbOps, accounts, now).catch(
+			(error) => {
+				log.warn(
+					"Failed to read banked resets:",
+					error instanceof Error ? error.message : String(error),
+				);
+				return new Map<string, BankedResets>();
+			},
+		);
+
 		const response: AccountResponse[] = await Promise.all(
 			accounts.map(async (account) => {
 				// Get usage data from cache for providers that expose account-page quota or credit data
@@ -792,6 +804,9 @@ export function createAccountsListHandler(
 					publicValueLabel: account.public_value_label ?? null,
 					codexCreditDrainActive: creditDrainActive,
 					codexCreditDrainServing: creditDrainServing,
+					...(bankedResetsById.has(account.id)
+						? { bankedResets: bankedResetsById.get(account.id) }
+						: {}),
 					customEndpoint: account.custom_endpoint,
 					modelMappings,
 					usageUtilization,

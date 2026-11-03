@@ -1991,6 +1991,9 @@ class UsageCache {
 				"credits_balance",
 				"code_review_used_percent",
 				"code_review_resets_at",
+				"reset_credits_available_count",
+				"reset_credits_applicable_count",
+				"reset_credits_present",
 			]) {
 				if (prev[key] !== undefined && merged[key] === undefined)
 					merged[key] = prev[key];

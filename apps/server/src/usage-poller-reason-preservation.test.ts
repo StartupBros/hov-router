@@ -413,6 +413,85 @@ describe("startUsagePollingWithRefresh lease ownership", () => {
 			startPolling.mockRestore();
 		}
 	});
+
+	it("hands only Codex snapshots to the reset-credit observer and never waits on it", async () => {
+		const account = makeAccount({ created_at: 100 });
+		type SnapshotPayload = {
+			accountId: string;
+			provider: string;
+			data: unknown;
+			windows: never[];
+		};
+		let snapshotCallback: ((payload: SnapshotPayload) => void) | undefined;
+		const alertCalls: unknown[][] = [];
+		const observed: SnapshotPayload[] = [];
+		const startPolling = spyOn(usageCache, "startPolling").mockImplementation(
+			(...args) => {
+				snapshotCallback = args[7] as typeof snapshotCallback;
+			},
+		);
+		const lifecycle = new UsagePollingLifecycle<number>({
+			schedule: () => 1,
+			cancel: () => {},
+		});
+		const settle = async () => {
+			for (let i = 0; i < 20; i++) await Promise.resolve();
+		};
+		try {
+			startUsagePollingWithRefresh(
+				account,
+				{
+					dbOps: {
+						getAccount: async () => account,
+						recordUsageSnapshot: async () => {},
+					},
+				} as never,
+				{
+					evaluateUsageSnapshot: async (...args: unknown[]) => {
+						alertCalls.push(args);
+					},
+				} as never,
+				{ observeSnapshot: async () => {} } as never,
+				lifecycle,
+				0,
+				90_000,
+				{
+					observeSnapshot: (payload) => {
+						observed.push(payload as SnapshotPayload);
+						// First call never settles (a hung list read); later ones reject.
+						return observed.length === 1
+							? new Promise<void>(() => {})
+							: Promise.reject(new Error("list read failed"));
+					},
+				},
+			);
+			await settle();
+			expect(snapshotCallback).toBeDefined();
+
+			const codex: SnapshotPayload = {
+				accountId: account.id,
+				provider: "codex",
+				data: { reset_credits_present: true },
+				windows: [],
+			};
+			snapshotCallback?.(codex);
+			await settle();
+			expect(observed).toEqual([codex]);
+			expect(alertCalls).toHaveLength(1);
+
+			snapshotCallback?.({ ...codex, provider: "anthropic" });
+			await settle();
+			expect(observed).toHaveLength(1);
+			expect(alertCalls).toHaveLength(2);
+
+			snapshotCallback?.(codex);
+			await settle();
+			expect(observed).toHaveLength(2);
+			expect(alertCalls).toHaveLength(3);
+		} finally {
+			startPolling.mockRestore();
+		}
+	});
 });
 
 describe("refreshPollingAccessToken (R25: rotation no longer defeats the pause)", () => {

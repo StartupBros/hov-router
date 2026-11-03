@@ -327,6 +327,45 @@ export interface AccountBindingConstraint {
 	readonly modelFamily: string | null;
 }
 
+/**
+ * Banked rate-limit resets on one Codex account, as last observed.
+ *
+ * `tracked` is false for a custom-endpoint account, which never reports
+ * resets. A stale account keeps its last values; it never reads as zero.
+ * Times are epoch milliseconds.
+ */
+export interface BankedResets {
+	tracked: boolean;
+	availableCount: number | null;
+	applicableCount: number | null;
+	soonestExpiresAt: number | null;
+	/** True when an available reset has no expiry. */
+	doesNotExpire: boolean;
+	/** True when a reset could be redeemed against the current limit. */
+	appliesNow: boolean;
+	stale: boolean;
+	observedAt: number | null;
+}
+
+export interface BankedResetsAppliesNowEntry {
+	accountId: string;
+	accountName: string;
+	applicableCount: number;
+	stale: boolean;
+}
+
+/**
+ * Fleet view of banked resets. `totalAvailable` counts each ChatGPT
+ * account once, however many router accounts share it.
+ */
+export interface BankedResetsSummary {
+	totalAvailable: number;
+	soonestExpiresAt: number | null;
+	appliesNow: BankedResetsAppliesNowEntry[];
+	anyStale: boolean;
+	trackedAccounts: number;
+}
+
 // API response type - what clients receive
 export interface AccountResponse {
 	id: string;
@@ -368,6 +407,8 @@ export interface AccountResponse {
 	 * spent, i.e. requests are being served from purchased credits now.
 	 */
 	codexCreditDrainServing?: boolean;
+	/** Codex accounts only: banked rate-limit resets as last observed. */
+	bankedResets?: BankedResets;
 	peakHoursPauseEnabled?: boolean;
 	customEndpoint: string | null;
 	modelMappings: { [key: string]: string | string[] } | null; // Parsed model mappings (arrays = cycling models)

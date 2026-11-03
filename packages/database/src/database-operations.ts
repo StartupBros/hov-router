@@ -90,6 +90,7 @@ import {
 	CacheFlightRecorderRepository,
 	type MarkIncompleteOptions,
 } from "./repositories/cache-flight-recorder.repository";
+import { CodexResetCreditsRepository } from "./repositories/codex-reset-credits.repository";
 import { ComboRepository } from "./repositories/combo.repository";
 import { DeviceSetupJobRepository } from "./repositories/device-setup-job.repository";
 import { OAuthRepository } from "./repositories/oauth.repository";
@@ -472,6 +473,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private deviceSetupJobs: DeviceSetupJobRepository;
 	private qualityRoutes: QualityRouteRepository;
 	private serverToolReplayIssuance: ServerToolReplayIssuanceRepository;
+	private codexResetCredits: CodexResetCreditsRepository;
 	private usageHistory: UsageHistoryRepository;
 	private usageWindows: UsageWindowsRepository;
 	private cacheFlightRecorder: CacheFlightRecorderRepository;
@@ -685,6 +687,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		this.serverToolReplayIssuance = new ServerToolReplayIssuanceRepository(
 			this.adapter,
 		);
+		this.codexResetCredits = new CodexResetCreditsRepository(this.adapter);
 		this.usageHistory = new UsageHistoryRepository(this.adapter);
 		this.usageWindows = new UsageWindowsRepository(this.adapter);
 		this.cacheFlightRecorder = new CacheFlightRecorderRepository(this.adapter);
@@ -1353,6 +1356,10 @@ OAuth tokens will need to be re-authenticated.
 
 	getServerToolReplayIssuanceRepository(): ServerToolReplayIssuanceRepository {
 		return this.serverToolReplayIssuance;
+	}
+
+	getCodexResetCreditsRepository(): CodexResetCreditsRepository {
+		return this.codexResetCredits;
 	}
 
 	// Usage-history operations delegated to repository

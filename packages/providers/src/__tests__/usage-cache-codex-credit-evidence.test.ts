@@ -127,4 +127,25 @@ describe("UsageCache Codex credit evidence", () => {
 			usageCache.getCodexCreditEvidence(accountId, now - 60_000, MAX_AGE),
 		).toBeNull();
 	});
+
+	it("keeps reset credit counts and the flag across a passive header update", async () => {
+		await poll({
+			...body({ has_credits: false }),
+			rate_limit_reset_credits: {
+				available_count: 2,
+				applicable_available_count: 1,
+			},
+		});
+		usageCache.setCodexPassiveUsage(
+			accountId,
+			new Headers({
+				"x-codex-primary-used-percent": "42",
+				"x-codex-primary-window-minutes": "300",
+			}),
+		);
+		const data = usageCache.get(accountId) as Record<string, unknown>;
+		expect(data.reset_credits_available_count).toBe(2);
+		expect(data.reset_credits_applicable_count).toBe(1);
+		expect(data.reset_credits_present).toBe(true);
+	});
 });
