@@ -40,6 +40,7 @@ import {
 	AlertService,
 	APIRouter,
 	AuthService,
+	CodexResetCreditObserver,
 	classifyAuthPath,
 	createServerDeviceSetupCoordinator,
 	ExternalCodexScanner,
@@ -60,6 +61,7 @@ import {
 	CODEX_PING_MODEL,
 	type CodexSubscriptionFacts,
 	extractWeeklyResetTime,
+	fetchCodexResetCredits,
 	fetchCodexUsageData,
 	fetchCodexUsageOnDemand,
 	getProvider,
@@ -299,6 +301,7 @@ export async function refreshCodexUsageFromMetadata(
 	dbOps: Pick<DatabaseOperations, "getAccount">,
 	db: { run(sql: string, params?: unknown[]): Promise<void> },
 	log: Pick<Logger, "info" | "warn"> = new Logger("Server"),
+	resetCredits?: Pick<CodexResetCreditObserver, "observeUsageData">,
 ): Promise<{ success: boolean; message: string } | null> {
 	const accountId = account.id;
 	let freeResult: Awaited<ReturnType<typeof fetchCodexUsageData>> | null = null;
@@ -331,6 +334,15 @@ export async function refreshCodexUsageFromMetadata(
 			};
 		}
 		usageCache.set(accountId, freeResult.data);
+		if (resetCredits) {
+			void resetCredits
+				.observeUsageData(accountId, freeResult.data)
+				.catch((error) => {
+					log.warn(
+						`Codex usage refresh: reset credit tracking failed for ${account.name}: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				});
+		}
 
 		const windows = [
 			freeResult.data.five_hour,
@@ -1045,6 +1057,7 @@ export function startUsagePollingWithRefresh(
 	lifecycle: UsagePollingLifecycle<NodeJS.Timeout>,
 	startupDelayMs: number = 0,
 	intervalMs: number = 90000,
+	codexResetCredits?: Pick<CodexResetCreditObserver, "observeSnapshot">,
 ) {
 	const logger = new Logger("UsagePolling");
 	const MAX_RETRY_ATTEMPTS = 10;
@@ -1178,6 +1191,15 @@ export function startUsagePollingWithRefresh(
 							);
 						}
 						if (!(await isCurrent())) return;
+
+						if (codexResetCredits && payload.provider === "codex") {
+							// Not awaited: a credit list read must not delay alerts.
+							void codexResetCredits.observeSnapshot(payload).catch((err) => {
+								logger.warn(
+									`Reset credit tracking failed for account ${accountId}: ${err}`,
+								);
+							});
+						}
 
 						try {
 							const currentAccount =
@@ -2128,6 +2150,27 @@ export default async function startServer(options?: {
 	};
 	modelCatalogProxyContext = proxyContext;
 
+	// Banked reset credits: each Codex usage poll carries the counts; the
+	// credit list is read only when they change or the stored list ages.
+	const codexResetCredits = new CodexResetCreditObserver(
+		dbOps,
+		async (accountId) => {
+			const account = await dbOps.getAccount(accountId);
+			if (!account || account.provider !== "codex") {
+				throw new Error("not a Codex account");
+			}
+			if (
+				!isCodexSubscriptionEndpoint(
+					resolveCodexEndpoint(account.custom_endpoint, account.name),
+				)
+			) {
+				throw new Error("Codex account uses a custom endpoint");
+			}
+			const accessToken = await getValidAccessToken(account, proxyContext);
+			return fetchCodexResetCredits(accessToken);
+		},
+	);
+
 	// This concrete owner is captured by account-removal callbacks below. Do not
 	// read the module-level variable from those callbacks: a later server start
 	// must never make an old callback retire the new server's timers.
@@ -2188,6 +2231,7 @@ export default async function startServer(options?: {
 			pollingLifecycle,
 			0,
 			config.getUsagePollIntervalMs(),
+			codexResetCredits,
 		);
 		return true;
 	});
@@ -2244,6 +2288,7 @@ export default async function startServer(options?: {
 				dbOps,
 				db,
 				log,
+				codexResetCredits,
 			);
 			if (outcome) return outcome;
 			// Free fetch yielded no data (or errored) — fall through to the
@@ -2773,6 +2818,7 @@ Available endpoints:
 					pollingLifecycle,
 					startupDelayMs,
 					config.getUsagePollIntervalMs(),
+					codexResetCredits,
 				);
 				log.info(
 					`Started usage polling for ${account.provider} account ${account.name}${startupDelayMs > 0 ? ` (delayed ${startupDelayMs / 1000}s)` : ""}`,
