@@ -60,6 +60,7 @@ mock.module("@better-ccflare/providers", () => ({
 	}),
 	fetchCodexUsageData: async () => null,
 	fetchCodexUsageOnDemand: async () => null,
+	extractChatGptAccountId: () => null,
 	extractWeeklyResetTime: () => null,
 	getOAuthProvider: () => ({ getOAuthConfig: () => ({ clientId: "test" }) }),
 	getProvider: () => null,
