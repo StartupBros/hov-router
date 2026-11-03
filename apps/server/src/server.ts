@@ -1431,7 +1431,7 @@ let quiesceKeepalive: ReturnType<typeof setInterval> | undefined;
 let retireBackendHeartbeat: (() => Promise<void>) | undefined;
 let stopAlertJob: (() => Promise<void>) | undefined;
 let stopExternalCodexJob: (() => void) | undefined;
-let stopMemberNoticeJob: (() => void) | undefined;
+let stopMemberNoticeJob: (() => Promise<void>) | undefined;
 
 export default async function startServer(options?: {
 	port?: number;
@@ -1696,11 +1696,12 @@ export default async function startServer(options?: {
 	if (memberNoticeWarning) log.warn(memberNoticeWarning);
 	// Each pass reads the destination fresh and does nothing while it is off
 	// or blocked, so the scheduler always runs.
-	const stopMemberNotices = startMemberNoticeScheduler(() =>
+	const stopMemberNotices = startMemberNoticeScheduler((signal) =>
 		runMemberNoticePass({
 			dbOps,
 			config,
 			now: () => Date.now(),
+			signal,
 			fetch: (url, init) => fetch(url, init),
 			onDeliveryFailed: (status) =>
 				alertService.handleMemberNoticeDeliveryFailed(status),
@@ -3502,7 +3503,9 @@ function stopPeriodicWork(): Promise<void> {
 		stopAlertJob = undefined;
 		stopExternalCodexJob?.();
 		stopExternalCodexJob = undefined;
-		stopMemberNoticeJob?.();
+		// Waits for a notice send in flight to be recorded, so a notice the
+		// webhook accepted is not posted again after restart.
+		pending.push(stopMemberNoticeJob?.() ?? Promise.resolve());
 		stopMemberNoticeJob = undefined;
 		// Admitted requests still route on cached usage evidence; shutdown clears
 		// it after the drain. Quality settlement recovery is not periodic work:

@@ -3,7 +3,10 @@ import { BaseRepository } from "./base.repository";
 export type MemberNoticeKind = "grant" | "reminder" | "early_reset";
 
 export interface MemberNoticeRow {
-	/** `grant:<wave id>`, `remind:<wave id>:3d|1d` or `early:<provider>:<minute>`. */
+	/**
+	 * `grant:<wave id>`, `remind:<wave id>:3d|1d`, or
+	 * `early:<provider>:after:<previous early notice's claim minute|none>`.
+	 */
 	noticeKey: string;
 	kind: MemberNoticeKind;
 	provider: string;
@@ -101,19 +104,21 @@ export class MemberNoticesRepository extends BaseRepository<never> {
 		return row ? toRow(row) : null;
 	}
 
-	/** Whether a notice of this kind and provider was claimed after `since`. */
-	async hasClaimSince(
+	/** The most recently claimed notice of this kind and provider, if any. */
+	async latestClaim(
 		kind: MemberNoticeKind,
 		provider: string,
-		since: number,
-	): Promise<boolean> {
+	): Promise<{ noticeKey: string; claimedAt: number } | null> {
 		const row = await this.get<Raw>(
-			`SELECT 1 AS found FROM member_notices
-			 WHERE kind = ? AND provider = ? AND claimed_at > ?
+			`SELECT notice_key, claimed_at FROM member_notices
+			 WHERE kind = ? AND provider = ?
+			 ORDER BY claimed_at DESC, notice_key DESC
 			 LIMIT 1`,
-			[kind, provider, since],
+			[kind, provider],
 		);
-		return row != null;
+		return row
+			? { noticeKey: String(row.notice_key), claimedAt: Number(row.claimed_at) }
+			: null;
 	}
 
 	/** Open, unexpired notices whose next attempt is due, oldest first. */

@@ -306,6 +306,46 @@ describe("member notice delivery", () => {
 			leaseOwner: null,
 		});
 	});
+
+	it("gives up on a redirect instead of following it, so a login page cannot count as delivered", async () => {
+		await claimNotice();
+		const hits: string[] = [];
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch(request) {
+				const { pathname } = new URL(request.url);
+				hits.push(`${request.method} ${pathname}`);
+				if (pathname === "/hook") {
+					return new Response(null, {
+						status: 302,
+						headers: { location: "/login" },
+					});
+				}
+				return new Response("login page", { status: 200 });
+			},
+		});
+		try {
+			const failures: string[] = [];
+			const result = await pass(
+				configFor(`http://127.0.0.1:${server.port}/hook`),
+				NOW,
+				(url, init) => globalThis.fetch(url, init),
+				failures,
+			);
+
+			expect(result).toMatchObject({ delivered: 0, gaveUp: 1 });
+			expect(hits).toEqual(["POST /hook"]);
+			expect(failures).toEqual(["302"]);
+			expect(await row()).toMatchObject({
+				deliveredAt: null,
+				gaveUpAt: NOW,
+				lastStatus: "302",
+			});
+		} finally {
+			server.stop(true);
+		}
+	});
 });
 
 async function waitFor(condition: () => boolean, timeoutMs = 1_000) {
@@ -336,12 +376,69 @@ describe("member notice scheduler", () => {
 			release();
 			await waitFor(() => started >= 2);
 		} finally {
-			stop();
+			const stopping = stop();
 			release();
+			await stopping;
 		}
 		const stoppedAt = started;
 		await new Promise((resolve) => setTimeout(resolve, 40));
 		expect(started).toBe(stoppedAt);
+	});
+
+	it("on stop, sends nothing more and waits until the send in flight is recorded", async () => {
+		const SECOND = "early:claude:2026-11-03T09:58Z";
+		await claimNotice();
+		await dbOps.getMemberNoticesRepository().claim({
+			noticeKey: SECOND,
+			kind: "early_reset",
+			provider: "claude",
+			content: "Claude weekly limits appear to have reset early.",
+			claimedAt: NOW,
+			expiresAt: NOW + 60 * MINUTE,
+		});
+		const config = configFor(MEMBER_URL);
+		const sends: string[] = [];
+		let finishSend: () => void = () => {};
+		const stop = startMemberNoticeScheduler(
+			(signal) =>
+				runMemberNoticePass({
+					dbOps,
+					config,
+					now: () => NOW,
+					signal,
+					fetch: async (_url, init) => {
+						sends.push(JSON.parse(String(init.body)).content);
+						await new Promise<void>((resolve) => {
+							finishSend = resolve;
+						});
+						return new Response(null, { status: 204 });
+					},
+					onDeliveryFailed: async () => {},
+				}),
+			{ initialDelayMs: 1, intervalMs: 60_000 },
+		);
+		await waitFor(() => sends.length === 1);
+
+		let stopped = false;
+		const stopping = stop().then(() => {
+			stopped = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(stopped).toBe(false);
+		finishSend();
+		await stopping;
+
+		// The first due notice (by key) was sent and recorded; the second was
+		// never leased, so it is still waiting for the next process.
+		expect(sends).toEqual(["Claude weekly limits appear to have reset early."]);
+		expect(
+			await dbOps.getMemberNoticesRepository().findByKey(SECOND),
+		).toMatchObject({ deliveredAt: NOW, lastStatus: "204", leaseOwner: null });
+		expect(await row()).toMatchObject({
+			deliveredAt: null,
+			attempts: 0,
+			leaseOwner: null,
+		});
 	});
 
 	it("logs a failed pass by its error name only", async () => {
@@ -359,7 +456,7 @@ describe("member notice scheduler", () => {
 		try {
 			await waitFor(() => messages.length === 1);
 		} finally {
-			stop();
+			await stop();
 		}
 		expect(messages[0]).toContain("TypeError");
 		expect(messages[0]).not.toContain("member-token");

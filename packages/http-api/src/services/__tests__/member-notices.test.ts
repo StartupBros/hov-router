@@ -276,11 +276,11 @@ describe("early reset notices", () => {
 		await seedEarlyReset("acct-claude-3", { openedAt: T + 20 * MINUTE });
 		const claimedAt = T + 30 * MINUTE;
 		expect(await detectMemberNotices(dbOps, claimedAt)).toEqual([
-			"early:claude:2026-11-03T09:58Z",
+			"early:claude:after:none",
 		]);
 		expect(await detectMemberNotices(dbOps, claimedAt + MINUTE)).toEqual([]);
 
-		const row = await notice("early:claude:2026-11-03T09:58Z");
+		const row = await notice("early:claude:after:none");
 		expect(row).toMatchObject({
 			kind: "early_reset",
 			provider: "claude",
@@ -330,7 +330,7 @@ describe("early reset notices", () => {
 			anchor: T + 4 * MINUTE,
 		});
 		expect(await detectMemberNotices(dbOps, T + 20 * MINUTE)).toEqual([
-			"early:codex:2026-11-03T09:58Z",
+			"early:codex:after:none",
 		]);
 	});
 
@@ -381,7 +381,74 @@ describe("early reset notices", () => {
 			await detectMemberNotices(dbOps, T + 3 * HOUR + 15 * MINUTE),
 		).toEqual([]);
 	});
+
+	it("claims the next early notice for a provider after 6 hours, keyed after the one before", async () => {
+		await seedEarlyReset("acct-claude-1", { openedAt: T });
+		await seedEarlyReset("acct-claude-2", { openedAt: T + 5 * MINUTE });
+		expect(await detectMemberNotices(dbOps, T + 20 * MINUTE)).toEqual([
+			"early:claude:after:none",
+		]);
+
+		await seedEarlyReset("acct-claude-3", { openedAt: T + 7 * HOUR });
+		await seedEarlyReset("acct-claude-4", { openedAt: T + 7 * HOUR });
+		expect(
+			await detectMemberNotices(dbOps, T + 7 * HOUR + 15 * MINUTE),
+		).toEqual(["early:claude:after:2026-11-03T10:20Z"]);
+	});
+
+	it("claims one notice when passes in two processes overlap as the oldest rollover leaves the hour", async () => {
+		await seedEarlyReset("acct-claude-1", { openedAt: T });
+		await seedEarlyReset("acct-claude-2", { openedAt: T + 5 * MINUTE });
+		await seedEarlyReset("acct-claude-4", { openedAt: T + 10 * MINUTE });
+		// Thirty seconds before the hour all three rollovers count; thirty
+		// seconds after it the first has left the window, though two remain.
+		const store = claimsHeldUntil(2);
+		const [before, after] = await Promise.all([
+			detectMemberNotices(store, T + HOUR - 30_000),
+			detectMemberNotices(store, T + HOUR + 30_000),
+		]);
+
+		expect([...before, ...after]).toEqual(["early:claude:after:none"]);
+		expect(
+			await dbOps
+				.getAdapter()
+				.query(
+					`SELECT notice_key FROM member_notices WHERE kind = 'early_reset'`,
+				),
+		).toHaveLength(1);
+	});
 });
+
+/**
+ * A store whose claims all wait until `parties` claims have arrived, so each
+ * pass decides what to claim before any pass writes, as passes in separate
+ * processes reading the database at the same moment would.
+ */
+function claimsHeldUntil(
+	parties: number,
+): Parameters<typeof detectMemberNotices>[0] {
+	const notices = dbOps.getMemberNoticesRepository();
+	let arrived = 0;
+	let releaseAll: () => void = () => {};
+	const allArrived = new Promise<void>((resolve) => {
+		releaseAll = resolve;
+	});
+	const held = Object.create(notices) as typeof notices;
+	held.claim = async (input) => {
+		arrived++;
+		if (arrived === parties) releaseAll();
+		await allArrived;
+		return notices.claim(input);
+	};
+	return {
+		getMemberNoticesRepository: () => held,
+		getCodexResetCreditsRepository: () =>
+			dbOps.getCodexResetCreditsRepository(),
+		getCodexResetRedemptionsRepository: () =>
+			dbOps.getCodexResetRedemptionsRepository(),
+		getUsageWindowsRepository: () => dbOps.getUsageWindowsRepository(),
+	};
+}
 
 describe("destination gate", () => {
 	const ENV_KEYS = ["MEMBER_NOTICE_WEBHOOK_URL", "ALERT_WEBHOOK_URL"] as const;
@@ -477,8 +544,8 @@ describe("notice text", () => {
 
 		const rows = await allNotices();
 		expect(rows.map((row) => row.notice_key)).toEqual([
-			"early:claude:2026-11-03T09:58Z",
-			"early:codex:2026-11-03T09:58Z",
+			"early:claude:after:none",
+			"early:codex:after:none",
 			`grant:${WAVE}`,
 			`remind:${WAVE}:1d`,
 			`remind:${WAVE}:3d`,

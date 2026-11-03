@@ -264,22 +264,33 @@ describe("member_notices table", () => {
 		).toEqual(["first"]);
 	});
 
-	it("finds a claim of one kind and provider since a time", async () => {
+	it("finds the latest claim of one kind and provider", async () => {
 		await repo.claim(
-			notice("early:claude:2026-11-03T10:00Z", {
+			notice("early:claude:after:none", {
+				kind: "early_reset",
+				provider: "claude",
+				claimedAt: AT - 12 * HOUR,
+			}),
+		);
+		await repo.claim(
+			notice("early:claude:after:first", {
 				kind: "early_reset",
 				provider: "claude",
 				claimedAt: AT - 5 * HOUR,
 			}),
 		);
-		expect(
-			await repo.hasClaimSince("early_reset", "claude", AT - 6 * HOUR),
-		).toBe(true);
-		expect(
-			await repo.hasClaimSince("early_reset", "claude", AT - 4 * HOUR),
-		).toBe(false);
-		expect(
-			await repo.hasClaimSince("early_reset", "codex", AT - 6 * HOUR),
-		).toBe(false);
+		await repo.claim(
+			notice("early:codex:after:none", {
+				kind: "early_reset",
+				provider: "codex",
+				claimedAt: AT - HOUR,
+			}),
+		);
+		expect(await repo.latestClaim("early_reset", "claude")).toEqual({
+			noticeKey: "early:claude:after:first",
+			claimedAt: AT - 5 * HOUR,
+		});
+		expect(await repo.latestClaim("early_reset", "xai")).toBeNull();
+		expect(await repo.latestClaim("grant", "codex")).toBeNull();
 	});
 });

@@ -204,17 +204,17 @@ export async function detectMemberNotices(
 	}
 
 	for (const event of await findEarlyResets(dbOps, now)) {
-		if (
-			await notices.hasClaimSince(
-				"early_reset",
-				event.group,
-				now - EARLY_REPEAT_MS,
-			)
-		) {
+		const previous = await notices.latestClaim("early_reset", event.group);
+		if (previous !== null && previous.claimedAt > now - EARLY_REPEAT_MS) {
 			continue;
 		}
+		// The key names the provider's previous early-reset notice, not the
+		// rollovers, which change as the hour slides. Passes in two processes
+		// that see the same previous notice try the same key, and the unique
+		// key lets only one of them claim it.
+		const after = previous === null ? "none" : utcMinute(previous.claimedAt);
 		await claim({
-			noticeKey: `early:${event.group}:${utcMinute(event.earliestStartedAt)}`,
+			noticeKey: `early:${event.group}:after:${after}`,
 			kind: "early_reset",
 			provider: event.group,
 			content: renderEarlyResetNotice({ providerName: event.providerName }),
@@ -234,13 +234,7 @@ export async function detectMemberNotices(
 async function findEarlyResets(
 	dbOps: NoticeStore,
 	now: number,
-): Promise<
-	{
-		group: string;
-		providerName: MemberNoticeProviderName;
-		earliestStartedAt: number;
-	}[]
-> {
+): Promise<{ group: string; providerName: MemberNoticeProviderName }[]> {
 	// The ledger dates an early row from its reset anchor, at most a week
 	// before the poll that saw it, so this bound misses no recent rollover.
 	const candidates = await dbOps
@@ -250,11 +244,7 @@ async function findEarlyResets(
 	const redemptions = dbOps.getCodexResetRedemptionsRepository();
 	const groups = new Map<
 		string,
-		{
-			providerName: MemberNoticeProviderName;
-			accounts: Set<string>;
-			earliestStartedAt: number;
-		}
+		{ providerName: MemberNoticeProviderName; accounts: Set<string> }
 	>();
 	for (const candidate of candidates) {
 		const mapping = EARLY_RESET_GROUPS.get(candidate.provider);
@@ -278,22 +268,13 @@ async function findEarlyResets(
 		const entry = groups.get(mapping.group) ?? {
 			providerName: mapping.providerName,
 			accounts: new Set<string>(),
-			earliestStartedAt: candidate.startedAt,
 		};
 		entry.accounts.add(candidate.accountId);
-		entry.earliestStartedAt = Math.min(
-			entry.earliestStartedAt,
-			candidate.startedAt,
-		);
 		groups.set(mapping.group, entry);
 	}
 	return [...groups]
 		.filter(([, entry]) => entry.accounts.size >= EARLY_MIN_ACCOUNTS)
-		.map(([group, entry]) => ({
-			group,
-			providerName: entry.providerName,
-			earliestStartedAt: entry.earliestStartedAt,
-		}));
+		.map(([group, entry]) => ({ group, providerName: entry.providerName }));
 }
 
 export type MemberNoticeFetch = (
@@ -350,6 +331,9 @@ async function sendMemberNotice(
 				"User-Agent": ALERT_WEBHOOK_USER_AGENT,
 			},
 			body: JSON.stringify(body),
+			// A followed redirect turns the POST into a GET of some other page,
+			// whose 200 would count an unsent notice as delivered.
+			redirect: "manual",
 			signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
 		});
 	} catch {
@@ -380,6 +364,11 @@ export interface MemberNoticePassDeps {
 	fetch: MemberNoticeFetch;
 	/** The lease owner for this pass; a fresh id when omitted. */
 	owner?: string;
+	/**
+	 * Once aborted, the pass leases no further notice. A send already in
+	 * flight still finishes and records its result.
+	 */
+	signal?: AbortSignal;
 	/** Called once per notice given up for a reason other than expiry. */
 	onDeliveryFailed: (status: string) => Promise<void> | void;
 }
@@ -418,6 +407,7 @@ export async function runMemberNoticePass(
 	result.claimed = await detectMemberNotices(deps.dbOps, deps.now());
 	result.expired = await notices.expireDue(deps.now());
 	for (const notice of await notices.listDue(deps.now(), DELIVERY_BATCH)) {
+		if (deps.signal?.aborted) break;
 		if (!(await notices.lease(notice.noticeKey, owner, deps.now(), LEASE_MS))) {
 			continue;
 		}
@@ -450,38 +440,47 @@ export async function runMemberNoticePass(
 
 /**
  * Run `pass` once a minute, one at a time, until the returned stop function
- * is called. It lives here rather than in server.ts so it can be tested.
+ * is called. Stop aborts the signal handed to `pass`, so it starts no further
+ * send, and resolves once the running pass has finished. Shutdown awaits it,
+ * so a notice the webhook accepted is recorded as delivered before the
+ * database closes, rather than posted again after restart. It lives here
+ * rather than in server.ts so it can be tested.
  */
 export function startMemberNoticeScheduler(
-	pass: () => Promise<unknown>,
+	pass: (signal: AbortSignal) => Promise<unknown>,
 	options: {
 		initialDelayMs?: number;
 		intervalMs?: number;
 		log?: { error(message: string): void };
 	} = {},
-): () => void {
+): () => Promise<void> {
 	const log = options.log ?? new Logger("MemberNotices");
-	let running = false;
-	let stopped = false;
-	const tick = async () => {
-		if (running || stopped) return;
-		running = true;
+	const stopping = new AbortController();
+	let running: Promise<void> | null = null;
+	const runOnce = async () => {
 		try {
-			await pass();
+			await pass(stopping.signal);
 		} catch (error) {
 			// The error message can embed the member address; log its name only.
 			log.error(
 				`Member notice pass failed (${error instanceof Error ? error.name : "non-error value"})`,
 			);
-		} finally {
-			running = false;
 		}
+	};
+	const tick = () => {
+		if (running || stopping.signal.aborted) return;
+		const current = runOnce();
+		running = current;
+		void current.then(() => {
+			if (running === current) running = null;
+		});
 	};
 	const initial = setTimeout(tick, options.initialDelayMs ?? 30_000);
 	const interval = setInterval(tick, options.intervalMs ?? MINUTE_MS);
-	return () => {
-		stopped = true;
+	return async () => {
+		stopping.abort();
 		clearTimeout(initial);
 		clearInterval(interval);
+		await running;
 	};
 }

@@ -1429,9 +1429,6 @@ describe.skipIf(!livePgAvailable)(
 					repo.claim(notice("a")),
 				]);
 				expect(claims.sort()).toEqual([false, true]);
-				expect(await repo.hasClaimSince("early_reset", "claude", at - 1)).toBe(
-					true,
-				);
 
 				const leases = await Promise.all([
 					repo.lease(key("a"), "owner-1", at, 60_000),
@@ -1468,6 +1465,13 @@ describe.skipIf(!livePgAvailable)(
 						.map((row) => row.noticeKey)
 						.filter((noticeKey) => noticeKey.startsWith(runId)),
 				).toEqual([key("a")]);
+
+				// A provider only this run uses, since the table is shared.
+				await repo.claim({ ...notice("c"), provider: runId });
+				expect(await repo.latestClaim("early_reset", runId)).toEqual({
+					noticeKey: key("c"),
+					claimedAt: at,
+				});
 
 				await repo.claim({ ...notice("b"), expiresAt: at + 1 });
 				expect(await repo.expireDue(at + 2)).toBeGreaterThanOrEqual(1);

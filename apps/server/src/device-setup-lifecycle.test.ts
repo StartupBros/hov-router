@@ -43,7 +43,7 @@ mock.module("@better-ccflare/http-api", () => ({
 	classifyAuthPath: () => null,
 	memberNoticeStartupWarning: () => null,
 	runMemberNoticePass: async () => {},
-	startMemberNoticeScheduler: () => () => {},
+	startMemberNoticeScheduler: () => async () => {},
 	createServerDeviceSetupCoordinator: () => ({
 		tick: async () => {},
 		dispose: () => {},
