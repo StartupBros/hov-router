@@ -141,6 +141,7 @@ import {
 	handleQualityControl,
 	isQualityControlPath,
 } from "./handlers/quality-routes";
+import { createAccountRedeemResetHandler } from "./handlers/redeem-reset";
 import {
 	createRequestPayloadHandler,
 	createRequestsDetailHandler,
@@ -894,6 +895,16 @@ export class APIRouter {
 				);
 				return await this.wrapHandler((req) =>
 					codexCreditDrainHandler(req, accountId),
+				)(req, url);
+			}
+
+			// Spend one banked Codex reset (Codex subscription accounts only)
+			if (path.endsWith("/redeem-reset") && method === "POST") {
+				const redeemResetHandler = createAccountRedeemResetHandler(
+					this.context.dbOps,
+				);
+				return await this.wrapHandler((req) =>
+					redeemResetHandler(req, accountId),
 				)(req, url);
 			}
 
