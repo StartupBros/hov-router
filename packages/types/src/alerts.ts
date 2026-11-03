@@ -62,7 +62,10 @@ export type AlertType =
 	| "codex_route_role_unavailable"
 	/** warning: a configured verified Codex CLI version record is stale or
 	 * unreadable — the managed updater has stalled. */
-	| "codex_identity_record_stale";
+	| "codex_identity_record_stale"
+	/** warning: the member notice address refused a notice, so it will not
+	 * be retried. The alert never names the address. */
+	| "member_notice_delivery_failed";
 
 /**
  * Every known `AlertType` value, in the same order as the union above. The
@@ -94,6 +97,7 @@ export const ALERT_TYPES: readonly AlertType[] = [
 	"codex_catalog_stale",
 	"codex_route_role_unavailable",
 	"codex_identity_record_stale",
+	"member_notice_delivery_failed",
 ];
 
 const ALERT_TYPE_SET: ReadonlySet<string> = new Set(ALERT_TYPES);
@@ -179,6 +183,14 @@ export interface AlertHistoryResponse {
 	unacknowledgedCount: number;
 }
 
+/**
+ * Whether member notices (banked-reset posts to the member channel) run.
+ * The member address itself never leaves the server: `off` when no address
+ * is set, `blocked_same_as_alert_webhook` when it points at the operator
+ * alert webhook, `on` otherwise.
+ */
+export type MemberNoticeState = "off" | "on" | "blocked_same_as_alert_webhook";
+
 /** Alert configuration payload exchanged with the settings API. */
 export interface AlertsConfigPayload {
 	/** Daily spend threshold in USD; 0 = disabled. */
@@ -225,4 +237,7 @@ export interface AlertsConfigPayload {
 	cooldownMinutes: number;
 	/** Webhook target URL; "" = disabled. */
 	webhookUrl: string;
+	/** Read-only. The member address is set only by env or the config
+	 * file, so the settings API reports its state and never accepts it. */
+	memberNotices?: { state: MemberNoticeState };
 }

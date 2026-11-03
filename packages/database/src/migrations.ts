@@ -473,6 +473,34 @@ function ensureCodexResetRedemptionsSchema(db: Database): void {
 	);
 }
 
+/**
+ * One row per member notice, keyed by its deterministic notice key so a
+ * claim can win only once. No account column: notice text never names one.
+ */
+function ensureMemberNoticesSchema(db: Database): void {
+	db.run(`
+		CREATE TABLE IF NOT EXISTS member_notices (
+			notice_key TEXT PRIMARY KEY,
+			kind TEXT NOT NULL CHECK (kind IN ('grant', 'reminder', 'early_reset')),
+			provider TEXT NOT NULL,
+			content TEXT NOT NULL,
+			claimed_at INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL,
+			next_attempt_at INTEGER NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			lease_owner TEXT,
+			lease_expires_at INTEGER,
+			delivered_at INTEGER,
+			gave_up_at INTEGER,
+			last_status TEXT
+		)
+	`);
+	db.run(
+		`CREATE INDEX IF NOT EXISTS idx_member_notices_due
+		 ON member_notices(delivered_at, next_attempt_at)`,
+	);
+}
+
 function ensureRoutingAttemptsSchema(db: Database): void {
 	db.run(`
 		CREATE TABLE IF NOT EXISTS routing_attempts (
@@ -747,6 +775,7 @@ export function ensureSchema(db: Database): void {
 	ensureServerToolReplayIssuanceSchema(db);
 	ensureCodexResetCreditsSchema(db);
 	ensureCodexResetRedemptionsSchema(db);
+	ensureMemberNoticesSchema(db);
 
 	// Create agent_preferences table for storing user-defined agent settings
 	db.run(`

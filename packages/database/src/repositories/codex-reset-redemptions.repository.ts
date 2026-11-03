@@ -216,6 +216,21 @@ export class CodexResetRedemptionsRepository extends BaseRepository<never> {
 		);
 	}
 
+	/**
+	 * Whether a router redemption on the account was attempted at or after
+	 * `since` in any state but `refused`. An abandoned request counts: it
+	 * may have reached OpenAI.
+	 */
+	async hasAttemptSince(accountId: string, since: number): Promise<boolean> {
+		const row = await this.get<Raw>(
+			`SELECT 1 AS found FROM codex_reset_redemptions
+			 WHERE account_id = ? AND state <> 'refused' AND attempted_at >= ?
+			 LIMIT 1`,
+			[accountId, since],
+		);
+		return row != null;
+	}
+
 	/** Credits among `creditIds` that a router redemption reported spending. */
 	async findRouterRedeemedCreditIds(
 		accountId: string,

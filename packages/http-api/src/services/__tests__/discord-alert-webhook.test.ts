@@ -745,4 +745,50 @@ describe("AlertService webhook wiring (end-to-end)", () => {
 		await Bun.sleep(20);
 		expect(fetchMock).toHaveBeenCalledTimes(0);
 	});
+
+	it("delivers a member notice delivery failure to the operator webhook by default, once per cooldown, without the member address", async () => {
+		const memberAddress = "https://discord.com/api/webhooks/999/member-secret";
+		const saved = process.env.MEMBER_NOTICE_WEBHOOK_URL;
+		process.env.MEMBER_NOTICE_WEBHOOK_URL = memberAddress;
+		try {
+			const fetchMock = mock(
+				async () => new Response(null, { status: 204 }),
+			) as unknown as typeof fetch;
+			globalThis.fetch = fetchMock;
+			service = new AlertService(new BunSqlAdapter(sqlite), makeConfig());
+
+			await service.handleMemberNoticeDeliveryFailed("404");
+			await waitFor(() => fetchMock.mock.calls.length === 1);
+
+			const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+			expect(url).toBe(makeConfig().getAlertWebhookUrl());
+			const body = JSON.parse(String(init.body));
+			expect(body.allowed_mentions).toEqual({ parse: [] });
+			expect(body.content).toContain("member notice");
+			expect(body.content).toContain("Affected: member notices.");
+
+			const alerts = await service.listAlerts();
+			expect(alerts).toHaveLength(1);
+			expect(alerts[0]?.type).toBe("member_notice_delivery_failed");
+			expect(alerts[0]?.severity).toBe("warning");
+			expect(alerts[0]?.account).toBeNull();
+			expect(alerts[0]?.message).toContain("404");
+			for (const text of [
+				String(init.body),
+				alerts[0]?.title ?? "",
+				alerts[0]?.message ?? "",
+			]) {
+				expect(text).not.toContain("member-secret");
+				expect(text).not.toContain("webhooks/999");
+			}
+
+			await service.handleMemberNoticeDeliveryFailed("404");
+			await Bun.sleep(20);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(await service.listAlerts()).toHaveLength(1);
+		} finally {
+			if (saved === undefined) delete process.env.MEMBER_NOTICE_WEBHOOK_URL;
+			else process.env.MEMBER_NOTICE_WEBHOOK_URL = saved;
+		}
+	});
 });

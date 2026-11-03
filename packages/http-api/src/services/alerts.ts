@@ -36,6 +36,7 @@ import type {
 	AlertsConfigPayload,
 	AlertType,
 	CanonicalUsageWindow,
+	MemberNoticeState,
 	PredictionPoint,
 	RequestResponse,
 	RunawayLoopGroup,
@@ -226,6 +227,7 @@ export function getAlertsConfig(config: Config): AlertsConfigPayload {
 		cacheHealthReminderMinutes:
 			config.getAlertCacheHealthReminderMinutes?.() ??
 			CACHE_HEALTH_DEFAULT_POLICY.reminderMs / 60_000,
+		memberNotices: { state: getMemberNoticeDestination(config).state },
 	};
 }
 
@@ -892,7 +894,7 @@ const DISCORD_WEBHOOK_HOSTS: ReadonlySet<string> = new Set([
 const DISCORD_WEBHOOK_PATH_PREFIX = "/api/webhooks/";
 
 /** Discord's edge returns 403 to a generic/default fetch User-Agent. */
-const ALERT_WEBHOOK_USER_AGENT = "better-ccflare-alerts/1.0";
+export const ALERT_WEBHOOK_USER_AGENT = "better-ccflare-alerts/1.0";
 
 /** Discord hard-caps message `content` at 2000 codepoints. A byte- or
  * UTF-16-unit-based cut can split a surrogate pair; see
@@ -904,6 +906,58 @@ export function isDiscordWebhookUrl(url: URL): boolean {
 		DISCORD_WEBHOOK_HOSTS.has(url.hostname) &&
 		url.pathname.startsWith(DISCORD_WEBHOOK_PATH_PREFIX)
 	);
+}
+
+/**
+ * What makes two webhook addresses the same destination. Discord accepts one
+ * webhook under several host spellings and with query strings, so a Discord
+ * address is its id and token; any other address is its trimmed text.
+ */
+function webhookIdentity(address: string): string | null {
+	const trimmed = address.trim();
+	if (trimmed === "") return null;
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		return `text:${trimmed}`;
+	}
+	if (!isDiscordWebhookUrl(url)) return `text:${trimmed}`;
+	const [id = "", token = ""] = url.pathname
+		.slice(DISCORD_WEBHOOK_PATH_PREFIX.length)
+		.split("/");
+	return `discord:${id}/${token}`;
+}
+
+/**
+ * Where member notices go, if anywhere. They are blocked when the member
+ * address is the operator alert webhook, so a misconfiguration can never put
+ * member posts in the operator channel or route operator alerts to members.
+ * `url` is set only when the state is `on`.
+ */
+export function getMemberNoticeDestination(config: Config): {
+	state: MemberNoticeState;
+	url: string | null;
+} {
+	// Legacy Config doubles implement only the older alert getters.
+	const member = config.getMemberNoticeWebhookUrl?.() ?? "";
+	const memberIdentity = webhookIdentity(member);
+	if (memberIdentity === null) return { state: "off", url: null };
+	if (memberIdentity === webhookIdentity(config.getAlertWebhookUrl())) {
+		return { state: "blocked_same_as_alert_webhook", url: null };
+	}
+	return { state: "on", url: member.trim() };
+}
+
+export const MEMBER_NOTICES_BLOCKED_WARNING =
+	"Member notices are off: the member notice address is the same webhook as the alert webhook. Set a separate address to turn them on.";
+
+/** The one startup warning member notices log; it names neither address. */
+export function memberNoticeStartupWarning(config: Config): string | null {
+	return getMemberNoticeDestination(config).state ===
+		"blocked_same_as_alert_webhook"
+		? MEMBER_NOTICES_BLOCKED_WARNING
+		: null;
 }
 
 function buildTruncationMarker(omittedCount: number): string {
@@ -1067,6 +1121,10 @@ export function buildDiscordAlertContent(alert: AlertEvent): string {
 				"The managed CLI identity record is stale or unreadable.",
 				"Check the managed updater and restore a verified CLI identity record.",
 			],
+			member_notice_delivery_failed: [
+				"A member notice could not be delivered and will not be retried.",
+				"Check the member notice address set by MEMBER_NOTICE_WEBHOOK_URL or member_notice_webhook_url.",
+			],
 		};
 		[condition, action] = guidance[alert.type as keyof typeof guidance] ?? [
 			"An alert needs investigation.",
@@ -1104,12 +1162,14 @@ export function buildDiscordAlertContent(alert: AlertEvent): string {
 			.slice(0, 160)
 			.join("");
 	const affected =
-		[
-			alert.account && `account ${display(alert.account)}`,
-			alert.model && `model ${display(alert.model)}`,
-		]
-			.filter(Boolean)
-			.join("; ") || "request routing and usage";
+		alert.type === "member_notice_delivery_failed"
+			? "member notices"
+			: [
+					alert.account && `account ${display(alert.account)}`,
+					alert.model && `model ${display(alert.model)}`,
+				]
+					.filter(Boolean)
+					.join("; ") || "request routing and usage";
 	const lines = [
 		`**${alert.severity.toUpperCase()}: ${condition}**`,
 		`Affected: ${affected}.`,
@@ -1632,6 +1692,40 @@ export class AlertService {
 			value: null,
 			threshold: null,
 			account: event.accountName,
+			model: null,
+			project: null,
+			requestId: null,
+			acknowledged: false,
+		};
+		await this.persistAndEmit(alert, config.webhookUrl);
+	}
+
+	/**
+	 * Tell the operator that the member notice address refused a notice.
+	 * `status` is the stored last status: an HTTP status code or a fixed
+	 * reason such as `invalid_address`, never an address or a response body.
+	 * One alert per status per cooldown bucket.
+	 */
+	async handleMemberNoticeDeliveryFailed(
+		status: string,
+		timestamp: number = Date.now(),
+	): Promise<void> {
+		const config = getAlertsConfig(this.config);
+		const alert: AlertEvent = {
+			id: buildThresholdAlertId(
+				"member_notice_delivery_failed",
+				status,
+				timestamp,
+				config.cooldownMinutes,
+			),
+			timestamp,
+			type: "member_notice_delivery_failed",
+			severity: "warning",
+			title: "Member notice not delivered",
+			message: `The member notice address refused a notice (last status: ${status}). It will not be retried.`,
+			value: null,
+			threshold: null,
+			account: null,
 			model: null,
 			project: null,
 			requestId: null,

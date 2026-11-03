@@ -359,6 +359,33 @@ async function ensureCodexResetRedemptionsSchemaPg(
 	);
 }
 
+/** PostgreSQL mirror of the SQLite member_notices table (migrations.ts). */
+async function ensureMemberNoticesSchemaPg(
+	adapter: BunSqlAdapter,
+): Promise<void> {
+	await adapter.unsafe(`
+		CREATE TABLE IF NOT EXISTS member_notices (
+			notice_key TEXT PRIMARY KEY,
+			kind TEXT NOT NULL CHECK (kind IN ('grant', 'reminder', 'early_reset')),
+			provider TEXT NOT NULL,
+			content TEXT NOT NULL,
+			claimed_at BIGINT NOT NULL,
+			expires_at BIGINT NOT NULL,
+			next_attempt_at BIGINT NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			lease_owner TEXT,
+			lease_expires_at BIGINT,
+			delivered_at BIGINT,
+			gave_up_at BIGINT,
+			last_status TEXT
+		)
+	`);
+	await adapter.unsafe(
+		`CREATE INDEX IF NOT EXISTS idx_member_notices_due
+		 ON member_notices(delivered_at, next_attempt_at)`,
+	);
+}
+
 /**
  * PostgreSQL mirror of the SQLite usage_windows table (see migrations.ts
  * ensureSchema for rationale). Column names are kept in exact parity with
@@ -956,6 +983,7 @@ export async function ensureSchemaPg(adapter: BunSqlAdapter): Promise<void> {
 	await ensureServerToolReplayIssuanceSchemaPg(adapter);
 	await ensureCodexResetCreditsSchemaPg(adapter);
 	await ensureCodexResetRedemptionsSchemaPg(adapter);
+	await ensureMemberNoticesSchemaPg(adapter);
 	await ensureUsageWindowsSchemaPg(adapter);
 
 	// Create agent_preferences table
@@ -2208,6 +2236,7 @@ export async function runMigrationsPg(adapter: BunSqlAdapter): Promise<void> {
 	await ensureServerToolReplayIssuanceSchemaPg(adapter);
 	await ensureCodexResetCreditsSchemaPg(adapter);
 	await ensureCodexResetRedemptionsSchemaPg(adapter);
+	await ensureMemberNoticesSchemaPg(adapter);
 	await ensureUsageWindowsSchemaPg(adapter);
 
 	// Performance indexes — mirrors packages/database/src/performance-indexes.ts

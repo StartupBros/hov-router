@@ -3,7 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Config } from "@better-ccflare/config";
-import { getAlertsConfig, setAlertsConfig } from "../../services/alerts";
+import {
+	getAlertsConfig,
+	getMemberNoticeDestination,
+	MEMBER_NOTICES_BLOCKED_WARNING,
+	memberNoticeStartupWarning,
+	setAlertsConfig,
+} from "../../services/alerts";
 import type { APIContext } from "../../types";
 import {
 	createAlertsConfigGetHandler,
@@ -118,5 +124,121 @@ describe("cache health alert config API", () => {
 			cacheHealthMinInputTokens: 100_000,
 			cacheHealthReminderMinutes: 1,
 		});
+	});
+});
+
+describe("member notice destination state", () => {
+	const ID = "1400000000000000001";
+	const TOKEN = "member-token-abc";
+	const DISCORD = `https://discord.com/api/webhooks/${ID}/${TOKEN}`;
+	let directory: string;
+	let config: Config;
+	let context: APIContext;
+	let environment: Record<string, string | undefined>;
+	beforeEach(() => {
+		environment = Object.fromEntries(
+			Object.entries(process.env).filter(
+				([key]) =>
+					key.startsWith("ALERT_") || key === "MEMBER_NOTICE_WEBHOOK_URL",
+			),
+		);
+		for (const key of Object.keys(environment)) delete process.env[key];
+		directory = mkdtempSync(join(tmpdir(), "member-notice-state-"));
+		config = new Config(join(directory, "config.json"));
+		context = { config } as APIContext;
+	});
+	afterEach(() => {
+		rmSync(directory, { recursive: true, force: true });
+		for (const key of Object.keys(process.env))
+			if (key.startsWith("ALERT_") || key === "MEMBER_NOTICE_WEBHOOK_URL")
+				delete process.env[key];
+		Object.assign(process.env, environment);
+	});
+	const state = async () =>
+		(
+			(await createAlertsConfigGetHandler(context)().json()) as {
+				memberNotices?: { state: string };
+			}
+		).memberNotices?.state;
+
+	it("is off when no member address is set", async () => {
+		config.setAlertWebhookUrl(DISCORD);
+		expect(await state()).toBe("off");
+		expect(getMemberNoticeDestination(config)).toEqual({
+			state: "off",
+			url: null,
+		});
+		expect(memberNoticeStartupWarning(config)).toBeNull();
+	});
+
+	it("is on for a separate address, and the payload names no part of it", async () => {
+		config.setAlertWebhookUrl(
+			"https://discord.com/api/webhooks/1399999999999999999/alert-token",
+		);
+		config.set("member_notice_webhook_url", DISCORD);
+		expect(await state()).toBe("on");
+		expect(getMemberNoticeDestination(config)).toEqual({
+			state: "on",
+			url: DISCORD,
+		});
+		const serialized = JSON.stringify(
+			await createAlertsConfigGetHandler(context)().json(),
+		);
+		expect(serialized).not.toContain(ID);
+		expect(serialized).not.toContain(TOKEN);
+		expect(serialized).not.toContain("discord.com/api/webhooks/1400");
+		expect(memberNoticeStartupWarning(config)).toBeNull();
+	});
+
+	it("is on when only the token differs from the alert webhook", async () => {
+		config.setAlertWebhookUrl(`https://discord.com/api/webhooks/${ID}/other`);
+		process.env.MEMBER_NOTICE_WEBHOOK_URL = DISCORD;
+		expect(await state()).toBe("on");
+	});
+
+	it("is blocked when the member address is the alert webhook under another Discord host spelling", async () => {
+		config.setAlertWebhookUrl(DISCORD);
+		for (const spelling of [
+			`https://discordapp.com/api/webhooks/${ID}/${TOKEN}`,
+			`https://canary.discord.com/api/webhooks/${ID}/${TOKEN}?wait=true`,
+			`  https://PTB.Discord.com/api/webhooks/${ID}/${TOKEN}  `,
+		]) {
+			process.env.MEMBER_NOTICE_WEBHOOK_URL = spelling;
+			expect(await state()).toBe("blocked_same_as_alert_webhook");
+			expect(getMemberNoticeDestination(config).url).toBeNull();
+		}
+	});
+
+	it("is blocked for a non-Discord address equal to the alert webhook once trimmed", async () => {
+		config.setAlertWebhookUrl("https://example.com/hooks/alerts");
+		process.env.MEMBER_NOTICE_WEBHOOK_URL =
+			" https://example.com/hooks/alerts\n";
+		expect(await state()).toBe("blocked_same_as_alert_webhook");
+	});
+
+	it("gives a fixed startup warning that names neither address when blocked", () => {
+		config.setAlertWebhookUrl(DISCORD);
+		process.env.MEMBER_NOTICE_WEBHOOK_URL = `https://discordapp.com/api/webhooks/${ID}/${TOKEN}`;
+		const warning = memberNoticeStartupWarning(config);
+		expect(warning).toBe(MEMBER_NOTICES_BLOCKED_WARNING);
+		expect(warning).not.toContain(ID);
+		expect(warning).not.toContain(TOKEN);
+		expect(warning).not.toContain("discord");
+	});
+
+	it("cannot be set through the alerts config API", async () => {
+		const response = await createAlertsConfigSetHandler(context)(
+			new Request("http://fixture/api/insights/alerts/config", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					memberNotices: { state: "on", url: DISCORD },
+					member_notice_webhook_url: DISCORD,
+				}),
+			}),
+		);
+		expect(response.status).toBe(200);
+		expect(config.getMemberNoticeWebhookUrl()).toBe("");
+		expect(await state()).toBe("off");
 	});
 });

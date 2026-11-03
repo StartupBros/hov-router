@@ -16,6 +16,7 @@ const ENV_KEYS = [
 	"ALERT_COOLDOWN_MINUTES",
 	"ALERT_WEBHOOK_URL",
 	"ALERT_WEBHOOK_TYPES",
+	"MEMBER_NOTICE_WEBHOOK_URL",
 ] as const;
 
 const ORIGINAL_ENV: Record<string, string | undefined> = {};
@@ -364,6 +365,76 @@ describe("alert webhook type allowlist", () => {
 
 			process.env.ALERT_WEBHOOK_TYPES = "";
 			expect(config.getAlertWebhookTypes()).toEqual([]);
+		} finally {
+			cleanup();
+		}
+	});
+});
+
+describe("member notice webhook address", () => {
+	const MEMBER_URL =
+		"https://discord.com/api/webhooks/1400000000000000001/member-token-abc";
+
+	afterEach(() => {
+		for (const key of ENV_KEYS) {
+			const original = ORIGINAL_ENV[key];
+			if (original === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = original;
+			}
+		}
+	});
+
+	it("is empty when neither the environment nor the config file sets it", () => {
+		for (const key of ENV_KEYS) {
+			delete process.env[key];
+		}
+		const { config, cleanup } = makeConfig();
+
+		try {
+			expect(config.getMemberNoticeWebhookUrl()).toBe("");
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("reads the config key, and the environment variable wins over it", () => {
+		for (const key of ENV_KEYS) {
+			delete process.env[key];
+		}
+		const { config, cleanup } = makeConfig();
+
+		try {
+			config.set("member_notice_webhook_url", MEMBER_URL);
+			expect(config.getMemberNoticeWebhookUrl()).toBe(MEMBER_URL);
+
+			process.env.MEMBER_NOTICE_WEBHOOK_URL =
+				"https://example.com/hooks/member";
+			expect(config.getMemberNoticeWebhookUrl()).toBe(
+				"https://example.com/hooks/member",
+			);
+
+			process.env.MEMBER_NOTICE_WEBHOOK_URL = "";
+			expect(config.getMemberNoticeWebhookUrl()).toBe("");
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("never appears in getAllSettings()", () => {
+		for (const key of ENV_KEYS) {
+			delete process.env[key];
+		}
+		const { config, cleanup } = makeConfig();
+
+		try {
+			config.set("member_notice_webhook_url", MEMBER_URL);
+			process.env.MEMBER_NOTICE_WEBHOOK_URL = MEMBER_URL;
+			const serialized = JSON.stringify(config.getAllSettings());
+			expect(serialized).not.toContain("member_notice_webhook_url");
+			expect(serialized).not.toContain("1400000000000000001");
+			expect(serialized).not.toContain("member-token-abc");
 		} finally {
 			cleanup();
 		}

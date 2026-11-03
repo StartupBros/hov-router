@@ -1365,6 +1365,291 @@ describe.skipIf(!livePgAvailable)(
 			}
 		});
 
+		it("creates the member notices table, claims a key once, and fences a late lease result", async () => {
+			const { SQL } = await import("bun");
+			const { BunSqlAdapter } = await import("./adapters/bun-sql-adapter");
+			const { MemberNoticesRepository } = await import(
+				"./repositories/member-notices.repository"
+			);
+
+			// biome-ignore lint/style/noNonNullAssertion: guarded by describe.skipIf(!livePgAvailable)
+			const sqlClient = new SQL({ url: process.env.DATABASE_URL! });
+			const adapter = new BunSqlAdapter(sqlClient, false);
+			const runId = `pg-notice-${Date.now()}`;
+			const at = 1_793_477_045_410;
+			const key = (name: string) => `${runId}:${name}`;
+
+			const expectShape = async () => {
+				const cols = await adapter.query<{
+					column_name: string;
+					data_type: string;
+				}>(
+					`SELECT column_name, data_type FROM information_schema.columns
+					 WHERE table_name = 'member_notices'`,
+				);
+				const type = (column: string) =>
+					cols.find((c) => c.column_name === column)?.data_type;
+				for (const column of [
+					"claimed_at",
+					"expires_at",
+					"next_attempt_at",
+					"lease_expires_at",
+					"delivered_at",
+					"gave_up_at",
+				]) {
+					expect(type(column)).toBe("bigint");
+				}
+				expect(type("attempts")).toBe("integer");
+				const idx = await adapter.get<{ indexdef: string }>(
+					`SELECT indexdef FROM pg_indexes
+					 WHERE indexname = 'idx_member_notices_due'`,
+				);
+				expect(idx?.indexdef).toContain("delivered_at, next_attempt_at");
+			};
+
+			try {
+				await ensureSchemaPg(adapter);
+				await runMigrationsPg(adapter);
+				await expectShape();
+				await adapter.unsafe(`DROP TABLE IF EXISTS member_notices`);
+				await runMigrationsPg(adapter);
+				await expectShape();
+
+				const repo = new MemberNoticesRepository(adapter);
+				const notice = (name: string) => ({
+					noticeKey: key(name),
+					kind: "early_reset" as const,
+					provider: "claude",
+					content: "Claude limits appear to have reset early.",
+					claimedAt: at,
+					expiresAt: at + 3_600_000,
+				});
+				const claims = await Promise.all([
+					repo.claim(notice("a")),
+					repo.claim(notice("a")),
+				]);
+				expect(claims.sort()).toEqual([false, true]);
+				expect(await repo.hasClaimSince("early_reset", "claude", at - 1)).toBe(
+					true,
+				);
+
+				const leases = await Promise.all([
+					repo.lease(key("a"), "owner-1", at, 60_000),
+					repo.lease(key("a"), "owner-2", at, 60_000),
+				]);
+				expect(leases.sort()).toEqual([false, true]);
+				const first = leases[0] ? "owner-1" : "owner-2";
+				expect(await repo.lease(key("a"), "owner-3", at + 60_000, 60_000)).toBe(
+					true,
+				);
+				expect(
+					await repo.finishAttempt(key("a"), first, {
+						outcome: "delivered",
+						at: at + 60_001,
+						status: "204",
+					}),
+				).toBe(false);
+				expect(
+					await repo.finishAttempt(key("a"), "owner-3", {
+						outcome: "retry",
+						nextAttemptAt: at + 120_000,
+						status: "503",
+					}),
+				).toBe(true);
+				expect(await repo.findByKey(key("a"))).toMatchObject({
+					attempts: 2,
+					nextAttemptAt: at + 120_000,
+					lastStatus: "503",
+					leaseOwner: null,
+					deliveredAt: null,
+				});
+				expect(
+					(await repo.listDue(at + 120_000, 1000))
+						.map((row) => row.noticeKey)
+						.filter((noticeKey) => noticeKey.startsWith(runId)),
+				).toEqual([key("a")]);
+
+				await repo.claim({ ...notice("b"), expiresAt: at + 1 });
+				expect(await repo.expireDue(at + 2)).toBeGreaterThanOrEqual(1);
+				expect(await repo.findByKey(key("b"))).toMatchObject({
+					gaveUpAt: at + 2,
+					lastStatus: "expired",
+				});
+			} finally {
+				await adapter.unsafe(
+					`DELETE FROM member_notices WHERE notice_key LIKE $1`,
+					[`${runId}:%`],
+				);
+				await adapter.close();
+			}
+		});
+
+		it("reads member notice inputs as numbers: wave summaries, redemption explanations and early-reset candidates", async () => {
+			const { SQL } = await import("bun");
+			const { BunSqlAdapter } = await import("./adapters/bun-sql-adapter");
+			const { CodexResetCreditsRepository } = await import(
+				"./repositories/codex-reset-credits.repository"
+			);
+			const { CodexResetRedemptionsRepository } = await import(
+				"./repositories/codex-reset-redemptions.repository"
+			);
+			const { UsageWindowsRepository } = await import(
+				"./repositories/usage-windows.repository"
+			);
+
+			// biome-ignore lint/style/noNonNullAssertion: guarded by describe.skipIf(!livePgAvailable)
+			const sqlClient = new SQL({ url: process.env.DATABASE_URL! });
+			const adapter = new BunSqlAdapter(sqlClient, false);
+			const runId = `pg-notice-in-${Date.now()}`;
+			const accountA = `${runId}-a`;
+			const accountB = `${runId}-b`;
+			const wave = `codex:${runId}`;
+			const at = 1_793_477_045_410;
+			const day = 86_400_000;
+
+			try {
+				await ensureSchemaPg(adapter);
+				await runMigrationsPg(adapter);
+				for (const [id, provider] of [
+					[accountA, "codex"],
+					[accountB, "claude-oauth"],
+				]) {
+					await adapter.unsafe(
+						`INSERT INTO accounts (id, name, provider, created_at) VALUES ($1, $2, $3, 1)`,
+						[id, id, provider],
+					);
+				}
+				const credits = new CodexResetCreditsRepository(adapter);
+				const credit = (creditId: string, overrides: object) => ({
+					accountId: accountA,
+					creditId,
+					resetType: "rate_limit",
+					status: "available",
+					grantedAt: at,
+					expiresAt: at + 29 * day,
+					title: null,
+					description: null,
+					firstSeenAt: at,
+					lastSeenAt: at,
+					isBaseline: true,
+					waveId: wave,
+					vanishedAt: null,
+					vanishReason: null,
+					...overrides,
+				});
+				await credits.insertCreditIfAbsent(credit("c1", {}));
+				await credits.insertCreditIfAbsent(
+					credit("c2", {
+						expiresAt: at + 28 * day,
+						firstSeenAt: at + 900_000,
+						isBaseline: false,
+						status: "redeemed",
+						vanishedAt: at + day,
+						vanishReason: "redeemed_elsewhere",
+					}),
+				);
+
+				const summaries = (
+					await credits.listWaveSummaries(at - day, at + 40 * day)
+				).filter((summary) => summary.waveId === wave);
+				expect(summaries).toEqual([
+					{
+						waveId: wave,
+						expiresAt: at + 28 * day,
+						newestFirstSeenAt: at + 900_000,
+						hasNonBaseline: true,
+					},
+				]);
+				expect(
+					(await credits.listWaveSummaries(at + 2 * day, at + 40 * day)).some(
+						(summary) => summary.waveId === wave,
+					),
+				).toBe(false);
+				expect(await credits.hasRedeemedVanishSince(accountA, at + day)).toBe(
+					true,
+				);
+				expect(
+					await credits.hasRedeemedVanishSince(accountA, at + day + 1),
+				).toBe(false);
+
+				const redemptions = new CodexResetRedemptionsRepository(adapter);
+				for (const [suffix, state] of [
+					["refused", "refused"],
+					["abandoned", "abandoned"],
+				]) {
+					await adapter.unsafe(
+						`INSERT INTO codex_reset_redemptions
+						 (request_id, account_id, credit_id, state, requested_at, attempted_at)
+						 VALUES ($1, $2, 'c1', $3, $4, $4)`,
+						[
+							`${runId}-${suffix}`,
+							suffix === "refused" ? accountB : accountA,
+							state,
+							at,
+						],
+					);
+				}
+				expect(await redemptions.hasAttemptSince(accountA, at)).toBe(true);
+				expect(await redemptions.hasAttemptSince(accountA, at + 1)).toBe(false);
+				expect(await redemptions.hasAttemptSince(accountB, at)).toBe(false);
+
+				const insertWindow = `INSERT INTO usage_windows
+					(id, account_id, window_key, started_at, resets_at, closed_at, grant_type)
+					VALUES ($1, $2, 'seven_day', $3, $4, $5, $6)`;
+				await adapter.unsafe(insertWindow, [
+					`${runId}-w1`,
+					accountB,
+					at - 3 * day,
+					at + 4 * day,
+					at + 120_000,
+					"natural",
+				]);
+				await adapter.unsafe(insertWindow, [
+					`${runId}-w2`,
+					accountB,
+					at,
+					at + 7 * day,
+					null,
+					"early_reset",
+				]);
+				const windows = new UsageWindowsRepository(adapter);
+				expect(
+					(await windows.listEarlyResetCandidates(at - day)).filter(
+						(candidate) => candidate.accountId === accountB,
+					),
+				).toEqual([
+					{
+						accountId: accountB,
+						provider: "claude-oauth",
+						startedAt: at,
+						previousClosedAt: at + 120_000,
+						previousStartedAt: at - 3 * day,
+					},
+				]);
+				expect(
+					(await windows.listEarlyResetCandidates(at + 1)).some(
+						(candidate) => candidate.accountId === accountB,
+					),
+				).toBe(false);
+			} finally {
+				await adapter.unsafe(`DELETE FROM usage_windows WHERE id LIKE $1`, [
+					`${runId}-%`,
+				]);
+				await adapter.unsafe(
+					`DELETE FROM codex_reset_redemptions WHERE request_id LIKE $1`,
+					[`${runId}-%`],
+				);
+				await adapter.unsafe(
+					`DELETE FROM codex_reset_credits WHERE account_id LIKE $1`,
+					[`${runId}-%`],
+				);
+				await adapter.unsafe(`DELETE FROM accounts WHERE id LIKE $1`, [
+					`${runId}-%`,
+				]);
+				await adapter.close();
+			}
+		});
+
 		it("creates the published-label unique index and repairs duplicate published labels fail-closed", async () => {
 			const { SQL } = await import("bun");
 			const { BunSqlAdapter } = await import("./adapters/bun-sql-adapter");
