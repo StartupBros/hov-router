@@ -113,6 +113,7 @@ import {
 	QualityRouteService,
 	recordCodexUsageSnapshot,
 	refreshModelCatalog,
+	refreshTokenAfterRejectedRedemption,
 	registerAutoRefreshTrackingClearer,
 	registerCodexResetRedeemer,
 	registerCodexUsageRefresher,
@@ -2249,10 +2250,12 @@ export default async function startServer(options?: {
 		return true;
 	});
 
-	// Register this server's banked-reset redeemer. It always takes a token
-	// through the proxy context, never the stored one: a stale token on an
-	// irreversible spend is wrong. Anything that stops it before the consume
-	// call reports `sent: false`, so the caller knows nothing reached OpenAI.
+	// Register this server's banked-reset redeemer. It takes its token through
+	// the proxy context, which refreshes one near expiry, and sends nothing
+	// when that fails rather than falling back to the stored token. A 401 from
+	// OpenAI refreshes the token so the next attempt sends a new one. Anything
+	// that stops it before the consume call reports `sent: false`, so the
+	// caller knows nothing reached OpenAI.
 	registerCodexResetRedeemer(serverId, async (accountId, request) => {
 		const account = await dbOps.getAccount(accountId);
 		if (!account) return { sent: false, reason: "account_not_found" };
@@ -2275,10 +2278,11 @@ export default async function startServer(options?: {
 			);
 			return { sent: false, reason: "token_unavailable" };
 		}
-		return {
-			sent: true,
-			result: await consumeCodexResetCredit(accessToken, request),
-		};
+		const result = await consumeCodexResetCredit(accessToken, request);
+		if (result.kind === "http" && result.status === 401) {
+			await refreshTokenAfterRejectedRedemption(account, proxyContext);
+		}
+		return { sent: true, result };
 	});
 
 	// Register this server's codex usage refresher. Subscription-backend

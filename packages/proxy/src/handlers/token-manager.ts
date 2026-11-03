@@ -1424,6 +1424,44 @@ export async function redeemCodexResetCreditForAccount(
 }
 
 /**
+ * After OpenAI answers a reset redemption with 401, refresh the account's
+ * token so the operator's next attempt sends a new one. getValidAccessToken
+ * keeps returning the rejected token until it nears expiry. Shares the
+ * proxy's reactive-refresh cooldown, so a redemption and a proxied request
+ * never both refresh one account within it. Never throws: a 401 spent
+ * nothing, and the token manager pauses an account whose refresh token was
+ * revoked. Returns whether a refresh completed.
+ */
+export async function refreshTokenAfterRejectedRedemption(
+	account: Account,
+	ctx: ProxyContext,
+	refresh: (
+		account: Account,
+		ctx: ProxyContext,
+	) => Promise<string> = refreshAccessTokenSafe,
+): Promise<boolean> {
+	if (
+		!canAttemptStaleTokenRefresh(account) ||
+		!tryAcquireStaleTokenRefresh(account.id)
+	) {
+		return false;
+	}
+	try {
+		await refresh(account, ctx);
+		log.info(
+			`Reset redemption: refreshed the token for account ${account.name} after OpenAI rejected it`,
+		);
+		return true;
+	} catch {
+		// The error can carry token material; its message is never logged.
+		log.warn(
+			`Reset redemption: could not refresh the token for account ${account.name} after OpenAI rejected it`,
+		);
+		return false;
+	}
+}
+
+/**
  * Register a function to clear refresh cache for a specific account
  * Used by the server to register its refresh clearing capability
  */

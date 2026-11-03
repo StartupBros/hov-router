@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import type { Account } from "@better-ccflare/types";
+import type { ProxyContext } from "../proxy-types";
 import {
 	type CodexResetRedeemDispatch,
+	clearStaleTokenRefreshState,
 	hasCodexResetRedeemer,
+	isStaleTokenRefreshCoolingDown,
 	redeemCodexResetCreditForAccount,
 	refreshCodexUsageForAccount,
+	refreshTokenAfterRejectedRedemption,
 	registerCodexResetRedeemer,
 	registerCodexUsageRefresher,
+	tryAcquireStaleTokenRefresh,
 	unregisterCodexResetRedeemer,
 	unregisterCodexUsageRefresher,
 } from "../token-manager";
@@ -155,5 +161,99 @@ describe("refreshCodexUsageForAccount awaitInFlight", () => {
 		});
 		expect(result.message).toBe("read 1");
 		expect(events).toEqual(["start-1", "end-1"]);
+	});
+});
+
+describe("refreshTokenAfterRejectedRedemption", () => {
+	const ctx = {} as ProxyContext;
+
+	function codexAccount(overrides: Partial<Account> = {}): Account {
+		return {
+			id: "acct-redeem-401",
+			name: "codex-one",
+			provider: "codex",
+			api_key: null,
+			refresh_token: "rt-codex",
+			access_token: "at-rejected",
+			expires_at: Date.now() + 3_600_000,
+			created_at: 1,
+			...overrides,
+		} as Account;
+	}
+
+	afterEach(() => {
+		clearStaleTokenRefreshState("acct-redeem-401");
+	});
+
+	it("refreshes an OAuth Codex account once so the next attempt sends a new token", async () => {
+		const refreshed: string[] = [];
+		const done = await refreshTokenAfterRejectedRedemption(
+			codexAccount(),
+			ctx,
+			async (account) => {
+				refreshed.push(account.id);
+				return "at-new";
+			},
+		);
+		expect(done).toBe(true);
+		expect(refreshed).toEqual(["acct-redeem-401"]);
+		// The proxy's reactive refresh shares this cooldown.
+		expect(isStaleTokenRefreshCoolingDown("acct-redeem-401")).toBe(true);
+	});
+
+	it("leaves an account that has no OAuth refresh alone", async () => {
+		let calls = 0;
+		const done = await refreshTokenAfterRejectedRedemption(
+			codexAccount({ refresh_token: null, api_key: "sk-key" }),
+			ctx,
+			async () => {
+				calls++;
+				return "at-new";
+			},
+		);
+		expect(done).toBe(false);
+		expect(calls).toBe(0);
+	});
+
+	it("does not refresh again inside the shared cooldown", async () => {
+		expect(tryAcquireStaleTokenRefresh("acct-redeem-401")).toBe(true);
+		let calls = 0;
+		const done = await refreshTokenAfterRejectedRedemption(
+			codexAccount(),
+			ctx,
+			async () => {
+				calls++;
+				return "at-new";
+			},
+		);
+		expect(done).toBe(false);
+		expect(calls).toBe(0);
+	});
+
+	it("swallows a failed refresh without logging its message", async () => {
+		const logged: string[] = [];
+		const methods = ["log", "info", "warn", "error", "debug"] as const;
+		const originals = methods.map((m) => console[m]);
+		for (const m of methods) {
+			console[m] = (...args: unknown[]) => {
+				logged.push(args.map(String).join(" "));
+			};
+		}
+		let done: boolean;
+		try {
+			done = await refreshTokenAfterRejectedRedemption(
+				codexAccount(),
+				ctx,
+				async () => {
+					throw new Error("DISTINCT-REFRESH-SECRET");
+				},
+			);
+		} finally {
+			methods.forEach((m, i) => {
+				console[m] = originals[i];
+			});
+		}
+		expect(done).toBe(false);
+		expect(logged.join("\n")).not.toContain("DISTINCT-REFRESH-SECRET");
 	});
 });

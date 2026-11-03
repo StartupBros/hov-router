@@ -110,6 +110,7 @@ export {
 	pauseAccountForReauthIfInvalidGrant,
 	redeemCodexResetCreditForAccount,
 	refreshCodexUsageForAccount,
+	refreshTokenAfterRejectedRedemption,
 	registerAutoRefreshTrackingClearer,
 	registerCodexResetRedeemer,
 	registerCodexUsageRefresher,

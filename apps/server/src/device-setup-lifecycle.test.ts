@@ -124,6 +124,7 @@ mock.module("@better-ccflare/proxy", () => {
 		markBackendRetiring: () => {},
 		recordCodexUsageSnapshot: async () => {},
 		refreshModelCatalog: async () => ({ success: true }),
+		refreshTokenAfterRejectedRedemption: async () => false,
 		registerAutoRefreshTrackingClearer: () => {},
 		registerCodexResetRedeemer: () => {},
 		registerCodexUsageRefresher: () => {},

@@ -149,6 +149,7 @@ export {
 	markAccountTokensFresh,
 	redeemCodexResetCreditForAccount,
 	refreshCodexUsageForAccount,
+	refreshTokenAfterRejectedRedemption,
 	registerAutoRefreshTrackingClearer,
 	registerCodexResetRedeemer,
 	registerCodexUsageRefresher,
