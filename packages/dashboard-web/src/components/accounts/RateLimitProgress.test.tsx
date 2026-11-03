@@ -29,6 +29,7 @@ describe("RateLimitProgress", () => {
 						resetAt: Date.now() + 60 * 60 * 1000,
 						type: "tokens_limit",
 					},
+					tokens_limit_weekly: null,
 					time_limit: null,
 				}}
 				usageThrottledUntil={Date.now() + 10 * 60 * 1000}
@@ -431,7 +432,7 @@ describe("RateLimitProgress", () => {
 		// card showed nothing, which reads as "no limit". Now the weekly window is
 		// shown as unavailable.
 		const html = renderToStaticMarkup(
-			<RateLimitProgress provider="codex" showWeekly />,
+			<RateLimitProgress resetIso={null} provider="codex" showWeekly />,
 		);
 
 		expect(html).toContain("Usage (Weekly)");

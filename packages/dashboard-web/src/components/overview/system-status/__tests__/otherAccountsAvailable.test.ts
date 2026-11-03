@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { otherAccountsAvailable } from "../otherAccountsAvailable";
 
-type Account = Parameters<typeof otherAccountsAvailable>[0][number];
+type Account = NonNullable<
+	Parameters<typeof otherAccountsAvailable>[0]
+>[number];
 
 const baseAccount: Account = {
 	id: "acc-1",

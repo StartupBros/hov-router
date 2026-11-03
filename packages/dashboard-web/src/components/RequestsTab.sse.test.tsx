@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import * as React from "react";
 import type { RequestPayload, RequestSummary } from "../api";
+import { makeRequestSummary } from "../hooks/__tests__/request-summary-fixture";
 import * as queries from "../hooks/queries";
 
 let hooks: unknown[] = [];
@@ -83,15 +84,14 @@ function request(id: string): RequestPayload {
 	} as RequestPayload;
 }
 function summary(id: string, statusCode: number): RequestSummary {
-	return {
+	return makeRequestSummary({
 		id,
-		timestamp: 1,
 		model: "test-model",
 		statusCode,
 		success: statusCode === 200,
 		inputTokens: 1,
 		outputTokens: 2,
-	} as RequestSummary;
+	});
 }
 function select() {
 	const button = find(
