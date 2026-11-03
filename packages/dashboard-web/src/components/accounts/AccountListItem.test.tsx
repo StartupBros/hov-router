@@ -725,6 +725,49 @@ describe("AccountListItem banked resets", () => {
 	});
 });
 
+describe("AccountListItem header at phone width", () => {
+	// At 390px a rate-limited card put Force Reset, Refresh usage, Pause and More
+	// beside the name. The name column had a zero flex basis, so it got the ~48px
+	// left over and `overflow-wrap: anywhere` split "pro-primary-wmgm" into five
+	// mid-word pieces. The column now claims 8rem before the actions may sit
+	// beside it, and the name breaks at hyphens before it breaks mid-word.
+	function header() {
+		const html = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({
+					name: "pro-primary-wmgm",
+					provider: "codex",
+					paused: false,
+					rateLimitedUntil: Date.now() + 3_600_000,
+				})}
+				{...requiredHandlers}
+			/>,
+		);
+		const nameEnd = html.indexOf(">pro-primary-wmgm</h3>");
+		const headingStart = html.lastIndexOf("<h3", nameEnd);
+		const columnStart = html.lastIndexOf('<div class="min-w-0', headingStart);
+		return {
+			html,
+			heading: html.slice(headingStart, nameEnd),
+			column: html.slice(columnStart, html.indexOf(">", columnStart)),
+		};
+	}
+
+	it("gives the name column a real basis so the actions wrap below it", () => {
+		const { html, column } = header();
+		expect(html).toContain("Force Reset");
+		expect(column).toContain("flex-[1_1_8rem]");
+		expect(column).not.toMatch(/\bflex-1\b/);
+		expect(html).toContain('class="ml-auto flex shrink-0 flex-wrap');
+	});
+
+	it("breaks a long name at its hyphens, not anywhere", () => {
+		const { heading } = header();
+		expect(heading).toContain("break-words");
+		expect(heading).not.toContain("anywhere");
+	});
+});
+
 type SwitchProps = { onCheckedChange?: (v: boolean) => void };
 function findSwitch(node: unknown): SwitchProps | null {
 	if (!node || typeof node !== "object") return null;
