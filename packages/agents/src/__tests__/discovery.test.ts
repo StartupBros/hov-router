@@ -302,5 +302,52 @@ describe("AgentRegistry — model parsing and empty-prompt guard", () => {
 			const fileContent = fs.readFileSync(agent.filePath, "utf-8");
 			expect(fileContent).toMatch(/^model: claude-sonnet-5$/m);
 		});
+
+		// The edit path re-parses the file itself. Without the same CRLF/BOM
+		// normalization as loading, no key parsed, and the rewrite kept only the
+		// updated keys: name and description were erased from the file.
+		const windowsFiles: Array<{ label: string; content: string }> = [
+			{
+				label: "CRLF",
+				content:
+					"---\r\nname: CRLF Edit Agent\r\ndescription: written on Windows\r\nmodel: opus\r\n---\r\n\r\nYou are a test agent.\r\n",
+			},
+			{
+				label: "BOM + CRLF",
+				content:
+					"\uFEFF---\r\nname: CRLF Edit Agent\r\ndescription: written on Windows\r\nmodel: opus\r\n---\r\n\r\nYou are a test agent.\r\n",
+			},
+		];
+
+		for (const { label, content } of windowsFiles) {
+			it(`keeps name and description when editing a ${label} agent file`, async () => {
+				fs.writeFileSync(path.join(agentsDir, "agent-crlf-edit.md"), content);
+				const registry = new AgentRegistry(
+					undefined,
+					// Never touch the real ~/.better-ccflare/workspaces.json from tests.
+					new WorkspacePersistence({
+						workspacesFile: path.join(tmpDir, "test-workspaces.json"),
+					}),
+				);
+				await registry.registerWorkspace(tmpDir);
+				const agent = (await registry.getAgents()).find((a) =>
+					a.id.endsWith(":agent-crlf-edit"),
+				);
+				if (!agent) throw new Error("fixture agent not found");
+
+				const updated = await registry.updateAgent(agent.id, {
+					model: "claude-sonnet-5",
+				});
+
+				expect(updated.name).toBe("CRLF Edit Agent");
+				expect(updated.description).toBe("written on Windows");
+				expect(updated.model).toBe("claude-sonnet-5");
+				expect(updated.systemPrompt).toBe("You are a test agent.");
+				const fileContent = fs.readFileSync(agent.filePath, "utf-8");
+				expect(fileContent).toMatch(/^name: CRLF Edit Agent$/m);
+				expect(fileContent).toMatch(/^description: written on Windows$/m);
+				expect(fileContent).toMatch(/^model: claude-sonnet-5$/m);
+			});
+		}
 	});
 });
