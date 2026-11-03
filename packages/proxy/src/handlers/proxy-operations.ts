@@ -2586,6 +2586,7 @@ export async function proxyUnauthenticated(
 					// drain controller must be present when fetch is created so
 					// terminal recovery can later tear down a stuck response body.
 					dispatchSignal,
+					ctx.provider.name,
 				);
 			},
 		);
@@ -2967,6 +2968,7 @@ export async function proxyWithAccount(
 							undefined,
 							undefined,
 							attemptSignal,
+							account.provider ?? "anthropic",
 						);
 						markObservedDispatch("http");
 						return pendingHttp;

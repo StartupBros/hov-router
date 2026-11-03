@@ -95,6 +95,36 @@ curl http://localhost:8080/health?detail=1
 curl http://localhost:8080/health
 ```
 
+**Upstream reachability**
+
+`runtime.upstreamTransport` says, per account provider, whether this machine is getting answers from upstream. It covers HTTP fetches only, not Codex WebSocket transports. Any HTTP response counts as an answer, a 429 or 529 included. A failure is a fetch that rejected before any answer: DNS, connect, TLS, reset or header timeout. Fetches the client or router aborted count as neither. A provider is `unreachable` when its last `unreachableAfter` or more fetches all failed and the latest failure falls inside the window (about `windowMs`). It is `reachable` when an answer arrived inside the window. Otherwise it is `unknown`, usually because there was no recent traffic. Counters reset on restart.
+
+```bash
+curl -s http://localhost:8080/health | jq .runtime.upstreamTransport
+```
+
+```json
+{
+  "windowMs": 300000,
+  "unreachableAfter": 5,
+  "unreachable": ["anthropic"],
+  "providers": {
+    "anthropic": {
+      "state": "unreachable",
+      "responses": 0,
+      "failures": 42,
+      "consecutiveFailures": 381,
+      "lastResponseAt": "2026-11-03T03:30:32.475Z",
+      "lastFailureAt": "2026-11-03T04:16:30.000Z",
+      "lastFailureCode": "ConnectionRefused"
+    },
+    "openai-compatible": { "state": "reachable", "responses": 26, "failures": 0, "...": "..." }
+  }
+}
+```
+
+The `status` field and the HTTP status ignore this block on purpose. The guard's readiness probe, `scripts/deploy-ccflare.sh` and `scripts/run-ccflare-stack.sh` all require a 200 from `/health`, so letting a network outage turn it into a 503 would also block deploys and recycles of a router that is working. The dashboard's System Status shows a warning instead. Labels are provider names and the failure code is a short token, never a host or an error message.
+
 **Retention job telemetry**
 
 The response includes `runtime.storage.retention`, reporting the health of the hourly data-retention cleanup job (request/payload/usage-snapshot pruning). Use `lastSuccessAt` for dead-man alerting — if it stops advancing, the job has stalled or is failing silently:

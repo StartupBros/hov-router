@@ -158,4 +158,102 @@ describe("describeSystemStatus", () => {
 		expect(view.tone).toBe("down");
 		expect(view.title).toBe("The router reports a problem");
 	});
+
+	// 2026-11-02: /health said ok with every account routable while each
+	// Anthropic request failed before Anthropic answered. The banner must not
+	// read "Routing normally" through that.
+	test("ok with an unreachable provider warns and blames the connection", () => {
+		const view = describeSystemStatus(
+			verdict("ok", undefined, {
+				upstreamTransport: transport({
+					anthropic: unreachable(381, "ConnectionRefused"),
+					"openai-compatible": reachable(),
+				}),
+			}),
+		);
+		expect(view).toEqual({
+			tone: "warning",
+			title: "Can't reach Anthropic from this machine",
+			detail:
+				"The last 381 attempts to reach Anthropic got no answer (ConnectionRefused). That points at the network connection, not the accounts. 3 of 3 accounts available.",
+		});
+	});
+
+	test("several unreachable providers are named together", () => {
+		const view = describeSystemStatus(
+			verdict("ok", undefined, {
+				upstreamTransport: transport({
+					anthropic: unreachable(9, "ConnectionRefused"),
+					codex: unreachable(6, "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR"),
+				}),
+			}),
+		);
+		expect(view.tone).toBe("warning");
+		expect(view.title).toBe("Can't reach Anthropic or Codex from this machine");
+		expect(view.detail).toBe(
+			"Recent attempts to reach each got no answer. That points at the network connection, not the accounts. 3 of 3 accounts available.",
+		);
+	});
+
+	test("ok with every provider reachable still routes normally", () => {
+		const view = describeSystemStatus(
+			verdict("ok", undefined, {
+				upstreamTransport: transport({ anthropic: reachable() }),
+			}),
+		);
+		expect(view.tone).toBe("ok");
+		expect(view.title).toBe("Routing normally");
+	});
+
+	test("an unknown provider label is shown as-is", () => {
+		const view = describeSystemStatus(
+			verdict("ok", undefined, {
+				upstreamTransport: transport({ zai: unreachable(5, "ECONNRESET") }),
+			}),
+		);
+		expect(view.title).toBe("Can't reach zai from this machine");
+	});
 });
+
+type TransportHealth = NonNullable<
+	NonNullable<HealthVerdict["runtime"]>["upstreamTransport"]
+>;
+type ProviderTransport = TransportHealth["providers"][string];
+
+function transport(
+	providers: Record<string, ProviderTransport>,
+): TransportHealth {
+	return {
+		windowMs: 300_000,
+		unreachableAfter: 5,
+		unreachable: Object.entries(providers)
+			.filter(([, p]) => p.state === "unreachable")
+			.map(([name]) => name)
+			.sort(),
+		providers,
+	};
+}
+
+function unreachable(count: number, code: string): ProviderTransport {
+	return {
+		state: "unreachable",
+		responses: 0,
+		failures: count,
+		consecutiveFailures: count,
+		lastResponseAt: null,
+		lastFailureAt: "2026-11-03T04:00:00.000Z",
+		lastFailureCode: code,
+	};
+}
+
+function reachable(): ProviderTransport {
+	return {
+		state: "reachable",
+		responses: 12,
+		failures: 0,
+		consecutiveFailures: 0,
+		lastResponseAt: "2026-11-03T04:00:00.000Z",
+		lastFailureAt: null,
+		lastFailureCode: null,
+	};
+}

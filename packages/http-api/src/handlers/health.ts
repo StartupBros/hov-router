@@ -17,6 +17,7 @@ import type {
 	Account,
 	AnthropicDegradedRuntimeHealth,
 	RoutingHealth,
+	UpstreamTransportHealth,
 } from "@better-ccflare/types";
 import type {
 	HealthResponse,
@@ -83,6 +84,7 @@ export type HealthHandlerRuntimeProviders = Readonly<{
 	getIntegrityStatus?: IntegrityStatusFn;
 	getAccountUsageInfo?: AccountUsageInfoFn;
 	getAnthropicDegradedHealth?: AnthropicDegradedHealthFn;
+	getUpstreamTransportHealth?: () => UpstreamTransportHealth;
 	getRetentionStatus?: RetentionStatusFn;
 	getRoutingHealth?: () => RoutingHealth | undefined;
 	getBodyAdmissionHealth?: () => NonNullable<
@@ -195,6 +197,7 @@ export function createHealthHandler(
 		getIntegrityStatus,
 		getAccountUsageInfo = usageCacheUsageInfo,
 		getAnthropicDegradedHealth,
+		getUpstreamTransportHealth,
 		getRetentionStatus,
 		getRoutingHealth,
 		getBodyAdmissionHealth,
@@ -280,6 +283,17 @@ export function createHealthHandler(
 			const runtime = response.runtime ?? {};
 			response.runtime = runtime;
 			runtime.anthropicDegraded = getAnthropicDegradedHealth();
+		}
+
+		// Diagnostic only: an unreachable upstream does not change `status`.
+		// The guard's replacement readiness probe, deploy-ccflare.sh and
+		// run-ccflare-stack.sh all require 200 from /health, so a host network
+		// outage turned into a 503 would also block deploys and recycles of a
+		// router that is itself fine (2026-11-02, see upstream-transport-health).
+		if (getUpstreamTransportHealth) {
+			const runtime = response.runtime ?? {};
+			response.runtime = runtime;
+			runtime.upstreamTransport = getUpstreamTransportHealth();
 		}
 
 		if (getMemorySnapshot) {
