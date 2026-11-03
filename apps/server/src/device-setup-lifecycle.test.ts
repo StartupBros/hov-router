@@ -53,6 +53,7 @@ mock.module("@better-ccflare/openai-responses-adapter", () => ({
 mock.module("@better-ccflare/providers", () => ({
 	CODEX_DEFAULT_ENDPOINT: "https://example.invalid",
 	CODEX_PING_MODEL: "test-model",
+	consumeCodexResetCredit: async () => ({ kind: "network" }),
 	fetchCodexResetCredits: async () => ({
 		ok: false,
 		reason: "network",
@@ -124,6 +125,7 @@ mock.module("@better-ccflare/proxy", () => {
 		recordCodexUsageSnapshot: async () => {},
 		refreshModelCatalog: async () => ({ success: true }),
 		registerAutoRefreshTrackingClearer: () => {},
+		registerCodexResetRedeemer: () => {},
 		registerCodexUsageRefresher: () => {},
 		registerPollingRestarter: () => {},
 		registerRefreshClearer: () => {},
@@ -133,6 +135,7 @@ mock.module("@better-ccflare/proxy", () => {
 		startIntegrityScheduler: () => () => {},
 		stopGlobalTokenHealthChecks: () => {},
 		unregisterAutoRefreshTrackingClearer: () => {},
+		unregisterCodexResetRedeemer: () => {},
 		unregisterCodexUsageRefresher: () => {},
 		unregisterPollingRestarter: () => {},
 		unregisterRefreshClearer: () => {},
