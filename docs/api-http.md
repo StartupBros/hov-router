@@ -622,8 +622,10 @@ The body is built from the stored record; nothing OpenAI sends back is passed th
 | 200 `nothing_to_reset` | `done` | `nothing_to_reset` |
 | 200 `no_credit` | `done` | `no_credit` |
 | 200 with any other code, 5xx, timeout or network error | `unknown` | `unclear`: retrying with the same id is safe |
-| 401 or 429 | `retryable` | `retry` |
+| 401 or 429 | `retryable` | `retry`: after a 401 the router refreshes the account's token, so the next attempt sends a new one |
 | 403 or another 4xx | `refused` | `refused`: use `/usage` and Redeem reset in the Codex CLI instead |
+
+If the server cannot record OpenAI's answer, it replies `200` with `state` `pending` and `outcome` `unclear`. The record stays open, so the same id is resent once it is 60 seconds old.
 
 A request still open when two router accounts are merged is closed as `abandoned`, with outcome `abandoned`: whether it spent a reset is unknown.
 
@@ -658,6 +660,7 @@ A request still open when two router accounts are merged is closed as `abandoned
 | `409` | `request_conflict` | This id was already used for another account |
 | `415` | `unsupported_media_type` | The body was not sent as `application/json` |
 | `503` | `not_sent` | Nothing reached OpenAI (no running proxy could take the request, or no valid token); retry with the same id |
+| `500` | none | An unexpected failure; the request may have reached OpenAI. Retrying with the same id is safe |
 
 **Example:**
 ```bash
