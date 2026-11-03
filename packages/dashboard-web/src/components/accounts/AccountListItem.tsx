@@ -1,4 +1,5 @@
 import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
+import type { BankedResets } from "@better-ccflare/types";
 import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
 	AlertCircle,
@@ -33,6 +34,10 @@ import {
 } from "../ui/dropdown-menu";
 import { Switch } from "../ui/switch";
 import type { AccountFamilyRoutingState } from "./account-routing";
+import {
+	describeBankedResetExpiry,
+	formatBankedResetExpiry,
+} from "./BankedResetsSummary";
 import { pauseStatusDisplay } from "./pause-status";
 import { RateLimitProgress } from "./RateLimitProgress";
 import {
@@ -182,6 +187,75 @@ export function CodexCreditDrainControl({
 				</span>
 			)}
 		</div>
+	);
+}
+
+/**
+ * Codex banked resets on the card: OpenAI's count, the soonest expiry and
+ * whether one applies now. A stale account keeps its last values with a stale
+ * mark, and an account that cannot report resets says so instead of showing 0.
+ */
+export function BankedResetsStatus({ resets }: { resets: BankedResets }) {
+	if (!resets.tracked) {
+		return (
+			<span
+				className="whitespace-nowrap text-muted-foreground"
+				title="This account uses a custom endpoint, which does not report banked resets"
+			>
+				Banked resets: not tracked
+			</span>
+		);
+	}
+	const count = resets.availableCount;
+	if (count === null) {
+		return (
+			<span
+				className="whitespace-nowrap text-muted-foreground"
+				title="No usage poll has reported banked resets for this account yet"
+			>
+				Banked resets: unknown
+			</span>
+		);
+	}
+	return (
+		<span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+			<span className="whitespace-nowrap tabular-nums text-muted-foreground">
+				{count} banked {count === 1 ? "reset" : "resets"}
+			</span>
+			{count > 0 && resets.soonestExpiresAt !== null && (
+				<span
+					className="whitespace-nowrap text-muted-foreground"
+					title={describeBankedResetExpiry(resets.soonestExpiresAt)}
+				>
+					expires {formatBankedResetExpiry(resets.soonestExpiresAt)}
+				</span>
+			)}
+			{count > 0 && resets.doesNotExpire && (
+				<span className="whitespace-nowrap text-muted-foreground">
+					does not expire
+				</span>
+			)}
+			{resets.appliesNow && (
+				<span
+					className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.ok}`}
+					title="OpenAI says a banked reset would apply to this account right now"
+				>
+					applies now
+				</span>
+			)}
+			{resets.stale && (
+				<span
+					className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
+					title={
+						resets.observedAt !== null
+							? `Last read ${new Date(resets.observedAt).toLocaleString()}; these are the last known values`
+							: "These are the last known values"
+					}
+				>
+					stale
+				</span>
+			)}
+		</span>
 	);
 }
 
@@ -647,6 +721,9 @@ export function AccountListItem({
 					<span className="whitespace-nowrap tabular-nums text-muted-foreground">
 						{codexCreditsBalance.toLocaleString()} credits
 					</span>
+				)}
+				{account.provider === "codex" && account.bankedResets && (
+					<BankedResetsStatus resets={account.bankedResets} />
 				)}
 			</div>
 

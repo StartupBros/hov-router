@@ -321,6 +321,18 @@ export const useAccounts = () => {
 	});
 };
 
+/** Fleet summary of banked Codex resets, on the accounts cadence. */
+export const useBankedResets = () => {
+	return useQuery({
+		queryKey: queryKeys.bankedResets(),
+		queryFn: () => api.getBankedResets(),
+		staleTime: 20000,
+		refetchInterval: 60000,
+		refetchIntervalInBackground: false,
+		gcTime: 5 * 60 * 1000,
+	});
+};
+
 const ACTIVE_DEVICE_SETUP_STATUSES = new Set<DeviceSetupJobStatus>([
 	"awaiting_authorization",
 	"account_committed",
