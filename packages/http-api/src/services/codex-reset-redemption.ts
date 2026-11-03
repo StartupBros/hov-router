@@ -40,9 +40,13 @@ export interface CodexResetRedemptionDeps {
 	>;
 	/** Whether a server in this process registered its redeemer. */
 	hasRedeemer(): boolean;
+	/** The hashed ChatGPT account the stored token names, or null when none. */
+	readChatGptAccountHash(accountId: string): Promise<string | null>;
+	/** Sends only while the token still names `expectedChatGptAccountHash`. */
 	dispatch(
 		accountId: string,
 		request: CodexResetConsumeRequest,
+		expectedChatGptAccountHash: string | null,
 	): Promise<CodexResetRedeemDispatch>;
 	/** A polled usage read that starts after the call; false when none landed. */
 	refreshUsage(accountId: string): Promise<boolean>;
@@ -50,8 +54,21 @@ export interface CodexResetRedemptionDeps {
 	refreshUsageManually(accountId: string): Promise<boolean>;
 	/** The available count in the usage just read, or null when it has none. */
 	readAvailableCount(accountId: string): number | null;
+	/** Whether the usage just read shows the account has room to serve. */
+	hasCapacity(accountId: string): boolean;
+	/**
+	 * Lift a rate-limit cooldown observed before `observedBefore`; a limit
+	 * seen later stays. Pauses are untouched.
+	 */
+	releaseCooldown(accountId: string, observedBefore: number): Promise<void>;
 	now(): number;
 }
+
+/** Outcomes after which OpenAI reports the account's limits as cleared. */
+const RESET_CODES: ReadonlySet<string | null> = new Set([
+	"reset",
+	"already_redeemed",
+]);
 
 export type RedeemResetServiceResult =
 	| { status: 200; body: RedeemResetResponse }
@@ -127,7 +144,7 @@ function outcomeOf(row: CodexResetRedemptionRow): RedeemResetOutcome {
 		case "refused":
 			return "refused";
 		case "abandoned":
-			return "abandoned";
+			return row.code === "account_changed" ? "account_changed" : "abandoned";
 		default:
 			return "unclear";
 	}
@@ -219,6 +236,7 @@ export class CodexResetRedemptionService {
 			requestId,
 			accountId,
 			creditId: chooseRedeemCreditId(live),
+			chatgptAccountHash: await this.deps.readChatGptAccountHash(accountId),
 			availableBefore: assessment.availableCount,
 			at: now,
 		});
@@ -288,10 +306,11 @@ export class CodexResetRedemptionService {
 		const { requestId, accountId } = row;
 		let dispatched: CodexResetRedeemDispatch;
 		try {
-			dispatched = await this.deps.dispatch(accountId, {
-				redeemRequestId: requestId,
-				creditId: row.creditId,
-			});
+			dispatched = await this.deps.dispatch(
+				accountId,
+				{ redeemRequestId: requestId, creditId: row.creditId },
+				row.chatgptAccountHash,
+			);
 		} catch {
 			// It may have reached OpenAI; the same id makes a retry safe.
 			dispatched = { sent: true, result: { kind: "network" } };
@@ -301,6 +320,9 @@ export class CodexResetRedemptionService {
 			log.warn(
 				`Reset redemption ${requestId} for account ${accountId} was not sent (${dispatched.reason})`,
 			);
+			if (dispatched.reason === "account_changed") {
+				return this.closeForChangedAccount(requestId, attemptedAt);
+			}
 			try {
 				await this.redemptions.recordOutcome(requestId, {
 					attemptedAt,
@@ -340,33 +362,94 @@ export class CodexResetRedemptionService {
 			`Reset redemption ${requestId} for account ${accountId}: ${outcome.state}${outcome.code ? ` (${outcome.code})` : ""}`,
 		);
 		if (outcome.state === "done") {
-			await this.recordCountAfter(accountId, requestId);
+			const landed = await this.recordCountAfter(accountId, requestId);
+			if (landed && RESET_CODES.has(outcome.code)) {
+				await this.releaseCooldown(accountId, requestId, attemptedAt);
+			}
 		}
-		const final = await this.redemptions.findByRequestId(requestId);
-		if (!final) {
+		return ok(await this.storedRow(requestId));
+	}
+
+	/**
+	 * The token now names a different ChatGPT account than the one the
+	 * request was confirmed for. Nothing was sent; close the request so no
+	 * retry ever sends it to the new account.
+	 */
+	private async closeForChangedAccount(
+		requestId: string,
+		attemptedAt: number,
+	): Promise<RedeemResetServiceResult> {
+		let recorded: number;
+		try {
+			recorded = await this.redemptions.recordOutcome(requestId, {
+				attemptedAt,
+				state: "abandoned",
+				code: "account_changed",
+				windowsReset: null,
+				httpStatus: null,
+				at: this.deps.now(),
+			});
+		} catch (error) {
+			// The row stays pending; a later retry checks the account again.
+			log.warn(
+				`Reset redemption ${requestId}: could not close the request for a changed account: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return refuse(503, "not_sent", { requestId });
+		}
+		if (recorded === 0) return this.answerWithoutSending(requestId);
+		return ok(await this.storedRow(requestId));
+	}
+
+	private async storedRow(requestId: string): Promise<CodexResetRedemptionRow> {
+		const row = await this.redemptions.findByRequestId(requestId);
+		if (!row) {
 			throw new Error(
 				`Reset redemption ${requestId} disappeared after its outcome was recorded`,
 			);
 		}
-		return ok(final);
+		return row;
 	}
 
-	/** Read usage again after the outcome is stored; keep the count it shows. */
+	/**
+	 * Read usage again after the outcome is stored; keep the count it shows.
+	 * Returns whether a read landed.
+	 */
 	private async recordCountAfter(
 		accountId: string,
 		requestId: string,
-	): Promise<void> {
+	): Promise<boolean> {
 		const landed =
 			(await settles(() => this.deps.refreshUsage(accountId))) ||
 			(await settles(() => this.deps.refreshUsageManually(accountId)));
-		if (!landed) return;
+		if (!landed) return false;
 		const after = this.deps.readAvailableCount(accountId);
-		if (after === null) return;
+		if (after === null) return true;
 		try {
 			await this.redemptions.recordAvailableAfter(requestId, after);
 		} catch (error) {
 			log.warn(
 				`Reset redemption ${requestId}: could not store the count after: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+		return true;
+	}
+
+	/**
+	 * OpenAI reported the limits cleared and the read after it shows room:
+	 * lift the cooldown routing recorded before this attempt, so the account
+	 * serves again without waiting out the old reset time.
+	 */
+	private async releaseCooldown(
+		accountId: string,
+		requestId: string,
+		attemptedAt: number,
+	): Promise<void> {
+		try {
+			if (!this.deps.hasCapacity(accountId)) return;
+			await this.deps.releaseCooldown(accountId, attemptedAt);
+		} catch (error) {
+			log.warn(
+				`Reset redemption ${requestId}: could not lift the account's earlier cooldown: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
 	}

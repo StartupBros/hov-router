@@ -309,6 +309,19 @@ export function extractChatGptAccountId(accessToken: string): string | null {
 	}
 }
 
+/** SHA-256 hex of a ChatGPT account id; the router stores this, not the id. */
+export function hashChatGptAccountId(chatgptAccountId: string): string {
+	return createHash("sha256").update(chatgptAccountId).digest("hex");
+}
+
+/** The hashed ChatGPT account a token names, or null when it names none. */
+export function chatGptAccountHashOf(accessToken: string): string | null {
+	const chatgptAccountId = extractChatGptAccountId(accessToken);
+	return chatgptAccountId === null
+		? null
+		: hashChatGptAccountId(chatgptAccountId);
+}
+
 function toUsageWindow(window: WhamUsageWindow): UsageWindow {
 	const utilization =
 		typeof window.used_percent === "number" &&

@@ -13,6 +13,7 @@ import { Logger } from "@better-ccflare/logger";
 import {
 	type CodexResetConsumeRequest,
 	type CodexResetConsumeResult,
+	chatGptAccountHashOf,
 	getProvider,
 	type TokenRefreshResult,
 } from "@better-ccflare/providers";
@@ -1357,7 +1358,9 @@ export type CodexResetNotSentReason =
 	| "account_not_found"
 	| "not_codex"
 	| "custom_endpoint"
-	| "token_unavailable";
+	| "token_unavailable"
+	/** The token names another ChatGPT account than the request was confirmed for. */
+	| "account_changed";
 
 /**
  * `sent: false` guarantees nothing reached OpenAI. `sent: true` carries what
@@ -1367,10 +1370,27 @@ export type CodexResetRedeemDispatch =
 	| { sent: false; reason: CodexResetNotSentReason }
 	| { sent: true; result: CodexResetConsumeResult };
 
+/**
+ * `expectedChatGptAccountHash` is the ChatGPT account the request was
+ * confirmed for. The redeemer sends only while the token it would send names
+ * that same account (`codexTokenNamesAccount`).
+ */
 export type CodexResetRedeemer = (
 	accountId: string,
 	request: CodexResetConsumeRequest,
+	expectedChatGptAccountHash: string | null,
 ) => Promise<CodexResetRedeemDispatch>;
+
+/**
+ * Whether `accessToken` names the ChatGPT account hashed as `expected`. Two
+ * nulls match: neither side names an account. Any other difference does not.
+ */
+export function codexTokenNamesAccount(
+	accessToken: string,
+	expected: string | null,
+): boolean {
+	return chatGptAccountHashOf(accessToken) === expected;
+}
 
 // One slot, unlike the usage refreshers: a redemption is an irreversible
 // spend, so dispatch reaches exactly the registered server or nobody.
@@ -1410,11 +1430,12 @@ export function hasCodexResetRedeemer(): boolean {
 export async function redeemCodexResetCreditForAccount(
 	accountId: string,
 	request: CodexResetConsumeRequest,
+	expectedChatGptAccountHash: string | null,
 ): Promise<CodexResetRedeemDispatch> {
 	const slot = codexResetRedeemer;
 	if (!slot) return { sent: false, reason: "no_redeemer" };
 	try {
-		return await slot.redeem(accountId, request);
+		return await slot.redeem(accountId, request, expectedChatGptAccountHash);
 	} catch {
 		log.warn(
 			`Reset redemption for account ${accountId} threw on server ${slot.serverId}; outcome unclear`,

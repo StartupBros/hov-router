@@ -44,6 +44,7 @@ const OUTCOMES = new Set<string>(
 		retry: true,
 		refused: true,
 		abandoned: true,
+		account_changed: true,
 	} satisfies Record<RedeemResetOutcome, true>),
 );
 const SPENDS = new Set<string>(

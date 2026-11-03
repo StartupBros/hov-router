@@ -194,6 +194,17 @@ describe("describeRedeemAnswer: what happened (R12)", () => {
 		expect(view.lines.join(" ")).toMatch(/merged.*not known/);
 		expect(view.canRetry).toBe(false);
 	});
+
+	it("says a request for a ChatGPT account the token no longer names sent nothing", () => {
+		const view = describeRedeemAnswer(
+			result({ state: "abandoned", outcome: "account_changed", spend: null }),
+		);
+		expect(view.lines.join(" ")).toMatch(
+			/different ChatGPT account.*nothing was sent.*Open Use reset again/,
+		);
+		expect(view.canRetry).toBe(false);
+		expect(view.showsCliPointer).toBe(false);
+	});
 });
 
 describe("describeRedeemAnswer: answers that sent nothing or got no reply", () => {
@@ -282,6 +293,7 @@ describe("dialog copy", () => {
 			"retry",
 			"refused",
 			"abandoned",
+			"account_changed",
 		];
 		const reasons: RedeemResetErrorReason[] = [
 			"in_progress",

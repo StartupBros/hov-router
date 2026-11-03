@@ -90,6 +90,7 @@ mock.module("@better-ccflare/proxy", () => {
 			dispose() {}
 		},
 		clearAccountRefreshCache: () => {},
+		codexTokenNamesAccount: () => false,
 		configurePendingRotationPersistence: () => {},
 		createAnthropicDegradedDetailedEventSink: () => undefined,
 		createAnthropicDegradedRuntimeHealth: () => ({}),

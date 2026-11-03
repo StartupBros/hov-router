@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { hashChatGptAccountId } from "@better-ccflare/providers";
 import type { Account } from "@better-ccflare/types";
 import type { ProxyContext } from "../proxy-types";
 import {
 	type CodexResetRedeemDispatch,
 	clearStaleTokenRefreshState,
+	codexTokenNamesAccount,
 	hasCodexResetRedeemer,
 	isStaleTokenRefreshCoolingDown,
 	redeemCodexResetCreditForAccount,
@@ -31,23 +33,38 @@ afterEach(() => {
 describe("codex reset redeemer registry", () => {
 	it("reports that nothing was sent when no redeemer is registered", async () => {
 		expect(hasCodexResetRedeemer()).toBe(false);
-		expect(await redeemCodexResetCreditForAccount("acct", REQUEST)).toEqual({
+		expect(
+			await redeemCodexResetCreditForAccount("acct", REQUEST, "hash-a"),
+		).toEqual({
 			sent: false,
 			reason: "no_redeemer",
 		});
 	});
 
-	it("dispatches to the registered redeemer with the account and request", async () => {
+	it("dispatches to the registered redeemer with the account, request and expected ChatGPT account", async () => {
 		const calls: unknown[] = [];
-		registerCodexResetRedeemer("server-a", async (accountId, request) => {
-			calls.push({ accountId, request });
-			return answered;
-		});
-		expect(hasCodexResetRedeemer()).toBe(true);
-		expect(await redeemCodexResetCreditForAccount("acct", REQUEST)).toEqual(
-			answered,
+		registerCodexResetRedeemer(
+			"server-a",
+			async (accountId, request, expectedChatGptAccountHash) => {
+				calls.push({ accountId, request, expectedChatGptAccountHash });
+				return answered;
+			},
 		);
-		expect(calls).toEqual([{ accountId: "acct", request: REQUEST }]);
+		expect(hasCodexResetRedeemer()).toBe(true);
+		expect(
+			await redeemCodexResetCreditForAccount("acct", REQUEST, "hash-a"),
+		).toEqual(answered);
+		expect(
+			await redeemCodexResetCreditForAccount("acct", REQUEST, null),
+		).toEqual(answered);
+		expect(calls).toEqual([
+			{
+				accountId: "acct",
+				request: REQUEST,
+				expectedChatGptAccountHash: "hash-a",
+			},
+			{ accountId: "acct", request: REQUEST, expectedChatGptAccountHash: null },
+		]);
 	});
 
 	it("holds one redeemer and never falls through to an earlier one", async () => {
@@ -60,7 +77,9 @@ describe("codex reset redeemer registry", () => {
 			used.push("b");
 			return { sent: false, reason: "token_unavailable" };
 		});
-		expect(await redeemCodexResetCreditForAccount("acct", REQUEST)).toEqual({
+		expect(
+			await redeemCodexResetCreditForAccount("acct", REQUEST, "hash-a"),
+		).toEqual({
 			sent: false,
 			reason: "token_unavailable",
 		});
@@ -90,7 +109,11 @@ describe("codex reset redeemer registry", () => {
 			registerCodexResetRedeemer("server-a", async () => {
 				throw new Error("DISTINCT-SECRET-TOKEN-TEXT");
 			});
-			result = await redeemCodexResetCreditForAccount("acct", REQUEST);
+			result = await redeemCodexResetCreditForAccount(
+				"acct",
+				REQUEST,
+				"hash-a",
+			);
 		} finally {
 			methods.forEach((m, i) => {
 				console[m] = originals[i];
@@ -99,6 +122,45 @@ describe("codex reset redeemer registry", () => {
 		// It may have sent the request, so the caller must treat it as unclear.
 		expect(result).toEqual({ sent: true, result: { kind: "network" } });
 		expect(logged.join("\n")).not.toContain("DISTINCT-SECRET-TOKEN-TEXT");
+	});
+});
+
+describe("codexTokenNamesAccount", () => {
+	function token(chatgptAccountId?: string): string {
+		const claims =
+			chatgptAccountId === undefined
+				? { sub: "user-1" }
+				: {
+						"https://api.openai.com/auth": {
+							chatgpt_account_id: chatgptAccountId,
+						},
+					};
+		const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+		return `header.${payload}.signature`;
+	}
+
+	it("accepts a token that names the account the request was confirmed for", () => {
+		expect(
+			codexTokenNamesAccount(token("acct-1"), hashChatGptAccountId("acct-1")),
+		).toBe(true);
+	});
+
+	it("refuses a token that names a different account", () => {
+		expect(
+			codexTokenNamesAccount(token("acct-2"), hashChatGptAccountId("acct-1")),
+		).toBe(false);
+	});
+
+	it("refuses a token that names an account when the request was confirmed for none, and the reverse", () => {
+		expect(codexTokenNamesAccount(token("acct-1"), null)).toBe(false);
+		expect(
+			codexTokenNamesAccount(token(), hashChatGptAccountId("acct-1")),
+		).toBe(false);
+	});
+
+	it("accepts a token that names no account when the request was confirmed for none", () => {
+		expect(codexTokenNamesAccount(token(), null)).toBe(true);
+		expect(codexTokenNamesAccount("opaque-token", null)).toBe(true);
 	});
 });
 

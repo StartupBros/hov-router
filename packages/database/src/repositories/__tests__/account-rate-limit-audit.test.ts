@@ -330,6 +330,115 @@ describe("AccountRepository - clearRateLimitState", () => {
 	});
 });
 
+describe("AccountRepository - clearRateLimitStateObservedBefore", () => {
+	let db: Database;
+	let repo: AccountRepository;
+
+	beforeEach(() => {
+		({ db, repo } = makeDb());
+	});
+
+	afterEach(() => {
+		db.close();
+	});
+
+	function cooldown(id: string, observedAt: number | null): void {
+		insertAccount(db, id);
+		db.run(
+			`UPDATE accounts
+			 SET rate_limited_until = ?, rate_limited_reason = ?,
+			     rate_limited_at = ?, rate_limit_reset = ?,
+			     rate_limit_status = ?, consecutive_rate_limits = ?
+			 WHERE id = ?`,
+			[
+				90_000,
+				"upstream_429_with_reset",
+				observedAt,
+				90_000,
+				"rate_limited",
+				3,
+				id,
+			],
+		);
+	}
+
+	it("clears a cooldown observed before the given time", async () => {
+		cooldown("acc-old", 40_000);
+		expect(
+			await repo.clearRateLimitStateObservedBefore("acc-old", 50_000),
+		).toBe(1);
+		expect(getFullAudit(db, "acc-old")).toEqual({
+			rate_limited_until: null,
+			rate_limited_reason: null,
+			rate_limited_at: null,
+			consecutive_rate_limits: 0,
+		});
+	});
+
+	it("clears a cooldown with no recorded observation time", async () => {
+		cooldown("acc-unaudited", null);
+		expect(
+			await repo.clearRateLimitStateObservedBefore("acc-unaudited", 50_000),
+		).toBe(1);
+		expect(getFullAudit(db, "acc-unaudited").rate_limited_until).toBeNull();
+	});
+
+	it("keeps a cooldown observed at or after the given time", async () => {
+		cooldown("acc-new", 50_000);
+		expect(
+			await repo.clearRateLimitStateObservedBefore("acc-new", 50_000),
+		).toBe(0);
+		expect(getFullAudit(db, "acc-new")).toMatchObject({
+			rate_limited_until: 90_000,
+			rate_limited_at: 50_000,
+			consecutive_rate_limits: 3,
+		});
+	});
+
+	it("changes nothing on an account with no cooldown and leaves a pause alone", async () => {
+		insertAccount(db, "acc-paused");
+		db.run(
+			`UPDATE accounts SET paused = 1, pause_reason = 'manual', consecutive_rate_limits = 2 WHERE id = ?`,
+			["acc-paused"],
+		);
+		expect(
+			await repo.clearRateLimitStateObservedBefore("acc-paused", 50_000),
+		).toBe(0);
+		expect(
+			db
+				.query<
+					{
+						paused: number;
+						pause_reason: string;
+						consecutive_rate_limits: number;
+					},
+					[string]
+				>(
+					"SELECT paused, pause_reason, consecutive_rate_limits FROM accounts WHERE id = ?",
+				)
+				.get("acc-paused"),
+		).toEqual({
+			paused: 1,
+			pause_reason: "manual",
+			consecutive_rate_limits: 2,
+		});
+
+		cooldown("acc-paused-limited", 40_000);
+		db.run(
+			`UPDATE accounts SET paused = 1, pause_reason = 'manual' WHERE id = ?`,
+			["acc-paused-limited"],
+		);
+		await repo.clearRateLimitStateObservedBefore("acc-paused-limited", 50_000);
+		expect(
+			db
+				.query<{ paused: number }, [string]>(
+					"SELECT paused FROM accounts WHERE id = ?",
+				)
+				.get("acc-paused-limited"),
+		).toEqual({ paused: 1 });
+	});
+});
+
 describe("AccountRepository - markAccountRateLimited MAX-style clamp under concurrent writers", () => {
 	let db: Database;
 	let repo: AccountRepository;

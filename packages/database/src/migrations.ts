@@ -438,6 +438,8 @@ function ensureCodexResetCreditsSchema(db: Database): void {
  * One row per redemption request id. No foreign key: the row is the only
  * record that a credit may have been spent, so it outlives its account.
  * The partial unique index allows one open request per account.
+ * `chatgpt_account_hash` names the ChatGPT account the request was confirmed
+ * for; a retry is sent only while the token still names that account.
  */
 function ensureCodexResetRedemptionsSchema(db: Database): void {
 	db.run(`
@@ -445,6 +447,7 @@ function ensureCodexResetRedemptionsSchema(db: Database): void {
 			request_id TEXT PRIMARY KEY,
 			account_id TEXT NOT NULL,
 			credit_id TEXT,
+			chatgpt_account_hash TEXT,
 			state TEXT NOT NULL CHECK (state IN (
 				'pending', 'unknown', 'retryable', 'done', 'refused', 'abandoned'
 			)),

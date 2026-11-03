@@ -437,6 +437,33 @@ export class AccountRepository extends BaseRepository<Account> {
 		);
 	}
 
+	/**
+	 * `clearRateLimitState`, applied only to a cooldown whose latest
+	 * observation came before `observedBefore`. A rate limit seen at or after
+	 * that time keeps its cooldown; a pause is never touched.
+	 */
+	async clearRateLimitStateObservedBefore(
+		accountId: string,
+		observedBefore: number,
+	): Promise<number> {
+		return this.runWithChanges(
+			`UPDATE accounts
+			 SET
+			 	rate_limited_until = NULL,
+			 	rate_limited_reason = NULL,
+			 	rate_limited_at = NULL,
+			 	rate_limit_reset = NULL,
+			 	rate_limit_reset_at = NULL,
+			 	rate_limit_status = NULL,
+				rate_limit_remaining = NULL,
+				consecutive_rate_limits = 0
+			 WHERE id = ?
+			   AND rate_limited_until IS NOT NULL
+			   AND (rate_limited_at IS NULL OR rate_limited_at < ?)`,
+			[accountId, observedBefore],
+		);
+	}
+
 	async pause(accountId: string, reason = "manual"): Promise<void> {
 		await this.run(
 			`UPDATE accounts SET paused = 1, pause_reason = ? WHERE id = ?`,

@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { Config } from "@better-ccflare/config";
 import { DatabaseOperations } from "@better-ccflare/database";
-import { consumeCodexResetCredit, usageCache } from "@better-ccflare/providers";
 import {
+	consumeCodexResetCredit,
+	hashChatGptAccountId,
+	usageCache,
+} from "@better-ccflare/providers";
+import {
+	codexTokenNamesAccount,
 	registerCodexResetRedeemer,
 	registerCodexUsageRefresher,
 	unregisterCodexResetRedeemer,
@@ -36,8 +41,15 @@ let accountId: string;
 let seq = 0;
 let calls: ConsumeCall[];
 let replies: Array<() => Promise<Response>>;
-/** What the next polled usage read reports; null means the read fails. */
-let nextUsage: { available: number; applicable: number } | null;
+/**
+ * What the next polled usage read reports; null means the read fails.
+ * `fiveHour` adds a five-hour window at that utilization.
+ */
+let nextUsage: {
+	available: number;
+	applicable: number;
+	fiveHour?: number;
+} | null;
 let refreshOptions: unknown[];
 
 const fakeOpenAi = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -82,12 +94,49 @@ function gatedReply(status: number, body: unknown) {
 function usageWith(counts: {
 	available: number;
 	applicable: number;
+	fiveHour?: number;
 }): UsageData {
 	return {
 		reset_credits_present: true,
 		reset_credits_available_count: counts.available,
 		reset_credits_applicable_count: counts.applicable,
+		...(counts.fiveHour === undefined
+			? {}
+			: {
+					five_hour: {
+						utilization: counts.fiveHour,
+						resets_at: new Date(Date.now() + HOUR).toISOString(),
+					},
+				}),
 	} as unknown as UsageData;
+}
+
+/** An access token whose claims name a ChatGPT account. */
+function codexToken(chatgptAccountId: string): string {
+	const claims = {
+		"https://api.openai.com/auth": { chatgpt_account_id: chatgptAccountId },
+	};
+	const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+	return `header.${payload}.signature`;
+}
+
+async function coolDown(id: string, observedAt: number, until: number) {
+	await dbOps
+		.getAdapter()
+		.run(
+			`UPDATE accounts SET rate_limited_until = ?, rate_limited_at = ?, rate_limited_reason = 'upstream_429' WHERE id = ?`,
+			[until, observedAt, id],
+		);
+}
+
+async function cooldownUntil(id: string): Promise<number | null> {
+	const row = await dbOps
+		.getAdapter()
+		.get<{ rate_limited_until: number | null }>(
+			`SELECT rate_limited_until FROM accounts WHERE id = ?`,
+			[id],
+		);
+	return row?.rate_limited_until ?? null;
 }
 
 async function insertAccount(
@@ -96,6 +145,7 @@ async function insertAccount(
 		provider?: string;
 		customEndpoint?: string | null;
 		paused?: boolean;
+		accessToken?: string;
 	} = {},
 ) {
 	await dbOps.getAdapter().run(
@@ -106,7 +156,7 @@ async function insertAccount(
 			`name-${id}`,
 			opts.provider ?? "codex",
 			"refresh",
-			"access",
+			opts.accessToken ?? "access",
 			Date.now() + HOUR,
 			Date.now(),
 			opts.customEndpoint ?? null,
@@ -354,6 +404,7 @@ describe("POST /api/accounts/:id/redeem-reset", () => {
 			requestId,
 			accountId,
 			creditId: `${accountId}-credit-1`,
+			chatgptAccountHash: null,
 			availableBefore: 2,
 			at: Date.now() - 2 * MINUTE,
 		});
@@ -384,6 +435,7 @@ describe("POST /api/accounts/:id/redeem-reset", () => {
 			requestId,
 			accountId,
 			creditId: null,
+			chatgptAccountHash: null,
 			availableBefore: 2,
 			at: Date.now() - 10_000,
 		});
@@ -702,6 +754,118 @@ describe("POST /api/accounts/:id/redeem-reset", () => {
 
 		expect(res.status).toBe(400);
 		expect(res.body.reason).toBe("not_codex");
+	});
+
+	it("stores the ChatGPT account the access token names and hands it to the redeemer", async () => {
+		await insertAccount(accountId, { accessToken: codexToken("chatgpt-1") });
+		await observe(accountId, { available: 2, applicable: 2 });
+		const expected: unknown[] = [];
+		registerCodexResetRedeemer(SERVER, async (_id, request, expectedHash) => {
+			expected.push(expectedHash);
+			return {
+				sent: true,
+				result: await consumeCodexResetCredit("test-token", request, {
+					fetchImpl: fakeOpenAi,
+				}),
+			};
+		});
+		replies.push(reply(200, { code: "reset", windows_reset: 1 }));
+		nextUsage = { available: 1, applicable: 1 };
+		const requestId = crypto.randomUUID();
+
+		const res = await post(accountId, { requestId });
+
+		expect(res.status).toBe(200);
+		expect((await stored(requestId))?.chatgptAccountHash).toBe(
+			hashChatGptAccountId("chatgpt-1"),
+		);
+		expect(expected).toEqual([hashChatGptAccountId("chatgpt-1")]);
+	});
+
+	it("closes a resend without sending once the account signs in to a different ChatGPT account", async () => {
+		await insertAccount(accountId, { accessToken: codexToken("chatgpt-2") });
+		await observe(accountId, { available: 2, applicable: 2 });
+		// The server's check: compare the token it would send with the account
+		// the request was confirmed for.
+		registerCodexResetRedeemer(SERVER, async (id, request, expectedHash) => {
+			const account = await dbOps.getAccount(id);
+			if (!codexTokenNamesAccount(account?.access_token ?? "", expectedHash)) {
+				return { sent: false, reason: "account_changed" };
+			}
+			return {
+				sent: true,
+				result: await consumeCodexResetCredit("test-token", request, {
+					fetchImpl: fakeOpenAi,
+				}),
+			};
+		});
+		const requestId = crypto.randomUUID();
+		await dbOps.getCodexResetRedemptionsRepository().insertPending({
+			requestId,
+			accountId,
+			creditId: `${accountId}-credit-1`,
+			chatgptAccountHash: hashChatGptAccountId("chatgpt-1"),
+			availableBefore: 2,
+			at: Date.now() - 2 * MINUTE,
+		});
+
+		const res = await post(accountId, { requestId });
+		const again = await post(accountId, { requestId });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({
+			requestId,
+			state: "abandoned",
+			outcome: "account_changed",
+		});
+		expect(again.status).toBe(200);
+		expect(again.body.outcome).toBe("account_changed");
+		expect(calls).toHaveLength(0);
+		expect((await stored(requestId))?.state).toBe("abandoned");
+	});
+
+	it("lifts a cooldown set before the redemption once the read after shows room", async () => {
+		await insertAccount(accountId);
+		await observe(accountId, { available: 2, applicable: 2 });
+		await coolDown(accountId, Date.now() - MINUTE, Date.now() + DAY);
+		replies.push(reply(200, { code: "reset", windows_reset: 1 }));
+		nextUsage = { available: 1, applicable: 1, fiveHour: 10 };
+
+		const res = await post(accountId, { requestId: crypto.randomUUID() });
+
+		expect(res.status).toBe(200);
+		expect(res.body.outcome).toBe("reset");
+		expect(await cooldownUntil(accountId)).toBeNull();
+	});
+
+	it("keeps the cooldown when the read after shows the window still full", async () => {
+		await insertAccount(accountId);
+		await observe(accountId, { available: 2, applicable: 2 });
+		const until = Date.now() + DAY;
+		await coolDown(accountId, Date.now() - MINUTE, until);
+		replies.push(reply(200, { code: "reset", windows_reset: 1 }));
+		nextUsage = { available: 1, applicable: 1, fiveHour: 100 };
+
+		const res = await post(accountId, { requestId: crypto.randomUUID() });
+
+		expect(res.status).toBe(200);
+		expect(res.body.outcome).toBe("reset");
+		expect(await cooldownUntil(accountId)).toBe(until);
+	});
+
+	it("keeps the cooldown when OpenAI reports nothing to reset", async () => {
+		await insertAccount(accountId);
+		await observe(accountId, { available: 2, applicable: 2 });
+		const until = Date.now() + DAY;
+		await coolDown(accountId, Date.now() - MINUTE, until);
+		replies.push(reply(200, { code: "nothing_to_reset", windows_reset: 0 }));
+		nextUsage = { available: 2, applicable: 2, fiveHour: 10 };
+
+		const res = await post(accountId, { requestId: crypto.randomUUID() });
+
+		expect(res.status).toBe(200);
+		expect(res.body.outcome).toBe("nothing_to_reset");
+		expect(await cooldownUntil(accountId)).toBe(until);
 	});
 
 	it("rejects a request without a key while an API key is active", async () => {

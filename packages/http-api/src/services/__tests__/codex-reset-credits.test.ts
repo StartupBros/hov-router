@@ -235,6 +235,7 @@ describe("CodexResetCreditObserver", () => {
 				requestId,
 				accountId: "acct-1",
 				creditId,
+				chatgptAccountHash: null,
 				availableBefore: 3,
 				at: clock,
 			});

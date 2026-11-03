@@ -1247,6 +1247,7 @@ describe.skipIf(!livePgAvailable)(
 					requestId: `${runId}-${requestId}`,
 					accountId,
 					creditId: "credit-a",
+					chatgptAccountHash: "hash-a",
 					availableBefore: 2,
 					at,
 				});

@@ -1,8 +1,10 @@
 export {
 	CODEX_WHAM_USAGE_ENDPOINT,
 	CODEX_WHAM_USAGE_FALLBACK_ENDPOINT,
+	chatGptAccountHashOf,
 	extractChatGptAccountId,
 	fetchCodexUsageData,
+	hashChatGptAccountId,
 	mapWhamUsageResponse,
 	nonNegativeIntegerOrNull,
 	resetCodexUsageEndpointForTest,

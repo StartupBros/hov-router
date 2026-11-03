@@ -369,7 +369,9 @@ export interface BankedResetsSummary {
 /**
  * Where one redemption request stands. `pending`, `unknown` and `retryable`
  * are open: the account takes no other request id until the open one closes.
- * `abandoned` is set only by an account merge that found two open requests.
+ * `abandoned` closes a request that must never be sent: an account merge
+ * found two open requests, or the account now signs in to a different
+ * ChatGPT account than the request was confirmed for.
  */
 export type CodexResetRedemptionState =
 	| "pending"
@@ -392,7 +394,12 @@ export type RedeemResetOutcome =
 	/** OpenAI refused the router's request; use `/usage` in the Codex CLI. */
 	| "refused"
 	/** Closed by an account merge; the outcome is unknown. */
-	| "abandoned";
+	| "abandoned"
+	/**
+	 * Closed without sending: the account now signs in to a different
+	 * ChatGPT account than the request was confirmed for.
+	 */
+	| "account_changed";
 
 /**
  * Whether a credit was spent, judged from the available count before the

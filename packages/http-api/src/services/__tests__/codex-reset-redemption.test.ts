@@ -131,6 +131,12 @@ describe("CodexResetRedemptionService", () => {
 	let autoRefresh: () => Promise<boolean>;
 	let manualRefresh: () => Promise<boolean>;
 	let cachedAvailable: number | null;
+	/** The hashed ChatGPT account the stored token names right now. */
+	let tokenHash: string | null;
+	/** The ChatGPT account each dispatch was told to expect. */
+	let dispatchedHashes: Array<string | null>;
+	let capacity: boolean;
+	let releases: Array<{ accountId: string; observedBefore: number }>;
 	let service: CodexResetRedemptionService;
 
 	const redemptions = () => dbOps.getCodexResetRedemptionsRepository();
@@ -166,6 +172,7 @@ describe("CodexResetRedemptionService", () => {
 			requestId,
 			accountId,
 			creditId,
+			chatgptAccountHash: "hash-a",
 			availableBefore,
 			at: clock,
 		});
@@ -184,11 +191,17 @@ describe("CodexResetRedemptionService", () => {
 		autoRefresh = async () => true;
 		manualRefresh = async () => true;
 		cachedAvailable = null;
+		tokenHash = "hash-a";
+		dispatchedHashes = [];
+		capacity = true;
+		releases = [];
 		service = new CodexResetRedemptionService({
 			dbOps,
 			hasRedeemer: () => redeemerPresent,
-			dispatch: async (accountId, request) => {
+			readChatGptAccountHash: async () => tokenHash,
+			dispatch: async (accountId, request, expectedChatGptAccountHash) => {
 				dispatches.push({ accountId, request });
+				dispatchedHashes.push(expectedChatGptAccountHash);
 				return nextDispatch();
 			},
 			refreshUsage: async (accountId) => {
@@ -200,6 +213,10 @@ describe("CodexResetRedemptionService", () => {
 				return manualRefresh();
 			},
 			readAvailableCount: () => cachedAvailable,
+			hasCapacity: () => capacity,
+			releaseCooldown: async (accountId, observedBefore) => {
+				releases.push({ accountId, observedBefore });
+			},
 			now: () => clock,
 		});
 	});
@@ -643,6 +660,184 @@ describe("CodexResetRedemptionService", () => {
 				availableBefore: 2,
 				availableAfter: after,
 				spend,
+			});
+		});
+	});
+
+	describe("the ChatGPT account a request was confirmed for", () => {
+		it("stores the account the token names and binds every attempt to it, even after a re-login", async () => {
+			await seedRedeemable();
+			nextDispatch = async () => ({ sent: false, reason: "token_unavailable" });
+			expect((await service.redeem(ACCOUNT, "req-1")).status).toBe(503);
+			expect(
+				(await redemptions().findByRequestId("req-1"))?.chatgptAccountHash,
+			).toBe("hash-a");
+
+			// The router account is signed in to another ChatGPT account now.
+			tokenHash = "hash-b";
+			nextDispatch = async () => answered("reset");
+			clock += SECOND;
+			await service.redeem(ACCOUNT, "req-1");
+
+			expect(dispatchedHashes).toEqual(["hash-a", "hash-a"]);
+		});
+
+		it("binds a request to no account when the token named none", async () => {
+			await seedRedeemable();
+			tokenHash = null;
+			await service.redeem(ACCOUNT, "req-1");
+			expect(
+				(await redemptions().findByRequestId("req-1"))?.chatgptAccountHash,
+			).toBeNull();
+			expect(dispatchedHashes).toEqual([null]);
+		});
+
+		it("closes the request without sending when the account now signs in elsewhere, and never resends it", async () => {
+			await seedRedeemable();
+			nextDispatch = async () => ({ sent: false, reason: "account_changed" });
+
+			const first = await service.redeem(ACCOUNT, "req-1");
+
+			expect(first.status).toBe(200);
+			expect(first.body).toMatchObject({
+				requestId: "req-1",
+				state: "abandoned",
+				outcome: "account_changed",
+				spend: null,
+				completedAt: START,
+			});
+			expect(await redemptions().findByRequestId("req-1")).toMatchObject({
+				state: "abandoned",
+				code: "account_changed",
+			});
+			expect(refreshes).toEqual([]);
+			expect(releases).toEqual([]);
+
+			nextDispatch = async () => answered("reset");
+			clock += 5 * MINUTE;
+			const again = await service.redeem(ACCOUNT, "req-1");
+			expect(again).toEqual(first);
+			expect(dispatches).toHaveLength(1);
+			expect(await redemptions().findOpenForAccount(ACCOUNT)).toBeNull();
+		});
+
+		it("answers 503 not_sent and keeps the row open when closing it for a changed account fails", async () => {
+			await seedRedeemable();
+			nextDispatch = async () => ({ sent: false, reason: "account_changed" });
+			redemptions().recordOutcome = async () => {
+				throw new Error("disk full");
+			};
+			const result = await service.redeem(ACCOUNT, "req-1");
+			expect(result.status).toBe(503);
+			expect(result.body).toMatchObject({
+				reason: "not_sent",
+				requestId: "req-1",
+			});
+			expect((await redemptions().findByRequestId("req-1"))?.state).toBe(
+				"pending",
+			);
+		});
+	});
+
+	describe("the cooldown after a confirmed reset", () => {
+		it.each([
+			"reset",
+			"already_redeemed",
+		])("lifts the cooldown recorded before the attempt after %s when the read after shows room", async (code) => {
+			await seedRedeemable();
+			nextDispatch = async () => answered(code);
+			await service.redeem(ACCOUNT, "req-1");
+			expect(releases).toEqual([{ accountId: ACCOUNT, observedBefore: START }]);
+		});
+
+		it("measures the cooldown against the attempt that was answered, not the first one", async () => {
+			await seedRedeemable();
+			await openRow("req-1", "sooner");
+			await redemptions().recordOutcome("req-1", {
+				attemptedAt: clock,
+				state: "unknown",
+				code: null,
+				windowsReset: null,
+				httpStatus: null,
+				at: clock,
+			});
+			clock += 3 * MINUTE;
+			await service.redeem(ACCOUNT, "req-1");
+			expect(releases).toEqual([
+				{ accountId: ACCOUNT, observedBefore: START + 3 * MINUTE },
+			]);
+		});
+
+		it.each([
+			"nothing_to_reset",
+			"no_credit",
+		])("keeps the cooldown after %s", async (code) => {
+			await seedRedeemable();
+			nextDispatch = async () => answered(code, 0);
+			await service.redeem(ACCOUNT, "req-1");
+			expect(releases).toEqual([]);
+		});
+
+		it("keeps the cooldown when the answer is unclear or refused", async () => {
+			await seedRedeemable();
+			nextDispatch = async () => ({ sent: true, result: { kind: "timeout" } });
+			await service.redeem(ACCOUNT, "req-1");
+			nextDispatch = async () => ({
+				sent: true,
+				result: { kind: "http", status: 403 },
+			});
+			clock += SECOND;
+			await service.redeem(ACCOUNT, "req-1");
+			expect((await redemptions().findByRequestId("req-1"))?.state).toBe(
+				"refused",
+			);
+			expect(releases).toEqual([]);
+		});
+
+		it("keeps the cooldown when no usage read lands after the reset", async () => {
+			await seedRedeemable();
+			autoRefresh = async () => false;
+			manualRefresh = async () => false;
+			await service.redeem(ACCOUNT, "req-1");
+			expect(releases).toEqual([]);
+		});
+
+		it("keeps the cooldown when the read after the reset still shows the account exhausted", async () => {
+			await seedRedeemable();
+			capacity = false;
+			await service.redeem(ACCOUNT, "req-1");
+			expect(releases).toEqual([]);
+		});
+
+		it.each([
+			["lifting the cooldown fails", false],
+			["reading the capacity fails", true],
+		] as const)("still answers the reset when %s", async (_label, capacityThrows) => {
+			await seedRedeemable();
+			cachedAvailable = 1;
+			service = new CodexResetRedemptionService({
+				dbOps,
+				hasRedeemer: () => true,
+				readChatGptAccountHash: async () => "hash-a",
+				dispatch: async () => answered("reset"),
+				refreshUsage: async () => true,
+				refreshUsageManually: async () => true,
+				readAvailableCount: () => cachedAvailable,
+				hasCapacity: () => {
+					if (capacityThrows) throw new Error("usage cache unreadable");
+					return true;
+				},
+				releaseCooldown: async () => {
+					throw new Error("database is locked");
+				},
+				now: () => clock,
+			});
+			const result = await service.redeem(ACCOUNT, "req-1");
+			expect(result.status).toBe(200);
+			expect(result.body).toMatchObject({
+				state: "done",
+				outcome: "reset",
+				spend: "spent",
 			});
 		});
 	});

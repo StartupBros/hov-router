@@ -20,6 +20,8 @@ export interface CodexResetRedemptionRow {
 	requestId: string;
 	accountId: string;
 	creditId: string | null;
+	/** The ChatGPT account the request was confirmed for, hashed; null when the token named none. */
+	chatgptAccountHash: string | null;
 	state: CodexResetRedemptionRowState;
 	code: string | null;
 	windowsReset: number | null;
@@ -56,6 +58,7 @@ function toRow(row: Raw): CodexResetRedemptionRow {
 		requestId: String(row.request_id),
 		accountId: String(row.account_id),
 		creditId: text(row.credit_id),
+		chatgptAccountHash: text(row.chatgpt_account_hash),
 		state: String(row.state) as CodexResetRedemptionRowState,
 		code: text(row.code),
 		windowsReset: numOrNull(row.windows_reset),
@@ -107,19 +110,21 @@ export class CodexResetRedemptionsRepository extends BaseRepository<never> {
 		requestId: string;
 		accountId: string;
 		creditId: string | null;
+		chatgptAccountHash: string | null;
 		availableBefore: number | null;
 		at: number;
 	}): Promise<InsertPendingResult> {
 		const changes = await this.runWithChanges(
 			`INSERT INTO codex_reset_redemptions (
-				request_id, account_id, credit_id, state, available_before,
-				requested_at, attempted_at, attempts
-			) VALUES (?, ?, ?, 'pending', ?, ?, ?, 1)
+				request_id, account_id, credit_id, chatgpt_account_hash, state,
+				available_before, requested_at, attempted_at, attempts
+			) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 1)
 			ON CONFLICT DO NOTHING`,
 			[
 				input.requestId,
 				input.accountId,
 				input.creditId,
+				input.chatgptAccountHash,
 				input.availableBefore,
 				input.at,
 				input.at,
@@ -164,20 +169,24 @@ export class CodexResetRedemptionsRepository extends BaseRepository<never> {
 
 	/**
 	 * Record what the attempt claimed at `attemptedAt` learned. Applies only
-	 * while the row is still `pending` from that same attempt.
+	 * while the row is still `pending` from that same attempt. `abandoned`
+	 * closes a row the attempt found it must not send.
 	 */
 	async recordOutcome(
 		requestId: string,
 		input: {
 			attemptedAt: number;
-			state: "unknown" | "retryable" | "done" | "refused";
+			state: "unknown" | "retryable" | "done" | "refused" | "abandoned";
 			code: string | null;
 			windowsReset: number | null;
 			httpStatus: number | null;
 			at: number;
 		},
 	): Promise<number> {
-		const terminal = input.state === "done" || input.state === "refused";
+		const terminal =
+			input.state === "done" ||
+			input.state === "refused" ||
+			input.state === "abandoned";
 		return this.runWithChanges(
 			`UPDATE codex_reset_redemptions
 			 SET state = ?, code = ?, windows_reset = ?, http_status = ?,

@@ -629,6 +629,10 @@ If the server cannot record OpenAI's answer, it replies `200` with `state` `pend
 
 A request still open when two router accounts are merged is closed as `abandoned`, with outcome `abandoned`: whether it spent a reset is unknown.
 
+The server stores which ChatGPT account the account's token named when the request was recorded, as a hash. Every attempt, first or retry, is sent only while the token still names that ChatGPT account. If the account was signed in to a different ChatGPT account in between, nothing is sent: the request is closed as `abandoned` with outcome `account_changed`, and the server replies `200`. Confirm again with a new id to spend a reset on the account it now signs in to.
+
+After `reset` or `already_redeemed`, when the usage read that follows shows the account has room, the server lifts any rate-limit cooldown it recorded before the attempt, so routing uses the account again without waiting for the old reset time. A limit recorded after the attempt stays, and a paused account stays paused.
+
 `spend` is set once `state` is `done`, and judged from OpenAI's reset count rather than the reply. The server stores the count before the call and reads it again from a usage read that starts after the call:
 
 - `spent`: the count fell.
@@ -641,7 +645,7 @@ A request still open when two router accounts are merged is closed as `abandoned
 |---|---|
 | A record for this id that is `done`, `refused` or `abandoned` | `200` with the stored outcome; nothing is sent |
 | A record for this id that is `pending` and under 60 seconds old | `409 in_progress` |
-| A record for this id that is `pending` and older, `unknown` or `retryable` | Resends the same id and credit, whatever the counts now say |
+| A record for this id that is `pending` and older, `unknown` or `retryable` | Resends the same id and credit, whatever the counts now say, unless the account now signs in to a different ChatGPT account |
 | A different id still open on this account | `409 open_request` with `openRequestId`; retry with that id |
 | Counts more than 10 minutes old, or no reset applies now | `409 counts_stale` or `409 not_applicable`; nothing is sent |
 | Otherwise | Records the id as `pending`, then calls OpenAI |

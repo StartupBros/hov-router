@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
 	CodexResetCreditRow,
 	CodexResetCreditState,
@@ -9,6 +8,7 @@ import { Logger } from "@better-ccflare/logger";
 import {
 	type CodexResetCredit,
 	type CodexResetCreditListResult,
+	hashChatGptAccountId,
 	nonNegativeIntegerOrNull,
 } from "@better-ccflare/providers";
 
@@ -58,10 +58,6 @@ export function readResetCreditCounts(data: unknown): ObservedCounts {
 
 function codexWaveId(at: number): string {
 	return `codex:${new Date(at).toISOString().slice(0, 16)}Z`;
-}
-
-function hashChatGptAccountId(id: string): string {
-	return createHash("sha256").update(id).digest("hex");
 }
 
 /** Soonest expiry among available credits, optionally only those after `after`. */

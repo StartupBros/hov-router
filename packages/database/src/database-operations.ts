@@ -1575,6 +1575,25 @@ OAuth tokens will need to be re-authenticated.
 		);
 	}
 
+	/**
+	 * Clear a cooldown whose latest rate limit was observed before
+	 * `observedBefore`; true when one was cleared. A later one is kept.
+	 */
+	async clearRateLimitObservedBefore(
+		accountId: string,
+		observedBefore: number,
+	): Promise<boolean> {
+		return withDatabaseRetry(
+			async () =>
+				(await this.accounts.clearRateLimitStateObservedBefore(
+					accountId,
+					observedBefore,
+				)) > 0,
+			this.retryConfig,
+			"clearRateLimitObservedBefore",
+		);
+	}
+
 	async pauseAccount(accountId: string, reason = "manual"): Promise<void> {
 		await this.accounts.pause(accountId, reason);
 	}

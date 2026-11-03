@@ -19,6 +19,7 @@ const pending = (
 	requestId,
 	accountId,
 	creditId,
+	chatgptAccountHash: "hash-a",
 	availableBefore: 2,
 	at: 10_000,
 });
@@ -48,6 +49,7 @@ describe("codex_reset_redemptions table", () => {
 			expect.arrayContaining([
 				"account_id",
 				"credit_id",
+				"chatgpt_account_hash",
 				"state",
 				"code",
 				"windows_reset",
@@ -111,6 +113,7 @@ describe("codex_reset_redemptions table", () => {
 			requestId: "req-1",
 			accountId: "acc-1",
 			creditId: "credit-a",
+			chatgptAccountHash: "hash-a",
 			state: "pending",
 			availableBefore: 2,
 			requestedAt: 10_000,
@@ -121,12 +124,51 @@ describe("codex_reset_redemptions table", () => {
 
 		const again = await repo.insertPending({
 			...pending("req-1"),
+			chatgptAccountHash: "hash-b",
 			availableBefore: 1,
 			at: 20_000,
 		});
 		expect(again.result).toBe("exists");
 		expect(again.row?.availableBefore).toBe(2);
 		expect(again.row?.requestedAt).toBe(10_000);
+		expect(again.row?.chatgptAccountHash).toBe("hash-a");
+	});
+
+	it("stores a request whose token named no ChatGPT account with a null hash", async () => {
+		const created = await repo.insertPending({
+			...pending("req-1"),
+			chatgptAccountHash: null,
+		});
+		expect(created.row?.chatgptAccountHash).toBeNull();
+	});
+
+	it("closes a row as abandoned and frees the account for a new request", async () => {
+		await repo.insertPending(pending("req-1"));
+		const row = await repo.findByRequestId("req-1");
+		expect(
+			await repo.recordOutcome("req-1", {
+				attemptedAt: row?.attemptedAt ?? 0,
+				state: "abandoned",
+				code: "account_changed",
+				windowsReset: null,
+				httpStatus: null,
+				at: 12_000,
+			}),
+		).toBe(1);
+		expect(await repo.findByRequestId("req-1")).toMatchObject({
+			state: "abandoned",
+			code: "account_changed",
+			completedAt: 12_000,
+		});
+		expect(await repo.findOpenForAccount("acc-1")).toBeNull();
+		expect(
+			await repo.claimResend("req-1", {
+				expectedState: "abandoned",
+				expectedAttemptedAt: row?.attemptedAt ?? 0,
+				at: 13_000,
+			}),
+		).toBe(0);
+		expect((await repo.insertPending(pending("req-2"))).result).toBe("created");
 	});
 
 	it("reports the same request id with a different account or credit as a conflict", async () => {

@@ -1,7 +1,10 @@
+import { isUsageExhausted } from "@better-ccflare/core";
 import type { DatabaseOperations } from "@better-ccflare/database";
 import { errorResponse, jsonResponse } from "@better-ccflare/http-common";
 import { Logger } from "@better-ccflare/logger";
 import {
+	chatGptAccountHashOf,
+	getRepresentativeUsageSnapshotForProvider,
 	isCodexSubscriptionEndpoint,
 	resolveCodexEndpoint,
 	usageCache,
@@ -67,6 +70,12 @@ export function defaultRedemptionDeps(
 	return {
 		dbOps,
 		hasRedeemer: hasCodexResetRedeemer,
+		readChatGptAccountHash: async (accountId) => {
+			const account = await dbOps.getAccount(accountId);
+			return account?.access_token
+				? chatGptAccountHashOf(account.access_token)
+				: null;
+		},
 		dispatch: redeemCodexResetCreditForAccount,
 		refreshUsage: (accountId) =>
 			usageCache.refreshNow(accountId, { awaitInFlight: true }),
@@ -75,6 +84,24 @@ export function defaultRedemptionDeps(
 				.success,
 		readAvailableCount: (accountId) =>
 			readAvailableCountFromUsage(usageCache.get(accountId)),
+		hasCapacity: (accountId) => {
+			const data = usageCache.get(accountId);
+			const snapshot = data
+				? getRepresentativeUsageSnapshotForProvider(data, "codex")
+				: null;
+			return (
+				snapshot !== null &&
+				!isUsageExhausted(snapshot.utilization, snapshot.resetMs, Date.now())
+			);
+		},
+		releaseCooldown: async (accountId, observedBefore) => {
+			if (await dbOps.clearRateLimitObservedBefore(accountId, observedBefore)) {
+				log.info(
+					`Reset redemption lifted the earlier cooldown on account ${accountId}`,
+				);
+			}
+			usageCache.clearReactiveScopedDepletions(accountId);
+		},
 		now: () => Date.now(),
 	};
 }

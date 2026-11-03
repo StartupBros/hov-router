@@ -92,6 +92,8 @@ function outcomeSentence(response: RedeemResetResponse): string {
 			return "OpenAI refused the router's request. Nothing is known to be spent.";
 		case "abandoned":
 			return "This request was closed when its account was merged into another, so its outcome is not known.";
+		case "account_changed":
+			return "This account now signs in to a different ChatGPT account, so this request was closed and nothing was sent. Open Use reset again to confirm for the current account.";
 	}
 }
 

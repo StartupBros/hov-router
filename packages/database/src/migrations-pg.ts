@@ -333,6 +333,7 @@ async function ensureCodexResetRedemptionsSchemaPg(
 			request_id TEXT PRIMARY KEY,
 			account_id TEXT NOT NULL,
 			credit_id TEXT,
+			chatgpt_account_hash TEXT,
 			state TEXT NOT NULL CHECK (state IN (
 				'pending', 'unknown', 'retryable', 'done', 'refused', 'abandoned'
 			)),

@@ -85,6 +85,7 @@ import {
 	CacheAffinityOrderer,
 	CacheKeepaliveScheduler,
 	CohortSealService,
+	codexTokenNamesAccount,
 	configurePendingRotationPersistence,
 	createAnthropicDegradedDetailedEventSink,
 	createAnthropicDegradedRuntimeHealth,
@@ -2255,35 +2256,46 @@ export default async function startServer(options?: {
 	// when that fails rather than falling back to the stored token. A 401 from
 	// OpenAI refreshes the token so the next attempt sends a new one. Anything
 	// that stops it before the consume call reports `sent: false`, so the
-	// caller knows nothing reached OpenAI.
-	registerCodexResetRedeemer(serverId, async (accountId, request) => {
-		const account = await dbOps.getAccount(accountId);
-		if (!account) return { sent: false, reason: "account_not_found" };
-		if (account.provider !== "codex") {
-			return { sent: false, reason: "not_codex" };
-		}
-		if (
-			!isCodexSubscriptionEndpoint(
-				resolveCodexEndpoint(account.custom_endpoint, account.name),
-			)
-		) {
-			return { sent: false, reason: "custom_endpoint" };
-		}
-		let accessToken: string;
-		try {
-			accessToken = await getValidAccessToken(account, proxyContext);
-		} catch {
-			log.warn(
-				`Reset redemption: no valid access token for account ${account.name}; nothing was sent`,
-			);
-			return { sent: false, reason: "token_unavailable" };
-		}
-		const result = await consumeCodexResetCredit(accessToken, request);
-		if (result.kind === "http" && result.status === 401) {
-			await refreshTokenAfterRejectedRedemption(account, proxyContext);
-		}
-		return { sent: true, result };
-	});
+	// caller knows nothing reached OpenAI. The token must still name the
+	// ChatGPT account the request was confirmed for; a re-login to another
+	// account sends nothing.
+	registerCodexResetRedeemer(
+		serverId,
+		async (accountId, request, expectedChatGptAccountHash) => {
+			const account = await dbOps.getAccount(accountId);
+			if (!account) return { sent: false, reason: "account_not_found" };
+			if (account.provider !== "codex") {
+				return { sent: false, reason: "not_codex" };
+			}
+			if (
+				!isCodexSubscriptionEndpoint(
+					resolveCodexEndpoint(account.custom_endpoint, account.name),
+				)
+			) {
+				return { sent: false, reason: "custom_endpoint" };
+			}
+			let accessToken: string;
+			try {
+				accessToken = await getValidAccessToken(account, proxyContext);
+			} catch {
+				log.warn(
+					`Reset redemption: no valid access token for account ${account.name}; nothing was sent`,
+				);
+				return { sent: false, reason: "token_unavailable" };
+			}
+			if (!codexTokenNamesAccount(accessToken, expectedChatGptAccountHash)) {
+				log.warn(
+					`Reset redemption: account ${account.name} now signs in to a different ChatGPT account than the request was confirmed for; nothing was sent`,
+				);
+				return { sent: false, reason: "account_changed" };
+			}
+			const result = await consumeCodexResetCredit(accessToken, request);
+			if (result.kind === "http" && result.status === 401) {
+				await refreshTokenAfterRejectedRedemption(account, proxyContext);
+			}
+			return { sent: true, result };
+		},
+	);
 
 	// Register this server's codex usage refresher. Subscription-backend
 	// accounts try the free wham/usage introspection endpoint first (see
