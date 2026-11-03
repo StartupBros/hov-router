@@ -397,8 +397,13 @@ export function RequestsTab() {
 								<span className="absolute -top-1 -right-1 h-2 w-2 bg-primary rounded-full animate-pulse" />
 							)}
 						</Button>
-						<Button onClick={() => loadRequests()} variant="ghost" size="icon">
-							<RefreshCw className="h-4 w-4" />
+						<Button
+							onClick={() => loadRequests()}
+							variant="ghost"
+							size="icon"
+							aria-label="Refresh requests"
+						>
+							<RefreshCw className="h-4 w-4" aria-hidden="true" />
 						</Button>
 					</div>
 				</div>
