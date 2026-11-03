@@ -515,7 +515,7 @@ Routing honors the flag only while fresh, poll-verified credit evidence exists (
 
 OpenAI grants ChatGPT accounts banked rate-limit resets that can be redeemed later. HoV Router reads the reset counts from each Codex usage poll and reads the per-credit list only when the counts change or the stored list is stale. Reading never spends a reset.
 
-`GET /api/accounts` adds `bankedResets` to every Codex account. Other providers carry no such field.
+`GET /api/accounts` adds `bankedResets` to every Codex account. Other providers carry no such field. If the router cannot read its stored reset data, the accounts list still returns and the field is left off every account for that response.
 
 ```json
 {

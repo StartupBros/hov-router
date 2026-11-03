@@ -346,6 +346,88 @@ describe("CodexResetCreditObserver", () => {
 		expect(state?.countsPresent).toBe(false);
 		expect(state?.availableCount).toBeNull();
 	});
+
+	it("keeps the last counts and marks them stale when a later poll lacks the credit fields", async () => {
+		answer("acct-1", listed([credit("c1", WAVE_ONE), credit("c2", WAVE_TWO)]));
+		await observer.observeUsageData("acct-1", counts(2, 2));
+		const countedAt = clock;
+
+		clock += 2 * MINUTE;
+		await observer.observeSnapshot({
+			accountId: "acct-1",
+			provider: "codex",
+			data: { five_hour: null },
+		});
+
+		expect(reads).toHaveLength(1);
+		const state = await repo().getState("acct-1");
+		if (!state) throw new Error("missing state");
+		expect(state.countsPresent).toBe(false);
+		expect(state.availableCount).toBe(2);
+		expect(state.applicableCount).toBe(2);
+		expect(state.countsObservedAt).toBe(countedAt);
+		const live = await repo().listCredits("acct-1", { includeVanished: false });
+		const view = assessBankedResets(state, live, clock);
+		expect(view.stale).toBe(true);
+		expect(view.availableCount).toBe(2);
+		expect(view.applicableCount).toBe(2);
+	});
+
+	it("records a list read that throws as a failure and keeps the counts", async () => {
+		// No scripted answer, so the reader throws.
+		await observer.observeUsageData("acct-1", counts(2, 2));
+
+		expect(reads).toHaveLength(1);
+		const state = await repo().getState("acct-1");
+		expect(state?.listFailingSince).toBe(START);
+		expect(state?.lastListAttemptAt).toBe(START);
+		expect(state?.lastListSuccessAt).toBeNull();
+		expect(state?.availableCount).toBe(2);
+	});
+
+	it("re-reads once when a stored expiry passes, not on every poll while the list still offers the credit", async () => {
+		const lapsing = credit("lapsing", WAVE_ONE, { expiresAt: START + HOUR });
+		answer("acct-1", listed([lapsing, credit("keep", WAVE_TWO)]));
+		await observer.observeUsageData("acct-1", counts(2, 2));
+		expect(reads).toHaveLength(1);
+
+		// The expiry passes and OpenAI still lists the credit as available.
+		clock = START + HOUR + MINUTE;
+		answer("acct-1", listed([lapsing, credit("keep", WAVE_TWO)]));
+		await observer.observeUsageData("acct-1", counts(2, 2));
+		expect(reads).toHaveLength(2);
+
+		for (let poll = 0; poll < 3; poll++) {
+			clock += 90_000;
+			await observer.observeUsageData("acct-1", counts(2, 2));
+		}
+		expect(reads).toHaveLength(2);
+		expect((await repo().getState("acct-1"))?.listFailingSince).toBeNull();
+	});
+
+	it("re-reads when a later expiry passes while an earlier expired credit is still listed", async () => {
+		const first = credit("first", WAVE_ONE, { expiresAt: START + HOUR });
+		const second = credit("second", WAVE_ONE, { expiresAt: START + 2 * HOUR });
+		const both = () => listed([first, second]);
+		answer("acct-1", both());
+		await observer.observeUsageData("acct-1", counts(2, 2));
+
+		clock = START + HOUR + MINUTE;
+		answer("acct-1", both());
+		await observer.observeUsageData("acct-1", counts(2, 2));
+		expect(reads).toHaveLength(2);
+
+		// The earlier credit is still listed as available, and now the later one
+		// lapses too: its expiry must trigger a read of its own.
+		clock = START + 2 * HOUR + MINUTE;
+		answer("acct-1", both());
+		await observer.observeUsageData("acct-1", counts(2, 2));
+		expect(reads).toHaveLength(3);
+
+		clock += 90_000;
+		await observer.observeUsageData("acct-1", counts(2, 2));
+		expect(reads).toHaveLength(3);
+	});
 });
 
 describe("assessBankedResets", () => {

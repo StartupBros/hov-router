@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { Config } from "@better-ccflare/config";
 import { DatabaseOperations } from "@better-ccflare/database";
 import type {
@@ -227,6 +227,26 @@ describe("bankedResets on the accounts list", () => {
 			stale: true,
 			observedAt: null,
 		});
+	});
+
+	it("still lists accounts, without the field, when the reset tables cannot be read", async () => {
+		await insertAccount("ae1", "codex");
+		await observe("ae1", { available: 2, applicable: 2, expiries: [NOV_30] });
+		const failing = spyOn(
+			dbOps.getCodexResetCreditsRepository(),
+			"listAllStates",
+		).mockRejectedValue(new Error("database is locked"));
+
+		try {
+			const response = await createAccountsListHandler(dbOps, CONFIG)();
+			expect(response.status).toBe(200);
+			const rows = JSON.parse(await response.text()) as AccountResponse[];
+			const row = rows.find((candidate) => candidate.id === "ae1");
+			expect(row).toBeDefined();
+			expect("bankedResets" in (row ?? {})).toBe(false);
+		} finally {
+			failing.mockRestore();
+		}
 	});
 });
 

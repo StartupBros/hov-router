@@ -59,11 +59,16 @@ function hashChatGptAccountId(id: string): string {
 	return createHash("sha256").update(id).digest("hex");
 }
 
-function soonestAvailableExpiry(credits: CodexResetCreditRow[]): number | null {
+/** Soonest expiry among available credits, optionally only those after `after`. */
+function soonestAvailableExpiry(
+	credits: CodexResetCreditRow[],
+	after: number | null = null,
+): number | null {
 	let soonest: number | null = null;
 	for (const credit of credits) {
 		if (credit.vanishedAt != null || credit.status !== "available") continue;
 		if (credit.expiresAt == null) continue;
+		if (after !== null && credit.expiresAt <= after) continue;
 		if (soonest === null || credit.expiresAt < soonest) {
 			soonest = credit.expiresAt;
 		}
@@ -136,7 +141,9 @@ function shouldReadList(
 		return true;
 	}
 	if (now - previous.lastListSuccessAt >= LIST_REFRESH_AFTER_MS) return true;
-	const soonest = soonestAvailableExpiry(live);
+	// Only an expiry that passed since the last read triggers one: a credit
+	// OpenAI still lists after its expiry must not make every poll re-read.
+	const soonest = soonestAvailableExpiry(live, previous.lastListSuccessAt);
 	return soonest !== null && soonest <= now;
 }
 
