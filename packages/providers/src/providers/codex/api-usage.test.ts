@@ -4,6 +4,7 @@ import {
 	CODEX_WHAM_USAGE_FALLBACK_ENDPOINT,
 	extractChatGptAccountId,
 	fetchCodexUsageData,
+	mapWhamUsageResponse,
 	resetCodexUsageEndpointForTest,
 } from "./api-usage";
 
@@ -378,6 +379,28 @@ describe("fetchCodexUsageData", () => {
 		expect((await fetchCodexUsageData(ACCOUNT_TOKEN)).data).toBeNull();
 	});
 
+	it("keeps reset counts from a recognized windowless response", async () => {
+		globalThis.fetch = mock(async () =>
+			Response.json({
+				rate_limit: { allowed: true, limit_reached: false },
+				rate_limit_reset_credits: {
+					available_count: 2,
+					applicable_available_count: 2,
+				},
+			}),
+		) as unknown as typeof fetch;
+		const result = await fetchCodexUsageData(
+			ACCOUNT_TOKEN,
+			undefined,
+			"acct-123",
+		);
+		expect(result.data?.reset_credits_available_count).toBe(2);
+		expect(result.data?.reset_credits_applicable_count).toBe(2);
+		expect(result.data?.reset_credits_present).toBe(true);
+		expect(result.data?.five_hour).toBeUndefined();
+		expect((await fetchCodexUsageData(ACCOUNT_TOKEN)).data).toBeNull();
+	});
+
 	it("retries at the flipped path on a 404 and succeeds within the same call", async () => {
 		const calls: string[] = [];
 		const fetchMock = mock(async (input: RequestInfo | URL) => {
@@ -576,5 +599,113 @@ describe("fetchCodexUsageData", () => {
 		await fetchCodexUsageData(NO_CLAIM_TOKEN);
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("mapWhamUsageResponse reset credit counts", () => {
+	const windowed = { rate_limit: { primary_window: { used_percent: 10 } } };
+	const keys = [
+		"reset_credits_available_count",
+		"reset_credits_applicable_count",
+		"reset_credits_present",
+	];
+
+	it("maps both counts and the presence flag", () => {
+		const data = mapWhamUsageResponse({
+			...windowed,
+			rate_limit_reset_credits: {
+				available_count: 2,
+				applicable_available_count: 2,
+			},
+		});
+		expect(data?.reset_credits_available_count).toBe(2);
+		expect(data?.reset_credits_applicable_count).toBe(2);
+		expect(data?.reset_credits_present).toBe(true);
+	});
+
+	it("maps a missing applicable count to null, not 0", () => {
+		const data = mapWhamUsageResponse({
+			...windowed,
+			rate_limit_reset_credits: { available_count: 3 },
+		});
+		expect(data?.reset_credits_available_count).toBe(3);
+		expect(data?.reset_credits_applicable_count).toBeNull();
+		expect(data?.reset_credits_present).toBe(true);
+	});
+
+	it("keeps a genuine zero", () => {
+		const data = mapWhamUsageResponse({
+			...windowed,
+			rate_limit_reset_credits: {
+				available_count: 2,
+				applicable_available_count: 0,
+			},
+		});
+		expect(data?.reset_credits_applicable_count).toBe(0);
+	});
+
+	it.each([
+		[1.5],
+		["2"],
+		[-1],
+		[Number.NaN],
+		[null],
+	])("maps %p to null", (bad) => {
+		const data = mapWhamUsageResponse({
+			...windowed,
+			rate_limit_reset_credits: {
+				available_count: bad,
+				applicable_available_count: bad,
+			},
+		} as never);
+		expect(data?.reset_credits_available_count).toBeNull();
+		expect(data?.reset_credits_applicable_count).toBeNull();
+		expect(data?.reset_credits_present).toBe(true);
+	});
+
+	it.each([
+		[undefined],
+		[null],
+		["x"],
+		[[]],
+	])("sets none of the keys when the object is %p", (value) => {
+		const data = mapWhamUsageResponse({
+			...windowed,
+			rate_limit_reset_credits: value,
+		} as never);
+		for (const key of keys) expect(key in (data ?? {})).toBe(false);
+	});
+});
+
+describe("fetchCodexUsageData request headers", () => {
+	it("sends exactly bearer, accept, user agent and both account headers", async () => {
+		const previousFetch = globalThis.fetch;
+		let seen: Record<string, string> = {};
+		try {
+			resetCodexUsageEndpointForTest();
+			globalThis.fetch = (async (_input, init) => {
+				seen = Object.fromEntries(
+					new Headers(init?.headers as HeadersInit).entries(),
+				);
+				return Response.json({
+					rate_limit: { primary_window: { used_percent: 1 } },
+				});
+			}) as typeof globalThis.fetch;
+			await fetchCodexUsageData(ACCOUNT_TOKEN);
+			expect(Object.keys(seen).sort()).toEqual([
+				"accept",
+				"authorization",
+				"chatgpt-account-id",
+				"user-agent",
+				"x-account-id",
+			]);
+			expect(seen.authorization).toBe(`Bearer ${ACCOUNT_TOKEN}`);
+			expect(seen["chatgpt-account-id"]).toBe("acct-123");
+			expect(seen["x-account-id"]).toBe("acct-123");
+			expect(seen.accept).toBe("application/json");
+		} finally {
+			globalThis.fetch = previousFetch;
+			resetCodexUsageEndpointForTest();
+		}
 	});
 });

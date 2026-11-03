@@ -11,6 +11,7 @@ import type {
 	AgentWorkspace,
 	AnalyticsResponse,
 	AnomalyInsightsResponse,
+	BankedResetsSummary,
 	CacheInsightsResponse,
 	CleanupResponse,
 	Combo,
@@ -417,6 +418,10 @@ class API extends HttpClient {
 			});
 			throw error;
 		}
+	}
+
+	async getBankedResets(): Promise<BankedResetsSummary> {
+		return this.get<BankedResetsSummary>("/api/banked-resets");
 	}
 
 	async initAddAccount(data: {

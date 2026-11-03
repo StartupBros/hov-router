@@ -4,6 +4,7 @@ export {
 	extractChatGptAccountId,
 	fetchCodexUsageData,
 	mapWhamUsageResponse,
+	nonNegativeIntegerOrNull,
 	resetCodexUsageEndpointForTest,
 } from "./api-usage";
 export type { CodexClientIdentity } from "./client-identity";
@@ -50,5 +51,10 @@ export {
 	resolveCodexRequestModel,
 	suppressCodexExplicitCacheBreakpoint,
 } from "./provider";
+export type {
+	CodexResetCredit,
+	CodexResetCreditListResult,
+} from "./reset-credits";
+export { fetchCodexResetCredits } from "./reset-credits";
 export { readCodexTurnStateConfig } from "./turn-state";
 export { parseCodexUsageHeaders } from "./usage";

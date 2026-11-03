@@ -58,6 +58,12 @@ export {
 } from "./repositories/cache-flight-recorder.repository";
 export { CacheHealthRepository } from "./repositories/cache-health.repository";
 export {
+	type CodexResetCreditRow,
+	type CodexResetCreditState,
+	CodexResetCreditsRepository,
+	type CodexResetCreditVanishReason,
+} from "./repositories/codex-reset-credits.repository";
+export {
 	type CreateDeviceSetupJobInput,
 	type CreateDeviceSetupJobResult,
 	DEVICE_SETUP_JOB_STATUSES,

@@ -229,6 +229,76 @@ describe("manual Codex metadata refresh (fake transport)", () => {
 		expect(calls[0]).toContain("/usage");
 	});
 
+	it("hands the account and its fresh reset counts to the reset-credit observer", async () => {
+		globalThis.fetch = (async () =>
+			Response.json({
+				rate_limit: {
+					allowed: true,
+					limit_reached: false,
+					primary_window: window(12),
+					secondary_window: window(55),
+				},
+				rate_limit_reset_credits: {
+					available_count: 2,
+					applicable_available_count: 1,
+				},
+			})) as typeof fetch;
+		const seen: { accountId: string; data: unknown }[] = [];
+		const result = await refreshCodexUsageFromMetadata(
+			account,
+			"fake-token",
+			{ getAccount: async () => account },
+			{ run: async () => {} },
+			{ info: () => {}, warn: () => {} },
+			{
+				observeUsageData: async (accountId, data) => {
+					seen.push({ accountId, data });
+				},
+			},
+		);
+		expect(result?.success).toBe(true);
+		expect(seen).toHaveLength(1);
+		expect(seen[0].accountId).toBe(account.id);
+		expect(seen[0].data).toMatchObject({
+			reset_credits_available_count: 2,
+			reset_credits_applicable_count: 1,
+			reset_credits_present: true,
+		});
+	});
+
+	it("does not reach the observer when the endpoint switched during the refresh", async () => {
+		globalThis.fetch = (async () =>
+			Response.json({
+				rate_limit: {
+					allowed: true,
+					limit_reached: false,
+					primary_window: window(12),
+					secondary_window: window(55),
+				},
+				rate_limit_reset_credits: { available_count: 2 },
+			})) as typeof fetch;
+		const seen: string[] = [];
+		const result = await refreshCodexUsageFromMetadata(
+			account,
+			"fake-token",
+			{
+				getAccount: async () => ({
+					...account,
+					custom_endpoint: "https://example.invalid/v1",
+				}),
+			},
+			{ run: async () => {} },
+			{ info: () => {}, warn: () => {} },
+			{
+				observeUsageData: async (accountId) => {
+					seen.push(accountId);
+				},
+			},
+		);
+		expect(result?.success).toBe(false);
+		expect(seen).toEqual([]);
+	});
+
 	it("returns the fallback signal only when metadata actually fails", async () => {
 		globalThis.fetch = (async () =>
 			new Response("unavailable", { status: 503 })) as typeof fetch;

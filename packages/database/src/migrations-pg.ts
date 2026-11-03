@@ -274,6 +274,56 @@ async function ensureServerToolReplayIssuanceSchemaPg(
 	`);
 }
 
+async function ensureCodexResetCreditsSchemaPg(
+	adapter: BunSqlAdapter,
+): Promise<void> {
+	await adapter.unsafe(`
+		CREATE TABLE IF NOT EXISTS codex_reset_credit_state (
+			account_id TEXT PRIMARY KEY,
+			available_count INTEGER,
+			applicable_available_count INTEGER,
+			counts_present INTEGER NOT NULL DEFAULT 0,
+			counts_observed_at BIGINT,
+			listed_available_count INTEGER,
+			listed_applicable_count INTEGER,
+			last_list_success_at BIGINT,
+			last_list_attempt_at BIGINT,
+			list_failing_since BIGINT,
+			baseline_at BIGINT,
+			chatgpt_account_hash TEXT,
+			updated_at BIGINT NOT NULL,
+			FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+		)
+	`);
+	await adapter.unsafe(`
+		CREATE TABLE IF NOT EXISTS codex_reset_credits (
+			account_id TEXT NOT NULL,
+			credit_id TEXT NOT NULL,
+			reset_type TEXT,
+			status TEXT NOT NULL,
+			granted_at BIGINT,
+			expires_at BIGINT,
+			title TEXT,
+			description TEXT,
+			first_seen_at BIGINT NOT NULL,
+			last_seen_at BIGINT NOT NULL,
+			is_baseline INTEGER NOT NULL DEFAULT 0,
+			wave_id TEXT,
+			vanished_at BIGINT,
+			vanish_reason TEXT,
+			PRIMARY KEY (account_id, credit_id)
+		)
+	`);
+	await adapter.unsafe(
+		`CREATE INDEX IF NOT EXISTS idx_codex_reset_credits_account_status
+		 ON codex_reset_credits(account_id, status)`,
+	);
+	await adapter.unsafe(
+		`CREATE INDEX IF NOT EXISTS idx_codex_reset_credits_wave
+		 ON codex_reset_credits(wave_id)`,
+	);
+}
+
 /**
  * PostgreSQL mirror of the SQLite usage_windows table (see migrations.ts
  * ensureSchema for rationale). Column names are kept in exact parity with
@@ -869,6 +919,7 @@ export async function ensureSchemaPg(adapter: BunSqlAdapter): Promise<void> {
 	await ensureDeviceSetupJobsSchemaPg(adapter);
 	await ensureQualityRouteSchemaPg(adapter);
 	await ensureServerToolReplayIssuanceSchemaPg(adapter);
+	await ensureCodexResetCreditsSchemaPg(adapter);
 	await ensureUsageWindowsSchemaPg(adapter);
 
 	// Create agent_preferences table
@@ -1636,6 +1687,31 @@ export async function collapseAccountDuplicatesPreservingStatePg(
 				[survivor.id, ...discardedIds],
 			);
 
+			// codex_reset_credits has no FK, so a missed repoint would leave rows
+			// pointing at a deleted id. Its PRIMARY KEY (account_id, credit_id)
+			// can collide when duplicates saw the same credit, so drop discarded
+			// rows another row in the merged set already covers (survivor first,
+			// else the lowest account id), then repoint the rest.
+			await adapter.runWithChanges(
+				`DELETE FROM codex_reset_credits
+				 WHERE account_id IN (${idListPlaceholders})
+				   AND EXISTS (
+				     SELECT 1 FROM codex_reset_credits AS keeper
+				     WHERE keeper.credit_id = codex_reset_credits.credit_id
+				       AND keeper.account_id <> codex_reset_credits.account_id
+				       AND (
+				         keeper.account_id = $1
+				         OR (keeper.account_id IN (${idListPlaceholders})
+				             AND keeper.account_id < codex_reset_credits.account_id)
+				       )
+				   )`,
+				[survivor.id, ...discardedIds],
+			);
+			await adapter.runWithChanges(
+				`UPDATE codex_reset_credits SET account_id = $1 WHERE account_id IN (${idListPlaceholders})`,
+				[survivor.id, ...discardedIds],
+			);
+
 			const idPlaceholders = discardedIds.map((_, i) => `$${i + 1}`).join(",");
 			const deleted = await adapter.runWithChanges(
 				`DELETE FROM accounts WHERE id IN (${idPlaceholders})`,
@@ -2065,6 +2141,7 @@ export async function runMigrationsPg(adapter: BunSqlAdapter): Promise<void> {
 	await ensureDeviceSetupJobsSchemaPg(adapter);
 	await ensureQualityRouteSchemaPg(adapter);
 	await ensureServerToolReplayIssuanceSchemaPg(adapter);
+	await ensureCodexResetCreditsSchemaPg(adapter);
 	await ensureUsageWindowsSchemaPg(adapter);
 
 	// Performance indexes — mirrors packages/database/src/performance-indexes.ts

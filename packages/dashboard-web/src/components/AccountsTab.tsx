@@ -7,6 +7,7 @@ import {
 	FULL_MANAGED_ROUTING_INVALIDATION,
 	useAccountRoutingOverview,
 	useAccounts,
+	useBankedResets,
 	useForceResetRateLimit,
 	useManagedRoutingInvalidation,
 	usePauseAccount,
@@ -28,6 +29,7 @@ import {
 	AccountModelMappingsDialog,
 	AccountPriorityDialog,
 	AnthropicReauthDialog,
+	BankedResetsSummary,
 	CodexReauthDialog,
 	DeleteConfirmationDialog,
 	PublicValueDialog,
@@ -239,6 +241,7 @@ export function AccountsTab() {
 		refetch: loadAccounts,
 	} = useAccounts();
 	const { data: routingOverview } = useAccountRoutingOverview();
+	const { data: bankedResets } = useBankedResets();
 	const routingByAccountId = buildRoutingByAccountId(
 		accounts?.map((account) => account.id) ?? [],
 		routingOverview,
@@ -850,6 +853,7 @@ export function AccountsTab() {
 						/>
 					)}
 
+					<BankedResetsSummary summary={bankedResets} />
 					<AccountList
 						accounts={accounts}
 						routingByAccountId={routingByAccountId}
