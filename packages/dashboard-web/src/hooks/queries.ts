@@ -321,7 +321,6 @@ export const useAccounts = () => {
 	});
 };
 
-/** Fleet summary of banked Codex resets, on the accounts cadence. */
 export const useBankedResets = () => {
 	return useQuery({
 		queryKey: queryKeys.bankedResets(),

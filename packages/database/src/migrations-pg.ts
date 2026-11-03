@@ -277,7 +277,6 @@ async function ensureServerToolReplayIssuanceSchemaPg(
 async function ensureCodexResetCreditsSchemaPg(
 	adapter: BunSqlAdapter,
 ): Promise<void> {
-	// One row per Codex account. Cascades with the account.
 	await adapter.unsafe(`
 		CREATE TABLE IF NOT EXISTS codex_reset_credit_state (
 			account_id TEXT PRIMARY KEY,
@@ -296,7 +295,6 @@ async function ensureCodexResetCreditsSchemaPg(
 			FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 		)
 	`);
-	// One row per (account, credit). No FK: history outlives a removed account.
 	await adapter.unsafe(`
 		CREATE TABLE IF NOT EXISTS codex_reset_credits (
 			account_id TEXT NOT NULL,

@@ -51,6 +51,7 @@ export {
 	isCodexResponseIdRejectionError,
 	isCodexSubscriptionEndpoint,
 	mapWhamUsageResponse,
+	nonNegativeIntegerOrNull,
 	parseCodexUsageHeaders,
 	readCodexCacheKeyContinuityPercent,
 	readCodexCacheKeyPrefixShardPercent,

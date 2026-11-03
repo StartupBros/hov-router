@@ -12,7 +12,6 @@ export function formatBankedResetExpiry(atMs: number): string {
 	return EXPIRY_DATE_FORMATTER.format(atMs);
 }
 
-/** Full local expiry time, for hover text. */
 export function describeBankedResetExpiry(atMs: number): string {
 	return `Expires ${new Date(atMs).toLocaleString()} (your local time)`;
 }
@@ -20,10 +19,6 @@ export function describeBankedResetExpiry(atMs: number): string {
 const STALE_PILL_CLASS =
 	"inline-flex items-center whitespace-nowrap rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400";
 
-/**
- * Fleet view of banked Codex resets, above the account list. Renders nothing
- * until the summary loads or when no Codex account is tracked.
- */
 export function BankedResetsSummary({
 	summary,
 }: {

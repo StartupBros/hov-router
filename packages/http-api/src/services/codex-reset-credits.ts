@@ -6,9 +6,10 @@ import type {
 	DatabaseOperations,
 } from "@better-ccflare/database";
 import { Logger } from "@better-ccflare/logger";
-import type {
-	CodexResetCredit,
-	CodexResetCreditListResult,
+import {
+	type CodexResetCredit,
+	type CodexResetCreditListResult,
+	nonNegativeIntegerOrNull,
 } from "@better-ccflare/providers";
 
 const log = new Logger("CodexResetCredits");
@@ -16,15 +17,10 @@ const log = new Logger("CodexResetCredits");
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 
-/** Counts older than this no longer describe the account. */
-export const RESET_COUNTS_STALE_AFTER_MS = 10 * MINUTE_MS;
-/** List reads failing for longer than this make the stored credits stale. */
-export const RESET_LIST_STALE_AFTER_MS = 12 * HOUR_MS;
-/** Unchanged counts still re-read the list this often, to catch swaps. */
+const RESET_COUNTS_STALE_AFTER_MS = 10 * MINUTE_MS;
+const RESET_LIST_STALE_AFTER_MS = 12 * HOUR_MS;
 const LIST_REFRESH_AFTER_MS = 6 * HOUR_MS;
-/** A failed list read is retried no sooner than this, unless counts change. */
 const LIST_RETRY_AFTER_MS = 15 * MINUTE_MS;
-/** A new credit joins a wave holding a credit granted within this distance. */
 const WAVE_JOIN_WINDOW_MS = HOUR_MS;
 
 /** Reads one router account's credit list; the server owns token handling. */
@@ -38,26 +34,24 @@ interface ObservedCounts {
 	applicableCount: number | null;
 }
 
-/** Counts from a Codex usage-data object; absent unless the poll carried them. */
-export function readResetCreditCounts(data: unknown): ObservedCounts {
+function readResetCreditCounts(data: unknown): ObservedCounts {
 	const record =
 		data && typeof data === "object" ? (data as Record<string, unknown>) : {};
 	if (record.reset_credits_present !== true) {
 		return { present: false, availableCount: null, applicableCount: null };
 	}
-	const count = (value: unknown) =>
-		typeof value === "number" && Number.isInteger(value) && value >= 0
-			? value
-			: null;
 	return {
 		present: true,
-		availableCount: count(record.reset_credits_available_count),
-		applicableCount: count(record.reset_credits_applicable_count),
+		availableCount: nonNegativeIntegerOrNull(
+			record.reset_credits_available_count,
+		),
+		applicableCount: nonNegativeIntegerOrNull(
+			record.reset_credits_applicable_count,
+		),
 	};
 }
 
-/** Wave key for a grant time: the grant's minute in UTC. */
-export function codexWaveId(at: number): string {
+function codexWaveId(at: number): string {
 	return `codex:${new Date(at).toISOString().slice(0, 16)}Z`;
 }
 
@@ -65,7 +59,6 @@ function hashChatGptAccountId(id: string): string {
 	return createHash("sha256").update(id).digest("hex");
 }
 
-/** Soonest expiry among available credits; null when none has an expiry. */
 function soonestAvailableExpiry(credits: CodexResetCreditRow[]): number | null {
 	let soonest: number | null = null;
 	for (const credit of credits) {
@@ -91,12 +84,6 @@ export interface BankedResetsAssessment {
 	observedAt: number | null;
 }
 
-/**
- * The account's banked resets as shown to a reader at `now`. Stale values are
- * kept, never zeroed: counts are stale when the last poll lacked them or they
- * are older than 10 minutes, and the list is stale after 12 hours of failed
- * reads.
- */
 export function assessBankedResets(
 	state: CodexResetCreditState,
 	credits: CodexResetCreditRow[],
@@ -124,7 +111,6 @@ export function assessBankedResets(
 	};
 }
 
-/** Whether this observation should read the credit list. */
 function shouldReadList(
 	previous: CodexResetCreditState | null,
 	counts: ObservedCounts,
@@ -183,7 +169,6 @@ export class CodexResetCreditObserver {
 		await this.observeUsageData(payload.accountId, payload.data);
 	}
 
-	/** Entry point for a fresh Codex usage-data object. */
 	async observeUsageData(accountId: string, data: unknown): Promise<void> {
 		const counts = readResetCreditCounts(data);
 		const at = this.now();
@@ -199,8 +184,6 @@ export class CodexResetCreditObserver {
 				observedAt: at,
 			});
 		} else {
-			// The poll lacked the fields: keep the last values and when they
-			// were seen, and mark them absent so readers show them as stale.
 			await this.repo.recordCounts(accountId, {
 				availableCount: previous.availableCount,
 				applicableCount: previous.applicableCount,
@@ -248,18 +231,17 @@ export class CodexResetCreditObserver {
 			result.chatgptAccountId == null
 				? null
 				: hashChatGptAccountId(result.chatgptAccountId);
-		let live = await this.repo.listCredits(accountId, {
-			includeVanished: false,
+		const stored = await this.repo.listCredits(accountId, {
+			includeVanished: true,
 		});
+		const known = new Set(stored.map((c) => c.creditId));
+		let live = stored.filter((c) => c.vanishedAt == null);
 		let baselineAt: number | null = null;
 		if (
 			hash != null &&
 			state?.chatgptAccountHash != null &&
 			state.chatgptAccountHash !== hash
 		) {
-			// The router account now points at a different ChatGPT account:
-			// its old credits are not redemptions, and its new ones are not
-			// grants.
 			await this.repo.markVanished(
 				accountId,
 				live.map((c) => c.creditId),
@@ -272,11 +254,6 @@ export class CodexResetCreditObserver {
 			baselineAt = at;
 		}
 
-		const known = new Set(
-			(await this.repo.listCredits(accountId, { includeVanished: true })).map(
-				(c) => c.creditId,
-			),
-		);
 		const listedIds = new Set<string>();
 		for (const credit of result.credits) {
 			listedIds.add(credit.id);

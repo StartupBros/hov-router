@@ -190,11 +190,6 @@ export function CodexCreditDrainControl({
 	);
 }
 
-/**
- * Codex banked resets on the card: OpenAI's count, the soonest expiry and
- * whether one applies now. A stale account keeps its last values with a stale
- * mark, and an account that cannot report resets says so instead of showing 0.
- */
 export function BankedResetsStatus({ resets }: { resets: BankedResets }) {
 	if (!resets.tracked) {
 		return (

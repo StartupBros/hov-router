@@ -467,7 +467,6 @@ export function createAccountsListHandler(
 			)
 			.catch(() => new Map());
 
-		// A failed read omits the field rather than failing the whole list.
 		const bankedResetsById = await loadBankedResets(dbOps, accounts, now).catch(
 			(error) => {
 				log.warn(

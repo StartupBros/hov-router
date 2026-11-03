@@ -347,7 +347,6 @@ export interface BankedResets {
 	observedAt: number | null;
 }
 
-/** One account where a banked reset applies now. */
 export interface BankedResetsAppliesNowEntry {
 	accountId: string;
 	accountName: string;

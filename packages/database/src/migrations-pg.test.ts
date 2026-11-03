@@ -1089,14 +1089,12 @@ describe.skipIf(!livePgAvailable)(
 				await runMigrationsPg(adapter);
 				await expectShape();
 
-				// Upgrade path: a database that predates the tables.
 				await adapter.unsafe(`DROP TABLE IF EXISTS codex_reset_credits`);
 				await adapter.unsafe(`DROP TABLE IF EXISTS codex_reset_credit_state`);
 				expect((await inspect()).cols).toHaveLength(0);
 				await runMigrationsPg(adapter);
 				await expectShape();
 
-				// The repository's upserts and the nearest-wave lookup run on PostgreSQL.
 				const { CodexResetCreditsRepository } = await import(
 					"./repositories/codex-reset-credits.repository"
 				);

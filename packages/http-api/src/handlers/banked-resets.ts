@@ -14,7 +14,6 @@ import type {
 } from "@better-ccflare/types";
 import { assessBankedResets } from "../services/codex-reset-credits";
 
-/** The account columns banked resets need. */
 export interface BankedResetsAccount {
 	id: string;
 	name: string;
@@ -25,10 +24,6 @@ export interface BankedResetsAccount {
 interface AssessedAccount {
 	account: BankedResetsAccount;
 	resets: BankedResets;
-	/**
-	 * Groups router accounts signed in to one ChatGPT account. Internal only:
-	 * it never leaves this module.
-	 */
 	chatgptAccountHash: string | null;
 }
 
@@ -40,7 +35,6 @@ function emptyResets(tracked: boolean): BankedResets {
 		soonestExpiresAt: null,
 		doesNotExpire: false,
 		appliesNow: false,
-		// A tracked account with no observation yet has nothing current to show.
 		stale: tracked,
 		observedAt: null,
 	};
@@ -67,8 +61,6 @@ async function assessCodexAccounts(
 	}
 
 	return codex.map((account) => {
-		// A custom endpoint is not the ChatGPT subscription API, which is the
-		// only source of reset counts.
 		if (
 			!isCodexSubscriptionEndpoint(
 				resolveCodexEndpoint(account.custom_endpoint, account.name),
@@ -91,7 +83,6 @@ async function assessCodexAccounts(
 	});
 }
 
-/** Banked resets for each Codex account in `accounts`, keyed by account id. */
 export async function loadBankedResets(
 	dbOps: DatabaseOperations,
 	accounts: BankedResetsAccount[],
@@ -101,11 +92,6 @@ export async function loadBankedResets(
 	return new Map(assessed.map((entry) => [entry.account.id, entry.resets]));
 }
 
-/**
- * Fleet view of tracked accounts. The total counts each ChatGPT account once,
- * from its freshest observation, so two router accounts signed in to one
- * ChatGPT account are not double counted.
- */
 function summarizeBankedResets(
 	assessed: AssessedAccount[],
 ): BankedResetsSummary {
@@ -147,7 +133,6 @@ function summarizeBankedResets(
 	};
 }
 
-/** GET /api/banked-resets: the fleet summary of banked Codex resets. */
 export function createBankedResetsSummaryHandler(dbOps: DatabaseOperations) {
 	return async (): Promise<Response> => {
 		const accounts = await dbOps.getAdapter().query<BankedResetsAccount>(

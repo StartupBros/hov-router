@@ -387,7 +387,6 @@ function ensureServerToolReplayIssuanceSchema(db: Database): void {
 }
 
 function ensureCodexResetCreditsSchema(db: Database): void {
-	// One row per Codex account. Cascades with the account.
 	db.run(`
 		CREATE TABLE IF NOT EXISTS codex_reset_credit_state (
 			account_id TEXT PRIMARY KEY,
@@ -406,7 +405,6 @@ function ensureCodexResetCreditsSchema(db: Database): void {
 			FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 		)
 	`);
-	// One row per (account, credit). No FK: history outlives a removed account.
 	db.run(`
 		CREATE TABLE IF NOT EXISTS codex_reset_credits (
 			account_id TEXT NOT NULL,

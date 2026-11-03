@@ -4,6 +4,7 @@ export {
 	extractChatGptAccountId,
 	fetchCodexUsageData,
 	mapWhamUsageResponse,
+	nonNegativeIntegerOrNull,
 	resetCodexUsageEndpointForTest,
 } from "./api-usage";
 export type { CodexClientIdentity } from "./client-identity";

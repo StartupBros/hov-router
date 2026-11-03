@@ -2150,8 +2150,6 @@ export default async function startServer(options?: {
 	};
 	modelCatalogProxyContext = proxyContext;
 
-	// Banked reset credits: each Codex usage poll carries the counts; the
-	// credit list is read only when they change or the stored list ages.
 	const codexResetCredits = new CodexResetCreditObserver(
 		dbOps,
 		async (accountId) => {

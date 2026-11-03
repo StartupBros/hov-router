@@ -414,8 +414,6 @@ export function mapWhamUsageResponse(
 		data.code_review_resets_at = codeReview.resets_at;
 	}
 
-	// Banked-reset counts: flat scalars for the same reason. A count that is
-	// missing or not a non-negative integer is unknown (null), never 0.
 	const resetCredits = body.rate_limit_reset_credits;
 	if (
 		resetCredits &&
@@ -437,17 +435,12 @@ export function mapWhamUsageResponse(
 	return data;
 }
 
-/** A count is known only when it is a non-negative integer; otherwise null. */
 export function nonNegativeIntegerOrNull(value: unknown): number | null {
 	return typeof value === "number" && Number.isInteger(value) && value >= 0
 		? value
 		: null;
 }
 
-/**
- * Headers shared by every authenticated wham request (usage and the reset
- * credit list). Never carries the Luna reserve header.
- */
 export function buildCodexWhamHeaders(
 	accessToken: string,
 	chatgptAccountId: string | null,
@@ -468,10 +461,6 @@ export function buildCodexWhamHeaders(
 	return headers;
 }
 
-/**
- * URL of the reset credit list, derived from the currently resolved usage
- * endpoint by swapping its final `/usage` segment.
- */
 export function getCodexResetCreditsEndpoint(): string {
 	return resolvedUsageEndpoint.replace(/\/usage$/, "/rate-limit-reset-credits");
 }
