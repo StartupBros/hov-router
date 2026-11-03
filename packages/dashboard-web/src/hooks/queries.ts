@@ -600,6 +600,18 @@ export const useStats = (
 	});
 };
 
+/** The router's /health verdict; `null` when the check gave none. */
+export const useHealth = () => {
+	return useQuery({
+		queryKey: queryKeys.health(),
+		queryFn: () => api.getHealth(),
+		staleTime: 15000,
+		refetchInterval: 30000,
+		refetchIntervalInBackground: false,
+		gcTime: 5 * 60 * 1000,
+	});
+};
+
 export const useRecentErrors = (errorsSinceHours: number) => {
 	return useQuery({
 		queryKey: queryKeys.recentErrors(errorsSinceHours),
