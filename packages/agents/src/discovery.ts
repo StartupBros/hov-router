@@ -57,6 +57,19 @@ function dequoteValue(value: string): string {
 	return trimmed;
 }
 
+/**
+ * Reads an agent file with Windows line endings and a leading UTF-8 BOM
+ * normalized away. The frontmatter parsers here are line-based: with CRLF
+ * every line keeps its \r and no `key: value` line matches. Loading then
+ * dropped the file as "missing required fields", and editing rewrote it
+ * with only the updated keys. Both paths read through this function.
+ */
+async function readAgentFileText(filePath: string): Promise<string> {
+	return (await readFile(filePath, "utf-8"))
+		.replace(/^\uFEFF/, "")
+		.replace(/\r\n/g, "\n");
+}
+
 export class AgentRegistry {
 	private cache: AgentCache | null = null;
 	private workspaces: Map<string, AgentWorkspace> = new Map();
@@ -134,12 +147,7 @@ export class AgentRegistry {
 				description: "agent file",
 				...(additionalAllowedPaths && { additionalAllowedPaths }),
 			});
-			// Normalize Windows line endings and a leading UTF-8 BOM. With CRLF,
-			// every frontmatter line kept its \r, no `key: value` line matched,
-			// and the file was dropped as "missing required fields".
-			const content = (await readFile(safePath, "utf-8"))
-				.replace(/^﻿/, "")
-				.replace(/\r\n/g, "\n");
+			const content = await readAgentFileText(safePath);
 
 			// Extract frontmatter manually
 			const frontmatterMatch = content.match(
@@ -596,7 +604,7 @@ export class AgentRegistry {
 		}
 
 		// Reconstruct the agent file
-		const currentContent = await readFile(agent.filePath, "utf-8");
+		const currentContent = await readAgentFileText(agent.filePath);
 		const frontmatterMatch = currentContent.match(
 			/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/,
 		);
