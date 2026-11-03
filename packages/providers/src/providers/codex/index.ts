@@ -52,3 +52,8 @@ export {
 } from "./provider";
 export { readCodexTurnStateConfig } from "./turn-state";
 export { parseCodexUsageHeaders } from "./usage";
+export type {
+	CodexResetCredit,
+	CodexResetCreditListResult,
+} from "./reset-credits";
+export { fetchCodexResetCredits } from "./reset-credits";
