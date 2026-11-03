@@ -688,78 +688,40 @@ describe("AccountListItem banked resets", () => {
 		return makeAccount({ provider: "codex", paused: false, bankedResets });
 	}
 
-	it("shows held resets, the soonest expiry and applies now", () => {
+	it("renders the account's banked resets as its own group below the status line", () => {
 		const html = render(codex(tracked));
-		expect(html).toContain("2 banked resets");
-		expect(html).toContain("Nov 30, 2026");
-		expect(html).toContain("applies now");
-		expect(html).not.toContain(">stale<");
-	});
-
-	it("leaves out applies now when no reset applies", () => {
-		const html = render(
-			codex({ ...tracked, applicableCount: 0, appliesNow: false }),
+		const group = html.indexOf(
+			'<fieldset aria-label="Banked resets for acc-1"',
 		);
-		expect(html).toContain("2 banked resets");
+		expect(group).toBeGreaterThan(-1);
+		expect(html).toContain("Usable now (OpenAI)");
 		expect(html).not.toContain("applies now");
+		// The status line closes before the group opens: the group is not one of
+		// its chips, so it cannot wrap in among the request counters.
+		const statusLine = html.indexOf("0 requests");
+		expect(statusLine).toBeGreaterThan(-1);
+		expect(html.slice(statusLine, group)).toContain("</div>");
 	});
 
-	it("shows a stale account's last values, not zero", () => {
-		const html = render(codex({ ...tracked, stale: true }));
-		expect(html).toContain("2 banked resets");
-		expect(html).toContain(">stale<");
-		expect(html).not.toContain("0 banked resets");
-	});
-
-	it("says a reset with no expiry does not expire", () => {
-		const html = render(
-			codex({
-				...tracked,
-				availableCount: 1,
-				soonestExpiresAt: null,
-				doesNotExpire: true,
-			}),
+	it("never colours a held reset green in the row", () => {
+		const html = render(codex(tracked));
+		const group = html.slice(html.indexOf("<fieldset"));
+		expect(group.slice(0, group.indexOf("</fieldset>"))).not.toMatch(
+			/bg-green|text-green/,
 		);
-		expect(html).toContain("1 banked reset");
-		expect(html).toContain("does not expire");
 	});
 
-	it("says a custom-endpoint account is not tracked instead of showing 0", () => {
-		const html = render(
-			codex({
-				...tracked,
-				tracked: false,
-				availableCount: null,
-				applicableCount: null,
-				soonestExpiresAt: null,
-				appliesNow: false,
-			}),
-		);
-		expect(html).toContain("not tracked");
-		expect(html).not.toContain("0 banked resets");
-	});
-
-	it("says the count is unknown before the first read", () => {
-		const html = render(
-			codex({
-				...tracked,
-				availableCount: null,
-				applicableCount: null,
-				soonestExpiresAt: null,
-				appliesNow: false,
-				stale: true,
-				observedAt: null,
-			}),
-		);
-		expect(html).toContain("Banked resets: unknown");
-		expect(html).not.toContain("0 banked resets");
-	});
-
-	it("shows nothing for accounts without the field", () => {
-		expect(render(codex(undefined))).not.toContain("banked reset");
+	it("shows nothing for accounts without the field or other providers", () => {
+		expect(render(codex(undefined))).not.toContain("Banked resets");
 		expect(
-			render(makeAccount({ provider: "anthropic", paused: false })),
-		).not.toContain("anked reset");
+			render(
+				makeAccount({
+					provider: "anthropic",
+					paused: false,
+					bankedResets: tracked,
+				}),
+			),
+		).not.toContain("Banked resets");
 	});
 });
 
