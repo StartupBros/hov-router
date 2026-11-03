@@ -4,7 +4,7 @@
 export * from "./handlers/storage";
 export { APIRouter, type APIRouterOptions } from "./router";
 export { createServerOwnedAccountRoutingFinalizer } from "./services/account-routing-operations";
-export { AlertService } from "./services/alerts";
+export { AlertService, memberNoticeStartupWarning } from "./services/alerts";
 export { classifyAuthPath } from "./services/auth-paths";
 // Export services
 export { AuthService } from "./services/auth-service";
@@ -20,6 +20,10 @@ export {
 	type DeviceSetupCoordinatorDependencies,
 } from "./services/device-setup-jobs";
 export { ExternalCodexScanner } from "./services/external-codex-scanner";
+export {
+	runMemberNoticePass,
+	startMemberNoticeScheduler,
+} from "./services/member-notices";
 export { createServerDeviceSetupCoordinator } from "./services/server-device-setup";
 export { UsageWindowLedger } from "./services/usage-window-ledger";
 // Export types

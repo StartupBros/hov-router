@@ -11,6 +11,9 @@ export type UsageWindowGrantType = (typeof USAGE_WINDOW_GRANT_TYPES)[number];
 
 const GRANT_TYPE_SET: ReadonlySet<string> = new Set(USAGE_WINDOW_GRANT_TYPES);
 
+/** The weekly window the value ledger tracks (usage-window-ledger.ts). */
+const WEEKLY_WINDOW_KEY = "seven_day";
+
 export interface UsageWindow {
 	id: string;
 	accountId: string;
@@ -69,6 +72,17 @@ export interface StaleClosedWindows {
 
 export interface CloseWindowInput extends CloseWindowAggregates {
 	closedAt: number;
+}
+
+/** A weekly window the ledger opened as an early reset, with its predecessor. */
+export interface EarlyResetCandidate {
+	accountId: string;
+	provider: string;
+	startedAt: number;
+	/** When the account's previous window closed: the poll that saw the
+	 * rollover. Null when the early row has no predecessor. */
+	previousClosedAt: number | null;
+	previousStartedAt: number | null;
 }
 
 export interface ListWindowsOptions {
@@ -486,6 +500,45 @@ export class UsageWindowsRepository extends BaseRepository<UsageWindow> {
 			"DELETE FROM external_usage_pending_windows WHERE window_id=? AND revision=?",
 			[id, revision],
 		);
+	}
+
+	/**
+	 * Weekly `early_reset` rows started at or after `startedAtOrAfter`, each
+	 * joined to its account's provider and to the account's previous row in
+	 * the same window. The bound on `started_at` stands in for an index.
+	 */
+	async listEarlyResetCandidates(
+		startedAtOrAfter: number,
+	): Promise<EarlyResetCandidate[]> {
+		const previous = (column: string) =>
+			`(SELECT p.${column} FROM usage_windows p
+			  WHERE p.account_id = w.account_id AND p.window_key = w.window_key
+			    AND p.started_at < w.started_at
+			  ORDER BY p.started_at DESC LIMIT 1)`;
+		const rows = await this.query<Record<string, unknown>>(
+			`SELECT w.account_id, COALESCE(a.provider, 'anthropic') AS provider,
+			        w.started_at,
+			        ${previous("closed_at")} AS previous_closed_at,
+			        ${previous("started_at")} AS previous_started_at
+			 FROM usage_windows w
+			 JOIN accounts a ON a.id = w.account_id
+			 WHERE w.grant_type = 'early_reset' AND w.window_key = ?
+			   AND w.started_at >= ?
+			 ORDER BY w.started_at, w.account_id`,
+			[
+				WEEKLY_WINDOW_KEY,
+				requireTimestamp(startedAtOrAfter, "startedAtOrAfter"),
+			],
+		);
+		const numOrNull = (value: unknown) =>
+			value == null ? null : Number(value);
+		return rows.map((row) => ({
+			accountId: String(row.account_id),
+			provider: String(row.provider),
+			startedAt: Number(row.started_at),
+			previousClosedAt: numOrNull(row.previous_closed_at),
+			previousStartedAt: numOrNull(row.previous_started_at),
+		}));
 	}
 
 	async listWindows(options: ListWindowsOptions = {}): Promise<UsageWindow[]> {

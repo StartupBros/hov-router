@@ -62,6 +62,7 @@ export {
 	type CodexResetCreditState,
 	CodexResetCreditsRepository,
 	type CodexResetCreditVanishReason,
+	type CodexWaveSummary,
 } from "./repositories/codex-reset-credits.repository";
 export {
 	type CodexResetRedemptionRow,
@@ -95,6 +96,13 @@ export {
 	ExternalUsageRepository,
 	type ExternalUsageSource,
 } from "./repositories/external-usage.repository";
+export {
+	type ClaimMemberNoticeInput,
+	type MemberNoticeAttemptResult,
+	type MemberNoticeKind,
+	type MemberNoticeRow,
+	MemberNoticesRepository,
+} from "./repositories/member-notices.repository";
 export type {
 	ModelTranslation,
 	SimilarModel,
@@ -136,6 +144,7 @@ export {
 // Re-export repository types
 export type { StatsRepository } from "./repositories/stats.repository";
 export type {
+	EarlyResetCandidate,
 	UsageWindow,
 	UsageWindowGrantType,
 } from "./repositories/usage-windows.repository";

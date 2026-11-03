@@ -94,6 +94,7 @@ import { CodexResetCreditsRepository } from "./repositories/codex-reset-credits.
 import { CodexResetRedemptionsRepository } from "./repositories/codex-reset-redemptions.repository";
 import { ComboRepository } from "./repositories/combo.repository";
 import { DeviceSetupJobRepository } from "./repositories/device-setup-job.repository";
+import { MemberNoticesRepository } from "./repositories/member-notices.repository";
 import { OAuthRepository } from "./repositories/oauth.repository";
 import { QualityRouteRepository } from "./repositories/quality-route.repository";
 import {
@@ -476,6 +477,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private serverToolReplayIssuance: ServerToolReplayIssuanceRepository;
 	private codexResetCredits: CodexResetCreditsRepository;
 	private codexResetRedemptions: CodexResetRedemptionsRepository;
+	private memberNotices: MemberNoticesRepository;
 	private usageHistory: UsageHistoryRepository;
 	private usageWindows: UsageWindowsRepository;
 	private cacheFlightRecorder: CacheFlightRecorderRepository;
@@ -693,6 +695,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		this.codexResetRedemptions = new CodexResetRedemptionsRepository(
 			this.adapter,
 		);
+		this.memberNotices = new MemberNoticesRepository(this.adapter);
 		this.usageHistory = new UsageHistoryRepository(this.adapter);
 		this.usageWindows = new UsageWindowsRepository(this.adapter);
 		this.cacheFlightRecorder = new CacheFlightRecorderRepository(this.adapter);
@@ -1369,6 +1372,10 @@ OAuth tokens will need to be re-authenticated.
 
 	getCodexResetRedemptionsRepository(): CodexResetRedemptionsRepository {
 		return this.codexResetRedemptions;
+	}
+
+	getMemberNoticesRepository(): MemberNoticesRepository {
+		return this.memberNotices;
 	}
 
 	// Usage-history operations delegated to repository

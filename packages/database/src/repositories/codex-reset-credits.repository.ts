@@ -39,6 +39,18 @@ export interface CodexResetCreditRow {
 	vanishReason: string | null;
 }
 
+/** One Codex wave, aggregated across accounts; it carries no account ids. */
+export interface CodexWaveSummary {
+	waveId: string;
+	/** Earliest expiry among the wave's credits, whatever their status; null
+	 * when none has one. */
+	expiresAt: number | null;
+	/** When the wave's newest credit was first seen. */
+	newestFirstSeenAt: number;
+	/** Whether any credit arrived after its account's first baseline read. */
+	hasNonBaseline: boolean;
+}
+
 // Raw rows: PostgreSQL's driver can hand BIGINT back as a string, so every
 // numeric column is normalised through num()/numOrNull() in the mappers.
 type Raw = Record<string, unknown>;
@@ -289,6 +301,51 @@ export class CodexResetCreditsRepository extends BaseRepository<never> {
 			   AND credit_id IN (${placeholders})`,
 			[at, reason, accountId, ...creditIds],
 		);
+	}
+
+	/**
+	 * Waves whose newest credit was first seen after `seenAfter`, or whose
+	 * earliest expiry is after `expiringAfter`. Vanished credits count, so a
+	 * wave keeps its expiry after members redeem from it.
+	 */
+	async listWaveSummaries(
+		seenAfter: number,
+		expiringAfter: number,
+	): Promise<CodexWaveSummary[]> {
+		const rows = await this.query<Raw>(
+			`SELECT wave_id,
+			        MIN(expires_at) AS expires_at,
+			        MAX(first_seen_at) AS newest_first_seen_at,
+			        MAX(CASE WHEN is_baseline = 0 THEN 1 ELSE 0 END) AS has_non_baseline
+			 FROM codex_reset_credits
+			 WHERE wave_id IS NOT NULL
+			 GROUP BY wave_id
+			 HAVING MAX(first_seen_at) > ? OR MIN(expires_at) > ?
+			 ORDER BY wave_id`,
+			[seenAfter, expiringAfter],
+		);
+		return rows.map((row) => ({
+			waveId: String(row.wave_id),
+			expiresAt: numOrNull(row.expires_at),
+			newestFirstSeenAt: num(row.newest_first_seen_at),
+			hasNonBaseline: Number(row.has_non_baseline) !== 0,
+		}));
+	}
+
+	/** Whether a credit on the account vanished as redeemed at or after `since`. */
+	async hasRedeemedVanishSince(
+		accountId: string,
+		since: number,
+	): Promise<boolean> {
+		const row = await this.get<Raw>(
+			`SELECT 1 AS found FROM codex_reset_credits
+			 WHERE account_id = ?
+			   AND vanish_reason IN ('redeemed_elsewhere', 'redeemed_by_router')
+			   AND vanished_at >= ?
+			 LIMIT 1`,
+			[accountId, since],
+		);
+		return row != null;
 	}
 
 	/** Wave id of the credit (any account) granted nearest to grantedAt, within windowMs. */

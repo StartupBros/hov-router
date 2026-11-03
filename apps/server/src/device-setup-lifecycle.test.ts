@@ -41,6 +41,9 @@ mock.module("@better-ccflare/http-api", () => ({
 	CodexResetCreditObserver: MockCodexResetCreditObserver,
 	UsageWindowLedger: MockUsageWindowLedger,
 	classifyAuthPath: () => null,
+	memberNoticeStartupWarning: () => null,
+	runMemberNoticePass: async () => {},
+	startMemberNoticeScheduler: () => async () => {},
 	createServerDeviceSetupCoordinator: () => ({
 		tick: async () => {},
 		dispose: () => {},

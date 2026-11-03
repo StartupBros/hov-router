@@ -982,6 +982,10 @@ export interface ConfigData {
 	alert_anomaly_loop_min_requests?: number;
 	alert_cooldown_minutes?: number;
 	alert_webhook_url?: string;
+	/** Member notice destination (banked-reset heads-ups for HoV members).
+	 * Set only by this key or MEMBER_NOTICE_WEBHOOK_URL; never returned by
+	 * getAllSettings or any API. */
+	member_notice_webhook_url?: string;
 	/** Comma-separated allowlist of AlertType names restricting which alert
 	 * types are delivered to the webhook; "" or unset = deliver all (see
 	 * getAlertWebhookTypes below). Only gates webhook delivery — the DB
@@ -2674,6 +2678,16 @@ export class Config extends EventEmitter {
 		return "";
 	}
 
+	/** The member notice address; "" = member notices off. No setter: the
+	 * operator sets it by environment or config file only. */
+	getMemberNoticeWebhookUrl(): string {
+		const fromEnv = process.env.MEMBER_NOTICE_WEBHOOK_URL;
+		if (fromEnv !== undefined) return fromEnv;
+		const fromFile = this.data.member_notice_webhook_url;
+		if (typeof fromFile === "string") return fromFile;
+		return "";
+	}
+
 	setAlertWebhookUrl(value: string): void {
 		if (value !== "") {
 			let parsed: URL;
@@ -2745,8 +2759,13 @@ export class Config extends EventEmitter {
 
 	getAllSettings(): Record<string, string | number | boolean | undefined> {
 		const anthropicDegradedMode = this.getAnthropicDegradedModeConfig();
-		const { quality_routing_policy: qualityRoutingPolicy, ...settings } =
-			this.data;
+		// The member notice address is a secret: it is removed here, not
+		// redacted, so no settings reader ever sees it.
+		const {
+			quality_routing_policy: qualityRoutingPolicy,
+			member_notice_webhook_url: _memberNoticeWebhookUrl,
+			...settings
+		} = this.data;
 		// Include current strategy (which might come from env)
 		return {
 			...settings,

@@ -971,6 +971,37 @@ If `ALERT_WEBHOOK_URL` resolves to a Discord webhook endpoint (host `discord.com
 
 Any other URL keeps the original body shape, `{ "type": "alert", "alert": { ... } }`, unchanged.
 
+### Member notices
+
+Member notices are short posts to a separate webhook, such as a members' Discord channel. They tell members when new banked resets appear, before a wave of banked resets expires, and when weekly limits appear to have reset early. A notice names only the provider (Codex or Claude), a UTC date, the lead time and the product name. It never names an account, an email, a count or an address.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `MEMBER_NOTICE_WEBHOOK_URL` | `http(s)` address that receives member notices. Unset or empty means member notices are off. The config file key is `member_notice_webhook_url`; the environment variable wins, including when it is set to an empty value. There is no API or dashboard setter, and the settings API never returns the value | unset |
+
+If the member address is the same webhook as `ALERT_WEBHOOK_URL`, member notices stay off and the server logs one warning at startup that names neither address. Discord addresses compare by webhook id and token, so the same webhook written with another Discord host or a query string still counts as the same one. Other addresses compare as trimmed text. `GET /api/insights/alerts/config` reports only `memberNotices.state`: `off`, `on` or `blocked_same_as_alert_webhook`.
+
+A background pass runs every minute, starting 30 seconds after startup. It does nothing while the state is not `on`.
+
+| Notice | Sent when | Sent at most |
+|--------|-----------|--------------|
+| New banked resets | A wave of Codex banked resets appeared, it holds at least one credit that arrived after the router's first read of that account, and no new credit has joined it for 30 minutes. A wave whose newest credit was first seen more than 24 hours ago is never announced | Once per wave |
+| Expiry reminder | 3 days and 1 day before the earliest expiry in a wave. Each reminder is sent only in the 6 hours after its time arrives, never later | Once per wave and lead time |
+| Early weekly reset | At least two accounts of one provider group (Codex, or Claude across Anthropic API and Claude OAuth accounts) show a weekly window that opened early between 10 and 60 minutes ago. An account's early reset is ignored when a router redemption on it (in any state but refused) or a credit recorded as redeemed happened after the weekly window that ended early began | Once per provider group per 6 hours, also across several router processes sharing one database |
+
+Discord addresses receive `{ "content": "...", "allowed_mentions": { "parse": [] } }`. Any other address receives `{ "kind": "grant" | "reminder" | "early_reset", "text": "..." }`. Each request carries the same `User-Agent` as alert webhooks and a ten-second timeout.
+
+Each notice is sent once. A pass leases a due notice for 60 seconds, so two passes never send the same one. A `5xx` answer or a network error retries after 1 minute, doubling to at most 30 minutes. A `429` waits for its `Retry-After` value. Redirects are not followed. Any other answer, a `3xx` included, or an address that is not a valid `http(s)` URL, stops retrying and raises one `member_notice_delivery_failed` alert (severity `warning`) on the operator alert webhook. That alert carries the status code or a fixed reason, never the address or a response body. It is delivered when `ALERT_WEBHOOK_TYPES` is empty; a non-empty allowlist must name it. A notice that is still undelivered when it expires is dropped without an alert: 24 hours after a new-resets notice is claimed, at the end of a reminder's 6-hour window, and 1 hour after an early-reset notice is claimed. On shutdown the pass starts no further send and waits for a send already in flight to record its result, so a restart does not post that notice again. Logs never contain the address, an error message or a response body.
+
+The early-reset notice is an inference from usage polls, not a provider announcement, and it misses some resets:
+
+- An account with no usage poll in the window has no window record, so idle accounts are not counted.
+- Only weekly windows are read; a reset of only the 5-hour window is not detected.
+- A genuine early reset in the same weekly window as a redemption on that account is treated as the redemption.
+- Two accounts pair only when both early opens fall in the same 50-minute span (10 to 60 minutes before a pass).
+
+Replaying production usage windows from 2026-08-24 to 2026-10-28 through these rules gives 21 early-reset notices (20 Codex, 1 Claude), about two a week.
+
 ## Database Configuration
 
 HoV Router supports two database backends:

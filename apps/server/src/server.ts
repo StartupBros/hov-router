@@ -44,6 +44,9 @@ import {
 	classifyAuthPath,
 	createServerDeviceSetupCoordinator,
 	ExternalCodexScanner,
+	memberNoticeStartupWarning,
+	runMemberNoticePass,
+	startMemberNoticeScheduler,
 	UsageWindowLedger,
 } from "@better-ccflare/http-api";
 import {
@@ -1428,6 +1431,7 @@ let quiesceKeepalive: ReturnType<typeof setInterval> | undefined;
 let retireBackendHeartbeat: (() => Promise<void>) | undefined;
 let stopAlertJob: (() => Promise<void>) | undefined;
 let stopExternalCodexJob: (() => void) | undefined;
+let stopMemberNoticeJob: (() => Promise<void>) | undefined;
 
 export default async function startServer(options?: {
 	port?: number;
@@ -1688,6 +1692,23 @@ export default async function startServer(options?: {
 	alertService.start();
 	stopAlertJob = () => alertService.stop();
 	registerDisposable({ dispose: () => alertService.stop() });
+	const memberNoticeWarning = memberNoticeStartupWarning(config);
+	if (memberNoticeWarning) log.warn(memberNoticeWarning);
+	// Each pass reads the destination fresh and does nothing while it is off
+	// or blocked, so the scheduler always runs.
+	const stopMemberNotices = startMemberNoticeScheduler((signal) =>
+		runMemberNoticePass({
+			dbOps,
+			config,
+			now: () => Date.now(),
+			signal,
+			fetch: (url, init) => fetch(url, init),
+			onDeliveryFailed: (status) =>
+				alertService.handleMemberNoticeDeliveryFailed(status),
+		}),
+	);
+	stopMemberNoticeJob = stopMemberNotices;
+	registerDisposable({ dispose: stopMemberNotices });
 
 	// Window Value Ledger (issue #252): tracks and prices each account's
 	// rolling 'seven_day' usage window. Driven from the same poll callbacks
@@ -3482,6 +3503,10 @@ function stopPeriodicWork(): Promise<void> {
 		stopAlertJob = undefined;
 		stopExternalCodexJob?.();
 		stopExternalCodexJob = undefined;
+		// Waits for a notice send in flight to be recorded, so a notice the
+		// webhook accepted is not posted again after restart.
+		pending.push(stopMemberNoticeJob?.() ?? Promise.resolve());
+		stopMemberNoticeJob = undefined;
 		// Admitted requests still route on cached usage evidence; shutdown clears
 		// it after the drain. Quality settlement recovery is not periodic work:
 		// it persists the outcomes of responses still streaming, so it stops only
