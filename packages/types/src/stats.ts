@@ -365,6 +365,42 @@ export interface MemorySnapshot {
 	};
 }
 
+/**
+ * One provider's upstream HTTP reachability, as seen by this process.
+ * - `unreachable`: the last `unreachableAfter` or more fetches failed before
+ *   the upstream sent any HTTP answer, and the latest failure is inside the
+ *   window.
+ * - `reachable`: not unreachable, and an HTTP answer (any status) arrived
+ *   inside the window.
+ * - `unknown`: neither; usually no recent traffic.
+ */
+export interface UpstreamTransportProviderHealth {
+	state: "reachable" | "unreachable" | "unknown";
+	/** HTTP answers of any status inside the window. */
+	responses: number;
+	/** Fetches that failed on their own (DNS, connect, TLS, reset, header timeout) inside the window. */
+	failures: number;
+	/** Failures since the last HTTP answer, not limited to the window. */
+	consecutiveFailures: number;
+	lastResponseAt: string | null;
+	lastFailureAt: string | null;
+	/** Short error code token (e.g. "ConnectionRefused"); never an error message. */
+	lastFailureCode: string | null;
+}
+
+/**
+ * Restart-scoped, process-local upstream HTTP reachability, keyed by account
+ * provider name. Fetches the router or client aborted are counted as neither.
+ * Codex WebSocket transports are not covered.
+ */
+export interface UpstreamTransportHealth {
+	windowMs: number;
+	unreachableAfter: number;
+	/** Provider names whose state is `unreachable`, sorted. */
+	unreachable: string[];
+	providers: Record<string, UpstreamTransportProviderHealth>;
+}
+
 // Health check response
 export interface HealthResponse {
 	handoff?: { protocol: "quiesce-v1"; pid: number };
@@ -408,6 +444,7 @@ export interface HealthResponse {
 			state: string;
 		};
 		anthropicDegraded?: AnthropicDegradedRuntimeHealth;
+		upstreamTransport?: UpstreamTransportHealth;
 		memory?: MemorySnapshot;
 		bodyAdmission?: {
 			enabled: boolean;

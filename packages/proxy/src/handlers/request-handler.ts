@@ -13,6 +13,7 @@ import type { Provider } from "@better-ccflare/providers";
 import { registerResponseDrainTransport } from "@better-ccflare/providers/stream-drain";
 import type { RequestMeta } from "@better-ccflare/types";
 import { chatGptCloudflareCookieJar } from "../chatgpt-cloudflare-cookies";
+import { upstreamTransportTracker } from "../upstream-transport-health";
 import type { GuardCorrelationVerifier } from "./guard-correlation-auth";
 import {
 	ERROR_MESSAGES,
@@ -134,6 +135,8 @@ const BUN_FETCH_TIMEOUT_DISABLED: RequestInit & { timeout: false } =
  * @param headers - Request headers
  * @param createBodyStream - Function to create request body stream
  * @param hasBody - Whether the request has a body
+ * @param upstreamLabel - Provider name to report reachability under
+ *   (upstreamTransportTracker); omitted means not reported
  * @returns Promise resolving to the response
  */
 export async function makeProxyRequest(
@@ -143,6 +146,7 @@ export async function makeProxyRequest(
 	createBodyStream?: () => ReadableStream<Uint8Array> | undefined,
 	hasBody?: boolean,
 	signal?: AbortSignal,
+	upstreamLabel?: string,
 ): Promise<Response> {
 	// The header-phase timeout is always armed, independent of any caller
 	// signal, but it bounds only the wait for headers: the finally below
@@ -170,6 +174,10 @@ export async function makeProxyRequest(
 	];
 	const effectiveSignal =
 		signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+	// Where a throw came from: only a fetch() rejection says anything about
+	// the upstream path. Header preparation before it and the cookie jar or
+	// drain registration after it are local.
+	let phase: "prepare" | "fetch" | "answered" = "prepare";
 
 	try {
 		if (target instanceof Request) {
@@ -183,6 +191,7 @@ export async function makeProxyRequest(
 			stripClientForwardingHeaders(mutableHeaders);
 			chatGptCloudflareCookieJar.applyCookieHeader(targetUrl, mutableHeaders);
 
+			phase = "fetch";
 			const response = await fetch(
 				new Request(target, {
 					headers: mutableHeaders,
@@ -190,6 +199,8 @@ export async function makeProxyRequest(
 				}),
 				BUN_FETCH_TIMEOUT_DISABLED,
 			);
+			phase = "answered";
+			if (upstreamLabel) upstreamTransportTracker.recordResponse(upstreamLabel);
 			chatGptCloudflareCookieJar.captureFromResponse(targetUrl, response);
 			registerResponseDrainTransport(response, responseDrainController);
 			return response;
@@ -202,6 +213,7 @@ export async function makeProxyRequest(
 		stripClientForwardingHeaders(mutableHeaders);
 		chatGptCloudflareCookieJar.applyCookieHeader(target, mutableHeaders);
 
+		phase = "fetch";
 		const response = await fetch(target, {
 			...BUN_FETCH_TIMEOUT_DISABLED,
 			method,
@@ -210,9 +222,27 @@ export async function makeProxyRequest(
 			signal: effectiveSignal,
 			...(hasBody ? ({ duplex: "half" } as RequestInit) : {}),
 		});
+		phase = "answered";
+		if (upstreamLabel) upstreamTransportTracker.recordResponse(upstreamLabel);
 		chatGptCloudflareCookieJar.captureFromResponse(target, response);
 		registerResponseDrainTransport(response, responseDrainController);
 		return response;
+	} catch (error) {
+		// A fetch the caller aborted (client gone, routing or commitment
+		// deadline) is neither an answer nor a failure of the path.
+		if (upstreamLabel && phase === "fetch") {
+			if (headerTimeoutController.signal.aborted) {
+				upstreamTransportTracker.recordFailure(upstreamLabel, {
+					code: "header_timeout",
+				});
+			} else if (
+				!signal?.aborted &&
+				!(target instanceof Request && target.signal.aborted)
+			) {
+				upstreamTransportTracker.recordFailure(upstreamLabel, error);
+			}
+		}
+		throw error;
 	} finally {
 		clearTimeout(timeoutId);
 	}

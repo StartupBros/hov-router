@@ -36,11 +36,13 @@ export function describeSystemStatus(
 	const { pool } = health;
 	switch (health.status) {
 		case "ok":
-			return {
-				tone: "ok",
-				title: "Routing normally",
-				detail: availabilityLine(pool),
-			};
+			return (
+				describeUnreachableUpstream(health) ?? {
+					tone: "ok",
+					title: "Routing normally",
+					detail: availabilityLine(pool),
+				}
+			);
 		case "degraded":
 			return {
 				tone: "warning",
@@ -54,6 +56,61 @@ export function describeSystemStatus(
 			return unreachable;
 		}
 	}
+}
+
+const PROVIDER_NAMES: Readonly<Record<string, string>> = {
+	anthropic: "Anthropic",
+	codex: "Codex",
+	"openai-compatible": "OpenAI-compatible endpoints",
+	other: "other providers",
+};
+
+/**
+ * /health stays `ok` when the host cannot reach an upstream, because the
+ * deploy and readiness probes need its 200 (2026-11-02: every Anthropic
+ * request failed for 45 minutes while this banner said "Routing normally").
+ * runtime.upstreamTransport carries the signal instead.
+ */
+function describeUnreachableUpstream(
+	health: HealthVerdict,
+): SystemStatusView | null {
+	const transport = health.runtime?.upstreamTransport;
+	// parseHealthVerdict passes runtime through unvalidated.
+	if (
+		!transport ||
+		!Array.isArray(transport.unreachable) ||
+		transport.unreachable.length === 0
+	) {
+		return null;
+	}
+	const names = transport.unreachable.map(
+		(label) => PROVIDER_NAMES[label] ?? label,
+	);
+	const tail = `That points at the network connection, not the accounts. ${availabilityLine(health.pool)}`;
+	if (names.length === 1) {
+		const name = names[0] as string;
+		const provider = transport.providers[transport.unreachable[0] as string];
+		const code = provider?.lastFailureCode
+			? ` (${provider.lastFailureCode})`
+			: "";
+		const attempts =
+			provider?.consecutiveFailures ?? transport.unreachableAfter;
+		return {
+			tone: "warning",
+			title: `Can't reach ${name} from this machine`,
+			detail: `The last ${attempts} attempts to reach ${name} got no answer${code}. ${tail}`,
+		};
+	}
+	return {
+		tone: "warning",
+		title: `Can't reach ${joinOr(names)} from this machine`,
+		detail: `Recent attempts to reach each got no answer. ${tail}`,
+	};
+}
+
+function joinOr(items: string[]): string {
+	if (items.length <= 2) return items.join(" or ");
+	return `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
 }
 
 function describeUnhealthy(health: HealthVerdict): SystemStatusView {

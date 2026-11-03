@@ -260,6 +260,12 @@ export {
 	type SessionAccountObservation,
 } from "./session-account-observer";
 export type { ProxyRequest, ProxyResponse } from "./types";
+export {
+	UPSTREAM_TRANSPORT_WINDOW_MS,
+	UPSTREAM_UNREACHABLE_AFTER,
+	UpstreamTransportTracker,
+	upstreamTransportTracker,
+} from "./upstream-transport-health";
 export type { UsageCollectorHealth } from "./usage-collector";
 export type {
 	ChunkMessage,

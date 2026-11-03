@@ -125,6 +125,7 @@ import {
 	unregisterCodexUsageRefresher,
 	unregisterPollingRestarter,
 	unregisterRefreshClearer,
+	upstreamTransportTracker,
 } from "@better-ccflare/proxy";
 import { validatePathOrThrow } from "@better-ccflare/security";
 import {
@@ -1959,6 +1960,7 @@ export default async function startServer(options?: {
 					ownerOverlay: degradedOwnerOverlay,
 					shadowOwnerOverlay: degradedOwnerShadowOverlay,
 				}),
+			getUpstreamTransportHealth: () => upstreamTransportTracker.snapshot(),
 			getRetentionStatus,
 			getHandoff: () =>
 				quiesceHandlerInstalled

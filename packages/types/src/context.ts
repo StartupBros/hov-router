@@ -20,6 +20,7 @@ import type {
 	MemorySnapshot,
 	RetentionStatus,
 	RoutingHealth,
+	UpstreamTransportHealth,
 } from "./stats";
 import type { StrategyStore } from "./strategy";
 
@@ -96,6 +97,8 @@ export interface APIContext {
 	getIntegrityStatus?: () => IntegrityStatus;
 	/** Fixed aggregate-only, restart-scoped degraded-mode health snapshot. */
 	getAnthropicDegradedHealth?: () => AnthropicDegradedRuntimeHealth;
+	/** Restart-scoped, per-provider upstream HTTP reachability. */
+	getUpstreamTransportHealth?: () => UpstreamTransportHealth;
 	getRetentionStatus?: () => RetentionStatus;
 	/** Restart-scoped, aggregate-only process memory and lifecycle telemetry. */
 	getMemorySnapshot?: () => MemorySnapshot;
