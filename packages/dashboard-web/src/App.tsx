@@ -36,6 +36,13 @@ import {
 } from "./lib/startup-check";
 import "./index.css";
 
+// The floating Debug panel captures console output for devices without
+// devtools (phones). It is opt-in: load any dashboard URL with `?debug`.
+// Read once at startup so it survives in-app navigation.
+const DEBUG_PANEL_ENABLED =
+	typeof window !== "undefined" &&
+	new URLSearchParams(window.location.search).has("debug");
+
 // Lazy load heavy components for better bundle splitting
 const LazyAnalyticsTab = lazy(() =>
 	import("./components/LazyAnalytics").then((module) => ({
@@ -429,7 +436,7 @@ export function App() {
 						</div>
 					</main>
 				</div>
-				<DebugPanel />
+				{DEBUG_PANEL_ENABLED && <DebugPanel />}
 
 				{/* API Key Authentication Dialog */}
 				<ApiKeyAuthDialog

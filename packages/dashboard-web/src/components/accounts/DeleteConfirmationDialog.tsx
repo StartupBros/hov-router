@@ -1,13 +1,13 @@
 import { AlertCircle } from "lucide-react";
-import { useId } from "react";
 import { Button } from "../ui/button";
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "../ui/card";
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 
@@ -26,63 +26,59 @@ export function DeleteConfirmationDialog({
 	onConfirm,
 	onCancel,
 }: DeleteConfirmationDialogProps) {
-	const titleId = useId();
-	const descriptionId = useId();
 	return (
-		<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-			<Card
+		<Dialog
+			open
+			onOpenChange={(open) => {
+				if (!open) onCancel();
+			}}
+		>
+			<DialogContent
 				role="alertdialog"
-				aria-labelledby={titleId}
-				aria-describedby={descriptionId}
-				className="w-full max-w-md"
+				className="max-w-md"
+				// A stray click outside must not dismiss a typed-name confirmation.
+				onInteractOutside={(event) => event.preventDefault()}
 			>
-				<CardHeader>
-					<CardTitle id={titleId}>Confirm Account Removal</CardTitle>
-					<CardDescription id={descriptionId}>
-						This action cannot be undone.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-4">
-					<div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
-						<div className="flex items-center gap-2 text-destructive">
-							<AlertCircle className="h-5 w-5" aria-hidden="true" />
-							<p className="font-medium">Warning</p>
-						</div>
-						<p className="text-sm mt-2">
-							You are about to permanently remove the account '{accountName}'.
-							This will delete all associated data and cannot be recovered.
-						</p>
+				<DialogHeader>
+					<DialogTitle>Confirm Account Removal</DialogTitle>
+					<DialogDescription>This action cannot be undone.</DialogDescription>
+				</DialogHeader>
+				<div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+					<div className="flex items-center gap-2 text-destructive">
+						<AlertCircle className="h-5 w-5" aria-hidden="true" />
+						<p className="font-medium">Warning</p>
 					</div>
-					<div className="space-y-2">
-						<Label htmlFor="confirm-input">
-							Type{" "}
-							<span className="font-mono font-semibold">{accountName}</span> to
-							confirm:
-						</Label>
-						<Input
-							id="confirm-input"
-							value={confirmInput}
-							onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-								onConfirmInputChange((e.target as HTMLInputElement).value)
-							}
-							placeholder="Enter account name"
-							autoComplete="off"
-						/>
-					</div>
-					<div className="flex gap-2">
-						<Button
-							variant="destructive"
-							onClick={onConfirm}
-							disabled={confirmInput !== accountName}
-						>
-							Delete Account
-						</Button>
-						<Button variant="outline" onClick={onCancel}>
-							Cancel
-						</Button>
-					</div>
-				</CardContent>
-			</Card>
-		</div>
+					<p className="text-sm mt-2">
+						You are about to permanently remove the account '{accountName}'.
+						This will delete all associated data and cannot be recovered.
+					</p>
+				</div>
+				<div className="space-y-2">
+					<Label htmlFor="confirm-input">
+						Type <span className="font-mono font-semibold">{accountName}</span>{" "}
+						to confirm:
+					</Label>
+					<Input
+						id="confirm-input"
+						value={confirmInput}
+						onChange={(e) => onConfirmInputChange(e.target.value)}
+						placeholder="Enter account name"
+						autoComplete="off"
+					/>
+				</div>
+				<DialogFooter>
+					<Button variant="outline" onClick={onCancel}>
+						Cancel
+					</Button>
+					<Button
+						variant="destructive"
+						onClick={onConfirm}
+						disabled={confirmInput !== accountName}
+					>
+						Delete Account
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
 	);
 }

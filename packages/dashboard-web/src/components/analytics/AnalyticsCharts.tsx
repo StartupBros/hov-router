@@ -190,7 +190,7 @@ export function MainMetricsChart({
 	return (
 		<Card>
 			<CardHeader>
-				<div className="flex items-center justify-between">
+				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<div>
 						<CardTitle>Traffic Analytics</CardTitle>
 						<CardDescription>
@@ -201,7 +201,7 @@ export function MainMetricsChart({
 									: "Request volume and performance metrics over time"}
 						</CardDescription>
 					</div>
-					<div className="flex items-center gap-4">
+					<div className="flex flex-wrap items-center gap-4">
 						{viewMode !== "cumulative" && (
 							<div className="flex items-center gap-2">
 								<Switch
@@ -215,7 +215,7 @@ export function MainMetricsChart({
 							</div>
 						)}
 						<Select value={selectedMetric} onValueChange={setSelectedMetric}>
-							<SelectTrigger className="w-40">
+							<SelectTrigger className="w-40" aria-label="Chart metric">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -505,7 +505,7 @@ export function PerformanceIndicatorsChart({
 	return (
 		<Card>
 			<CardHeader>
-				<div className="flex items-center justify-between">
+				<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<div>
 						<CardTitle>Performance Indicators</CardTitle>
 						<CardDescription>
@@ -521,7 +521,7 @@ export function PerformanceIndicatorsChart({
 								setCurrentMetric(value as "errorRate" | "cacheHitRate")
 							}
 						>
-							<SelectTrigger className="w-36">
+							<SelectTrigger className="w-36" aria-label="Performance metric">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
