@@ -982,10 +982,14 @@ export interface ConfigData {
 	alert_anomaly_loop_min_requests?: number;
 	alert_cooldown_minutes?: number;
 	alert_webhook_url?: string;
-	/** Member notice destination (banked-reset heads-ups for HoV members).
-	 * Set only by this key or MEMBER_NOTICE_WEBHOOK_URL; never returned by
-	 * getAllSettings or any API. */
+	/** Member notice destination: the BroBot intake that turns reset events
+	 * into reviewed member cards. Set only by this key or
+	 * MEMBER_NOTICE_WEBHOOK_URL; never returned by getAllSettings or any API. */
 	member_notice_webhook_url?: string;
+	/** The secret member notice requests are signed with; BroBot holds the
+	 * same value. Set only by this key or MEMBER_NOTICE_SIGNING_SECRET; never
+	 * returned by getAllSettings or any API. */
+	member_notice_signing_secret?: string;
 	/** Comma-separated allowlist of AlertType names restricting which alert
 	 * types are delivered to the webhook; "" or unset = deliver all (see
 	 * getAlertWebhookTypes below). Only gates webhook delivery — the DB
@@ -2688,6 +2692,16 @@ export class Config extends EventEmitter {
 		return "";
 	}
 
+	/** The member notice signing secret; "" = not set. No setter, like the
+	 * address it signs for. */
+	getMemberNoticeSigningSecret(): string {
+		const fromEnv = process.env.MEMBER_NOTICE_SIGNING_SECRET;
+		if (fromEnv !== undefined) return fromEnv;
+		const fromFile = this.data.member_notice_signing_secret;
+		if (typeof fromFile === "string") return fromFile;
+		return "";
+	}
+
 	setAlertWebhookUrl(value: string): void {
 		if (value !== "") {
 			let parsed: URL;
@@ -2759,11 +2773,12 @@ export class Config extends EventEmitter {
 
 	getAllSettings(): Record<string, string | number | boolean | undefined> {
 		const anthropicDegradedMode = this.getAnthropicDegradedModeConfig();
-		// The member notice address is a secret: it is removed here, not
-		// redacted, so no settings reader ever sees it.
+		// The member notice address and signing secret are removed here, not
+		// redacted, so no settings reader ever sees them.
 		const {
 			quality_routing_policy: qualityRoutingPolicy,
 			member_notice_webhook_url: _memberNoticeWebhookUrl,
+			member_notice_signing_secret: _memberNoticeSigningSecret,
 			...settings
 		} = this.data;
 		// Include current strategy (which might come from env)

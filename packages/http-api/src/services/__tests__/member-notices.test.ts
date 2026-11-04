@@ -8,9 +8,6 @@ import { DatabaseOperations } from "@better-ccflare/database";
 import {
 	detectMemberNotices,
 	type MemberNoticeFetch,
-	renderEarlyResetNotice,
-	renderGrantNotice,
-	renderReminderNotice,
 	runMemberNoticePass,
 } from "../member-notices";
 
@@ -36,9 +33,42 @@ const ACCOUNTS = [
 ];
 
 const MEMBER_URL =
-	"https://discord.com/api/webhooks/1400000000000000001/member-token-abc";
-const ALERT_URL =
-	"https://discord.com/api/webhooks/1399999999999999999/alert-token";
+	"https://brobot.example.com/api/internal/ai-alerts/router-events";
+const SECRET = "router-signing-secret-7f3a";
+
+/** BroBot's version 1 event fields, in the order the router writes them. */
+const EVENT_KEYS = [
+	"version",
+	"noticeKey",
+	"kind",
+	"provider",
+	"detectedAt",
+	"waveExpiresAt",
+	"lead",
+];
+
+/** The exact body BroBot's intake should receive for one notice. */
+function expectedEvent(fields: {
+	noticeKey: string;
+	kind: string;
+	provider: string;
+	detectedAt: number;
+	waveExpiresAt: number | null;
+	lead: string | null;
+}): string {
+	return JSON.stringify({
+		version: 1,
+		noticeKey: fields.noticeKey,
+		kind: fields.kind,
+		provider: fields.provider,
+		detectedAt: new Date(fields.detectedAt).toISOString(),
+		waveExpiresAt:
+			fields.waveExpiresAt === null
+				? null
+				: new Date(fields.waveExpiresAt).toISOString(),
+		lead: fields.lead,
+	});
+}
 
 let dbOps: DatabaseOperations;
 
@@ -177,10 +207,16 @@ describe("grant notices", () => {
 			attempts: 0,
 			deliveredAt: null,
 		});
-		expect(row?.content).toContain("Codex");
-		expect(row?.content).toContain("/usage");
-		expect(row?.content).toContain("Redeem reset");
-		expect(row?.content).toContain("November 30, 2026");
+		expect(row?.content).toBe(
+			expectedEvent({
+				noticeKey: `grant:${WAVE}`,
+				kind: "grant",
+				provider: "codex",
+				detectedAt: claimedAt,
+				waveExpiresAt: EXPIRY,
+				lead: null,
+			}),
+		);
 		expect(await allNotices()).toHaveLength(1);
 	});
 
@@ -227,12 +263,28 @@ describe("expiry reminders", () => {
 			provider: "codex",
 			expiresAt: threeDays + 6 * HOUR,
 		});
-		expect(early?.content).toContain("3 days");
-		expect(early?.content).toContain("November 30, 2026");
+		expect(early?.content).toBe(
+			expectedEvent({
+				noticeKey: `remind:${WAVE}:3d`,
+				kind: "reminder",
+				provider: "codex",
+				detectedAt: threeDays,
+				waveExpiresAt: EXPIRY,
+				lead: "3d",
+			}),
+		);
 		const late = await notice(`remind:${WAVE}:1d`);
 		expect(late?.expiresAt).toBe(oneDay + 6 * HOUR);
-		expect(late?.content).toContain("1 day");
-		expect(late?.content).not.toContain("1 days");
+		expect(late?.content).toBe(
+			expectedEvent({
+				noticeKey: `remind:${WAVE}:1d`,
+				kind: "reminder",
+				provider: "codex",
+				detectedAt: oneDay + 30 * MINUTE,
+				waveExpiresAt: EXPIRY,
+				lead: "1d",
+			}),
+		);
 	});
 
 	it("claims no reminder for credits with no expiry", async () => {
@@ -286,8 +338,16 @@ describe("early reset notices", () => {
 			provider: "claude",
 			expiresAt: claimedAt + HOUR,
 		});
-		expect(row?.content).toContain("Claude");
-		expect(row?.content).not.toContain("Codex");
+		expect(row?.content).toBe(
+			expectedEvent({
+				noticeKey: "early:claude:after:none",
+				kind: "early_reset",
+				provider: "claude",
+				detectedAt: claimedAt,
+				waveExpiresAt: null,
+				lead: null,
+			}),
+		);
 	});
 
 	it("waits until the newer rollover is 10 minutes old and ignores rollovers opened over an hour ago", async () => {
@@ -451,7 +511,11 @@ function claimsHeldUntil(
 }
 
 describe("destination gate", () => {
-	const ENV_KEYS = ["MEMBER_NOTICE_WEBHOOK_URL", "ALERT_WEBHOOK_URL"] as const;
+	const ENV_KEYS = [
+		"MEMBER_NOTICE_WEBHOOK_URL",
+		"MEMBER_NOTICE_SIGNING_SECRET",
+		"ALERT_WEBHOOK_URL",
+	] as const;
 	let directory: string;
 	let saved: Record<string, string | undefined>;
 	let config: Config;
@@ -477,40 +541,35 @@ describe("destination gate", () => {
 		throw new Error("no request may leave a gated pass");
 	};
 
-	it("claims and sends nothing while the destination is off or blocked", async () => {
+	const gatedPass = () =>
+		runMemberNoticePass({
+			dbOps,
+			config,
+			now: () => GRANT + HOUR,
+			fetch: refusingFetch,
+			onDeliveryFailed: async () => {},
+		});
+
+	it("claims and sends nothing until an https address and a signing secret are both set", async () => {
 		await seedCredit("acct-codex-1", "c1", { firstSeenAt: GRANT + MINUTE });
-		const now = GRANT + HOUR;
-		config.setAlertWebhookUrl(ALERT_URL);
 
-		const off = await runMemberNoticePass({
-			dbOps,
-			config,
-			now: () => now,
-			fetch: refusingFetch,
-			onDeliveryFailed: async () => {},
-		});
-		expect(off.state).toBe("off");
+		expect((await gatedPass()).state).toBe("off");
+		config.set("member_notice_signing_secret", SECRET);
+		expect((await gatedPass()).state).toBe("off");
 
-		config.set(
-			"member_notice_webhook_url",
-			ALERT_URL.replace("discord.com", "discordapp.com"),
-		);
-		const blocked = await runMemberNoticePass({
-			dbOps,
-			config,
-			now: () => now,
-			fetch: refusingFetch,
-			onDeliveryFailed: async () => {},
-		});
-		expect(blocked.state).toBe("blocked_same_as_alert_webhook");
+		config.set("member_notice_signing_secret", "");
+		config.set("member_notice_webhook_url", MEMBER_URL);
+		expect((await gatedPass()).state).toBe("missing_secret");
+		config.set("member_notice_signing_secret", "  \t ");
+		expect((await gatedPass()).state).toBe("missing_secret");
 		expect(await allNotices()).toEqual([]);
 
-		config.set("member_notice_webhook_url", MEMBER_URL);
+		config.set("member_notice_signing_secret", SECRET);
 		const sent: string[] = [];
 		const on = await runMemberNoticePass({
 			dbOps,
 			config,
-			now: () => now,
+			now: () => GRANT + HOUR,
 			fetch: async (url) => {
 				sent.push(url);
 				return new Response(null, { status: 204 });
@@ -520,10 +579,26 @@ describe("destination gate", () => {
 		expect(on).toMatchObject({ state: "on", claimed: [`grant:${WAVE}`] });
 		expect(sent).toEqual([MEMBER_URL]);
 	});
+
+	it("reports an address that is not an https URL before a missing secret, and claims nothing", async () => {
+		await seedCredit("acct-codex-1", "c1", { firstSeenAt: GRANT + MINUTE });
+		for (const address of [
+			"brobot.example.com/api/internal/ai-alerts/router-events",
+			"http://brobot.example.com/api/internal/ai-alerts/router-events",
+			"ftp://brobot.example.com/events",
+		]) {
+			config.set("member_notice_webhook_url", address);
+			config.set("member_notice_signing_secret", "");
+			expect((await gatedPass()).state).toBe("invalid_address");
+			config.set("member_notice_signing_secret", SECRET);
+			expect((await gatedPass()).state).toBe("invalid_address");
+		}
+		expect(await allNotices()).toEqual([]);
+	});
 });
 
-describe("notice text", () => {
-	it("never names an account, an email, an account id or a count (AE11)", async () => {
+describe("event body", () => {
+	it("holds only BroBot's version 1 fields and never names an account, an email, an account id or a count (AE11)", async () => {
 		for (const [index, account] of [
 			"acct-codex-1",
 			"acct-codex-2",
@@ -550,42 +625,40 @@ describe("notice text", () => {
 			`remind:${WAVE}:1d`,
 			`remind:${WAVE}:3d`,
 		]);
-		const texts = [
-			...rows.map((row) => row.content),
-			renderGrantNotice({ providerName: "Codex", expiresAt: null }),
-		];
-		for (const text of texts) {
+		for (const row of rows) {
+			const event = JSON.parse(row.content);
+			expect(Object.keys(event)).toEqual(EVENT_KEYS);
+			expect(event).toMatchObject({ version: 1, noticeKey: row.notice_key });
 			for (const account of ACCOUNTS) {
-				expect(text).not.toContain(account.id);
-				expect(text).not.toContain(account.name);
+				expect(row.content).not.toContain(account.id);
+				expect(row.content).not.toContain(account.name);
 			}
-			expect(text).not.toContain("@");
-			expect(text).not.toMatch(/\b\d+\s+(accounts?|credits?|resets?)\b/i);
+			expect(row.content).not.toContain("@");
 		}
+		expect(rows.map((row) => JSON.parse(row.content).provider)).toEqual([
+			"claude",
+			"codex",
+			"codex",
+			"codex",
+			"codex",
+		]);
 	});
 
-	it("renders each notice from the provider name, expiry date and lead time only", () => {
-		expect(
-			renderGrantNotice({ providerName: "Codex", expiresAt: EXPIRY }),
-		).toContain("This wave expires November 30, 2026 at 20:04 UTC.");
-		expect(
-			renderGrantNotice({ providerName: "Codex", expiresAt: null }),
-		).not.toContain("expires");
-		expect(
-			renderReminderNotice({
-				providerName: "Codex",
-				expiresAt: EXPIRY,
-				lead: "1d",
+	it("leaves the wave expiry null on a grant for credits with no expiry", async () => {
+		await seedCredit("acct-codex-1", "c1", {
+			firstSeenAt: GRANT + MINUTE,
+			expiresAt: null,
+		});
+		await detectMemberNotices(dbOps, GRANT + HOUR);
+		expect((await notice(`grant:${WAVE}`))?.content).toBe(
+			expectedEvent({
+				noticeKey: `grant:${WAVE}`,
+				kind: "grant",
+				provider: "codex",
+				detectedAt: GRANT + HOUR,
+				waveExpiresAt: null,
+				lead: null,
 			}),
-		).toContain("1 day");
-		expect(renderEarlyResetNotice({ providerName: "Claude" })).toContain(
-			"Claude",
 		);
-		for (const text of [
-			renderGrantNotice({ providerName: "Codex", expiresAt: EXPIRY }),
-			renderEarlyResetNotice({ providerName: "Codex" }),
-		]) {
-			expect(text).toContain("HoV Router");
-		}
 	});
 });

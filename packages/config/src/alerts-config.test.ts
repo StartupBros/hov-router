@@ -17,6 +17,7 @@ const ENV_KEYS = [
 	"ALERT_WEBHOOK_URL",
 	"ALERT_WEBHOOK_TYPES",
 	"MEMBER_NOTICE_WEBHOOK_URL",
+	"MEMBER_NOTICE_SIGNING_SECRET",
 ] as const;
 
 const ORIGINAL_ENV: Record<string, string | undefined> = {};
@@ -371,9 +372,10 @@ describe("alert webhook type allowlist", () => {
 	});
 });
 
-describe("member notice webhook address", () => {
+describe("member notice address and signing secret", () => {
 	const MEMBER_URL =
-		"https://discord.com/api/webhooks/1400000000000000001/member-token-abc";
+		"https://brobot.example.com/api/internal/ai-alerts/router-events";
+	const SECRET = "router-signing-secret-7f3a";
 
 	afterEach(() => {
 		for (const key of ENV_KEYS) {
@@ -394,6 +396,29 @@ describe("member notice webhook address", () => {
 
 		try {
 			expect(config.getMemberNoticeWebhookUrl()).toBe("");
+			expect(config.getMemberNoticeSigningSecret()).toBe("");
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("reads the signing secret from the config key, and the environment variable wins over it", () => {
+		for (const key of ENV_KEYS) {
+			delete process.env[key];
+		}
+		const { config, cleanup } = makeConfig();
+
+		try {
+			config.set("member_notice_signing_secret", SECRET);
+			expect(config.getMemberNoticeSigningSecret()).toBe(SECRET);
+
+			process.env.MEMBER_NOTICE_SIGNING_SECRET = "from-the-environment";
+			expect(config.getMemberNoticeSigningSecret()).toBe(
+				"from-the-environment",
+			);
+
+			process.env.MEMBER_NOTICE_SIGNING_SECRET = "";
+			expect(config.getMemberNoticeSigningSecret()).toBe("");
 		} finally {
 			cleanup();
 		}
@@ -430,11 +455,14 @@ describe("member notice webhook address", () => {
 
 		try {
 			config.set("member_notice_webhook_url", MEMBER_URL);
+			config.set("member_notice_signing_secret", SECRET);
 			process.env.MEMBER_NOTICE_WEBHOOK_URL = MEMBER_URL;
+			process.env.MEMBER_NOTICE_SIGNING_SECRET = SECRET;
 			const serialized = JSON.stringify(config.getAllSettings());
 			expect(serialized).not.toContain("member_notice_webhook_url");
-			expect(serialized).not.toContain("1400000000000000001");
-			expect(serialized).not.toContain("member-token-abc");
+			expect(serialized).not.toContain("member_notice_signing_secret");
+			expect(serialized).not.toContain("brobot.example.com");
+			expect(serialized).not.toContain(SECRET);
 		} finally {
 			cleanup();
 		}

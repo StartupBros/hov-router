@@ -908,56 +908,59 @@ export function isDiscordWebhookUrl(url: URL): boolean {
 	);
 }
 
+export type MemberNoticeDestination =
+	| { state: "on"; url: string; secret: string }
+	| { state: Exclude<MemberNoticeState, "on">; url: null; secret: null };
+
 /**
- * What makes two webhook addresses the same destination. Discord accepts one
- * webhook under several host spellings and with query strings, so a Discord
- * address is its id and token; any other address is its trimmed text.
+ * Where member notices go, if anywhere: BroBot's intake, which checks each
+ * request's signature before it stores the event. Notices run only with an
+ * https address and a signing secret; the address is checked first, so a
+ * mistyped address is reported as that even before a secret is set. `url`
+ * and `secret` are set only when the state is `on`.
  */
-function webhookIdentity(address: string): string | null {
-	const trimmed = address.trim();
-	if (trimmed === "") return null;
+export function getMemberNoticeDestination(
+	config: Config,
+): MemberNoticeDestination {
+	// Legacy Config doubles implement only the older alert getters.
+	const address = (config.getMemberNoticeWebhookUrl?.() ?? "").trim();
+	if (address === "") return { state: "off", url: null, secret: null };
 	let url: URL;
 	try {
-		url = new URL(trimmed);
+		url = new URL(address);
 	} catch {
-		return `text:${trimmed}`;
+		return { state: "invalid_address", url: null, secret: null };
 	}
-	if (!isDiscordWebhookUrl(url)) return `text:${trimmed}`;
-	const [id = "", token = ""] = url.pathname
-		.slice(DISCORD_WEBHOOK_PATH_PREFIX.length)
-		.split("/");
-	return `discord:${id}/${token}`;
+	if (url.protocol !== "https:") {
+		return { state: "invalid_address", url: null, secret: null };
+	}
+	// BroBot verifies with its secret exactly as set, so this one is used
+	// exactly as set too; only an empty or blank value counts as unset.
+	const secret = config.getMemberNoticeSigningSecret?.() ?? "";
+	if (secret.trim() === "") {
+		return { state: "missing_secret", url: null, secret: null };
+	}
+	return { state: "on", url: address, secret };
 }
+
+const MEMBER_NOTICE_STARTUP_WARNINGS: Partial<
+	Record<MemberNoticeState, string>
+> = {
+	invalid_address:
+		"Member notices are off: the member notice address is not an https URL. Check MEMBER_NOTICE_WEBHOOK_URL or member_notice_webhook_url.",
+	missing_secret:
+		"Member notices are off: no signing secret is set. Set MEMBER_NOTICE_SIGNING_SECRET or member_notice_signing_secret to the value BroBot holds.",
+};
 
 /**
- * Where member notices go, if anywhere. They are blocked when the member
- * address is the operator alert webhook, so a misconfiguration can never put
- * member posts in the operator channel or route operator alerts to members.
- * `url` is set only when the state is `on`.
+ * The one startup warning member notices log, when an address is set but
+ * notices cannot run. It names neither the address nor the secret.
  */
-export function getMemberNoticeDestination(config: Config): {
-	state: MemberNoticeState;
-	url: string | null;
-} {
-	// Legacy Config doubles implement only the older alert getters.
-	const member = config.getMemberNoticeWebhookUrl?.() ?? "";
-	const memberIdentity = webhookIdentity(member);
-	if (memberIdentity === null) return { state: "off", url: null };
-	if (memberIdentity === webhookIdentity(config.getAlertWebhookUrl())) {
-		return { state: "blocked_same_as_alert_webhook", url: null };
-	}
-	return { state: "on", url: member.trim() };
-}
-
-export const MEMBER_NOTICES_BLOCKED_WARNING =
-	"Member notices are off: the member notice address is the same webhook as the alert webhook. Set a separate address to turn them on.";
-
-/** The one startup warning member notices log; it names neither address. */
 export function memberNoticeStartupWarning(config: Config): string | null {
-	return getMemberNoticeDestination(config).state ===
-		"blocked_same_as_alert_webhook"
-		? MEMBER_NOTICES_BLOCKED_WARNING
-		: null;
+	return (
+		MEMBER_NOTICE_STARTUP_WARNINGS[getMemberNoticeDestination(config).state] ??
+		null
+	);
 }
 
 function buildTruncationMarker(omittedCount: number): string {
@@ -1123,7 +1126,7 @@ export function buildDiscordAlertContent(alert: AlertEvent): string {
 			],
 			member_notice_delivery_failed: [
 				"A member notice could not be delivered and will not be retried.",
-				"Check the member notice address set by MEMBER_NOTICE_WEBHOOK_URL or member_notice_webhook_url.",
+				"Check the member notice address (MEMBER_NOTICE_WEBHOOK_URL or member_notice_webhook_url). A 401 means BroBot refused the signature: check that MEMBER_NOTICE_SIGNING_SECRET or member_notice_signing_secret matches BroBot's secret.",
 			],
 		};
 		[condition, action] = guidance[alert.type as keyof typeof guidance] ?? [
