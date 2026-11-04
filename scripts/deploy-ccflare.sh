@@ -185,6 +185,9 @@ report_deploy_plan() {
 rollback_on_failure() {
 	local status="$1"
 	trap - EXIT
+	# A TERM or HUP may have started this cleanup; another one (a process-group
+	# signal that step 0 also forwards) must not cut it short.
+	trap '' TERM HUP
 	set +e
 
 	# Step 0's worktree. A deploy running from it removes only its own build
@@ -300,13 +303,43 @@ if [[ -z "${CCFLARE_DEPLOY_BOOTSTRAP_SHA:-}" ]]; then
 	BOOTSTRAP_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/better-ccflare-deploy-bootstrap.XXXXXX")"
 	BOOTSTRAP_ROOT="$(cd "$BOOTSTRAP_PARENT" && pwd -P)/source"
 	create_verified_source_snapshot "$REPO_ROOT" "$BOOTSTRAP_ROOT" "$BOOTSTRAP_SHA"
-	# The deploy owns interrupts: Ctrl-C reaches it directly through the
-	# process group, and this shell waits for its cleanup and rollback before
-	# the EXIT trap removes the snapshot.
-	trap ':' INT TERM HUP
-	BOOTSTRAP_STATUS=0
+	# The deploy owns interrupts. Ctrl-C reaches it directly through the
+	# process group, and a TERM or HUP sent to this shell alone is forwarded,
+	# so `kill <pid>` still runs the deploy's rollback. Either way this shell
+	# waits for that cleanup, exits with the deploy's status, and its EXIT trap
+	# then removes the snapshot. The deploy runs asynchronously so these traps
+	# can fire while it runs: env restores the SIGINT that bash ignores in an
+	# asynchronous child, and <&0 keeps the caller's stdin.
+	BOOTSTRAP_PID=""
+	BOOTSTRAP_SIGNALLED=0
+	forward_to_deploy() {
+		BOOTSTRAP_SIGNALLED=1
+		if [[ -n "$1" && -n "$BOOTSTRAP_PID" ]]; then
+			kill -s "$1" "$BOOTSTRAP_PID" 2>/dev/null || true
+		fi
+	}
+	trap 'forward_to_deploy TERM' TERM
+	trap 'forward_to_deploy HUP' HUP
+	trap 'forward_to_deploy ""' INT
 	CCFLARE_DEPLOY_BOOTSTRAP_SHA="$BOOTSTRAP_SHA" CCFLARE_DEPLOY_BOOTSTRAP_ROOT="$BOOTSTRAP_ROOT" \
-		bash "$BOOTSTRAP_ROOT/scripts/deploy-ccflare.sh" "$@" || BOOTSTRAP_STATUS=$?
+		env --default-signal=INT,QUIT bash "$BOOTSTRAP_ROOT/scripts/deploy-ccflare.sh" "$@" <&0 &
+	BOOTSTRAP_PID=$!
+	# wait returns early (status > 128) whenever a trap runs, so wait again
+	# until the deploy has exited.
+	BOOTSTRAP_STATUS=0
+	wait "$BOOTSTRAP_PID" || BOOTSTRAP_STATUS=$?
+	while kill -0 "$BOOTSTRAP_PID" 2>/dev/null; do
+		BOOTSTRAP_SIGNALLED=0
+		BOOTSTRAP_STATUS=0
+		wait "$BOOTSTRAP_PID" || BOOTSTRAP_STATUS=$?
+	done
+	if ((BOOTSTRAP_SIGNALLED)); then
+		# A trap interrupted the last wait after the deploy exited: collect the
+		# status the shell recorded (127 means that wait already returned it).
+		BOOTSTRAP_RECORDED=0
+		wait "$BOOTSTRAP_PID" 2>/dev/null || BOOTSTRAP_RECORDED=$?
+		((BOOTSTRAP_RECORDED == 127)) || BOOTSTRAP_STATUS=$BOOTSTRAP_RECORDED
+	fi
 	exit "$BOOTSTRAP_STATUS"
 fi
 if [[ "$(pwd -P)" != "${CCFLARE_DEPLOY_BOOTSTRAP_ROOT:-}" ]]; then

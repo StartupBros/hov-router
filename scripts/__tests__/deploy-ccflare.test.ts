@@ -2794,10 +2794,25 @@ type HandoffFixture = ReturnType<typeof createHandoffFixture>;
 
 // `sudo` mode runs through a pass-through sudo on PATH, so both modes run the
 // same node program as this (non-root) user and must reach the same verdict.
+// A pass-through `sudo` on PATH that records each command it runs, so tests
+// can show which paths elevate and which never do.
+function recordingSudo(): { dir: string; calls: () => string[] } {
+	const dir = tempDir();
+	const log = join(dir, "sudo.log");
+	writeFileSync(
+		join(dir, "sudo"),
+		`#!/bin/sh\nprintf '%s\\n' "$*" >> ${shellQuote(log)}\nexec "$@"\n`,
+	);
+	chmodSync(join(dir, "sudo"), 0o755);
+	return {
+		dir,
+		calls: () =>
+			existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [],
+	};
+}
+
 function runEligibility(fixture: HandoffFixture, mode: "user" | "sudo") {
-	const shim = tempDir();
-	writeFileSync(join(shim, "sudo"), '#!/bin/sh\nexec "$@"\n');
-	chmodSync(join(shim, "sudo"), 0o755);
+	const sudo = recordingSudo();
 	const args = [
 		mode,
 		fixture.runtime,
@@ -2810,7 +2825,7 @@ function runEligibility(fixture: HandoffFixture, mode: "user" | "sudo") {
 	];
 	const result = bash(
 		[
-			`PATH=${shellQuote(shim)}:"$PATH"`,
+			`PATH=${shellQuote(sudo.dir)}:"$PATH"`,
 			`source ${shellQuote(helperScriptForShell)}`,
 			"status=0",
 			`reason="$(backend_handoff_eligible ${args.map(shellQuote).join(" ")})" || status=$?`,
@@ -2819,7 +2834,7 @@ function runEligibility(fixture: HandoffFixture, mode: "user" | "sudo") {
 	);
 	expectCommandOk(result);
 	const [status, ...reason] = capturedOutput(result.stdout, "stdout").split("\n");
-	return { status: Number(status), reason: reason.join("\n") };
+	return { status: Number(status), reason: reason.join("\n"), sudo: sudo.calls() };
 }
 
 const runningAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
@@ -2831,6 +2846,8 @@ describe("backend_handoff_eligible", () => {
 		status: 0 | 1 | 2;
 		reason: (fixture: HandoffFixture) => string;
 		skip?: boolean;
+		// Decided by the shell pre-checks, before any (elevated) node runs.
+		precheck?: boolean;
 	}[] = [
 		{ name: "the running generation matches the target", mutate: () => {}, status: 0, reason: () => "" },
 		{
@@ -2838,6 +2855,7 @@ describe("backend_handoff_eligible", () => {
 			mutate: (f) => rmSync(f.runtime),
 			status: 1,
 			reason: (f) => `no ${f.runtime}, so no running backend-handoff runtime is recorded`,
+			precheck: true,
 		},
 		{
 			name: "runtime.json is not JSON",
@@ -2906,6 +2924,17 @@ describe("backend_handoff_eligible", () => {
 			reason: () => "target timing is missing",
 		},
 		{
+			// An unreadable input that does not depend on file modes, so it
+			// still runs when the suite runs as root.
+			name: "a directory at a target file path",
+			mutate: (f) => {
+				rmSync(f.files.timing);
+				mkdirSync(f.files.timing);
+			},
+			status: 2,
+			reason: () => "cannot read target timing (EISDIR)",
+		},
+		{
 			name: "a directory at the runtime.json path",
 			mutate: (f) => {
 				rmSync(f.runtime);
@@ -2913,6 +2942,7 @@ describe("backend_handoff_eligible", () => {
 			},
 			status: 2,
 			reason: (f) => `${f.runtime} is not a regular file`,
+			precheck: true,
 		},
 		{
 			name: "an unreadable runtime.json",
@@ -2927,19 +2957,33 @@ describe("backend_handoff_eligible", () => {
 			status: 2,
 			reason: (f) => `cannot search ${f.handoffDir}`,
 			skip: runningAsRoot,
+			precheck: true,
 		},
 	];
 
-	for (const { name, mutate, status, reason, skip } of cases) {
+	for (const { name, mutate, status, reason, skip, precheck } of cases) {
 		test.skipIf(skip === true)(`${name}: returns ${status} in both modes`, () => {
 			const fixture = createHandoffFixture();
 			mutate(fixture);
+			// sudo mode runs the comparison as root and user mode never elevates.
+			const elevated = [
+				"node",
+				"-",
+				fixture.runtime,
+				fixture.files.runner,
+				fixture.files.guard,
+				fixture.files.policy,
+				fixture.files.timing,
+				fixture.files.transaction,
+				fixture.schema,
+			].join(" ");
 			try {
 				for (const mode of ["user", "sudo"] as const) {
 					expect({ mode, ...runEligibility(fixture, mode) }).toEqual({
 						mode,
 						status,
 						reason: reason(fixture),
+						sudo: mode === "sudo" && precheck !== true ? [elevated] : [],
 					});
 				}
 			} finally {
@@ -2985,9 +3029,11 @@ describe("deploy --check report", () => {
 		const end = source.indexOf("rollback_on_failure() {");
 		expect(start).toBeGreaterThan(0);
 		expect(end).toBeGreaterThan(start);
+		const sudo = recordingSudo();
 		const result = bash(
 			[
 				"set -Eeuo pipefail",
+				`PATH=${shellQuote(sudo.dir)}:"$PATH"`,
 				`source ${shellQuote(helperScriptForShell)}`,
 				source.slice(start, end),
 				`HEAD_SHA=${shellQuote(headSha)}`,
@@ -2999,6 +3045,8 @@ describe("deploy --check report", () => {
 			].join("\n"),
 		);
 		expectCommandOk(result);
+		// --check never elevates, whatever the verdict.
+		expect(sudo.calls()).toEqual([]);
 		return capturedOutput(result.stdout, "stdout");
 	}
 
@@ -3183,10 +3231,14 @@ describe("deploy --no-prune", () => {
 
 describe("deploy source gate in disposable repositories", () => {
 	function runCheck(checkout: string, scratch: string, prefix = "") {
-		return bashAt(
+		const sudo = recordingSudo();
+		const result = bashAt(
 			checkout,
-			`${prefix}TMPDIR=${shellQuote(scratch)} bash scripts/deploy-ccflare.sh --check`,
+			`${prefix}PATH=${shellQuote(sudo.dir)}:"$PATH" TMPDIR=${shellQuote(scratch)} bash scripts/deploy-ccflare.sh --check`,
 		);
+		// The bootstrap and every source gate run without elevation.
+		expect(sudo.calls()).toEqual([]);
+		return result;
 	}
 
 	function expectCheckTargets(
@@ -3325,53 +3377,84 @@ describe("deploy source gate in disposable repositories", () => {
 		});
 	});
 
-	test.skipIf(process.platform === "win32")(
-		"an interrupt mid-deploy exits 130 and removes the bootstrap snapshot",
-		async () => {
-			const { checkout } = createDisposableDeployRepo();
-			const scratch = tempDir();
-			const shim = tempDir();
-			const marker = join(shim, "node-started");
-			// The snapshot's first `node` call (the version gate) blocks, so the
-			// interrupt lands while the snapshot's copy of the script is running.
-			writeFileSync(
-				join(shim, "node"),
-				`#!/bin/sh\n: > ${shellQuote(marker)}\nexec sleep 30\n`,
-			);
-			chmodSync(join(shim, "node"), 0o755);
-			const child = spawn("bash", ["scripts/deploy-ccflare.sh", "--check"], {
-				cwd: checkout,
-				detached: true,
-				stdio: ["ignore", "pipe", "pipe"],
-				env: { ...process.env, PATH: `${shim}:${process.env.PATH}`, TMPDIR: scratch },
-			});
-			let output = "";
-			child.stdout?.on("data", (chunk) => {
-				output += chunk;
-			});
-			child.stderr?.on("data", (chunk) => {
-				output += chunk;
-			});
-			const exited = new Promise<{ code: number | null; signal: string | null }>(
-				(resolve) => child.on("exit", (code, signal) => resolve({ code, signal })),
-			);
-			try {
-				for (let waited = 0; !existsSync(marker); waited += 50) {
-					if (waited > 10_000) throw new Error(`deploy never reached node:\n${output}`);
-					await Bun.sleep(50);
-				}
-				expect(readdirSync(scratch)).toHaveLength(1);
-				// A terminal Ctrl-C signals the whole foreground process group.
-				process.kill(-(child.pid as number), "SIGINT");
-				expect(await exited).toEqual({ code: 130, signal: null });
-			} finally {
-				try {
-					process.kill(-(child.pid as number), "SIGKILL");
-				} catch {
-					// The group already exited.
-				}
+	// Start a deploy whose snapshot copy blocks in its first `node` call (the
+	// version gate), signal it there, and return how the invoked process exited.
+	async function interruptMidDeploy(signalDeploy: (pid: number) => void) {
+		const { checkout } = createDisposableDeployRepo();
+		const scratch = tempDir();
+		const shim = tempDir();
+		const marker = join(shim, "node-started");
+		writeFileSync(
+			join(shim, "node"),
+			`#!/bin/sh\n: > ${shellQuote(marker)}\nexec sleep 30\n`,
+		);
+		chmodSync(join(shim, "node"), 0o755);
+		const child = spawn("bash", ["scripts/deploy-ccflare.sh", "--check"], {
+			cwd: checkout,
+			detached: true,
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, PATH: `${shim}:${process.env.PATH}`, TMPDIR: scratch },
+		});
+		let output = "";
+		child.stdout?.on("data", (chunk) => {
+			output += chunk;
+		});
+		child.stderr?.on("data", (chunk) => {
+			output += chunk;
+		});
+		const exited = new Promise<{ code: number | null; signal: string | null }>(
+			(resolve) => child.on("exit", (code, signal) => resolve({ code, signal })),
+		);
+		try {
+			for (let waited = 0; !existsSync(marker); waited += 50) {
+				if (waited > 10_000) throw new Error(`deploy never reached node:\n${output}`);
+				await Bun.sleep(50);
 			}
+			expect(readdirSync(scratch)).toHaveLength(1);
+			signalDeploy(child.pid as number);
+			const result = await exited;
 			expectNoBootstrapLeft(checkout, scratch);
+			return result;
+		} finally {
+			try {
+				// Ends the blocked shim, which a TERM to the deploy alone leaves running.
+				process.kill(-(child.pid as number), "SIGKILL");
+			} catch {
+				// The group already exited.
+			}
+		}
+	}
+
+	test.skipIf(process.platform === "win32")(
+		"a Ctrl-C mid-deploy exits 130 and removes the bootstrap snapshot",
+		async () => {
+			// A terminal Ctrl-C signals the whole foreground process group.
+			expect(await interruptMidDeploy((pid) => process.kill(-pid, "SIGINT"))).toEqual({
+				code: 130,
+				signal: null,
+			});
+		},
+		20_000,
+	);
+
+	test.skipIf(process.platform === "win32")(
+		"a TERM sent only to the invoked process reaches the deploy and removes the bootstrap snapshot",
+		async () => {
+			expect(await interruptMidDeploy((pid) => process.kill(pid, "SIGTERM"))).toEqual({
+				code: 143,
+				signal: null,
+			});
+		},
+		20_000,
+	);
+
+	test.skipIf(process.platform === "win32")(
+		"a TERM to the whole process group (delivered and forwarded) exits 143 and removes the bootstrap snapshot",
+		async () => {
+			expect(await interruptMidDeploy((pid) => process.kill(-pid, "SIGTERM"))).toEqual({
+				code: 143,
+				signal: null,
+			});
 		},
 		20_000,
 	);
@@ -3476,6 +3559,17 @@ describe("deployment flow safety contracts", () => {
 			...source.matchAll(/backend_handoff_eligible (\S+) "\$HANDOFF_DIR\/runtime\.json"/g),
 		].map((match) => match[1]);
 		expect(calls.sort()).toEqual(["sudo", "user"]);
+		// --check evaluates as the invoking user; the deploy reads the root-owned
+		// handoff state through sudo.
+		const report = source.slice(
+			source.indexOf("report_deploy_plan() {"),
+			source.indexOf("rollback_on_failure() {"),
+		);
+		expect(report).toContain('backend_handoff_eligible user "$HANDOFF_DIR/runtime.json"');
+		expect(report).not.toContain("sudo");
+		expect(source).toContain(
+			'HANDOFF_REASON="$(\n\tbackend_handoff_eligible sudo "$HANDOFF_DIR/runtime.json"',
+		);
 		// The runtime.json comparison and the schema formula live only in the
 		// library (the script still writes and health-checks schemaDigest).
 		expect(source).not.toContain("r.schemaDigest");
@@ -3499,11 +3593,19 @@ describe("deployment flow safety contracts", () => {
 			'create_verified_source_snapshot "$REPO_ROOT" "$BOOTSTRAP_ROOT" "$BOOTSTRAP_SHA"',
 		);
 		expect(bootstrap).toContain(
-			'bash "$BOOTSTRAP_ROOT/scripts/deploy-ccflare.sh" "$@" || BOOTSTRAP_STATUS=$?',
+			'env --default-signal=INT,QUIT bash "$BOOTSTRAP_ROOT/scripts/deploy-ccflare.sh" "$@" <&0 &',
 		);
+		expect(bootstrap).toContain("trap 'forward_to_deploy TERM' TERM");
+		expect(bootstrap).toContain("trap 'forward_to_deploy HUP' HUP");
 		expect(bootstrap).toContain('exit "$BOOTSTRAP_STATUS"');
 		expect(source).toContain(
 			'remove_verified_source_snapshot "$REPO_ROOT" "$BOOTSTRAP_ROOT"',
+		);
+		// A second TERM or HUP (direct plus forwarded) cannot cut cleanup short.
+		const rollback = source.slice(source.indexOf("rollback_on_failure() {"));
+		expect(rollback.indexOf("trap '' TERM HUP")).toBeGreaterThan(0);
+		expect(rollback.indexOf("trap '' TERM HUP")).toBeLessThan(
+			rollback.indexOf("remove_verified_source_snapshot"),
 		);
 	});
 
