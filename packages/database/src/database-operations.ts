@@ -125,6 +125,7 @@ import {
 	SqliteStatementTimer,
 	type SqlWindowSummary,
 } from "./sqlite-statement-timing";
+import { DB_WORKER_THREAD_NAMES } from "./worker-thread-names";
 
 export interface DatabaseConfig {
 	/** Enable WAL (Write-Ahead Logging) mode for better concurrency */
@@ -501,6 +502,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			new URL("./incremental-vacuum-worker.ts", import.meta.url).href,
 			{
 				embeddedCode: EMBEDDED_INCREMENTAL_VACUUM_WORKER_CODE,
+				threadName: DB_WORKER_THREAD_NAMES.incrementalVacuum,
 				...maintenanceOptions,
 			},
 		);
@@ -508,6 +510,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			new URL("./vacuum-worker.ts", import.meta.url).href,
 			{
 				embeddedCode: EMBEDDED_VACUUM_WORKER_CODE,
+				threadName: DB_WORKER_THREAD_NAMES.compaction,
 				jobTimeoutMs: 30 * 60_000,
 				maxPendingJobs: 0,
 			},
@@ -674,11 +677,15 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 					embeddedCode: EMBEDDED_READER_WORKER_CODE,
 					sourceUrl: new URL("./reader-worker.ts", import.meta.url).href,
 				};
-				this.offThreadReader = new OffThreadReader(readerOptions);
+				this.offThreadReader = new OffThreadReader({
+					...readerOptions,
+					threadName: DB_WORKER_THREAD_NAMES.bulkReader,
+				});
 				this.adapter.setOffThreadReader(this.offThreadReader);
 				this.interactiveReader = new OffThreadReader({
 					...readerOptions,
 					label: "interactive reader",
+					threadName: DB_WORKER_THREAD_NAMES.interactiveReader,
 				});
 				this.adapter.setOffThreadReader(this.interactiveReader, "interactive");
 			}
@@ -770,6 +777,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			}),
 			embeddedCode: EMBEDDED_READER_WORKER_CODE,
 			sourceUrl: new URL("./reader-worker.ts", import.meta.url).href,
+			threadName: DB_WORKER_THREAD_NAMES.writer,
 		});
 		this.adapter.setWriter(this.offThreadWriter);
 		return true;
