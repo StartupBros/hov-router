@@ -714,6 +714,8 @@ metadata:
     app: better-ccflare
 spec:
   replicas: 1 # single-instance-per-database — do not scale this without a separate database
+  strategy:
+    type: Recreate # stop the old pod before starting its replacement
   selector:
     matchLabels:
       app: better-ccflare
@@ -722,6 +724,8 @@ spec:
       labels:
         app: better-ccflare
     spec:
+      securityContext:
+        fsGroup: 1000 # the image runs as UID 1000; make the mounted volume writable to it
       containers:
       - name: better-ccflare
         image: your-registry/better-ccflare:latest
@@ -785,6 +789,11 @@ spec:
     targetPort: 8080
   type: LoadBalancer
 ```
+
+Two settings in this manifest matter for the volume:
+
+- **`strategy: Recreate`.** The default rolling update starts the replacement pod before stopping the old one. With a `ReadWriteOnce` volume, a replacement scheduled on another node cannot mount it, so the rollout stalls. If both pods do get the volume, two instances share one database, which this deployment must never do. `Recreate` stops the old pod first.
+- **`fsGroup: 1000`.** The image runs as the non-root `ccflare` user (UID 1000). A fresh volume is usually owned by root, and the mount hides the image's own `/data`, so without `fsGroup` the app cannot create its database or config. If your storage driver ignores `fsGroup`, make the volume writable by UID 1000 some other way, such as an init container that runs `chown`.
 
 ### High Availability Checklist
 
