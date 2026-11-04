@@ -475,6 +475,51 @@ describe("off-thread reader fault lifecycle", () => {
 		expect(await second).toEqual([{ n: 2 }]);
 		expect(reads().map((m) => m.sql)).toEqual(["SELECT 1", "SELECT 2"]);
 	});
+	it.each([
+		"open-failed",
+		"spawn-failed",
+	])("keeps waiting reads through a replacement worker that %s", async (kind) => {
+		const workers: FakeWorker[] = [];
+		let spawns = 0;
+		const { reader, warn } = fakeFixture({
+			workerFactory: () => {
+				spawns++;
+				if (spawns === 2 && kind === "spawn-failed")
+					throw new Error("spawn failed");
+				const worker = new FakeWorker();
+				if (spawns === 2) worker.ready = false;
+				workers.push(worker);
+				return worker;
+			},
+		});
+		const running = reader.all("SELECT 1", []).catch((e) => e);
+		const waiting = reader.get("SELECT 2", []);
+		await turns();
+		workers[0].onerror?.({
+			message: "worker broke",
+			preventDefault() {},
+		} as ErrorEvent);
+		expect(await running).toBeInstanceOf(OffThreadReaderUnavailableError);
+		await turns();
+		if (kind === "open-failed") {
+			expect(workers).toHaveLength(2);
+			workers[1].emit({ kind: "open-failed", error: "cannot open database" });
+			await turns();
+			expect(workers[1].terminated).toBe(1);
+		}
+		const last = workers.at(-1);
+		const message = last?.messages.find((m) => m.kind === "read");
+		expect(message).toMatchObject({ mode: "get", sql: "SELECT 2" });
+		last?.emit({
+			kind: "result",
+			id: message?.id,
+			ok: true,
+			row: { n: 2 },
+			ms: 1,
+		});
+		expect(await waiting).toEqual({ n: 2 });
+		expect(warn).toHaveBeenCalledTimes(2);
+	});
 	it("sends waiting reads to the main-thread fallback once the spawn budget is spent", async () => {
 		const { reader, workers } = fakeFixture({ maxSpawns: 1 });
 		const running = reader.all("SELECT 1", []).catch((e) => e);

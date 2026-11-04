@@ -227,26 +227,35 @@ async function getCachedOrPersistedCodexUsage(
 	// The accounts page waits on it, so it uses the interactive reader (#709).
 	// With no payloads stored (payload storage off, or all pruned) the walk
 	// below would read the account's whole request index to find nothing.
-	const anyPayload = await db.getOffThread<{ present: number }>(
-		"SELECT 1 AS present FROM request_payloads LIMIT 1",
-		[],
-		"interactive",
-	);
-	const rows = anyPayload
-		? await db.queryOffThread<{
+	let rows: { json: string; timestamp: number | null }[] = [];
+	try {
+		const anyPayload = await db.getOffThread<{ present: number }>(
+			"SELECT 1 AS present FROM request_payloads LIMIT 1",
+			[],
+			"interactive",
+		);
+		if (anyPayload)
+			rows = await db.queryOffThread<{
 				json: string;
 				timestamp: number | null;
 			}>(
 				`SELECT rp.json, COALESCE(rp.timestamp, r.timestamp) as timestamp
-		 FROM request_payloads rp
-		 JOIN requests r ON rp.id = r.id
-		 WHERE r.account_used = ?
-		 ORDER BY r.timestamp DESC
-		 LIMIT 20`,
+			 FROM request_payloads rp
+			 JOIN requests r ON rp.id = r.id
+			 WHERE r.account_used = ?
+			 ORDER BY r.timestamp DESC
+			 LIMIT 20`,
 				[accountId],
 				"interactive",
-			)
-		: [];
+			);
+	} catch (error) {
+		// A busy or failed reader must not fail the whole accounts list; the
+		// durable snapshot below still answers.
+		log.warn(
+			`Failed to read stored payloads for ${accountName}:`,
+			error instanceof Error ? error.message : String(error),
+		);
+	}
 
 	for (const row of rows) {
 		if (!row.json || !row.timestamp) continue;

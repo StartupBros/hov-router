@@ -343,6 +343,12 @@ describe("heavy read result equivalence", () => {
 		await adapter.run("UPDATE accounts SET session_start = ? WHERE id = 'a1'", [
 			NOW - 3 * DAY,
 		]);
+		// One stored payload, so the Codex fallback walks the payloads too.
+		await adapter.run(
+			"INSERT INTO request_payloads (id,json,timestamp) VALUES ('0-1-0','{}',?)",
+			[NOW - 60_000],
+		);
+		const readerAll = spyOn(reader, "all");
 		const stuck = {
 			all: mock(<R>() => new Promise<R[]>(() => {})),
 			get: mock(<R>() => new Promise<R | null>(() => {})),
@@ -379,8 +385,50 @@ describe("heavy read result equivalence", () => {
 			expect(stuck.all).not.toHaveBeenCalled();
 			expect(stuck.get).not.toHaveBeenCalled();
 			expect(reader.readsServed - before).toBeGreaterThanOrEqual(1);
+			const walk = ([sql]: unknown[]) =>
+				/JOIN requests r ON rp\.id = r\.id/.test(String(sql));
+			expect(readerAll.mock.calls.filter(walk)).toHaveLength(3);
 		} finally {
 			clearTimeout(timer);
+			for (const id of ids) usageCache.delete(id);
+		}
+	});
+	it("keeps the accounts list when the stored-usage reads fail", async () => {
+		const adapter = db.getAdapter();
+		await adapter.run(
+			"INSERT INTO usage_snapshots (account_id,timestamp,window_key,utilization,resets_at,active) VALUES ('a1',?,'seven_day',42,?,1)",
+			[NOW - 60_000, NOW + DAY],
+		);
+		// What a read gets after waiting its whole timeout for a busy reader.
+		const busy = new Error(
+			"off-thread interactive reader busy: read waited 120000ms: SELECT ?",
+		);
+		const failing = {
+			all: mock(async <R>(): Promise<R[]> => {
+				throw busy;
+			}),
+			get: mock(async <R>(): Promise<R | null> => {
+				throw busy;
+			}),
+		};
+		adapter.setOffThreadReader(failing, "interactive");
+		const ids = ["a1", "a2", "a3"];
+		const handler = createAccountsListHandler(db, {
+			getUsageThrottlingFiveHourEnabled: () => false,
+			getUsageThrottlingWeeklyEnabled: () => false,
+		} as unknown as Config);
+		try {
+			for (const id of ids) usageCache.delete(id);
+			const response = await handler();
+			expect(response.status).toBe(200);
+			const accounts = (await response.json()) as AccountResponse[];
+			expect(accounts.map((account) => account.id).sort()).toEqual(ids);
+			// a1 falls through to its durable weekly snapshot.
+			expect(
+				accounts.find((account) => account.id === "a1")?.usageData,
+			).toMatchObject({ seven_day: { utilization: 42 } });
+			expect(failing.get).toHaveBeenCalled();
+		} finally {
 			for (const id of ids) usageCache.delete(id);
 		}
 	});
