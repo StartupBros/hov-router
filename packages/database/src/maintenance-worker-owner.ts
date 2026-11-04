@@ -14,6 +14,8 @@ export interface MaintenanceWorkerOptions {
 	createObjectURL?: (blob: Blob) => string;
 	revokeObjectURL?: (url: string) => void;
 	embeddedCode?: string;
+	/** The worker's OS thread name (see DB_WORKER_THREAD_NAMES); 15 bytes at most. */
+	threadName?: string;
 	maxPendingJobs?: number;
 	jobTimeoutMs?: number;
 	retirementTimeoutMs?: number;
@@ -126,11 +128,15 @@ export class MaintenanceWorkerOwner {
 			this.urlsAcquired++;
 		}
 		let worker: MaintenanceWorker;
+		const { threadName } = this.options;
 		try {
 			worker = (
 				this.options.workerFactory ??
 				((specifier, options) => new Worker(specifier, options))
-			)(url ?? this.sourceUrl, { smol: true });
+			)(
+				url ?? this.sourceUrl,
+				threadName ? { smol: true, name: threadName } : { smol: true },
+			);
 		} catch (error) {
 			if (url) this.revoke(url);
 			throw error;

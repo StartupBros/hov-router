@@ -30,6 +30,8 @@ export interface OffThreadReaderOptions {
 	maxSpawns?: number;
 	/** Names this worker in log lines when a process runs more than one reader. */
 	label?: string;
+	/** The worker's OS thread name (see DB_WORKER_THREAD_NAMES); 15 bytes at most. */
+	threadName?: string;
 	warn?: (message: string) => void;
 	info?: (message: string) => void;
 }
@@ -285,10 +287,14 @@ export class OffThreadReader {
 					),
 				);
 			}
+			const { threadName } = this.options;
 			worker = (
 				this.options.workerFactory ??
 				((specifier, options) => new Worker(specifier, options))
-			)(url ?? this.options.sourceUrl, { smol: true });
+			)(
+				url ?? this.options.sourceUrl,
+				threadName ? { smol: true, name: threadName } : { smol: true },
+			);
 		} catch (error) {
 			if (url) this.revoke(url);
 			throw this.fault("spawn failed", error);
