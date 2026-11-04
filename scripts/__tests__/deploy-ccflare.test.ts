@@ -10,6 +10,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	statSync,
 	utimesSync,
@@ -81,7 +82,10 @@ function expectCommandOk(result: ReturnType<typeof Bun.spawnSync>): void {
 	}
 }
 
-function createDisposableDeployRepo(): {
+// A bare origin plus a checkout of it whose main carries this branch's deploy
+// script and library. `cliVersion` differing from the root's 1.0.0 makes every
+// full run refuse at the version gate, before the deploy lock or any sudo.
+function createDisposableDeployRepo(options: { cliVersion?: string } = {}): {
 	checkout: string;
 	remote: string;
 } {
@@ -109,7 +113,7 @@ function createDisposableDeployRepo(): {
 	mkdirSync(join(checkout, "apps", "cli"), { recursive: true });
 	writeFileSync(
 		join(checkout, "apps", "cli", "package.json"),
-		'{"name":"deploy-fixture-cli","version":"1.0.0"}\n',
+		`{"name":"deploy-fixture-cli","version":"${options.cliVersion ?? "1.0.0"}"}\n`,
 	);
 	expectCommandOk(gitAt(checkout, "add", "scripts", "package.json", "apps"));
 	expectCommandOk(gitAt(checkout, "commit", "-m", "fixture"));
@@ -124,6 +128,33 @@ function createDisposableDeployRepo(): {
 		),
 	);
 	return { checkout, remote };
+}
+
+function headOf(checkout: string, rev = "HEAD"): string {
+	return capturedOutput(gitAt(checkout, "rev-parse", rev).stdout, "stdout").trim();
+}
+
+// Commit a new file on the fixture checkout's main and push it, so origin/main
+// moves ahead of whatever was captured before.
+function advanceOriginMain(checkout: string, name: string): string {
+	writeFileSync(join(checkout, name), `${name}\n`);
+	expectCommandOk(gitAt(checkout, "add", name));
+	expectCommandOk(gitAt(checkout, "commit", "-m", `advance ${name}`));
+	expectCommandOk(
+		gitAt(checkout, "push", "origin", "HEAD:refs/heads/main"),
+	);
+	return headOf(checkout);
+}
+
+// Step 0 snapshots origin/main under $TMPDIR; every run must leave neither
+// the worktree registration nor its directory behind.
+function expectNoBootstrapLeft(checkout: string, scratch: string): void {
+	const worktrees = capturedOutput(
+		gitAt(checkout, "worktree", "list", "--porcelain").stdout,
+		"stdout",
+	);
+	expect(worktrees.match(/^worktree /gm)).toHaveLength(1);
+	expect(readdirSync(scratch)).toEqual([]);
 }
 
 function shellQuote(value: string): string {
@@ -364,7 +395,9 @@ function schemaDigestPaths(scriptSource: string): string[] {
 
 describe("schema digest input list", () => {
 	test("names only files that exist in the repository", () => {
-		const paths = schemaDigestPaths(readFileSync(deployScript, "utf8"));
+		const paths = schemaDigestPaths(
+			readFileSync(join(repoRoot, helperScriptForShell), "utf8"),
+		);
 
 		expect(paths).toContain("packages/database/src/migrations.ts");
 		for (const path of paths) {
@@ -2594,60 +2627,424 @@ process.on("SIGTERM", () => {
 });
 
 describe("validate_main_deploy_source", () => {
-	function runSourceGate(
-		branchRef: string,
-		headSha: string,
-		originMainSha: string,
-	) {
+	const tip = "a".repeat(40);
+	function runSourceGate(...args: string[]) {
 		return bash(
 			[
 				`source ${shellQuote(helperScriptForShell)}`,
-				`validate_main_deploy_source ${shellQuote(branchRef)} ${shellQuote(headSha)} ${shellQuote(originMainSha)}`,
+				`validate_main_deploy_source ${args.map(shellQuote).join(" ")}`,
 			].join("\n"),
 		);
 	}
 
-	test("accepts only refs/heads/main at the fetched origin/main tip", () => {
-		const sha = "a".repeat(40);
-		const result = runSourceGate("refs/heads/main", sha, sha);
+	test("accepts a detached snapshot at the bootstrap SHA, still the origin/main tip", () => {
+		const result = runSourceGate("", tip, tip, tip);
 
 		expect(result.exitCode).toBe(0);
 		expect(capturedOutput(result.stderr, "stderr")).toBe("");
 		expect(capturedOutput(result.stdout, "stdout")).toContain(
-			"is refs/heads/main at refs/remotes/origin/main",
+			"is a detached snapshot of refs/remotes/origin/main",
 		);
 	});
 
-	test("rejects a feature branch even when it points at origin/main", () => {
-		const sha = "a".repeat(40);
-		const result = runSourceGate("refs/heads/codex/example", sha, sha);
+	test("rejects a branch checkout even at the right commit", () => {
+		for (const ref of ["refs/heads/main", "refs/heads/feature"]) {
+			const result = runSourceGate(ref, tip, tip, tip);
+
+			expect(result.exitCode).toBe(1);
+			expect(capturedOutput(result.stderr, "stderr")).toContain(
+				`the deploy snapshot is on ${ref}`,
+			);
+		}
+	});
+
+	test("rejects a snapshot at a commit other than the one the bootstrap named", () => {
+		const result = runSourceGate("", "b".repeat(40), tip, tip);
 
 		expect(result.exitCode).toBe(1);
 		expect(capturedOutput(result.stderr, "stderr")).toContain(
-			"checkout must be refs/heads/main",
+			"not at the bootstrap-named aaaaaaaaaaaa",
 		);
 	});
 
-	test("rejects detached HEAD even when it points at origin/main", () => {
-		const sha = "a".repeat(40);
-		const result = runSourceGate("", sha, sha);
+	test("rejects a bootstrap whose origin/main has moved since", () => {
+		const moved = "c".repeat(40);
+		const result = runSourceGate("", tip, moved, tip);
 
 		expect(result.exitCode).toBe(1);
 		expect(capturedOutput(result.stderr, "stderr")).toContain(
-			"checkout has detached HEAD",
+			"moved from aaaaaaaaaaaa to cccccccccccc",
 		);
 	});
 
-	test("rejects local main whenever it differs from fetched origin/main", () => {
-		const result = runSourceGate(
-			"refs/heads/main",
-			"1111111111111111111111111111111111111111",
-			"2222222222222222222222222222222222222222",
+	test("refuses the old three-argument call and abbreviated SHAs", () => {
+		const threeArgs = runSourceGate("", tip, tip);
+		expect(threeArgs.exitCode).toBe(2);
+		expect(capturedOutput(threeArgs.stderr, "stderr")).toContain(
+			"requires: checkout-ref HEAD-SHA origin-main-SHA bootstrap-SHA",
 		);
 
-		expect(result.exitCode).toBe(1);
+		const short = runSourceGate("", tip, tip, "aaaaaaa");
+		expect(short.exitCode).toBe(2);
+		expect(capturedOutput(short.stderr, "stderr")).toContain(
+			"requires full lowercase Git SHAs",
+		);
+	});
+});
+
+describe("deploy_schema_digest", () => {
+	test("hashes each input as path, NUL, byte length, NUL, then the bytes", () => {
+		const root = tempDir();
+		mkdirSync(join(root, "packages", "database", "src"), { recursive: true });
+		// A multi-byte character makes the byte length differ from the string length.
+		const bytes = Buffer.from("export const migration = 'é';\n");
+		writeFileSync(join(root, "packages/database/src/migrations.ts"), bytes);
+		const expected = createHash("sha256")
+			.update(`packages/database/src/migrations.ts\0${bytes.length}\0`)
+			.update(bytes)
+			.digest("hex");
+
+		const result = bash(
+			[
+				`source ${shellQuote(helperScriptForShell)}`,
+				`deploy_schema_digest ${shellQuote(root)}`,
+			].join("\n"),
+		);
+
+		expectCommandOk(result);
+		expect(capturedOutput(result.stdout, "stdout")).toBe(expected);
+	});
+
+	test("fails, rather than hashing nothing, when an input is missing", () => {
+		const result = bash(
+			[
+				`source ${shellQuote(helperScriptForShell)}`,
+				`deploy_schema_digest ${shellQuote(tempDir())}`,
+			].join("\n"),
+		);
+
+		expect(result.exitCode).not.toBe(0);
+		expect(capturedOutput(result.stdout, "stdout")).toBe("");
 		expect(capturedOutput(result.stderr, "stderr")).toContain(
-			"does not exactly match refs/remotes/origin/main",
+			"schema digest input packages/database/src/migrations.ts is unreadable",
+		);
+	});
+});
+
+// The five files a backend-only handoff must find byte-identical to the
+// running ingress, keyed as runtime.json's `ingress` object keys them.
+const handoffInputs = {
+	runner: "scripts/run-ccflare-stack.sh",
+	guard: "scripts/ccflare-guard.mjs",
+	policy: "scripts/ccflare-guard-policy.mjs",
+	timing: "scripts/ccflare-managed-timing.mjs",
+	transaction: "scripts/ccflare-deployment-transaction.mjs",
+} as const;
+type HandoffKey = keyof typeof handoffInputs;
+
+function sha256File(path: string): string {
+	return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+// A source tree carrying the handoff inputs and a schema file, plus a handoff
+// directory whose runtime.json records exactly that tree: the state in which a
+// deploy of this tree may hand off without restarting the guard.
+function createHandoffFixture() {
+	const root = realpathSync(tempDir());
+	const source = join(root, "source");
+	mkdirSync(join(source, "scripts"), { recursive: true });
+	mkdirSync(join(source, "packages", "database", "src"), { recursive: true });
+	const files = {} as Record<HandoffKey, string>;
+	for (const [key, path] of Object.entries(handoffInputs) as [HandoffKey, string][]) {
+		files[key] = join(source, path);
+		writeFileSync(files[key], `// ${key} fixture\n`);
+	}
+	const migrations = Buffer.from("export const schema = 1;\n");
+	writeFileSync(join(source, "packages/database/src/migrations.ts"), migrations);
+	const schema = createHash("sha256")
+		.update(`packages/database/src/migrations.ts\0${migrations.length}\0`)
+		.update(migrations)
+		.digest("hex");
+
+	const handoffDir = join(root, "handoff");
+	const controlDir = join(root, "control");
+	const pin = join(root, "50-pinned-build.conf");
+	mkdirSync(handoffDir);
+	mkdirSync(controlDir);
+	writeFileSync(join(controlDir, "deploy.sock"), "");
+	writeFileSync(pin, "[Service]\n");
+	const runtime = join(handoffDir, "runtime.json");
+	const base = {
+		schemaDigest: schema,
+		ingress: Object.fromEntries(
+			(Object.keys(handoffInputs) as HandoffKey[]).map((key) => [key, sha256File(files[key])]),
+		) as Record<HandoffKey, string>,
+		pinPath: pin,
+		pinHash: sha256File(pin),
+		controlDir,
+		oldPid: 4242,
+		generation: 3,
+	};
+	const writeRuntime = (value: unknown) =>
+		writeFileSync(runtime, typeof value === "string" ? value : JSON.stringify(value));
+	writeRuntime(base);
+	return { root, source, files, schema, handoffDir, controlDir, pin, runtime, base, writeRuntime };
+}
+type HandoffFixture = ReturnType<typeof createHandoffFixture>;
+
+// `sudo` mode runs through a pass-through sudo on PATH, so both modes run the
+// same node program as this (non-root) user and must reach the same verdict.
+function runEligibility(fixture: HandoffFixture, mode: "user" | "sudo") {
+	const shim = tempDir();
+	writeFileSync(join(shim, "sudo"), '#!/bin/sh\nexec "$@"\n');
+	chmodSync(join(shim, "sudo"), 0o755);
+	const args = [
+		mode,
+		fixture.runtime,
+		fixture.files.runner,
+		fixture.files.guard,
+		fixture.files.policy,
+		fixture.files.timing,
+		fixture.files.transaction,
+		fixture.schema,
+	];
+	const result = bash(
+		[
+			`PATH=${shellQuote(shim)}:"$PATH"`,
+			`source ${shellQuote(helperScriptForShell)}`,
+			"status=0",
+			`reason="$(backend_handoff_eligible ${args.map(shellQuote).join(" ")})" || status=$?`,
+			'printf "%s\\n%s" "$status" "$reason"',
+		].join("\n"),
+	);
+	expectCommandOk(result);
+	const [status, ...reason] = capturedOutput(result.stdout, "stdout").split("\n");
+	return { status: Number(status), reason: reason.join("\n") };
+}
+
+const runningAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+describe("backend_handoff_eligible", () => {
+	const cases: {
+		name: string;
+		mutate: (fixture: HandoffFixture) => void;
+		status: 0 | 1 | 2;
+		reason: (fixture: HandoffFixture) => string;
+		skip?: boolean;
+	}[] = [
+		{ name: "the running generation matches the target", mutate: () => {}, status: 0, reason: () => "" },
+		{
+			name: "no runtime.json",
+			mutate: (f) => rmSync(f.runtime),
+			status: 1,
+			reason: (f) => `no ${f.runtime}, so no running backend-handoff runtime is recorded`,
+		},
+		{
+			name: "runtime.json is not JSON",
+			mutate: (f) => f.writeRuntime("{not json"),
+			status: 1,
+			reason: () => "runtime.json is not valid JSON",
+		},
+		{
+			name: "a different schema digest",
+			mutate: (f) => f.writeRuntime({ ...f.base, schemaDigest: "e".repeat(64) }),
+			status: 1,
+			reason: (f) => `schema digest changed (running eeeeeeeeeeee, target ${f.schema.slice(0, 12)})`,
+		},
+		...(Object.keys(handoffInputs) as HandoffKey[]).map((key) => ({
+			name: `different ${key} bytes`,
+			mutate: (f: HandoffFixture) => writeFileSync(f.files[key], `// changed ${key}\n`),
+			status: 1 as const,
+			reason: () => `${key} bytes differ from the running ingress`,
+		})),
+		{
+			name: "no ingress record",
+			mutate: (f) => f.writeRuntime({ ...f.base, ingress: undefined }),
+			status: 1,
+			reason: () => "runtime.json is malformed",
+		},
+		{
+			name: "no pinPath",
+			mutate: (f) => f.writeRuntime({ ...f.base, pinPath: undefined }),
+			status: 1,
+			reason: () => "runtime.json has no pinPath",
+		},
+		{
+			name: "a changed systemd pin",
+			mutate: (f) => writeFileSync(f.pin, "[Service]\nEnvironment=CHANGED=1\n"),
+			status: 1,
+			reason: () => "systemd pin changed since the running generation started",
+		},
+		{
+			name: "a missing systemd pin",
+			mutate: (f) => rmSync(f.pin),
+			status: 1,
+			reason: (f) => `systemd pin ${f.pin} is missing`,
+		},
+		{
+			name: "a missing control socket",
+			mutate: (f) => rmSync(join(f.controlDir, "deploy.sock")),
+			status: 1,
+			reason: (f) => `control socket ${f.controlDir}/deploy.sock is missing`,
+		},
+		{
+			name: "a non-integer oldPid",
+			mutate: (f) => f.writeRuntime({ ...f.base, oldPid: "4242" }),
+			status: 1,
+			reason: () => "runtime.json oldPid is not an integer",
+		},
+		{
+			name: "a non-integer generation",
+			mutate: (f) => f.writeRuntime({ ...f.base, generation: 1.5 }),
+			status: 1,
+			reason: () => "runtime.json generation is not an integer",
+		},
+		{
+			name: "a missing target file",
+			mutate: (f) => rmSync(f.files.timing),
+			status: 2,
+			reason: () => "target timing is missing",
+		},
+		{
+			name: "a directory at the runtime.json path",
+			mutate: (f) => {
+				rmSync(f.runtime);
+				mkdirSync(f.runtime);
+			},
+			status: 2,
+			reason: (f) => `${f.runtime} is not a regular file`,
+		},
+		{
+			name: "an unreadable runtime.json",
+			mutate: (f) => chmodSync(f.runtime, 0o000),
+			status: 2,
+			reason: () => "cannot read runtime.json (EACCES)",
+			skip: runningAsRoot,
+		},
+		{
+			name: "an unsearchable handoff directory",
+			mutate: (f) => chmodSync(f.handoffDir, 0o000),
+			status: 2,
+			reason: (f) => `cannot search ${f.handoffDir}`,
+			skip: runningAsRoot,
+		},
+	];
+
+	for (const { name, mutate, status, reason, skip } of cases) {
+		test.skipIf(skip === true)(`${name}: returns ${status} in both modes`, () => {
+			const fixture = createHandoffFixture();
+			mutate(fixture);
+			try {
+				for (const mode of ["user", "sudo"] as const) {
+					expect({ mode, ...runEligibility(fixture, mode) }).toEqual({
+						mode,
+						status,
+						reason: reason(fixture),
+					});
+				}
+			} finally {
+				// Restore permissions so afterEach can remove the fixture.
+				chmodSync(fixture.handoffDir, 0o755);
+				if (existsSync(fixture.runtime) && statSync(fixture.runtime).isFile()) {
+					chmodSync(fixture.runtime, 0o644);
+				}
+			}
+		});
+	}
+
+	test("rejects a call without the privilege mode", () => {
+		const fixture = createHandoffFixture();
+		const result = bash(
+			[
+				`source ${shellQuote(helperScriptForShell)}`,
+				`backend_handoff_eligible ${shellQuote(fixture.runtime)} a b c d e f`,
+			].join("\n"),
+		);
+		expect(result.exitCode).toBe(2);
+		expect(capturedOutput(result.stdout, "stdout")).toContain(
+			"requires: sudo|user runtime runner guard policy timing transaction schema",
+		);
+	});
+});
+
+describe("deploy --check report", () => {
+	// Run the script's own report function against a fixture tree, handoff
+	// directory and health document (curl reads file:// URLs).
+	function runReport(
+		fixture: HandoffFixture,
+		health: unknown,
+		headSha = "a".repeat(40),
+	) {
+		const healthFile = join(fixture.root, "health.json");
+		writeFileSync(
+			healthFile,
+			typeof health === "string" ? health : JSON.stringify(health),
+		);
+		const source = readFileSync(deployScript, "utf8");
+		const start = source.indexOf("report_deploy_plan() {");
+		const end = source.indexOf("rollback_on_failure() {");
+		expect(start).toBeGreaterThan(0);
+		expect(end).toBeGreaterThan(start);
+		const result = bash(
+			[
+				"set -Eeuo pipefail",
+				`source ${shellQuote(helperScriptForShell)}`,
+				source.slice(start, end),
+				`HEAD_SHA=${shellQuote(headSha)}`,
+				"VERSION=1.2.3",
+				`REPO_ROOT=${shellQuote(fixture.source)}`,
+				`HANDOFF_DIR=${shellQuote(fixture.handoffDir)}`,
+				`HEALTH_URL=${shellQuote(`file://${healthFile}`)}`,
+				"report_deploy_plan",
+			].join("\n"),
+		);
+		expectCommandOk(result);
+		return capturedOutput(result.stdout, "stdout");
+	}
+
+	test("reports the target, the live build and a backend-only handoff", () => {
+		const output = runReport(createHandoffFixture(), { git_sha: "e784510d" });
+
+		expect(output).toContain("target:  aaaaaaaaaaaa (refs/remotes/origin/main, v1.2.3)");
+		expect(output).toContain("live:    e784510d\n");
+		expect(output).toContain("restart: backend-only (the running guard and runner stay up)");
+	});
+
+	test("says when the live build is already the target", () => {
+		const output = runReport(createHandoffFixture(), { git_sha: "aaaaaaaa" });
+
+		expect(output).toContain("live:    aaaaaaaa (already the target; a deploy would rebuild and re-verify it)");
+	});
+
+	test("reports the live build as unavailable without a valid git_sha", () => {
+		for (const health of [{ status: "ok" }, { git_sha: "not-a-sha" }, "not json"]) {
+			expect(runReport(createHandoffFixture(), health)).toContain(
+				"live:    unavailable (file://",
+			);
+		}
+	});
+
+	test("names the first field that forces a full restart", () => {
+		const fixture = createHandoffFixture();
+		writeFileSync(fixture.files.guard, "// newer guard\n");
+
+		expect(runReport(fixture, { git_sha: "e784510d" })).toContain(
+			"restart: full restart: guard bytes differ from the running ingress",
+		);
+	});
+
+	test("reports an undecidable verdict as unknown, never as backend-only", () => {
+		const noSchema = createHandoffFixture();
+		rmSync(join(noSchema.source, "packages/database/src/migrations.ts"));
+		expect(runReport(noSchema, {})).toContain(
+			"restart: unknown: could not compute the target's schema digest",
+		);
+
+		const runtimeIsDirectory = createHandoffFixture();
+		rmSync(runtimeIsDirectory.runtime);
+		mkdirSync(runtimeIsDirectory.runtime);
+		expect(runReport(runtimeIsDirectory, {})).toContain(
+			`restart: unknown: ${runtimeIsDirectory.runtime} is not a regular file`,
 		);
 	});
 });
@@ -2656,21 +3053,47 @@ describe("deploy --no-prune", () => {
 	test("documents preservation and still rejects unknown arguments", () => {
 		const help = bash("bash scripts/deploy-ccflare.sh --no-prune --help");
 		expectCommandOk(help);
-		expect(capturedOutput(help.stdout, "stdout")).toContain("--no-prune");
+		const helpText = capturedOutput(help.stdout, "stdout");
+		expect(helpText).toContain("--no-prune");
+		expect(helpText).toContain("--check");
+		// The help range ends at the header's last line, not inside the code.
+		expect(helpText).toContain("REQUIRES");
+		expect(helpText).not.toContain("set -Eeuo pipefail");
 		const unknown = bash("bash scripts/deploy-ccflare.sh --no-prune --unknown");
 		expect(unknown.exitCode).toBe(2);
 		expect(capturedOutput(unknown.stderr, "stderr")).toContain("Unknown arg: --unknown");
 	});
 
-	test("combines with --check without bypassing the main source gate", () => {
+	test("combines with --check and still passes through every source gate", () => {
 		const { checkout } = createDisposableDeployRepo();
-		expectCommandOk(bashAt(checkout, "bash scripts/deploy-ccflare.sh --no-prune --check"));
+		const tip = headOf(checkout);
 		expectCommandOk(gitAt(checkout, "switch", "-c", "feature"));
-		for (const flags of ["--no-prune --check", "--no-prune"]) {
-			const result = bashAt(checkout, `bash scripts/deploy-ccflare.sh ${flags}`);
-			expect(result.exitCode).toBe(1);
-			expect(capturedOutput(result.stderr, "stderr")).toContain("checkout must be refs/heads/main");
-		}
+		const scratch = tempDir();
+		const check = bashAt(
+			checkout,
+			`TMPDIR=${shellQuote(scratch)} bash scripts/deploy-ccflare.sh --no-prune --check`,
+		);
+		expectCommandOk(check);
+		expect(capturedOutput(check.stdout, "stdout")).toContain(
+			`target:  ${tip.slice(0, 12)} (refs/remotes/origin/main, v1.0.0)`,
+		);
+		expectNoBootstrapLeft(checkout, scratch);
+
+		// A full run gets as far as the version gate (which this fixture's
+		// origin/main fails), so it refuses before the deploy lock or any sudo.
+		const mismatched = createDisposableDeployRepo({ cliVersion: "1.0.1" });
+		expectCommandOk(gitAt(mismatched.checkout, "switch", "-c", "feature"));
+		const runtimeDir = tempDir();
+		const full = bashAt(
+			mismatched.checkout,
+			`TMPDIR=${shellQuote(scratch)} XDG_RUNTIME_DIR=${shellQuote(runtimeDir)} bash scripts/deploy-ccflare.sh --no-prune`,
+		);
+		expect(full.exitCode).toBe(1);
+		const stderr = capturedOutput(full.stderr, "stderr");
+		expect(stderr).toContain("does not match apps/cli version");
+		expect(stderr).not.toContain("checkout must be");
+		expect(readdirSync(runtimeDir)).toEqual([]);
+		expectNoBootstrapLeft(mismatched.checkout, scratch);
 	});
 
 	// Execute the actual parser and cleanup section, not a replica of its pruning
@@ -2705,7 +3128,7 @@ describe("deploy --no-prune", () => {
 		const pin = join(pins, "50-pinned-build.conf");
 		writeFileSync(pin, "[Service]\n");
 		const source = readFileSync(deployScript, "utf8");
-		const parser = source.slice(source.indexOf("CHECK_ONLY=0"), source.indexOf("# 1) Main source gate"));
+		const parser = source.slice(source.indexOf("CHECK_ONLY=0"), source.indexOf("# 0) Bootstrap"));
 		const cleanup = source.slice(source.indexOf("# 8) Prune old artifacts"), source.indexOf("# Summary"));
 		const health = source.slice(source.indexOf('echo "==> Waiting for health'), source.indexOf("# 7) Verify exact binary"));
 		const result = bash([
@@ -2759,58 +3182,227 @@ describe("deploy --no-prune", () => {
 });
 
 describe("deploy source gate in disposable repositories", () => {
-	test("--check accepts only the checked-out refs/heads/main at the current origin tip", () => {
-		const accepted = createDisposableDeployRepo();
-		const pass = bashAt(
-			accepted.checkout,
-			"bash scripts/deploy-ccflare.sh --check",
+	function runCheck(checkout: string, scratch: string, prefix = "") {
+		return bashAt(
+			checkout,
+			`${prefix}TMPDIR=${shellQuote(scratch)} bash scripts/deploy-ccflare.sh --check`,
 		);
-		expect(pass.exitCode).toBe(0);
-		expect(capturedOutput(pass.stdout, "stdout")).toContain(
-			"is refs/heads/main at refs/remotes/origin/main",
+	}
+
+	function expectCheckTargets(
+		result: ReturnType<typeof Bun.spawnSync>,
+		tip: string,
+	): void {
+		expectCommandOk(result);
+		const output = capturedOutput(result.stdout, "stdout");
+		const short = tip.slice(0, 12);
+		expect(output).toContain(`==> Target: refs/remotes/origin/main at ${short}.`);
+		expect(output).toContain(
+			`OK: ${short} is a detached snapshot of refs/remotes/origin/main.`,
 		);
-		expect(capturedOutput(pass.stdout, "stdout")).toContain(
-			"no merged v* tags to compare",
+		expect(output).toContain("OK: package version 1.0.0 (no merged v* tags to compare).");
+		expect(output).toContain(`target:  ${short} (refs/remotes/origin/main, v1.0.0)`);
+		expect(output).toMatch(/^live: {4}\S/m);
+		// The fixture has no migrations file, so the verdict is deterministic.
+		expect(output).toContain(
+			"restart: unknown: could not compute the target's schema digest",
+		);
+	}
+
+	test("--check from main at the origin tip reports that tip", () => {
+		const { checkout } = createDisposableDeployRepo();
+		const scratch = tempDir();
+
+		expectCheckTargets(runCheck(checkout, scratch), headOf(checkout));
+		expectNoBootstrapLeft(checkout, scratch);
+	});
+
+	test("--check from a dirty feature branch reports origin/main, not the checkout", () => {
+		const { checkout } = createDisposableDeployRepo();
+		const tip = headOf(checkout);
+		expectCommandOk(gitAt(checkout, "switch", "-c", "feature"));
+		writeFileSync(join(checkout, "feature.txt"), "feature work\n");
+		expectCommandOk(gitAt(checkout, "add", "feature.txt"));
+		expectCommandOk(gitAt(checkout, "commit", "-m", "feature work"));
+		// Uncommitted versions that would fail the version gate if they shipped.
+		writeFileSync(join(checkout, "package.json"), '{"version":"9.9.9"}\n');
+		writeFileSync(
+			join(checkout, "apps", "cli", "package.json"),
+			'{"version":"8.8.8"}\n',
+		);
+		const scratch = tempDir();
+
+		const result = runCheck(checkout, scratch);
+		expectCheckTargets(result, tip);
+		expect(capturedOutput(result.stdout, "stdout")).toContain(
+			`This checkout (feature at ${headOf(checkout).slice(0, 7)})`,
+		);
+		expectNoBootstrapLeft(checkout, scratch);
+	});
+
+	test("--check from a stale main reports the newer origin tip", () => {
+		const { checkout } = createDisposableDeployRepo();
+		const oldSha = headOf(checkout);
+		const newTip = advanceOriginMain(checkout, "remote-change.txt");
+		expectCommandOk(gitAt(checkout, "reset", "--hard", oldSha));
+		const scratch = tempDir();
+
+		expectCheckTargets(runCheck(checkout, scratch), newTip);
+		expectNoBootstrapLeft(checkout, scratch);
+	});
+
+	// Step 0 hands the deploy to a snapshot through two environment variables.
+	// Setting them by hand must not let any other tree pass the source gate.
+	describe("refuses a forged bootstrap", () => {
+		function runInner(cwd: string, sha: string, root: string) {
+			return bashAt(
+				cwd,
+				`CCFLARE_DEPLOY_BOOTSTRAP_SHA=${shellQuote(sha)} CCFLARE_DEPLOY_BOOTSTRAP_ROOT=${shellQuote(root)} bash scripts/deploy-ccflare.sh --check`,
+			);
+		}
+
+		function addWorktree(checkout: string, ...args: string[]): string {
+			const path = join(realpathSync(tempDir()), "source");
+			expectCommandOk(gitAt(checkout, "worktree", "add", "--quiet", ...args.slice(0, -1), path, ...args.slice(-1)));
+			return path;
+		}
+
+		test("when the script is not running from the named snapshot", () => {
+			const { checkout } = createDisposableDeployRepo();
+			const tip = headOf(checkout);
+			for (const root of ["", join(tempDir(), "elsewhere")]) {
+				const result = runInner(checkout, tip, root);
+				expect(result.exitCode).toBe(1);
+				expect(capturedOutput(result.stderr, "stderr")).toContain(
+					"this script is not running from the bootstrap snapshot",
+				);
+			}
+			// Naming the invoking checkout itself gets past the location check
+			// and is then refused by the source gate, because it is on a branch.
+			const self = runInner(checkout, tip, realpathSync(checkout));
+			expect(self.exitCode).toBe(1);
+			expect(capturedOutput(self.stderr, "stderr")).toContain(
+				"the deploy snapshot is on refs/heads/main",
+			);
+		});
+
+		test("when the snapshot is a branch checkout", () => {
+			const { checkout } = createDisposableDeployRepo();
+			const tip = headOf(checkout);
+			const snapshot = addWorktree(checkout, "-b", "deploy-branch", tip);
+
+			const result = runInner(snapshot, tip, snapshot);
+			expect(result.exitCode).toBe(1);
+			expect(capturedOutput(result.stderr, "stderr")).toContain(
+				"the deploy snapshot is on refs/heads/deploy-branch",
+			);
+		});
+
+		test("when the snapshot is at another commit than the named one", () => {
+			const { checkout } = createDisposableDeployRepo();
+			const oldSha = headOf(checkout);
+			const tip = advanceOriginMain(checkout, "newer.txt");
+			const snapshot = addWorktree(checkout, "--detach", oldSha);
+
+			const result = runInner(snapshot, tip, snapshot);
+			expect(result.exitCode).toBe(1);
+			expect(capturedOutput(result.stderr, "stderr")).toContain(
+				`not at the bootstrap-named ${tip.slice(0, 12)}`,
+			);
+		});
+
+		test("when origin/main moved after the bootstrap", () => {
+			const { checkout } = createDisposableDeployRepo();
+			const tip = headOf(checkout);
+			const snapshot = addWorktree(checkout, "--detach", tip);
+			const moved = advanceOriginMain(checkout, "pushed-later.txt");
+
+			const result = runInner(snapshot, tip, snapshot);
+			expect(result.exitCode).toBe(1);
+			expect(capturedOutput(result.stderr, "stderr")).toContain(
+				`moved from ${tip.slice(0, 12)} to ${moved.slice(0, 12)}`,
+			);
+		});
+	});
+
+	test.skipIf(process.platform === "win32")(
+		"an interrupt mid-deploy exits 130 and removes the bootstrap snapshot",
+		async () => {
+			const { checkout } = createDisposableDeployRepo();
+			const scratch = tempDir();
+			const shim = tempDir();
+			const marker = join(shim, "node-started");
+			// The snapshot's first `node` call (the version gate) blocks, so the
+			// interrupt lands while the snapshot's copy of the script is running.
+			writeFileSync(
+				join(shim, "node"),
+				`#!/bin/sh\n: > ${shellQuote(marker)}\nexec sleep 30\n`,
+			);
+			chmodSync(join(shim, "node"), 0o755);
+			const child = spawn("bash", ["scripts/deploy-ccflare.sh", "--check"], {
+				cwd: checkout,
+				detached: true,
+				stdio: ["ignore", "pipe", "pipe"],
+				env: { ...process.env, PATH: `${shim}:${process.env.PATH}`, TMPDIR: scratch },
+			});
+			let output = "";
+			child.stdout?.on("data", (chunk) => {
+				output += chunk;
+			});
+			child.stderr?.on("data", (chunk) => {
+				output += chunk;
+			});
+			const exited = new Promise<{ code: number | null; signal: string | null }>(
+				(resolve) => child.on("exit", (code, signal) => resolve({ code, signal })),
+			);
+			try {
+				for (let waited = 0; !existsSync(marker); waited += 50) {
+					if (waited > 10_000) throw new Error(`deploy never reached node:\n${output}`);
+					await Bun.sleep(50);
+				}
+				expect(readdirSync(scratch)).toHaveLength(1);
+				// A terminal Ctrl-C signals the whole foreground process group.
+				process.kill(-(child.pid as number), "SIGINT");
+				expect(await exited).toEqual({ code: 130, signal: null });
+			} finally {
+				try {
+					process.kill(-(child.pid as number), "SIGKILL");
+				} catch {
+					// The group already exited.
+				}
+			}
+			expectNoBootstrapLeft(checkout, scratch);
+		},
+		20_000,
+	);
+
+	test("a build snapshot made from the bootstrap snapshot removes cleanly", () => {
+		const { checkout } = createDisposableDeployRepo();
+		const tip = headOf(checkout);
+		const parent = realpathSync(tempDir());
+		const bootstrap = join(parent, "bootstrap", "source");
+		const build = join(parent, "build", "source");
+		mkdirSync(join(parent, "bootstrap"));
+		mkdirSync(join(parent, "build"));
+		const result = bashAt(
+			checkout,
+			[
+				"set -e",
+				`source ${shellQuote(join(checkout, helperScriptForShell))}`,
+				`create_verified_source_snapshot ${shellQuote(checkout)} ${shellQuote(bootstrap)} ${shellQuote(tip)}`,
+				// The deploy runs from the bootstrap snapshot, so its REPO_ROOT is
+				// that worktree when it creates and removes the build snapshot.
+				`create_verified_source_snapshot ${shellQuote(bootstrap)} ${shellQuote(build)} ${shellQuote(tip)}`,
+				`test "$(git -C ${shellQuote(build)} rev-parse HEAD)" = ${shellQuote(tip)}`,
+				`remove_verified_source_snapshot ${shellQuote(bootstrap)} ${shellQuote(build)}`,
+				`remove_verified_source_snapshot ${shellQuote(checkout)} ${shellQuote(bootstrap)}`,
+			].join("\n"),
 		);
 
-		const feature = createDisposableDeployRepo();
-		expectCommandOk(gitAt(feature.checkout, "switch", "-c", "feature"));
-		const wrongBranch = bashAt(
-			feature.checkout,
-			"bash scripts/deploy-ccflare.sh --check",
-		);
-		expect(wrongBranch.exitCode).toBe(1);
-		expect(capturedOutput(wrongBranch.stderr, "stderr")).toContain(
-			"checkout must be refs/heads/main",
-		);
-
-		const staleMain = createDisposableDeployRepo();
-		const oldSha = capturedOutput(
-			gitAt(staleMain.checkout, "rev-parse", "HEAD").stdout,
-			"stdout",
-		).trim();
-		writeFileSync(join(staleMain.checkout, "remote-change.txt"), "new tip\n");
-		expectCommandOk(gitAt(staleMain.checkout, "add", "remote-change.txt"));
-		expectCommandOk(
-			gitAt(staleMain.checkout, "commit", "-m", "advance remote"),
-		);
-		expectCommandOk(
-			gitAt(
-				staleMain.checkout,
-				"push",
-				"origin",
-				"refs/heads/main:refs/heads/main",
-			),
-		);
-		expectCommandOk(gitAt(staleMain.checkout, "reset", "--hard", oldSha));
-		const behind = bashAt(
-			staleMain.checkout,
-			"bash scripts/deploy-ccflare.sh --check",
-		);
-		expect(behind.exitCode).toBe(1);
-		expect(capturedOutput(behind.stderr, "stderr")).toContain(
-			"does not exactly match refs/remotes/origin/main",
-		);
+		expectCommandOk(result);
+		expect(existsSync(build)).toBe(false);
+		expect(existsSync(bootstrap)).toBe(false);
+		expectNoBootstrapLeft(checkout, join(parent, "build"));
 	});
 
 	test("verified source snapshot remains at the captured commit after the shared checkout changes", () => {
@@ -2872,6 +3464,46 @@ describe("deployment flow safety contracts", () => {
 		expect(source).toContain("validate_main_deploy_source");
 		expect(source).toContain(
 			'git merge-base --is-ancestor "$HEAD_SHA" refs/remotes/origin/main',
+		);
+		expect(source).toContain(
+			'"$CCFLARE_DEPLOY_BOOTSTRAP_SHA"; then\n\tMAIN_SOURCE_OK=1',
+		);
+	});
+
+	test("the restart decision has one implementation, shared by the deploy and --check", () => {
+		const source = readFileSync(deployScript, "utf8");
+		const calls = [
+			...source.matchAll(/backend_handoff_eligible (\S+) "\$HANDOFF_DIR\/runtime\.json"/g),
+		].map((match) => match[1]);
+		expect(calls.sort()).toEqual(["sudo", "user"]);
+		// The runtime.json comparison and the schema formula live only in the
+		// library (the script still writes and health-checks schemaDigest).
+		expect(source).not.toContain("r.schemaDigest");
+		expect(source).not.toContain("packages/database/src/migrations.ts");
+		expect(source.match(/deploy_schema_digest "\$/g)).toHaveLength(2);
+		// The deploy treats an unknown verdict (2) as a full restart, like 1.
+		expect(source).toContain("if ((HANDOFF_STATUS != 0)); then");
+	});
+
+	test("step 0 only snapshots and re-executes origin/main's copy of the script", () => {
+		const source = readFileSync(deployScript, "utf8");
+		const bootstrap = source.slice(
+			source.indexOf("# 0) Bootstrap"),
+			source.indexOf("# 1) Main source gate"),
+		);
+		expect(bootstrap.length).toBeGreaterThan(0);
+		for (const marker of ["sudo", "systemctl", "flock", "bun ", "DEST"]) {
+			expect(bootstrap).not.toContain(marker);
+		}
+		expect(bootstrap).toContain(
+			'create_verified_source_snapshot "$REPO_ROOT" "$BOOTSTRAP_ROOT" "$BOOTSTRAP_SHA"',
+		);
+		expect(bootstrap).toContain(
+			'bash "$BOOTSTRAP_ROOT/scripts/deploy-ccflare.sh" "$@" || BOOTSTRAP_STATUS=$?',
+		);
+		expect(bootstrap).toContain('exit "$BOOTSTRAP_STATUS"');
+		expect(source).toContain(
+			'remove_verified_source_snapshot "$REPO_ROOT" "$BOOTSTRAP_ROOT"',
 		);
 	});
 
