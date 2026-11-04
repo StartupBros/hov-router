@@ -107,9 +107,9 @@ describe("ComboRepository guarded model_mappings writes", () => {
 	});
 
 	it("rejects a stale row with a row conflict and rolls back the rows written before it", async () => {
-		// A changed row without a revision advance models an upgraded PostgreSQL
-		// install whose account update trigger was not (re)installed: the per-row
-		// guard is then the only thing standing between the preview and the write.
+		// A changed row without a revision advance models an install whose
+		// account update trigger is missing: the per-row guard is then the only
+		// thing standing between the preview and the write.
 		db.run("UPDATE accounts SET model_mappings = ? WHERE id = 'codex-beta'", [
 			JSON.stringify({ haiku: "gpt-7-luna" }),
 		]);

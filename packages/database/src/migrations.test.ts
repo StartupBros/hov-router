@@ -2017,45 +2017,6 @@ describe("Attribution source columns (project_attribution_source / agent_attribu
 	});
 });
 
-describe("PostgreSQL migration parity — attribution source columns", () => {
-	// A live PostgreSQL server is not available in this environment, so this
-	// is a static-parity check: read migrations-pg.ts as text and assert both
-	// new columns are wired into ensureSchemaPg's CREATE TABLE and into the
-	// columnsToAdd list consumed by runMigrationsPg, mirroring the SQLite
-	// migration added above. See repo CLAUDE.md "Database Migrations — Port
-	// to PostgreSQL" checklist.
-	it("ensureSchemaPg's requests CREATE TABLE includes both attribution source columns", () => {
-		const source = fs.readFileSync(
-			path.join(__dirname, "../src/migrations-pg.ts"),
-			"utf8",
-		);
-		const ensureSchemaPgMatch = source.match(
-			/export async function ensureSchemaPg[\s\S]*?\n}\n/,
-		);
-		expect(ensureSchemaPgMatch).not.toBeNull();
-		const ensureSchemaPgBody = ensureSchemaPgMatch?.[0] ?? "";
-		expect(ensureSchemaPgBody).toContain("project_attribution_source TEXT");
-		expect(ensureSchemaPgBody).toContain("agent_attribution_source TEXT");
-	});
-
-	it("runMigrationsPg's columnsToAdd includes both attribution source columns for the requests table", () => {
-		const source = fs.readFileSync(
-			path.join(__dirname, "../src/migrations-pg.ts"),
-			"utf8",
-		);
-		const columnsToAddMatch = source.match(/const columnsToAdd[\s\S]*?\n\t\];/);
-		expect(columnsToAddMatch).not.toBeNull();
-		const columnsToAddBody = columnsToAddMatch?.[0] ?? "";
-
-		expect(columnsToAddBody).toContain(
-			'"ALTER TABLE requests ADD COLUMN project_attribution_source TEXT"',
-		);
-		expect(columnsToAddBody).toContain(
-			'"ALTER TABLE requests ADD COLUMN agent_attribution_source TEXT"',
-		);
-	});
-});
-
 describe("Muse Spark provider migration", () => {
 	it("state-preservingly collapses alias collisions, repoints dependents, and remains idempotent", () => {
 		const db = new Database(":memory:");

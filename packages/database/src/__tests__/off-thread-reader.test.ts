@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SQL } from "bun";
 import { BunSqlAdapter } from "../adapters/bun-sql-adapter";
 import {
 	OffThreadReader,
@@ -688,27 +687,6 @@ describe("off-thread reader fault lifecycle", () => {
 });
 
 describe("adapter off-thread fallback", () => {
-	it("keeps PostgreSQL on its existing query/get path even with a reader attached", async () => {
-		const unsafe = mock(async () => [{ n: 1 }]);
-		const adapter = new BunSqlAdapter({ unsafe } as unknown as SQL, false);
-		const all = mock(async <R>() => [] as R[]);
-		const get = mock(async <R>() => null as R | null);
-		adapter.setOffThreadReader({ all, get });
-		adapter.setOffThreadReader({ all, get }, "interactive");
-		expect(await adapter.queryOffThread("SELECT ? AS n", [1])).toEqual([
-			{ n: 1 },
-		]);
-		expect(await adapter.getOffThread("SELECT ? AS n", [1])).toEqual({ n: 1 });
-		expect(
-			await adapter.queryOffThread("SELECT ? AS n", [1], "interactive"),
-		).toEqual([{ n: 1 }]);
-		expect(
-			await adapter.getOffThread("SELECT ? AS n", [1], "interactive"),
-		).toEqual({ n: 1 });
-		expect(unsafe).toHaveBeenCalledWith("SELECT $1 AS n", [1]);
-		expect(all).not.toHaveBeenCalled();
-		expect(get).not.toHaveBeenCalled();
-	});
 	it("propagates read timeouts without rerunning the hung SQL on the main thread", async () => {
 		const { adapter } = realFixture();
 		const { reader } = fakeFixture({ readTimeoutMs: 20 });

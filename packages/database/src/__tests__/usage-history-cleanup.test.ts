@@ -4,7 +4,7 @@
  * usage_snapshots is an append-only time series with no surrogate key, so
  * retention pruning batches on the natural composite key
  * (account_id, timestamp, window_key). Regression coverage for #384: a
- * single unbounded DELETE could exceed PostgreSQL's statement_timeout once
+ * single unbounded DELETE could exceed a statement timeout once
  * the table grew large, causing retention cleanup to fail forever.
  */
 import { Database } from "bun:sqlite";

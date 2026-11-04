@@ -354,6 +354,35 @@ function writeDigestFixtures(dir: string): {
 	return { guard, policy, runner };
 }
 
+function schemaDigestPaths(scriptSource: string): string[] {
+	const list = /for\s*\(\s*const\s+p\s+of\s+\[([^\]]*)\]/.exec(scriptSource);
+	if (!list) {
+		throw new Error("schema digest path list not found in deploy script");
+	}
+	return [...list[1].matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+}
+
+describe("schema digest input list", () => {
+	test("names only files that exist in the repository", () => {
+		const paths = schemaDigestPaths(readFileSync(deployScript, "utf8"));
+
+		expect(paths).toContain("packages/database/src/migrations.ts");
+		for (const path of paths) {
+			expect(existsSync(join(repoRoot, path))).toBe(true);
+		}
+	});
+
+	test("extraction sees a path that names a missing file", () => {
+		const paths = schemaDigestPaths(
+			'for(const p of ["packages/database/src/migrations.ts","packages/database/src/no-such-file.ts"]){}',
+		);
+
+		expect(paths.filter((p) => !existsSync(join(repoRoot, p)))).toEqual([
+			"packages/database/src/no-such-file.ts",
+		]);
+	});
+});
+
 describe("systemd documentation contracts", () => {
 	test("keeps StartLimit directives in the Unit section", () => {
 		for (const path of [systemdDocs, deploymentDocs]) {

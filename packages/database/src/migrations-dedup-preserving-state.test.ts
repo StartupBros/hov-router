@@ -187,9 +187,8 @@ describe("Database Migrations — non-destructive account dedup", () => {
 	it("breaks full timestamp ties by smallest logical account id", () => {
 		setupFullSchemaForDedupTest(db);
 
-		// Both physical insertion order and PostgreSQL ctid are deliberately
-		// irrelevant: SQLite and PostgreSQL must choose the same logical account
-		// under a complete timestamp tie.
+		// Physical insertion order is deliberately irrelevant: a complete
+		// timestamp tie must choose the smallest logical account id.
 		const sameCreatedAt = 1000;
 		db.prepare(
 			`INSERT INTO accounts (id, name, provider, refresh_token, access_token, created_at, custom_endpoint)

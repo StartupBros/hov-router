@@ -180,4 +180,56 @@ describe("createAccountAddHandler — duplicate (name, provider, custom_endpoint
 			]);
 		expect(rows).toHaveLength(1);
 	});
+
+	// isUniqueConstraintError (KTD9): the pre-check is blinded so the handler's
+	// own INSERT hits the real SQLite UNIQUE index and the detector maps it.
+	it("maps a real SQLite UNIQUE violation on the INSERT to a 400 when the pre-check misses", async () => {
+		const seeded = await handler(
+			makeRequest({
+				name: "blind",
+				provider: "anthropic",
+				accessToken: "a1",
+				refreshToken: "r1",
+			}),
+		);
+		expect(seeded.status).toBe(200);
+
+		const realAdapter = dbOps.getAdapter();
+		const blindAdapter = new Proxy(realAdapter, {
+			get(target, prop, receiver) {
+				if (prop === "get") {
+					// assertAccountNameAvailable's SELECT sees no existing row.
+					return async () => null;
+				}
+				const value = Reflect.get(target, prop, receiver);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const blindOps = new Proxy(dbOps, {
+			get(target, prop, receiver) {
+				if (prop === "getAdapter") return () => blindAdapter;
+				const value = Reflect.get(target, prop, receiver);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		const blindHandler = createAccountAddHandler(blindOps, null as never);
+
+		const response = await blindHandler(
+			makeRequest({
+				name: "blind",
+				provider: "anthropic",
+				accessToken: "a2",
+				refreshToken: "r2",
+			}),
+		);
+		expect(response.status).toBe(400);
+		expect(JSON.stringify(await response.json())).toContain(
+			"Account name 'blind' is already taken",
+		);
+		const rows = await realAdapter.query<{ id: string }>(
+			"SELECT id FROM accounts WHERE name = ?",
+			["blind"],
+		);
+		expect(rows).toHaveLength(1);
+	});
 });

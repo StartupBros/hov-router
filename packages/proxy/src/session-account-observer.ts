@@ -9,7 +9,7 @@ import { TIME_CONSTANTS } from "@better-ccflare/core";
  *
  * This is live, short-lived state — the read-only foundation for the status-line
  * account badge. It is deliberately in-memory only: the association carries no
- * durable value and a persisted column would force a SQLite + PostgreSQL
+ * durable value and a persisted column would force a SQLite
  * migration for nothing (R3). Bounds mirror {@link SessionAffinityStrategy}: a
  * 5h TTL swept lazily on access (no timers) and a hard entry cap with
  * oldest-entry eviction, so a buggy or adversarial caller streaming distinct

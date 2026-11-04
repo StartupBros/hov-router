@@ -40,18 +40,11 @@ export interface AccountCreated {
 
 /**
  * SQLite surfaces a UNIQUE-constraint violation as an Error whose message
- * contains "UNIQUE constraint failed:". PostgreSQL (via Bun.SQL) surfaces
- * the same condition as SQLSTATE 23505 (unique_violation) on `.code`, with
- * a message that does NOT contain the SQLite string — so both must be
- * checked for this to work on either database backend.
+ * contains "UNIQUE constraint failed:".
  */
-const PG_UNIQUE_VIOLATION = "23505";
-
 function isUniqueConstraintError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
-	if (error.message.includes("UNIQUE constraint failed")) return true;
-	const code = (error as { code?: string }).code;
-	return code === PG_UNIQUE_VIOLATION;
+	return error.message.includes("UNIQUE constraint failed");
 }
 
 export interface OAuthFlowResult {

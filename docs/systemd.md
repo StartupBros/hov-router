@@ -310,7 +310,7 @@ Before enforcement:
 
 - Inventory every load-balancer target and service instance, not just the local unit.
 - Confirm one active upstream server process owns all affected routes.
-- Treat SQLite/PostgreSQL as irrelevant to coordination; degraded state is never stored there.
+- Treat the SQLite database as irrelevant to coordination; degraded state is never stored there.
 - Do not enable enforcement across replicas. Two independent coordinators may each elect one natural recovery probe.
 
 The local process check is useful but does not replace the fleet inventory:

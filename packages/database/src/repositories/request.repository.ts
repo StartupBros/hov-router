@@ -630,10 +630,8 @@ export class RequestRepository extends BaseRepository<RequestData> {
 		);
 
 		return {
-			// Bun.SQL returns COUNT()/SUM() as JavaScript strings on PostgreSQL
-			// (BIGINT is stringified, see Bun#22188). Coerce to Number so the
-			// public return type stays a plain number and downstream `toBe(N)`
-			// assertions on this method hold on both dialects. avg() already
+			// Coerce COUNT()/SUM() to Number so the
+			// public return type stays a plain number. avg() already
 			// returns numeric/Number on both.
 			totalRequests: Number(result?.total_requests) || 0,
 			successfulRequests: Number(result?.successful_requests) || 0,
@@ -694,8 +692,7 @@ export class RequestRepository extends BaseRepository<RequestData> {
 			params,
 		);
 
-		// Bun.SQL returns PostgreSQL COUNT/SUM BIGINT values as strings. Normalize
-		// here so this cross-dialect public API always fulfills its number contract.
+		// Normalize here so this public API always fulfills its number contract.
 		return {
 			totalRequests: Number(result?.total_requests) || 0,
 			successfulRequests: Number(result?.successful_requests) || 0,
@@ -941,9 +938,7 @@ export class RequestRepository extends BaseRepository<RequestData> {
 
 	private mapTokenAggregateRows(rows: TokenAggregateRow[]): LedgerAggregate[] {
 		return rows.map((row) => ({
-			// Bun.SQL returns COUNT()/SUM() as JavaScript strings on PostgreSQL
-			// (BIGINT stringified, see Bun#22188) — coerce to Number so this
-			// holds identically on both dialects (mirrors getRequestStats above).
+			// Coerce COUNT()/SUM() to Number (mirrors getRequestStats above).
 			model: row.model,
 			requestCount: Number(row.request_count) || 0,
 			inputTokens: Number(row.input_tokens) || 0,
@@ -987,9 +982,9 @@ export class RequestRepository extends BaseRepository<RequestData> {
 
 	async deleteOrphanedPayloads(pacer?: CleanupPacer): Promise<number> {
 		// Batched like deleteOlderThan/deletePayloadsOlderThan above — an unbounded
-		// DELETE here can exceed the PG statement_timeout once the table is large.
+		// DELETE here can run too long once the table is large.
 		// LEFT JOIN instead of NOT IN (SELECT ...) avoids the slow anti-join plan
-		// NOT IN produces against a large subquery on both SQLite and PostgreSQL.
+		// NOT IN produces against a large subquery on SQLite.
 		// Batch size is configurable via BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE
 		// (default 200) — lower it if rows are large (#412).
 		const BATCH_SIZE = getCleanupBatchSize();

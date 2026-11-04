@@ -363,7 +363,7 @@ export class QualityRouteRepository extends BaseRepository<never> {
 				commands: [],
 			};
 			// The singleton write lock serializes admissions before the COUNT, including
-			// PostgreSQL READ COMMITTED transactions in other processes. Never evict live state.
+			// writers in other processes. Never evict live state.
 			await this.adapter.runBatchWithChanges([
 				{
 					sql: "UPDATE quality_route_admission SET revision = revision + 1 WHERE id = 1",

@@ -8,7 +8,6 @@ import {
 	mock,
 	spyOn,
 } from "bun:test";
-import type { SQL } from "bun";
 // Avoid the pre-existing types/core initialization cycle.
 import "@better-ccflare/core";
 import { BunSqlAdapter } from "../adapters/bun-sql-adapter";
@@ -154,33 +153,6 @@ describe("SQLite lifetime account aggregation", () => {
 		]);
 		expect((await stats.getAccountStats())[0]?.name).toBe("History only");
 		expect(await stats.getAccountStats(0, false)).toEqual([]);
-	});
-
-	it("leaves PostgreSQL grouping, parameters and numeric coercion on the existing path", async () => {
-		const unsafe = mock(
-			async () =>
-				[
-					{ id: "a", name: "Account", requestCount: "3", totalRequests: "9" },
-				] as unknown[],
-		);
-		unsafe.mockResolvedValueOnce([
-			{ id: "a", name: "Account", requestCount: "3", totalRequests: "9" },
-		]);
-		unsafe.mockResolvedValueOnce([
-			{ accountId: "a", total: "3", successful: "2" },
-		]);
-		const pg = new BunSqlAdapter(
-			{ unsafe } as unknown as InstanceType<typeof SQL>,
-			false,
-		);
-		const query = spyOn(pg, "query");
-		expect(await new StatsRepository(pg).getAccountStats()).toEqual([
-			{ name: "Account", requestCount: 3, successRate: 67, totalRequests: 9 },
-		]);
-		expect(query).toHaveBeenCalledTimes(2);
-		expect(query.mock.calls[0]?.[0]).toContain("GROUP BY 1, 2");
-		expect(query.mock.calls[1]?.[1]).toEqual(["no_account", "a"]);
-		expect(query.mock.calls[1]?.[0]).toContain("account_used IN (?)");
 	});
 
 	it("uses a single covering request scan with the existing migrated indexes", async () => {

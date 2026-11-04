@@ -71,16 +71,11 @@ interface DryRunClone {
  * is a documented no-op for SQLite — it runs its callback entirely outside
  * any real transaction — so a rollback-based approach would provide no
  * isolation here. VACUUM INTO works from both a file-backed and an
- * in-memory source database; only PostgreSQL has no equivalent.
+ * in-memory source database.
  */
 async function cloneForDryRun(
 	source: DatabaseOperations,
 ): Promise<DryRunClone> {
-	if (!source.isSQLite) {
-		throw new Error(
-			"--dry-run is only supported against SQLite (no VACUUM INTO clone path for PostgreSQL).",
-		);
-	}
 	const dir = mkdtempSync(join(tmpdir(), "ccflare-rebuild-windows-dryrun-"));
 	const clonePath = join(dir, "clone.db");
 	source.getAdapter().getSQLiteDb().exec("VACUUM INTO ?", [clonePath]);

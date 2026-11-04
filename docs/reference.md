@@ -43,7 +43,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 - **Standalone Linux x86_64 Binary** - Router 3.7.1 runs without Node.js or Bun; other platforms use the source-build path
 - **Comprehensive Logging** - Request/response tracking with searchable history
 - **Alert Webhooks** - With an empty `ALERT_WEBHOOK_TYPES` list, Discord keeps cache-efficiency observations (including recovery) and unknown-model catalog observations in alert history and the dashboard stream without sending a notification. Authentication failures, capacity warnings, actual stale-policy model rewrites, and cache telemetry gaps (including recovery) remain eligible. A nonempty list admits exactly the named types, including these observations. Generic webhooks retain their legacy admission and `{type, alert}` body. Discord presents the affected thing, observation, impact, action, and where to find evidence; raw messages remain in history. Persistence is not a delivery receipt: failed sends are logged, and the existing engine can record an opening that never arrived and later send its recovery.
-- **Database Integration** - SQLite (default) or PostgreSQL for persistent storage and analytics, supporting Kubernetes multi-pod deployments
+- **Database Integration** - SQLite for persistent storage and analytics
 
 **Distribution & Updates:**
 - **Local Source Build** - Install the built artifact as `hov-router` and its compatibility command names
@@ -54,7 +54,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 - **Enterprise Features** - Custom API endpoints, session management, advanced analytics
 - **Reliability** - Automatic error recovery, circuit breakers, and health monitoring
 - **Anthropic Degraded-Mode Hardening (opt-in)** - Default-off, restart-scoped large-context replay protection; enforcement is supported only when all affected traffic shares one server runtime. See [configuration](configuration.md#anthropic-degraded-mode), [routing behavior](routing-architecture.md#anthropic-degraded-mode), and the [systemd rollout](systemd.md#anthropic-degraded-mode-rollout).
-- **PostgreSQL Support** - Set `DATABASE_URL=postgresql://...` to use PostgreSQL for Kubernetes multi-pod deployments where SQLite file-sharing is not feasible
+- **SQLite only** - PostgreSQL support was removed; a PostgreSQL `DATABASE_URL` is refused at startup. See [PostgreSQL support removed](hov-router-migration.md#postgresql-support-removed)
 
 ## Quick Start
 
@@ -405,12 +405,6 @@ Read account creation timestamps from the default SQLite database:
 sqlite3 ~/.config/better-ccflare/better-ccflare.db 'SELECT id, created_at FROM accounts;'
 ```
 
-For PostgreSQL, run the equivalent SQL against the configured database:
-
-```sql
-SELECT id, created_at FROM accounts;
-```
-
 ##### Dashboard-managed roster
 
 Instead of a JSON array, set `BETTER_CCFLARE_PUBLIC_SUBSCRIPTIONS=accounts`
@@ -618,7 +612,7 @@ Before any writer can be enabled, deploy decoder-compatible readers and the iden
 
 Writers remain unavailable without trustworthy aggregate, per-key-material fleet issuance telemetry. Key identity and its counter are independent of wire version, so changing the protocol cannot reset the budget for reused AES key bytes. Rotate and stop issuance at `2^31` envelopes per key material and keep the hard operational budget below `2^32`. These are operational limits for probabilistic nonce uniqueness, not an atomic cross-process guarantee.
 
-📖 **See [docs/configuration.md](configuration.md) for the complete list** — overload/rate-limit retry tuning, health endpoint detail, agent discovery, payload encryption at rest, model catalog refresh, PostgreSQL pooling, Codex prompt-cache keys, and more.
+📖 **See [docs/configuration.md](configuration.md) for the complete list** — overload/rate-limit retry tuning, health endpoint detail, agent discovery, payload encryption at rest, model catalog refresh, Codex prompt-cache keys, and more.
 
 ### Using .env Files
 

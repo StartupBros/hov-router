@@ -114,7 +114,7 @@ export class StatsRepository {
 		limit = 10,
 		includeUnauthenticated = true,
 	): Promise<AccountStats[]> {
-		if (includeUnauthenticated && this.adapter.isSQLite) {
+		if (includeUnauthenticated) {
 			return this.getSQLiteLifetimeAccountStats(limit);
 		}
 
@@ -186,13 +186,7 @@ export class StatsRepository {
 		//
 		// The SELECT still maps NULL to NO_ACCOUNT_ID via COALESCE, and GROUP BY 1
 		// references that output column instead of repeating the expression with
-		// another bind parameter. BunSqlAdapter's placeholder renumberer assigns
-		// each bare `?` a fresh $N independently, so SELECT / GROUP BY would
-		// otherwise render as COALESCE(..., $1) / COALESCE(..., $2).
-		// PostgreSQL treats those as distinct expression trees and rejects the
-		// query with SQLSTATE 42803 ("column ... must appear in the GROUP BY
-		// clause"). SQLite does not enforce that, which is why the SQLite-only
-		// test suite passed.
+		// another bind parameter.
 		const includesNoAccount = accountIds.includes(NO_ACCOUNT_ID);
 		const accountPredicate = includesNoAccount
 			? `(account_used IN (${placeholders}) OR account_used IS NULL)`
@@ -521,10 +515,8 @@ export class StatsRepository {
 		return rawStats.map((key) => ({
 			id: key.id,
 			name: key.name,
-			// Bun.SQL returns COUNT(*) as a JavaScript string on PostgreSQL
-			// (BIGINT is stringified, see Bun#22188). The companion
-			// successRateMap already coerces with Number(); requests needs the
-			// same treatment so `toBe(2)` assertions hold on both dialects.
+			// The companion successRateMap already coerces with Number();
+			// requests needs the same treatment.
 			requests: Number(key.requests) || 0,
 			successRate: successRateMap.get(key.id) || 0,
 		}));

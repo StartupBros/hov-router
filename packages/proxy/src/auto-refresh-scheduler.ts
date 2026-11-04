@@ -61,7 +61,7 @@ class StaleProactiveGenerationError extends Error {
 	}
 }
 
-/** Bun.SQL returns PostgreSQL BIGINT columns as strings, unlike SQLite. */
+/** Raw `created_at` may arrive as a number or a numeric string. */
 function normalizeRawAccountCreatedAt<
 	T extends { created_at: number | string },
 >(row: T): Omit<T, "created_at"> & { created_at: number } {
@@ -1160,8 +1160,8 @@ export class AutoRefreshScheduler {
 						// or a request-triggered refresh joining the same account) must not
 						// be overwritten with the tokens from this now-superseded attempt.
 						// Routed through the retry-wrapped dbOps helper instead of raw SQL
-						// so this write benefits from the same transient-failure retries on
-						// Postgres as the token-manager funnel.
+						// so this write benefits from the same transient-failure retries as
+						// the token-manager funnel.
 						let persisted: boolean;
 						try {
 							persisted =
@@ -1374,8 +1374,8 @@ export class AutoRefreshScheduler {
 						// or a request-triggered refresh joining the same account) must not
 						// be overwritten with the tokens from this now-superseded attempt.
 						// Routed through the retry-wrapped dbOps helper instead of raw SQL
-						// so this write benefits from the same transient-failure retries on
-						// Postgres as the token-manager funnel.
+						// so this write benefits from the same transient-failure retries as
+						// the token-manager funnel.
 						let persisted: boolean;
 						try {
 							persisted =

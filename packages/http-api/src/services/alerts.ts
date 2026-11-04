@@ -2091,7 +2091,7 @@ export class AlertService {
 		// so the regression input is bounded (~2016 rows for a 7d window) even
 		// at the supported 10s poll interval — re-reading every raw row per
 		// poll is quadratic over the cycle (pro-gate finding). Integer
-		// division truncates identically on SQLite and Postgres.
+		// division truncates in SQLite.
 		const rows = await this.db.queryOffThread<UsageSnapshotSqlRow>(
 			`SELECT MAX(timestamp) AS timestamp, AVG(utilization) AS utilization, MAX(resets_at) AS resets_at
 			 FROM usage_snapshots
@@ -2242,11 +2242,8 @@ export class AlertService {
 			`SELECT COUNT(*) as cnt FROM alerts WHERE id = ?`,
 			[id],
 		);
-		// Bun.SQL returns COUNT(*) on PostgreSQL as a JavaScript string (BIGINT
-		// is stringified, see Bun#22188). Strict equality `row.cnt === 0` is
-		// always false under that serialization, so the "missing id" branch
-		// never fires on PG. Coerce to Number first — the same coercion
-		// getUnacknowledgedCount() uses one method above.
+		// Coerce to Number first — the same coercion getUnacknowledgedCount()
+		// uses one method above.
 		if (!row || Number(row.cnt) === 0) return false;
 		await this.db.run(`UPDATE alerts SET acknowledged = 1 WHERE id = ?`, [id]);
 		return true;
@@ -2517,11 +2514,6 @@ export class AlertService {
 		expectedCreatedAt?: number,
 	): Promise<void> {
 		try {
-			// INSERT OR IGNORE is SQLite-only; PostgreSQL uses ON CONFLICT DO NOTHING.
-			const conflictClause = this.db.isSQLite ? "INSERT OR IGNORE" : "INSERT";
-			const onConflictClause = this.db.isSQLite
-				? ""
-				: "ON CONFLICT (id) DO NOTHING";
 			// The unique alert ID is the cooldown guard. Only the caller whose insert
 			// actually wins may emit SSE or deliver the webhook; checking first would
 			// leave a race in which concurrent duplicates both deliver notifications.
@@ -2550,11 +2542,10 @@ export class AlertService {
 					: "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 			const inserted = await this.db.runWithChanges(
 				`
-				${conflictClause} INTO alerts (
+				INSERT OR IGNORE INTO alerts (
 					id, timestamp, type, severity, title, message, value, threshold,
 					account, model, project, request_id, acknowledged
 				) ${valuesSource}
-				${onConflictClause}
 			`,
 				[
 					alert.id,

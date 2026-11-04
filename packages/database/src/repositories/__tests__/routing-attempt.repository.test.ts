@@ -1,9 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { SQL } from "bun";
 import { BunSqlAdapter } from "../../adapters/bun-sql-adapter";
 import { ensureSchema, runMigrations } from "../../migrations";
-import { ensureSchemaPg, runMigrationsPg } from "../../migrations-pg";
 import { RequestRepository } from "../request.repository";
 import {
 	type RoutingAttemptData,
@@ -401,95 +399,5 @@ describe("RoutingAttemptRepository", () => {
 			],
 		});
 		expect(queryCount).toBe(1);
-	});
-});
-
-function requireSafeTestPostgresUrl(rawUrl: string): string {
-	const url = new URL(rawUrl);
-	const databaseName = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
-	const isLoopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(
-		url.hostname,
-	);
-	if (!isLoopback || !/(?:^|[_-])test(?:$|[_-])/i.test(databaseName)) {
-		throw new Error(
-			"BETTER_CCFLARE_TEST_POSTGRES_URL must target a loopback-hosted database with 'test' in its name",
-		);
-	}
-	return url.toString();
-}
-
-const configuredPostgresUrl = process.env.BETTER_CCFLARE_TEST_POSTGRES_URL;
-const postgresUrl = configuredPostgresUrl
-	? requireSafeTestPostgresUrl(configuredPostgresUrl)
-	: undefined;
-const describePostgres = postgresUrl ? describe : describe.skip;
-
-describePostgres("RoutingAttemptRepository PostgreSQL parity", () => {
-	it("returns a one-statement, bounded summary from a disposable database", async () => {
-		if (!postgresUrl) throw new Error("PostgreSQL integration URL is required");
-		const databaseName = `ccflare_routing_attempt_test_${crypto.randomUUID().replaceAll("-", "")}`;
-		const adminSql = new SQL({ url: postgresUrl, max: 1, prepare: false });
-		const databaseUrl = new URL(postgresUrl);
-		databaseUrl.pathname = `/${databaseName}`;
-		let adapter: BunSqlAdapter | undefined;
-		let databaseCreated = false;
-		try {
-			await adminSql.unsafe(`CREATE DATABASE ${databaseName}`);
-			databaseCreated = true;
-			adapter = new BunSqlAdapter(
-				new SQL({ url: databaseUrl.toString(), max: 1, prepare: false }),
-				false,
-			);
-			await ensureSchemaPg(adapter);
-			await runMigrationsPg(adapter);
-			const repository = new RoutingAttemptRepository(adapter);
-			const requestRepository = new RequestRepository(adapter);
-			const testNow = 1_725_000_000_000;
-			await requestRepository.save(terminal("pg-recovered", true));
-			await repository.append(
-				attempt({
-					id: "pg-retained",
-					parentRequestId: "pg-recovered",
-					timestamp: testNow - 1,
-				}),
-			);
-			await repository.append(
-				attempt({
-					id: "pg-future",
-					parentRequestId: "pg-future",
-					timestamp: testNow + 1,
-				}),
-			);
-
-			expect(await repository.getSummary("24h", testNow)).toEqual({
-				firstObservedAt: new Date(testNow - 1).toISOString(),
-				totalAttempts: 1,
-				distinctRequests: 1,
-				recoveredRequests: 1,
-				terminalFailureRequests: 0,
-				awaitingTerminalRequests: 0,
-				byReasonScope: [
-					{
-						reason: "model_scoped_429",
-						scope: "model",
-						attemptCount: 1,
-						distinctRequests: 1,
-						recoveredRequests: 1,
-						terminalFailureRequests: 0,
-						awaitingTerminalRequests: 0,
-					},
-				],
-			});
-		} finally {
-			await adapter?.close();
-			if (databaseCreated) {
-				await adminSql.unsafe(
-					["DROP", "DATABASE IF EXISTS", databaseName, "WITH (FORCE)"].join(
-						" ",
-					),
-				);
-			}
-			await adminSql.end();
-		}
 	});
 });

@@ -1355,9 +1355,11 @@ async function main() {
 			fastExit(2);
 		}
 
+		const { DatabaseFactory, PostgresUrlRefusedError } = await import(
+			"@better-ccflare/database"
+		);
 		try {
 			const config = new Config();
-			const { DatabaseFactory } = await import("@better-ccflare/database");
 			DatabaseFactory.initialize(undefined, undefined, false);
 			const dbOps = await DatabaseFactory.getInstanceAsync(false);
 			const options = parsed.cacheFlightRecorderReport
@@ -1372,8 +1374,12 @@ async function main() {
 				retentionHours: config.getCacheFlightRecorderRetentionHours(),
 			});
 			await exitGracefully(exitCode);
-		} catch {
-			console.error("Cache flight recorder operation failed");
+		} catch (error) {
+			console.error(
+				error instanceof PostgresUrlRefusedError
+					? `Error: ${error.message}`
+					: "Cache flight recorder operation failed",
+			);
 			if (parsed.json)
 				console.log(cacheFlightRecorderError("operational_failure"));
 			await exitGracefully(1);

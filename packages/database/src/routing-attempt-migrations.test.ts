@@ -413,73 +413,22 @@ describe("routing_attempts migrations", () => {
 		}
 	});
 
-	it("keeps PostgreSQL fresh and upgrade paths in exact logical parity", () => {
-		const source = fs.readFileSync(
-			path.join(__dirname, "migrations-pg.ts"),
-			"utf8",
-		);
-		for (const column of expectedColumns) {
-			expect(source).toContain(column);
-		}
-		for (const index of expectedIndexes) {
-			expect(source).toContain(index);
-		}
-		expect(source).toContain('table: "routing_attempts"');
-		expect(source).toContain('column: "upstream_evidence"');
-		expect(source).toContain(
-			"ALTER TABLE routing_attempts ADD COLUMN upstream_evidence TEXT",
-		);
-		const pgTable = source.match(
-			/CREATE TABLE IF NOT EXISTS routing_attempts \(([\s\S]*?)\n\t\t\)/,
-		)?.[1];
-		expect(pgTable).toBeDefined();
-		expect(pgTable).not.toContain("FOREIGN KEY");
+	it("keeps the SQLite migration on the shared reason taxonomy", () => {
 		const sqliteSource = fs.readFileSync(
 			path.join(__dirname, "migrations.ts"),
 			"utf8",
 		);
-		for (const migrationSource of [source, sqliteSource]) {
-			// Formatting-tolerant: matches a single- or multi-line named import,
-			// with any number of sibling symbols, as long as it pulls
-			// ROUTING_ATTEMPT_REASON_SQL from the shared taxonomy module. This is
-			// what actually guarantees the SQLite and PostgreSQL reason lists
-			// can't drift — the exact import text/formatting is incidental.
-			const importMatch = migrationSource.match(
-				/import\s*\{([^}]*)\}\s*from\s*["']\.\/routing-attempt-taxonomy["'];/,
-			);
-			expect(importMatch).not.toBeNull();
-			const importedSymbols = (importMatch?.[1] ?? "")
-				.split(",")
-				.map((symbol) => symbol.trim())
-				.filter(Boolean);
-			expect(importedSymbols).toContain("ROUTING_ATTEMPT_REASON_SQL");
-		}
-		expect(pgTable).toContain(
-			"reason TEXT NOT NULL CHECK (reason IN ($" +
-				"{ROUTING_ATTEMPT_REASON_SQL}))",
+		// Formatting-tolerant: matches a single- or multi-line named import,
+		// with any number of sibling symbols, as long as it pulls
+		// ROUTING_ATTEMPT_REASON_SQL from the shared taxonomy module.
+		const importMatch = sqliteSource.match(
+			/import\s*\{([^}]*)\}\s*from\s*["']\.\/routing-attempt-taxonomy["'];/,
 		);
-		expect(pgTable).toContain(
-			"physical_attempt INTEGER CHECK (physical_attempt IS NULL OR physical_attempt >= 1)",
-		);
-		for (const prohibited of [
-			"payload",
-			"error_body",
-			"token",
-			"cost",
-			"api_key",
-			"client",
-			"session",
-			"agent",
-			"project",
-			"user",
-		]) {
-			expect(pgTable).not.toContain(prohibited);
-		}
-		expect(source).toMatch(
-			/export async function ensureSchemaPg[\s\S]*ensureRoutingAttemptsSchemaPg\(adapter\)/,
-		);
-		expect(source).toMatch(
-			/export async function runMigrationsPg[\s\S]*ensureRoutingAttemptsSchemaPg\(adapter\)/,
-		);
+		expect(importMatch).not.toBeNull();
+		const importedSymbols = (importMatch?.[1] ?? "")
+			.split(",")
+			.map((symbol) => symbol.trim())
+			.filter(Boolean);
+		expect(importedSymbols).toContain("ROUTING_ATTEMPT_REASON_SQL");
 	});
 });

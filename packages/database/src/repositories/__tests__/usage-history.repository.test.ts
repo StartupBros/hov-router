@@ -614,10 +614,9 @@ describe("UsageHistoryRepository", () => {
 		}
 	});
 
-	it("uses PostgreSQL append_order as the latest-snapshot append tie-break", async () => {
+	it("uses append_order as the latest-snapshot append tie-break", async () => {
 		let latestSql = "";
-		const pgAdapter = {
-			isSQLite: false,
+		const stubAdapter = {
 			query: async <R>(sql: string): Promise<R[]> => {
 				latestSql = sql;
 				return [
@@ -632,7 +631,7 @@ describe("UsageHistoryRepository", () => {
 				] as R[];
 			},
 		} as unknown as BunSqlAdapter;
-		const repo = new UsageHistoryRepository(pgAdapter);
+		const repo = new UsageHistoryRepository(stubAdapter);
 
 		expect(
 			(await repo.getLatestSnapshot("acc1", "seven_day"))?.utilization,
@@ -641,16 +640,15 @@ describe("UsageHistoryRepository", () => {
 		expect(latestSql).not.toContain("ctid");
 	});
 
-	it("uses append_order rather than physical row locations for PostgreSQL cleanup", async () => {
+	it("uses append_order rather than physical row locations for cleanup", async () => {
 		let cleanupSql = "";
-		const pgAdapter = {
-			isSQLite: false,
+		const stubAdapter = {
 			runWithChanges: async (sql: string): Promise<number> => {
 				cleanupSql = sql;
 				return 0;
 			},
 		} as unknown as BunSqlAdapter;
-		const repo = new UsageHistoryRepository(pgAdapter);
+		const repo = new UsageHistoryRepository(stubAdapter);
 
 		expect(await repo.deleteOlderThan(1_000)).toBe(0);
 		expect(cleanupSql).toContain(

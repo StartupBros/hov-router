@@ -1,8 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
-import type { BunSqlAdapter } from "../adapters/bun-sql-adapter";
 import { ensureSchema, runMigrations } from "../migrations";
-import { ensureSchemaPg, runMigrationsPg } from "../migrations-pg";
 
 const ISSUANCE_COLUMNS = ["counter_identity", "issuance_count"];
 
@@ -48,28 +46,6 @@ function tableSql(db: Database): string {
 				"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'server_tool_replay_issuance'",
 			)
 			.get()?.sql ?? ""
-	);
-}
-
-function captureAdapter(statements: string[]): BunSqlAdapter {
-	return {
-		get: async () => ({ exists: 1 }),
-		query: async () => [],
-		run: async (sql: string) => {
-			statements.push(sql);
-		},
-		unsafe: async (sql: string) => {
-			statements.push(sql);
-			return [];
-		},
-	} as unknown as BunSqlAdapter;
-}
-
-function pgTableSql(statements: string[]): string {
-	return (
-		statements.find((sql) =>
-			sql.includes("CREATE TABLE IF NOT EXISTS server_tool_replay_issuance"),
-		) ?? ""
 	);
 }
 
@@ -124,23 +100,5 @@ describe("server-tool replay issuance migrations", () => {
 		} finally {
 			db.close();
 		}
-	});
-
-	it("emits identical PostgreSQL DDL from fresh and upgrade paths", async () => {
-		const fresh: string[] = [];
-		await ensureSchemaPg(captureAdapter(fresh));
-		const upgrade: string[] = [];
-		await runMigrationsPg(captureAdapter(upgrade));
-
-		const freshDdl = pgTableSql(fresh);
-		const upgradeDdl = pgTableSql(upgrade);
-		expectContentFreeSchema(ISSUANCE_COLUMNS, freshDdl);
-		expectIssuanceDdl(freshDdl);
-		expectIssuanceDdl(upgradeDdl);
-		expect(fresh.join("\n")).not.toContain("server_tool_proof_controls");
-		expect(upgrade.join("\n")).not.toContain("server_tool_proof_controls");
-		expect(freshDdl.replace(/\s+/g, " ").trim()).toBe(
-			upgradeDdl.replace(/\s+/g, " ").trim(),
-		);
 	});
 });

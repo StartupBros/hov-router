@@ -879,7 +879,7 @@ export interface RequestResponse {
 	// combo_model_override column, so historical `GET /api/requests` reads never
 	// return it. That is sufficient for its consumer, the model-routing drift
 	// alert, which evaluates the live event stream. Persisting it would require
-	// a dual SQLite+Postgres migration per the repo's migration-parity rule.
+	// a SQLite migration for a field no consumer reads back.
 	comboModelOverride?: { from: string; to: string } | null;
 	// Derived from statusCode === 429 server-side so the list view can render
 	// the "Rate Limited" badge without lazy-loading the full payload.

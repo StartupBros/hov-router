@@ -46,10 +46,7 @@ import type {
 	RouteProvenance,
 	StrategyStore,
 } from "@better-ccflare/types";
-import {
-	BunSqlAdapter,
-	PG_CLIENT_QUERY_TIMEOUT_MS,
-} from "./adapters/bun-sql-adapter";
+import { BunSqlAdapter } from "./adapters/bun-sql-adapter";
 import type { CleanupPacer } from "./cleanup-pacing";
 import { ensurePrivateDir, restrictDbFiles } from "./file-modes";
 import { EMBEDDED_INCREMENTAL_VACUUM_WORKER_CODE } from "./inline-incremental-vacuum-worker";
@@ -66,7 +63,6 @@ import {
 	MaintenanceWorkerOwner,
 } from "./maintenance-worker-owner";
 import { ensureSchema, runMigrations } from "./migrations";
-import { ensureSchemaPg, runMigrationsPg } from "./migrations-pg";
 import {
 	readMultiInstanceMode,
 	runStartupGuard,
@@ -78,6 +74,7 @@ import {
 	type WorkerPragma,
 } from "./off-thread-reader";
 import { resolveDbPath } from "./paths";
+import { assertNotPostgresUrl } from "./postgres-refusal";
 import {
 	AccountRepository,
 	type ClearedRateLimit,
@@ -395,12 +392,11 @@ function collapseIntegrityStatus(next: IntegrityStatus): void {
  * DatabaseOperations using Repository Pattern
  * Provides a clean, organized interface for database operations
  *
- * Supports both SQLite (default) and PostgreSQL (via DATABASE_URL env var).
- * All public methods are async to support both backends.
+ * Backed by SQLite. Most public methods are async.
  */
 export class DatabaseOperations implements StrategyStore, Disposable {
 	private adapter: BunSqlAdapter;
-	/** Raw bun:sqlite Database — only set in SQLite mode */
+	/** Raw bun:sqlite Database */
 	private sqliteDb?: Database;
 	/** Times every main-thread statement on sqliteDb (#606) */
 	private sqlTiming?: SqliteStatementTimer;
@@ -442,7 +438,6 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private runtime?: RuntimeConfig;
 	private dbConfig: DatabaseConfig;
 	private retryConfig: DatabaseRetryConfig;
-	readonly isSQLite: boolean;
 	/** Cached integrity check status; surfaced via /api/storage and /health. */
 	private integrityStatus: IntegrityStatus = {
 		status: "unchecked",
@@ -498,6 +493,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		retryConfig?: DatabaseRetryConfig,
 		maintenanceOptions?: MaintenanceWorkerOptions,
 	) {
+		assertNotPostgresUrl();
 		this.maintenanceOwner = new MaintenanceWorkerOwner(
 			new URL("./incremental-vacuum-worker.ts", import.meta.url).href,
 			{
@@ -542,153 +538,89 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			...retryConfig,
 		};
 
-		// Detect PostgreSQL mode from DATABASE_URL
-		const databaseUrl = process.env.DATABASE_URL;
-		const isPostgres =
-			databaseUrl &&
-			(databaseUrl.startsWith("postgres://") ||
-				databaseUrl.startsWith("postgresql://"));
+		const resolvedPath = dbPath ?? resolveDbPath();
+		this.resolvedDbPath = resolvedPath;
 
-		if (isPostgres) {
-			this.isSQLite = false;
-			// Import SQL lazily to avoid issues when not needed
-			const { SQL } = require("bun");
-			const pgMax = Number(process.env.BETTER_CCFLARE_DB_POOL_MAX ?? 10);
-			const pgIdleTimeout = Number(
-				process.env.BETTER_CCFLARE_DB_IDLE_TIMEOUT ?? 0,
-			);
-			// Server-side timeout must stay below the adapter's client-side race
-			// (PG_CLIENT_QUERY_TIMEOUT_MS) so PG cancels the statement — freeing
-			// its pool connection — before the client gives up. A non-numeric,
-			// zero/negative (PG treats 0 as "disabled"), or too-large override is
-			// silently clamped rather than trusted, since an unbounded value here
-			// reopens the exact connection-leak bug this timeout exists to close.
-			// PG_CLIENT_QUERY_TIMEOUT_MS itself is configurable via
-			// BETTER_CCFLARE_DB_CLIENT_TIMEOUT (default 8000ms), so raising that
-			// env var also raises this clamp's ceiling (#412).
-			const requestedPgStatementTimeout = Number(
-				process.env.BETTER_CCFLARE_DB_STATEMENT_TIMEOUT,
-			);
-			const maxPgStatementTimeout = PG_CLIENT_QUERY_TIMEOUT_MS - 1000;
-			const pgStatementTimeout =
-				Number.isFinite(requestedPgStatementTimeout) &&
-				requestedPgStatementTimeout > 0 &&
-				requestedPgStatementTimeout <= maxPgStatementTimeout
-					? requestedPgStatementTimeout
-					: maxPgStatementTimeout;
-			// Named prepared statements are disabled by default: Bun's native PG
-			// driver has a known class of bugs (oven-sh/bun#16774) where concurrent
-			// queries sharing a pooled connection can misattribute a cached
-			// statement's column metadata, corrupting binary integer decoding
-			// (ERR_POSTGRES_UNSUPPORTED_INTEGER_SIZE — #284). Unnamed prepared
-			// statements close this window since they don't persist across queries.
-			const pgPrepare = process.env.BETTER_CCFLARE_DB_PG_PREPARE === "true";
-			const sqlClient = new SQL({
-				url: databaseUrl,
-				max: pgMax,
-				idleTimeout: pgIdleTimeout,
-				prepare: pgPrepare,
-				connection: {
-					// Server-side timeout so PG cancels the query and frees the
-					// connection instead of leaving it occupied after the client
-					// gives up. Matches the client-side Promise.race in BunSqlAdapter.
-					statement_timeout: pgStatementTimeout,
-				},
+		// Ensure the directory exists. A directory created here is 0700; an
+		// existing one keeps its mode (it may hold other files).
+		ensurePrivateDir(dirname(resolvedPath));
+
+		// Validate operator-supplied PRAGMA config BEFORE opening the handle.
+		// `configureSqlite()` used to validate mid-flight, after
+		// `auto_vacuum`/`journal_mode = WAL` had already executed — WAL mode
+		// persists to disk immediately, so a bad value would leave that
+		// mutation on disk and throw out of the constructor with an unclosed
+		// handle. Validating here guarantees neither happens on bad input.
+		validateSqliteConfig(this.dbConfig);
+
+		this.sqliteDb = new Database(resolvedPath, { create: true });
+		// Time statements on the handle itself, before anything else runs on
+		// it: the adapter and every direct getDatabase() caller share it, and
+		// each of its calls blocks the event loop (#606).
+		const sqlTimingLog = new Logger("SqlTiming");
+		this.sqlTiming = new SqliteStatementTimer({
+			onSlow: (sample) => sqlTimingLog.warn(formatSlowSqlStatement(sample)),
+		});
+		this.sqlTiming.instrument(this.sqliteDb);
+
+		// The accounts table stores credentials as plaintext TEXT, and
+		// bun:sqlite creates the file at the umask default (0644 under 022).
+		// Before configureSqlite, which turns WAL on: SQLite gives a new -wal
+		// and -shm the main file's mode, so they are born 0600.
+		if (resolvedPath !== ":memory:") restrictDbFiles(resolvedPath);
+
+		try {
+			// Capture the persisted auto_vacuum mode BEFORE configureSqlite's
+			// leading PRAGMA flips the connection-local view. See the field
+			// docstring for the SQLite quirk this works around. (Greptile #230)
+			this.originalAutoVacuumMode = (
+				this.sqliteDb.query("PRAGMA auto_vacuum").get() as {
+					auto_vacuum: number;
+				}
+			).auto_vacuum;
+
+			// Apply SQLite configuration
+			configureSqlite(this.sqliteDb, this.dbConfig);
+
+			ensureSchema(this.sqliteDb);
+			runMigrations(this.sqliteDb, resolvedPath);
+		} catch (error) {
+			// Post-open setup failed — close the handle rather than leaking it
+			// out of a throwing constructor, which the caller has no reference
+			// to clean up.
+			this.sqliteDb.close();
+			this.sqliteDb = undefined;
+			throw error;
+		}
+
+		if (resolvedPath !== ":memory:") {
+			this.restoreIntegrityStatus(resolvedPath);
+		}
+
+		this.adapter = new BunSqlAdapter(this.sqliteDb);
+		if (
+			resolvedPath !== ":memory:" &&
+			!["0", "false", "off"].includes(
+				process.env.BETTER_CCFLARE_DB_READER_WORKER?.toLowerCase() ?? "",
+			)
+		) {
+			const readerOptions = {
+				dbPath: resolvedPath,
+				busyTimeoutMs: this.dbConfig.busyTimeoutMs ?? 10000,
+				embeddedCode: EMBEDDED_READER_WORKER_CODE,
+				sourceUrl: new URL("./reader-worker.ts", import.meta.url).href,
+			};
+			this.offThreadReader = new OffThreadReader({
+				...readerOptions,
+				threadName: DB_WORKER_THREAD_NAMES.bulkReader,
 			});
-			// ERR_POSTGRES_IDLE_TIMEOUT is a normal pool lifecycle event (idle
-			// connection reaped). Without this handler it bubbles as an unhandled
-			// error and crashes the process, causing 502s behind a load balancer.
-			sqlClient.on?.("error", (err: Error & { code?: string }) => {
-				if (err?.code === "ERR_POSTGRES_IDLE_TIMEOUT") return;
-				console.error("[postgres] pool error:", err);
+			this.adapter.setOffThreadReader(this.offThreadReader);
+			this.interactiveReader = new OffThreadReader({
+				...readerOptions,
+				label: "interactive reader",
+				threadName: DB_WORKER_THREAD_NAMES.interactiveReader,
 			});
-			this.adapter = new BunSqlAdapter(sqlClient, false);
-		} else {
-			this.isSQLite = true;
-			const resolvedPath = dbPath ?? resolveDbPath();
-			this.resolvedDbPath = resolvedPath;
-
-			// Ensure the directory exists. A directory created here is 0700; an
-			// existing one keeps its mode (it may hold other files).
-			ensurePrivateDir(dirname(resolvedPath));
-
-			// Validate operator-supplied PRAGMA config BEFORE opening the handle.
-			// `configureSqlite()` used to validate mid-flight, after
-			// `auto_vacuum`/`journal_mode = WAL` had already executed — WAL mode
-			// persists to disk immediately, so a bad value would leave that
-			// mutation on disk and throw out of the constructor with an unclosed
-			// handle. Validating here guarantees neither happens on bad input.
-			validateSqliteConfig(this.dbConfig);
-
-			this.sqliteDb = new Database(resolvedPath, { create: true });
-			// Time statements on the handle itself, before anything else runs on
-			// it: the adapter and every direct getDatabase() caller share it, and
-			// each of its calls blocks the event loop (#606).
-			const sqlTimingLog = new Logger("SqlTiming");
-			this.sqlTiming = new SqliteStatementTimer({
-				onSlow: (sample) => sqlTimingLog.warn(formatSlowSqlStatement(sample)),
-			});
-			this.sqlTiming.instrument(this.sqliteDb);
-
-			// The accounts table stores credentials as plaintext TEXT, and
-			// bun:sqlite creates the file at the umask default (0644 under 022).
-			// Before configureSqlite, which turns WAL on: SQLite gives a new -wal
-			// and -shm the main file's mode, so they are born 0600.
-			if (resolvedPath !== ":memory:") restrictDbFiles(resolvedPath);
-
-			try {
-				// Capture the persisted auto_vacuum mode BEFORE configureSqlite's
-				// leading PRAGMA flips the connection-local view. See the field
-				// docstring for the SQLite quirk this works around. (Greptile #230)
-				this.originalAutoVacuumMode = (
-					this.sqliteDb.query("PRAGMA auto_vacuum").get() as {
-						auto_vacuum: number;
-					}
-				).auto_vacuum;
-
-				// Apply SQLite configuration
-				configureSqlite(this.sqliteDb, this.dbConfig);
-
-				ensureSchema(this.sqliteDb);
-				runMigrations(this.sqliteDb, resolvedPath);
-			} catch (error) {
-				// Post-open setup failed — close the handle rather than leaking it
-				// out of a throwing constructor, which the caller has no reference
-				// to clean up.
-				this.sqliteDb.close();
-				this.sqliteDb = undefined;
-				throw error;
-			}
-
-			if (resolvedPath !== ":memory:") {
-				this.restoreIntegrityStatus(resolvedPath);
-			}
-
-			this.adapter = new BunSqlAdapter(this.sqliteDb);
-			if (
-				resolvedPath !== ":memory:" &&
-				!["0", "false", "off"].includes(
-					process.env.BETTER_CCFLARE_DB_READER_WORKER?.toLowerCase() ?? "",
-				)
-			) {
-				const readerOptions = {
-					dbPath: resolvedPath,
-					busyTimeoutMs: this.dbConfig.busyTimeoutMs ?? 10000,
-					embeddedCode: EMBEDDED_READER_WORKER_CODE,
-					sourceUrl: new URL("./reader-worker.ts", import.meta.url).href,
-				};
-				this.offThreadReader = new OffThreadReader({
-					...readerOptions,
-					threadName: DB_WORKER_THREAD_NAMES.bulkReader,
-				});
-				this.adapter.setOffThreadReader(this.offThreadReader);
-				this.interactiveReader = new OffThreadReader({
-					...readerOptions,
-					label: "interactive reader",
-					threadName: DB_WORKER_THREAD_NAMES.interactiveReader,
-				});
-				this.adapter.setOffThreadReader(this.interactiveReader, "interactive");
-			}
+			this.adapter.setOffThreadReader(this.interactiveReader, "interactive");
 		}
 
 		// Initialize repositories
@@ -717,16 +649,12 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	}
 
 	/**
-	 * Initialize the PostgreSQL schema (async, must be called after construction in PG mode)
+	 * Start the multi-instance guard and heartbeat loop. Call after construction.
 	 */
 	async initializeAsync(): Promise<void> {
-		if (!this.isSQLite) {
-			await ensureSchemaPg(this.adapter);
-			await runMigrationsPg(this.adapter);
-		}
 		// Run the multi-instance guard after migrations so the heartbeat table
 		// exists before we probe it. SQLite migrations are synchronous so they
-		// were applied inside the constructor; for PG we just ran them above.
+		// were applied inside the constructor.
 		// Default mode is "warn" — see #351.
 		const mode = readMultiInstanceMode();
 		await runStartupGuard(this.adapter, { mode });
@@ -805,22 +733,18 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 
 	/**
 	 * Get the underlying bun:sqlite Database.
-	 * @deprecated Use getAdapter() for cross-backend compatible code.
-	 * Only valid when running in SQLite mode.
+	 * @deprecated Use getAdapter().
 	 */
 	getDatabase(): Database {
 		if (!this.sqliteDb) {
-			throw new Error(
-				"getDatabase() is not available in PostgreSQL mode. Use getAdapter() instead.",
-			);
+			throw new Error("getDatabase() called before the database was opened.");
 		}
 		return this.sqliteDb;
 	}
 
 	/**
 	 * Main-thread SQL time since the previous call, for the event-loop stall
-	 * monitor (#606). Null in PostgreSQL mode, whose queries don't block the
-	 * loop.
+	 * monitor (#606). Null when no statement timer is attached.
 	 */
 	drainSqlTimingWindow(): SqlWindowSummary | null {
 		return this.sqlTiming?.drainWindow() ?? null;
@@ -828,9 +752,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 
 	async runQuickIntegrityCheck(): Promise<string> {
 		if (!this.sqliteDb) {
-			// PostgreSQL: verify connectivity with a lightweight query
-			await this.adapter.get("SELECT 1 AS ok");
-			return "ok";
+			throw new Error("Integrity check called before the database was opened.");
 		}
 		const result = this.sqliteDb.query("PRAGMA quick_check").get() as {
 			quick_check: string;
@@ -852,9 +774,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	 */
 	async runFullIntegrityCheck(): Promise<string> {
 		if (!this.sqliteDb) {
-			// PostgreSQL: verify connectivity with a lightweight query
-			await this.adapter.get("SELECT 1 AS ok");
-			return "ok";
+			throw new Error("Integrity check called before the database was opened.");
 		}
 		// integrity_check can return multiple rows for long error reports.
 		const integrityRows = this.sqliteDb
@@ -888,8 +808,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	}
 
 	/**
-	 * Path to the live SQLite file, or `undefined` when running against
-	 * PostgreSQL or before initialization. Used by the integrity-check worker
+	 * Path to the live SQLite file, or `undefined` before initialization. Used by the integrity-check worker
 	 * to open its own read-only handle.
 	 */
 	getResolvedDbPath(): string | undefined {
@@ -2070,7 +1989,7 @@ OAuth tokens will need to be re-authenticated.
 		return this.requests.getRequestsByAccount(since);
 	}
 
-	/** Global retention boundary, shared by SQLite and PostgreSQL adapters. */
+	/** Global retention boundary. */
 	async getOldestRequestTimestamp(): Promise<number | null> {
 		const row = await this.adapter.get<{ oldest: number | string | null }>(
 			"SELECT MIN(timestamp) AS oldest FROM requests",
@@ -2149,7 +2068,6 @@ OAuth tokens will need to be re-authenticated.
 	async getTableRowCounts(): Promise<
 		Array<{ name: string; rowCount: number; dataBytes?: number }>
 	> {
-		if (!this.adapter.isSQLite) return [];
 		if (this.tableRowCounts && this.tableRowCounts.expiresAt > Date.now()) {
 			return this.tableRowCounts.rows;
 		}
@@ -2206,7 +2124,7 @@ OAuth tokens will need to be re-authenticated.
 	}
 
 	async getDbSizeBytes(): Promise<number> {
-		if (!this.adapter.isSQLite || !this.resolvedDbPath) {
+		if (!this.resolvedDbPath) {
 			return 0;
 		}
 		try {
@@ -2220,7 +2138,7 @@ OAuth tokens will need to be re-authenticated.
 
 	/** WAL file size in bytes (SQLite only). Returns 0 if the WAL file doesn't exist. */
 	async getWalSizeBytes(): Promise<number> {
-		if (!this.adapter.isSQLite || !this.resolvedDbPath) {
+		if (!this.resolvedDbPath) {
 			return 0;
 		}
 		try {

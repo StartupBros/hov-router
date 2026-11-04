@@ -37,7 +37,7 @@ A port must preserve, at minimum, these protected fork contracts:
 - fork providers and defaults, canonical provider identities, model mappings, and
   compatible-endpoint validation;
 - Config-authoritative controls and default-off behavior for new routing features;
-- SQLite/PostgreSQL migration, repository, retention, and active-window parity;
+- SQLite migration, repository, retention, and active-window behavior;
 - fork build/update provenance, runtime Git-SHA identity, deployment source gates,
   observability, and operator controls.
 
@@ -62,6 +62,11 @@ would justify bringing it back.
   `router-release.yml`; `build:multi` with `CCFLARE_ONLY_PLATFORMS` still builds
   any platform. `scripts/__tests__/router-release-workflow.test.ts` fails if a
   publisher workflow reappears.
+- **PostgreSQL support** (`migrations-pg.ts`, the PostgreSQL adapter and repository
+  arms, the `DATABASE_URL` backend switch): removed 2026-11-03; v3.7.1 is the last
+  release that has it. Upstream PostgreSQL fixes are not ported. A PostgreSQL
+  `DATABASE_URL` is refused at startup, see
+  [PostgreSQL support removed](docs/hov-router-migration.md#postgresql-support-removed).
 - **Docker image publishing workflow:** removed earlier; the
   [Docker guide](docs/docker.md) builds from source.
 - **Wholesale-merge tooling** (`scripts/verify-upstream-sync-ledger.ts`,

@@ -247,7 +247,7 @@ describe("cache health repository (SQLite)", () => {
 		]);
 		await expect(repo.fetchBuckets(0, 2 * 24 * 60 * 60_000)).rejects.toThrow();
 		const plan = db
-			.query(`EXPLAIN QUERY PLAN ${cacheHealthBucketQuery(true)}`)
+			.query(`EXPLAIN QUERY PLAN ${cacheHealthBucketQuery()}`)
 			.all(CACHE_TEST_TIME, CACHE_TEST_TIME + 600_000) as { detail: string }[];
 		expect(
 			plan.some((p) =>

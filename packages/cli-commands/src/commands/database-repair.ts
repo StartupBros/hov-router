@@ -26,36 +26,28 @@ export async function repairDatabase(
 
 	console.log("Checking database integrity...\n");
 
-	// 1. Check database integrity (SQLite only - PostgreSQL uses different mechanisms)
-	if (dbOps.isSQLite) {
-		try {
-			const integrityResult = await adapter.get<{
-				integrity_check: string;
-			}>("PRAGMA integrity_check");
+	// 1. Check database integrity
+	try {
+		const integrityResult = await adapter.get<{
+			integrity_check: string;
+		}>("PRAGMA integrity_check");
 
-			if (integrityResult?.integrity_check === "ok") {
-				result.integrityOk = true;
-				console.log("Database integrity check: PASSED\n");
-			} else {
-				result.integrityOk = false;
-				result.errors.push(
-					`Integrity check failed: ${integrityResult?.integrity_check}`,
-				);
-				console.log(
-					`Database integrity check: FAILED\n   ${integrityResult?.integrity_check}\n`,
-				);
-			}
-		} catch (error) {
-			result.errors.push(`Failed to run integrity check: ${error}`);
-			console.log(`Failed to run integrity check: ${error}\n`);
-			return result;
+		if (integrityResult?.integrity_check === "ok") {
+			result.integrityOk = true;
+			console.log("Database integrity check: PASSED\n");
+		} else {
+			result.integrityOk = false;
+			result.errors.push(
+				`Integrity check failed: ${integrityResult?.integrity_check}`,
+			);
+			console.log(
+				`Database integrity check: FAILED\n   ${integrityResult?.integrity_check}\n`,
+			);
 		}
-	} else {
-		// PostgreSQL - assume integrity is ok (managed by PostgreSQL itself)
-		result.integrityOk = true;
-		console.log(
-			"Database integrity check: SKIPPED (PostgreSQL manages integrity internally)\n",
-		);
+	} catch (error) {
+		result.errors.push(`Failed to run integrity check: ${error}`);
+		console.log(`Failed to run integrity check: ${error}\n`);
+		return result;
 	}
 
 	// 2. Check for NULL values in numeric fields
@@ -121,54 +113,46 @@ export async function repairDatabase(
 		console.log(`Failed to check/fix NULL values: ${error}\n`);
 	}
 
-	// 3. Check foreign key constraints (SQLite only)
-	if (dbOps.isSQLite) {
-		console.log("Checking foreign key constraints...\n");
-		try {
-			const fkCheck = await adapter.query("PRAGMA foreign_key_check");
-			if (fkCheck.length === 0) {
-				console.log("Foreign key constraints: PASSED\n");
-			} else {
-				result.warnings.push(`Found ${fkCheck.length} foreign key violations`);
-				console.log(`Found ${fkCheck.length} foreign key violations:`);
-				for (const violation of fkCheck) {
-					console.log(`   ${JSON.stringify(violation)}`);
-				}
-				console.log("");
+	// 3. Check foreign key constraints
+	console.log("Checking foreign key constraints...\n");
+	try {
+		const fkCheck = await adapter.query("PRAGMA foreign_key_check");
+		if (fkCheck.length === 0) {
+			console.log("Foreign key constraints: PASSED\n");
+		} else {
+			result.warnings.push(`Found ${fkCheck.length} foreign key violations`);
+			console.log(`Found ${fkCheck.length} foreign key violations:`);
+			for (const violation of fkCheck) {
+				console.log(`   ${JSON.stringify(violation)}`);
 			}
-		} catch (error) {
-			result.warnings.push(`Failed to check foreign keys: ${error}`);
-			console.log(`Failed to check foreign keys: ${error}\n`);
+			console.log("");
 		}
+	} catch (error) {
+		result.warnings.push(`Failed to check foreign keys: ${error}`);
+		console.log(`Failed to check foreign keys: ${error}\n`);
+	}
 
-		// 4. Vacuum database to rebuild and optimize (SQLite only)
-		console.log("Vacuuming database (this may take a moment)...\n");
-		try {
-			await adapter.unsafe("PRAGMA wal_checkpoint(TRUNCATE)");
-			await adapter.unsafe("VACUUM");
-			result.vacuumed = true;
-			console.log("Database vacuumed successfully\n");
-		} catch (error) {
-			result.errors.push(`Failed to vacuum database: ${error}`);
-			console.log(`Failed to vacuum database: ${error}\n`);
-		}
+	// 4. Vacuum database to rebuild and optimize
+	console.log("Vacuuming database (this may take a moment)...\n");
+	try {
+		await adapter.unsafe("PRAGMA wal_checkpoint(TRUNCATE)");
+		await adapter.unsafe("VACUUM");
+		result.vacuumed = true;
+		console.log("Database vacuumed successfully\n");
+	} catch (error) {
+		result.errors.push(`Failed to vacuum database: ${error}`);
+		console.log(`Failed to vacuum database: ${error}\n`);
+	}
 
-		// 5. Optimize database (SQLite only)
-		console.log("Optimizing database...\n");
-		try {
-			await adapter.unsafe("ANALYZE");
-			await adapter.unsafe("PRAGMA optimize");
-			console.log("Database optimized successfully\n");
-		} catch (error) {
-			result.warnings.push(`Failed to optimize database: ${error}`);
-			console.log(`Failed to optimize database: ${error}\n`);
-		}
-	} else {
-		// PostgreSQL
-		result.vacuumed = true; // PostgreSQL autovacuums
-		console.log(
-			"Vacuum/optimize: SKIPPED (PostgreSQL handles this automatically via autovacuum)\n",
-		);
+	// 5. Optimize database
+	console.log("Optimizing database...\n");
+	try {
+		await adapter.unsafe("ANALYZE");
+		await adapter.unsafe("PRAGMA optimize");
+		console.log("Database optimized successfully\n");
+	} catch (error) {
+		result.warnings.push(`Failed to optimize database: ${error}`);
+		console.log(`Failed to optimize database: ${error}\n`);
 	}
 
 	return result;

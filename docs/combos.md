@@ -325,7 +325,7 @@ Enable the next family only after the first family meets that evidence threshold
 
 ## Upgrade and troubleshooting notes
 
-- SQLite and PostgreSQL migrations both default existing assignments to Manual.
+- The SQLite migration defaults existing assignments to Manual.
 - `manual_override` means an enabled Manual slot won over a matching virtual candidate; it is not an error.
 - `excluded` means an explicit family exclusion suppressed Managed membership.
 - `disabled` can refer to an inactive family/combo, disabled Manual slot, or disabled rule.

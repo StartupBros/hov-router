@@ -45,6 +45,10 @@ export {
 	isEncryptionEnabled,
 } from "./payload-encryption";
 export { analyzeIndexUsage } from "./performance-indexes";
+export {
+	assertNotPostgresUrl,
+	PostgresUrlRefusedError,
+} from "./postgres-refusal";
 export type {
 	MarkAccountRateLimitedResult,
 	PublishedPublicValueRow,

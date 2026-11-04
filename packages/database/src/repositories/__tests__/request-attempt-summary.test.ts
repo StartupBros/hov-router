@@ -17,7 +17,6 @@ import {
 } from "../../__tests__/route-provenance.fixture";
 import { BunSqlAdapter } from "../../adapters/bun-sql-adapter";
 import { ensureSchema, runMigrations } from "../../migrations";
-import { ensureSchemaPg, runMigrationsPg } from "../../migrations-pg";
 import { RequestRepository } from "../request.repository";
 
 const summary = {
@@ -39,7 +38,7 @@ const summary = {
 	},
 };
 
-test("SQLite and fake PostgreSQL rows retain tombstones and legacy summaries have no lane", async () => {
+test("SQLite and fake-adapter rows retain tombstones and legacy summaries have no lane", async () => {
 	const db = new Database(":memory:");
 	try {
 		ensureSchema(db);
@@ -175,38 +174,13 @@ test("additive migration upgrades old requests table and remains idempotent", as
 	}
 });
 
-test("PostgreSQL fresh/upgrade schema and adapter writes preserve the bounded first terminal", async () => {
-	let freshColumn = false;
-	let upgradeColumn = false;
-	let mode: "fresh" | "upgrade" | "write" = "fresh";
+test("adapter writes preserve the bounded first terminal and bind the summary by position", async () => {
 	let lastWrite: { sql: string; params: unknown[] } | null = null;
 	const adapter = {
-		get: async (_sql: string, params?: unknown[]) => ({
-			exists:
-				params?.[0] === "requests" && params?.[1] === "routing_attempt_summary"
-					? 0
-					: 1,
-		}),
-		unsafe: async (sql: string) => {
-			if (mode === "fresh" && /routing_attempt_summary\s+TEXT/.test(sql))
-				freshColumn = true;
-			if (
-				mode === "upgrade" &&
-				/ADD COLUMN.*routing_attempt_summary.*TEXT/s.test(sql)
-			)
-				upgradeColumn = true;
-			return [];
-		},
 		run: async (sql: string, params: unknown[]) => {
-			if (mode === "write") lastWrite = { sql, params };
+			lastWrite = { sql, params };
 		},
 	} as unknown as BunSqlAdapter;
-	await ensureSchemaPg(adapter);
-	mode = "upgrade";
-	await runMigrationsPg(adapter);
-	expect(freshColumn).toBe(true);
-	expect(upgradeColumn).toBe(true);
-	mode = "write";
 	await new RequestRepository(adapter).save({
 		...base,
 		routingAttemptSummary: summary,
@@ -223,7 +197,7 @@ test("PostgreSQL fresh/upgrade schema and adapter writes preserve the bounded fi
 	expect(insertColumns).toHaveLength(write.params.length);
 	expect(JSON.parse(write.params[summaryIndex] as string)).toEqual(summary);
 	// The fake adapter captures the SQL boundary, then exercises the same row
-	// mapper used by PostgreSQL history reads. This is not live-PG evidence.
+	// mapper used by history reads.
 	expect(
 		toRequest({
 			routing_attempt_summary: write.params[summaryIndex],
@@ -307,9 +281,9 @@ test("route provenance is preserved when a re-save omits it", async () => {
 	}
 });
 
-// Checks the generated statement's shape and binding only; the live
-// PostgreSQL freeze is exercised in managed-routing-postgres.integration.test.ts.
-test("PostgreSQL upsert SQL guards every route provenance column behind the attempt-summary CASE and binds it by position", async () => {
+// Checks the generated statement's shape and binding only; the real SQLite
+// freeze is exercised above.
+test("upsert SQL guards every route provenance column behind the attempt-summary CASE and binds it by position", async () => {
 	let lastWrite: { sql: string; params: unknown[] } | null = null;
 	const adapter = {
 		run: async (sql: string, params: unknown[]) => {

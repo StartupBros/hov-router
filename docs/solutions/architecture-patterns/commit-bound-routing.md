@@ -23,6 +23,8 @@ tags:
   - authorization
 ---
 
+> **Superseded in part (2026-11-03):** PostgreSQL support was removed, so the instruction below to update PostgreSQL schemas no longer applies; update the SQLite schema and upgrade path in `migrations.ts` only. Body kept as history.
+
 # Authorization-Before-Ranking and Success-Conditioned Route Ownership
 
 ## Context

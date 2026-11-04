@@ -6,6 +6,7 @@ import {
 	type DatabaseRetryConfig,
 } from "./database-operations";
 import { migrateFromCcflare } from "./migrate-from-ccflare";
+import { assertNotPostgresUrl } from "./postgres-refusal";
 
 let instance: DatabaseOperations | null = null;
 let closing: Promise<void> | null = null;
@@ -50,6 +51,9 @@ export function getInstance(_fastMode?: boolean): DatabaseOperations {
 			"Database owner retiring; await closeAll() before replacement",
 		);
 	if (!instance) {
+		// Before the legacy copy below, which would otherwise leave database
+		// files behind for a start that is refused anyway.
+		assertNotPostgresUrl();
 		// Perform one-time migration check from legacy ccflare
 		if (!migrationChecked) {
 			migrateFromCcflare();
@@ -93,14 +97,14 @@ export function getInstance(_fastMode?: boolean): DatabaseOperations {
 }
 
 /**
- * Get or create the database instance, running async initialization for PostgreSQL.
+ * Get or create the database instance, running async initialization.
  * Use this in server startup code where async is available.
  */
 export async function getInstanceAsync(
 	_fastMode?: boolean,
 ): Promise<DatabaseOperations> {
 	const db = getInstance();
-	// Initialize PostgreSQL schema/migrations if needed
+	// Start the multi-instance guard and heartbeat
 	await db.initializeAsync();
 	return db;
 }

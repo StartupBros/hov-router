@@ -8,13 +8,12 @@
  *
  * Plus: refuse-mode throws MultiInstanceRefusedError, the operator-facing
  * message names the seven divergence categories, and the schema is present
- * in both SQLite and PostgreSQL migrations.
+ * in the SQLite migrations.
  */
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { BunSqlAdapter } from "../adapters/bun-sql-adapter";
 import { ensureSchema } from "../migrations";
-import { ensureSchemaPg } from "../migrations-pg";
 import {
 	clearHeartbeat,
 	clearHeartbeatWithRetry,
@@ -563,108 +562,4 @@ describe("multi-instance-guard — schema shape", () => {
 			expect(cols).toContain(col);
 		}
 	});
-
-	it("PG ensureSchemaPg includes the instance_heartbeats CREATE TABLE", () => {
-		// We don't need a live PG database for this — confirm the SQL
-		// text is shipped in migrations-pg.ts. The live-PostgreSQL
-		// test below exercises the actual DDL when DATABASE_URL is set.
-		const fs = require("node:fs") as typeof import("node:fs");
-		const path = require("node:path") as typeof import("node:path");
-		const src = fs.readFileSync(
-			path.join(import.meta.dir, "..", "migrations-pg.ts"),
-			"utf8",
-		);
-		expect(src).toContain("CREATE TABLE IF NOT EXISTS instance_heartbeats");
-		expect(src).toContain(
-			"CREATE INDEX IF NOT EXISTS idx_instance_heartbeats_last_heartbeat",
-		);
-		// All seven columns must be present in the PG schema text.
-		for (const col of [
-			"instance_id",
-			"hostname",
-			"pid",
-			"started_at",
-			"last_heartbeat",
-			"node_version",
-			"db_dialect",
-		]) {
-			expect(src).toContain(`\t\t\t${col} `);
-		}
-	});
 });
-
-// Live PostgreSQL test — same three negative controls, gated on DATABASE_URL.
-// Matches the pattern in migrations-pg.test.ts: skipIf(!databaseUrl).
-const databaseUrl = process.env.DATABASE_URL;
-const livePgAvailable = Boolean(databaseUrl?.startsWith("postgres"));
-
-describe.skipIf(!livePgAvailable)(
-	"multi-instance-guard (PostgreSQL, live, requires DATABASE_URL)",
-	() => {
-		let adapter: BunSqlAdapter;
-		beforeEach(async () => {
-			const sql = new (await import("bun")).SQL(databaseUrl!);
-			adapter = new BunSqlAdapter(sql, false);
-			await ensureSchemaPg(adapter);
-			// Clean any rows left by a previous run.
-			await adapter.run("DELETE FROM instance_heartbeats");
-		});
-		afterEach(async () => {
-			await adapter.run("DELETE FROM instance_heartbeats");
-			await adapter.close();
-		});
-
-		it("NEGATIVE 1 (PG): detects a second instance", async () => {
-			const now = Date.now();
-			await adapter.run(
-				`INSERT INTO instance_heartbeats
-					(instance_id, hostname, pid, started_at, last_heartbeat,
-					 node_version, db_dialect)
-				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				[
-					"pg-peer-aaaa",
-					"pg-host",
-					4321,
-					now - 5_000,
-					now - 1_000,
-					"v20.0.0",
-					"postgres",
-				],
-			);
-			const result = await scanHeartbeats(adapter, now);
-			expect(result.peers.length).toBe(1);
-			expect(result.peers[0].instance_id).toBe("pg-peer-aaaa");
-		});
-
-		it("NEGATIVE 2 (PG): stale predecessor does NOT block startup", async () => {
-			const now = Date.now();
-			const stale = now - HEARTBEAT_EXPIRY_MS - 5_000;
-			await adapter.run(
-				`INSERT INTO instance_heartbeats
-					(instance_id, hostname, pid, started_at, last_heartbeat,
-					 node_version, db_dialect)
-				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				["pg-crashed", "old", 1234, stale - 60_000, stale, "v18", "postgres"],
-			);
-			const warnings: string[] = [];
-			const result = await runStartupGuard(adapter, {
-				now,
-				mode: "warn",
-				log: (msg) => warnings.push(msg),
-			});
-			expect(result.peers.length).toBe(0);
-			expect(result.expired.length).toBe(1);
-			expect(warnings.length).toBe(0);
-		});
-
-		it("NEGATIVE 3 (PG): single-instance startup is silent", async () => {
-			const warnings: string[] = [];
-			const result = await runStartupGuard(adapter, {
-				mode: "warn",
-				log: (msg) => warnings.push(msg),
-			});
-			expect(result.peers.length).toBe(0);
-			expect(warnings.length).toBe(0);
-		});
-	},
-);

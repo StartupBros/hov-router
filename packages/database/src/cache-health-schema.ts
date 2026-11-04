@@ -1,4 +1,4 @@
-/** BIGINT has INTEGER affinity on SQLite and preserves epoch milliseconds on PG. */
+/** BIGINT has INTEGER affinity on SQLite and preserves epoch milliseconds. */
 export const CACHE_HEALTH_STATE_SCHEMA = `
 	CREATE TABLE IF NOT EXISTS cache_health_state (
 		scope_key TEXT PRIMARY KEY,

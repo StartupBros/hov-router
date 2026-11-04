@@ -213,10 +213,7 @@ export class ApiKeyRepository extends BaseRepository<ApiKey> {
 			WHERE is_active = 1
 		`);
 
-		// Bun.SQL returns COUNT(*) on PostgreSQL as a JavaScript string
-		// (BIGINT is stringified, see Bun#22188). Coerce to Number so the
-		// public return type stays a plain number and downstream `toBe(N)`
-		// assertions hold on both dialects.
+		// Coerce to Number so the public return type stays a plain number.
 		return Number(row?.count) || 0;
 	}
 
@@ -229,7 +226,7 @@ export class ApiKeyRepository extends BaseRepository<ApiKey> {
 			FROM api_keys
 		`);
 
-		// See countActive() for the Bun.SQL BIGINT-as-string caveat.
+		// Coerce to Number, as countActive() does.
 		return Number(row?.count) || 0;
 	}
 

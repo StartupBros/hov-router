@@ -5,7 +5,7 @@ import type {
 	QualityRouteRepository,
 } from "../repositories/quality-route.repository";
 
-/** Run unchanged against independent SQLite and PostgreSQL connections. */
+/** Run against independent SQLite connections. */
 export function qualityIngressContract(
 	repositories: (
 		limits: Partial<QualityRouteLimits>,

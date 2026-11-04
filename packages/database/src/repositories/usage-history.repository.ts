@@ -104,8 +104,7 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 		expectedCreatedAt?: number,
 	): Promise<void> {
 		// Build one value tuple per window, then insert them all in a SINGLE
-		// statement. A multi-row INSERT is atomic (all-or-nothing) on both SQLite
-		// and Postgres, so a failure can no longer leave a partial snapshot the
+		// statement. A multi-row INSERT is atomic (all-or-nothing) on SQLite, so a failure can no longer leave a partial snapshot the
 		// way the previous await-in-loop of per-window inserts could.
 		const params: unknown[] = [];
 		const count = windows.length;
@@ -132,8 +131,7 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 			return;
 		}
 
-		// A CTE makes the generation guard one statement across SQLite and
-		// PostgreSQL. Either every canonical window is inserted for the exact
+		// A CTE makes the generation guard one statement. Either every canonical window is inserted for the exact
 		// account row, or the SELECT produces zero rows after a same-ID replacement.
 		params.push(accountId, expectedCreatedAt);
 		await this.run(
@@ -169,14 +167,8 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 			opts.bucketMs != null && opts.bucketMs > 0
 				? Math.round(opts.bucketMs)
 				: null;
-		// Integer division truncates identically on SQLite and Postgres, so
-		// the bucketed variant runs unchanged on both adapters.
 		// The bucket expression is computed ONCE in a subquery and grouped by
-		// its alias: repeating `timestamp / ?` in SELECT and GROUP BY binds
-		// DISTINCT parameters after placeholder conversion ($1 vs $n), and
-		// PostgreSQL does not recognize those as the same grouping expression
-		// — every bucketed query would raise an ungrouped-column error
-		// (pro-gate finding).
+		// its alias rather than repeating `timestamp / ?` in SELECT and GROUP BY.
 		const rows = bucketMs
 			? await this.query<SnapshotDbRow>(
 					`SELECT account_id, bucket * ? AS timestamp, window_key,
@@ -278,16 +270,11 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 			params.push(value);
 			return `?${nextParamIndex++}`;
 		};
-		const requestedAccountsSql = this.adapter.isSQLite
-			? "SELECT DISTINCT CAST(value AS TEXT) AS account_id FROM json_each(?1)"
-			: "SELECT DISTINCT account_id FROM jsonb_array_elements_text(CAST(?1 AS jsonb)) AS requested(account_id)";
-		// Pin text ordering to raw UTF-8 bytes. SQLite's default BINARY collation
-		// happens to provide that today, but PostgreSQL inherits the database's
-		// locale unless `C` is explicit; equal-recency series could therefore
-		// select different strict prefixes on the two adapters.
-		const bytewiseCollationSql = this.adapter.isSQLite
-			? "COLLATE BINARY"
-			: 'COLLATE "C"';
+		const requestedAccountsSql =
+			"SELECT DISTINCT CAST(value AS TEXT) AS account_id FROM json_each(?1)";
+		// Pin text ordering to raw UTF-8 bytes explicitly, so equal-recency
+		// series select the same strict prefix whatever the default collation.
+		const bytewiseCollationSql = "COLLATE BINARY";
 		const filterClauses = ["COALESCE(snapshots.active, 1) = 1"];
 		const requestedWindowPlaceholder = requestedWindow
 			? bindParam(requestedWindow)
@@ -486,20 +473,19 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 		pacer?: CleanupPacer,
 	): Promise<number> {
 		// Batched like RequestRepository.deleteOlderThan/deletePayloadsOlderThan —
-		// an unbounded DELETE here can exceed the PG statement_timeout once the
+		// an unbounded DELETE here can run too long once the
 		// table is large, which previously caused retention cleanup to fail
 		// forever and let usage_snapshots grow unbounded (#384).
 		//
 		// usage_snapshots' natural key (account_id, timestamp, window_key) isn't
 		// unique. Selecting that key with LIMIT would bound distinct values, not
 		// rows: duplicates could make one nominal batch delete unbounded rows.
-		// append_order is the durable database-generated surrogate key shared by
-		// SQLite and PostgreSQL, so it bounds the physical delete without relying
-		// on SQLite rowid or PostgreSQL ctid storage locations. The timestamp index
-		// makes the inner selection efficient on both dialects.
+		// append_order is the durable database-generated surrogate key, so it
+		// bounds the physical delete without relying on SQLite rowid storage
+		// locations. The timestamp index makes the inner selection efficient.
 		// Batch size is configurable via BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE
 		// (default 200) — lower it if rows are large and batches are timing
-		// out against statement_timeout (#412).
+		// out (#412).
 		const BATCH_SIZE = getCleanupBatchSize();
 		const appendOrderSql = `DELETE FROM usage_snapshots WHERE append_order IN (
 			SELECT append_order FROM usage_snapshots WHERE timestamp < ? LIMIT ?

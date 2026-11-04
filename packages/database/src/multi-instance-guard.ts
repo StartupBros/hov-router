@@ -32,8 +32,7 @@
  *     into hard-failure with the BETTER_CCFLARE_MULTI_INSTANCE=refuse env
  *     var, matching ccflare's existing pattern of opt-in strictness.
  *
- * Schema: the `instance_heartbeats` table is added in both
- * `migrations.ts` (SQLite) and `migrations-pg.ts` (PostgreSQL).
+ * Schema: the `instance_heartbeats` table is added in `migrations.ts`.
  */
 
 import { randomUUID } from "node:crypto";
@@ -64,7 +63,7 @@ export interface HeartbeatRecord {
 	started_at: number;
 	last_heartbeat: number;
 	node_version: string;
-	db_dialect: "sqlite" | "postgres";
+	db_dialect: "sqlite";
 }
 
 /** Result of a startup scan: peers with a fresh heartbeat, plus the
@@ -147,9 +146,8 @@ export async function writeHeartbeat(
 	adapter: BunSqlAdapter,
 	now: number = Date.now(),
 ): Promise<void> {
-	const dialect = adapter.isSQLite ? "sqlite" : "postgres";
-	if (adapter.isSQLite) {
-		const sql = `INSERT INTO instance_heartbeats (
+	const dialect = "sqlite";
+	const sql = `INSERT INTO instance_heartbeats (
 				instance_id, hostname, pid, started_at, last_heartbeat,
 				node_version, db_dialect
 			) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -159,41 +157,18 @@ export async function writeHeartbeat(
 				pid = excluded.pid,
 				node_version = excluded.node_version,
 				db_dialect = excluded.db_dialect`;
-		const params = [
-			THIS_INSTANCE_ID,
-			THIS_HOSTNAME,
-			THIS_PID,
-			now,
-			now,
-			THIS_NODE_VERSION,
-			dialect,
-		];
-		// The main connection is query_only while the writer thread owns writes.
-		if (adapter.writerAttached()) await adapter.run(sql, params);
-		else adapter.getSQLiteDb().run(sql, params);
-	} else {
-		await adapter.run(
-			`INSERT INTO instance_heartbeats (
-				instance_id, hostname, pid, started_at, last_heartbeat,
-				node_version, db_dialect
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (instance_id) DO UPDATE SET
-				last_heartbeat = EXCLUDED.last_heartbeat,
-				hostname = EXCLUDED.hostname,
-				pid = EXCLUDED.pid,
-				node_version = EXCLUDED.node_version,
-				db_dialect = EXCLUDED.db_dialect`,
-			[
-				THIS_INSTANCE_ID,
-				THIS_HOSTNAME,
-				THIS_PID,
-				now,
-				now,
-				THIS_NODE_VERSION,
-				dialect,
-			],
-		);
-	}
+	const params = [
+		THIS_INSTANCE_ID,
+		THIS_HOSTNAME,
+		THIS_PID,
+		now,
+		now,
+		THIS_NODE_VERSION,
+		dialect,
+	];
+	// The main connection is query_only while the writer thread owns writes.
+	if (adapter.writerAttached()) await adapter.run(sql, params);
+	else adapter.getSQLiteDb().run(sql, params);
 }
 
 /**
@@ -207,17 +182,12 @@ export async function scanHeartbeats(
 	expiryMs: number = HEARTBEAT_EXPIRY_MS,
 ): Promise<MultiInstanceScanResult> {
 	const cutoffFresh = now - expiryMs;
-	const rows = adapter.isSQLite
-		? (adapter
-				.getSQLiteDb()
-				.query<HeartbeatRecord, [string]>(
-					"SELECT instance_id, hostname, pid, started_at, last_heartbeat, node_version, db_dialect FROM instance_heartbeats WHERE instance_id != ? ORDER BY last_heartbeat DESC",
-				)
-				.all(THIS_INSTANCE_ID) as HeartbeatRecord[])
-		: ((await adapter.query<HeartbeatRecord>(
-				"SELECT instance_id, hostname, pid, started_at, last_heartbeat, node_version, db_dialect FROM instance_heartbeats WHERE instance_id != ? ORDER BY last_heartbeat DESC",
-				[THIS_INSTANCE_ID],
-			)) as HeartbeatRecord[]);
+	const rows = adapter
+		.getSQLiteDb()
+		.query<HeartbeatRecord, [string]>(
+			"SELECT instance_id, hostname, pid, started_at, last_heartbeat, node_version, db_dialect FROM instance_heartbeats WHERE instance_id != ? ORDER BY last_heartbeat DESC",
+		)
+		.all(THIS_INSTANCE_ID) as HeartbeatRecord[];
 
 	const peers: HeartbeatRecord[] = [];
 	const expired: HeartbeatRecord[] = [];
@@ -236,13 +206,13 @@ export async function clearHeartbeat(
 	adapter: BunSqlAdapter,
 	nonblocking = false,
 ): Promise<void> {
-	if (adapter.isSQLite && adapter.writerAttached()) {
+	if (adapter.writerAttached()) {
 		// The writer thread waits out the lock, never the serving thread, so the
 		// caller's settlement timeout bounds this without a nonblocking DELETE.
 		await adapter.run("DELETE FROM instance_heartbeats WHERE instance_id = ?", [
 			THIS_INSTANCE_ID,
 		]);
-	} else if (adapter.isSQLite) {
+	} else {
 		const db = adapter.getSQLiteDb();
 		// A Promise timeout cannot interrupt SQLite's synchronous busy handler.
 		// Only the retirement DELETE is nonblocking; serving requests retain their timeout.
@@ -257,16 +227,11 @@ export async function clearHeartbeat(
 		} finally {
 			if (previous !== undefined) db.run(`PRAGMA busy_timeout = ${previous}`);
 		}
-	} else {
-		await adapter.run("DELETE FROM instance_heartbeats WHERE instance_id = ?", [
-			THIS_INSTANCE_ID,
-		]);
 	}
 }
 
 /**
- * Retry `clearHeartbeat` on transient failures (SQLITE_BUSY, brief PG
- * connection errors, etc). Without this, a transient DELETE failure in
+ * Retry `clearHeartbeat` on transient failures (SQLITE_BUSY, etc). Without this, a transient DELETE failure in
  * the refuse-path cleanup of runStartupGuard leaves the just-written
  * heartbeat row in place. A fast restart then sees that orphan as a
  * peer (the new process has a fresh THIS_INSTANCE_ID, so it does not
@@ -358,7 +323,7 @@ export async function runStartupGuard(
 			// runStartupGuard returns), so the row would otherwise linger.
 			//
 			// Use the retry helper because a single transient DELETE failure
-			// (SQLITE_BUSY, brief PG connection blip) otherwise leaves the
+			// (SQLITE_BUSY) otherwise leaves the
 			// just-written row in place. The new process on retry gets a
 			// fresh THIS_INSTANCE_ID, so it does not exclude its own previous
 			// orphan and refuses startup again. Addresses Greptile "Failed
@@ -496,8 +461,7 @@ export function startHeartbeatLoop(
 			// The writer thread commits in posting order, so a DELETE posted now
 			// lands after an in-flight tick. Waiting for the tick first would skip
 			// the DELETE whenever the write queue outlasts the settlement bound.
-			if (inFlight && !(adapter.isSQLite && adapter.writerAttached()))
-				await settle(inFlight);
+			if (inFlight && !adapter.writerAttached()) await settle(inFlight);
 			// The row cannot be resurrected by a still-owned heartbeat after deletion.
 			// A pending cleanup also holds adapter close; an ordinary settled failure
 			// is best-effort and the stale row expires naturally.

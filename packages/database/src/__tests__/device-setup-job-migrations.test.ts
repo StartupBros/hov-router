@@ -1,8 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, it } from "bun:test";
-import type { BunSqlAdapter } from "../adapters/bun-sql-adapter";
 import { ensureSchema, runMigrations } from "../migrations";
-import { ensureSchemaPg, runMigrationsPg } from "../migrations-pg";
 
 const DEVICE_SETUP_JOB_COLUMNS = [
 	"id",
@@ -121,47 +119,6 @@ function insertMinimalJob(db: Database, values: unknown[]): void {
 	);
 }
 
-function captureAdapter(statements: string[]): BunSqlAdapter {
-	return {
-		get: async () => ({ exists: 1 }),
-		run: async (sql: string) => {
-			statements.push(sql);
-		},
-		unsafe: async (sql: string) => {
-			statements.push(sql);
-			return [];
-		},
-	} as unknown as BunSqlAdapter;
-}
-
-function deviceSetupTableSql(statements: string[]): string {
-	return (
-		statements.find((sql) =>
-			sql.includes("CREATE TABLE IF NOT EXISTS device_setup_jobs"),
-		) ?? ""
-	);
-}
-
-function expectPostgresDeviceSetupDdl(statements: string[]): void {
-	const ddl = deviceSetupTableSql(statements);
-	expect(ddl).not.toBe("");
-	expectExactDomains(ddl);
-	const normalized = ddl.replace(/\s+/g, " ");
-	expect(normalized).toContain("idempotency_key TEXT NOT NULL UNIQUE");
-	expect(normalized).toContain("retention_expires_at BIGINT");
-	expect(normalized).not.toContain("retention_expires_at BIGINT NOT NULL");
-	for (const column of DEVICE_SETUP_JOB_COLUMNS) {
-		expect(ddl).toMatch(new RegExp(`\\b${column}\\b`));
-	}
-	for (const name of SENSITIVE_COLUMN_NAMES) {
-		expect(ddl).not.toMatch(new RegExp(`\\b${name}\\b`));
-	}
-	const allSql = statements.join("\n");
-	for (const index of DEVICE_SETUP_JOB_INDEXES) {
-		expect(allSql).toContain(index);
-	}
-}
-
 describe("device setup job migrations", () => {
 	it("creates the exact security-minimal SQLite schema on fresh install", () => {
 		const db = new Database(":memory:");
@@ -220,19 +177,5 @@ describe("device setup job migrations", () => {
 		} finally {
 			db.close();
 		}
-	});
-
-	it("emits matching security-minimal PostgreSQL DDL for fresh and upgrade paths", async () => {
-		const freshStatements: string[] = [];
-		await ensureSchemaPg(captureAdapter(freshStatements));
-		expectPostgresDeviceSetupDdl(freshStatements);
-
-		const upgradeStatements: string[] = [];
-		await runMigrationsPg(captureAdapter(upgradeStatements));
-		expectPostgresDeviceSetupDdl(upgradeStatements);
-
-		expect(
-			deviceSetupTableSql(freshStatements).replace(/\s+/g, " ").trim(),
-		).toBe(deviceSetupTableSql(upgradeStatements).replace(/\s+/g, " ").trim());
 	});
 });
