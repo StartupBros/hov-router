@@ -6,6 +6,7 @@ import {
 	type DatabaseRetryConfig,
 } from "./database-operations";
 import { migrateFromCcflare } from "./migrate-from-ccflare";
+import { assertNotPostgresUrl } from "./postgres-refusal";
 
 let instance: DatabaseOperations | null = null;
 let closing: Promise<void> | null = null;
@@ -50,6 +51,9 @@ export function getInstance(_fastMode?: boolean): DatabaseOperations {
 			"Database owner retiring; await closeAll() before replacement",
 		);
 	if (!instance) {
+		// Before the legacy copy below, which would otherwise leave database
+		// files behind for a start that is refused anyway.
+		assertNotPostgresUrl();
 		// Perform one-time migration check from legacy ccflare
 		if (!migrationChecked) {
 			migrateFromCcflare();

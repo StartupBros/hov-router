@@ -34,8 +34,8 @@ beforeEach(() => {
 	// Under umask 077 bun:sqlite yields 0600 with no help from our code.
 	savedUmask = process.umask(0o022);
 	dir = mkdtempSync(join(tmpdir(), "hov-dbctor-"));
-	// DATABASE_URL selects the PostgreSQL branch, which never reaches the code
-	// under test.
+	// An ambient PostgreSQL DATABASE_URL makes the constructor refuse before it
+	// reaches the code under test.
 	savedDatabaseUrl = process.env.DATABASE_URL;
 	delete process.env.DATABASE_URL;
 	savedReaderWorker = process.env.BETTER_CCFLARE_DB_READER_WORKER;

@@ -72,6 +72,7 @@ import {
 	runStartupGuard,
 	startHeartbeatLoop,
 } from "./multi-instance-guard";
+import { assertNotPostgresUrl } from "./postgres-refusal";
 import {
 	OffThreadReader,
 	OffThreadWriter,
@@ -498,6 +499,7 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		retryConfig?: DatabaseRetryConfig,
 		maintenanceOptions?: MaintenanceWorkerOptions,
 	) {
+		assertNotPostgresUrl();
 		this.maintenanceOwner = new MaintenanceWorkerOwner(
 			new URL("./incremental-vacuum-worker.ts", import.meta.url).href,
 			{
