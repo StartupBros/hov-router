@@ -1,19 +1,23 @@
 /**
  * Query-plan test for RequestRepository.aggregateTokensByModel (issue #710).
  *
- * The periodic `PRAGMA optimize` runs ANALYZE with `analysis_limit = 400`
- * (incremental-vacuum-worker.ts). Sampling ~400 rows of an index whose leading
- * column has few distinct values sees only one value, so production's
- * sqlite_stat1 records 401 rows per `billing_type` value, the same figure it
- * records per `account_used` value. With those statistics the planner answers
- * the per-account window query from idx_requests_billing_type_timestamp, which
+ * With `billing_type = 'plan'` in the WHERE clause, SQLite answers the
+ * per-account window query from idx_requests_billing_type_timestamp, which
  * walks every account's plan-billed rows in the window and reads each row's
- * table page to check its account. On the production database on 2026-11-04
- * one public-value refresh (8 accounts, 2 statements each) read 3.9 GiB that
- * way, against 510 MiB on idx_requests_account_timestamp.
+ * table page to check its account. With no statistics the planner rates that
+ * index and idx_requests_account_timestamp the same and takes the billing_type
+ * one. Production's statistics leave the tie in place: the periodic
+ * `PRAGMA optimize` samples ~400 rows per index (`analysis_limit`,
+ * incremental-vacuum-worker.ts), sees one billing_type value, and records 401
+ * rows per value for both indexes. Full counts on 2026-11-04 (1,122,013 rows,
+ * 2 billing_type values, 11 accounts) would have picked the account index. On
+ * the production database one public-value refresh (8 accounts, 2 statements
+ * each) read 3.9 GiB on the billing_type index, against 510 MiB on the account
+ * index.
  *
- * This test loads production's statistics into a real SQLite database and asks
- * the planner which index each statement the repository sends would use.
+ * This test plans each statement the repository sends under production's
+ * statistics. The steer does not depend on them: the old predicate takes the
+ * billing_type index on a fresh schema too.
  */
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -86,15 +90,6 @@ describe("RequestRepository.aggregateTokensByModel query plan", () => {
 		}) as typeof adapter.queryOffThread;
 		repo = new RequestRepository(adapter);
 		loadProductionStatistics(db);
-	});
-
-	it("the loaded statistics are the ones production plans with", () => {
-		const row = db
-			.query(
-				"SELECT stat FROM sqlite_stat1 WHERE idx = 'idx_requests_billing_type_timestamp'",
-			)
-			.get() as { stat: string };
-		expect(row.stat).toBe("2123332 401 1");
 	});
 
 	it("reads one account's window from the account index, not the billing_type index", async () => {
