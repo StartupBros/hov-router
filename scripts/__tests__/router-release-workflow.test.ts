@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -725,50 +726,24 @@ function evaluate(
 		`return (${condition.replace(/^\s*\$\{\{|\}\}\s*$/g, "")});`,
 	)(github, needs, () => false);
 }
-for (const file of [
-	"release-dispatch.yml",
-	"release.yml",
-	"signpath-release.yml",
-	"signpath-test.yml",
-]) {
-	test(`${file}: publisher gate fixtures deny the Router name, its former name and stable ID and preserve upstream conditions`, () => {
-		for (const job of Object.values(workflow(file).jobs)) {
-			for (const event_name of ["workflow_dispatch", "push", "workflow_run"])
-				for (const conclusion of ["success", "failure"]) {
-					const context = {
-						repository,
-						repository_id: String(repositoryId),
-						event_name,
-						event: { workflow_run: { conclusion } },
-					};
-					expect(evaluate(job.if ?? "true", context)).toBe(false);
-					// The former name stays fenced: another repository could claim it.
-					for (const repository of [...ROUTER_REPOSITORIES, formerRepository])
-						for (const repository_id of [undefined, "1", String(repositoryId)])
-							expect(
-								evaluate(job.if ?? "true", {
-									...context,
-									repository,
-									repository_id,
-								}),
-							).toBe(false);
-					expect(
-						evaluate(job.if ?? "true", {
-							...context,
-							repository: "other/renamed-router",
-						}),
-					).toBe(false);
-					expect(
-						evaluate(job.if ?? "true", {
-							...context,
-							repository: "tombii/better-ccflare",
-							repository_id: "123",
-						}),
-					).toBe(true);
-				}
-		}
-	});
-}
+// Upstream's npm, multi-architecture and SignPath publishers were deleted when
+// wholesale upstream merges ended (UPSTREAM.md). An upstream port must not
+// bring one back: on a tag push it would try to publish or sign this fork.
+test("upstream publisher workflows and signing config stay deleted", () => {
+	for (const file of [
+		"release-dispatch.yml",
+		"release.yml",
+		"signpath-release.yml",
+		"signpath-test.yml",
+	])
+		expect(existsSync(join(workflows, file))).toBe(false);
+	expect(existsSync(join(import.meta.dir, "../../.signpath"))).toBe(false);
+	for (const file of readdirSync(workflows)) {
+		const text = readFileSync(join(workflows, file), "utf8");
+		expect(text).not.toContain("npm publish");
+		expect(text).not.toContain("signpath/github-action-submit-signing-request");
+	}
+});
 test("coordinator dispatches all four pending candidates at their tags", () => {
 	const root = mkdtempSync(join(tmpdir(), "router-dispatch-"));
 	try {
