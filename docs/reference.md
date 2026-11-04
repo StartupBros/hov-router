@@ -17,7 +17,6 @@ Manual installation, client configuration, and operating details for HoV Router.
 - **☁️ OpenAI-Compatible Support** - Use OpenAI-compatible providers like OpenRouter, Together AI, and more with Claude API format
 - **🧩 Codex / Responses API Compatibility** - `POST /v1/responses` and `POST /v1/responses/compact` are translated to Anthropic `/v1/messages`
 - **🔄 Smart Auto-Fallback** - Automatically switch back to preferred accounts when their rate limits reset
-- **⚡ Auto-Refresh** - Automatically start new usage windows when rate limits reset with 30-minute buffer
 - **📊 Request-Level Analytics** - Track latency, token usage, and costs in real-time with optimized batch processing
 - **🔍 Deep Debugging** - Full request/response logging and error traces
 - **🔐 API Authentication** - Optional API key authentication with secure key management
@@ -1046,7 +1045,6 @@ We recommend using one of the workarounds above until the npm bug is fixed.
 ### Intelligent Load Balancing
 - **Session-based** - Maintain conversation context for Claude OAuth accounts (5hr usage windows), pay-as-you-go for other providers
 - **Auto-fallback** - Automatically switch back to higher priority Claude OAuth accounts when their usage windows reset
-- **Auto-refresh** - Automatically start new usage windows when they reset
 - **Usage Window Alignment** - Sessions automatically align with Claude OAuth usage window resets for optimal resource utilization
 - **Usage Throttling** - Configurable monthly token/cost limits per account with peak-hours auto-pause for Zai accounts
 - **503 on Pool Exhaustion** - Returns HTTP 503 when all accounts are rate-limited or paused, enabling client-side retry logic
@@ -1165,7 +1163,6 @@ Full documentation available in [the documentation index](index.md):
 - [Account Routing Architecture](routing-architecture.md)
 - [Load Balancing Strategies](load-balancing.md)
 - [Auto-Fallback Guide](auto-fallback.md)
-- [Auto-Refresh Guide](auto-refresh.md)
 - [OpenAI-Compatible Providers](providers.md)
 - [Combos — Fallback Chains](combos.md)
 

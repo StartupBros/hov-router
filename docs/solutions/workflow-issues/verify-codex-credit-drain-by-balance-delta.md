@@ -104,7 +104,7 @@ That evidence comes only from the account's own wham poll. It is `null` when mis
   4. The gate then admits it again, until an admitted response's headers refresh the snapshot.
 
   So during a poll outage a kept account can spend credits through ccflare. This is the gate's general stale-evidence behaviour, not something drain added.
-- **Internal probes never drain.** Synthetic probes and trusted auto-refresh requests keep the spent-window gate (`packages/proxy/src/handlers/account-selector.ts:1337-1348`). Codex's adversarial review of PR #421 found that an earlier revision let an auto-refresh probe for an opted-in account spend credits (session history).
+- **Internal probes never drain.** Verified cache-keepalive probes keep the spent-window gate (`syntheticProbe` in `evaluateCandidateCapacity`, `packages/proxy/src/handlers/account-selector.ts`). Codex's adversarial review of PR #421 found that an earlier revision let an auto-refresh probe for an opted-in account spend credits (session history). The auto-refresh probes have since been removed, and their marker header now earns a request no exemption.
 
 ### 4. Know which routes drain
 

@@ -119,7 +119,7 @@ The `accounts` table stores OAuth account information and usage statistics for l
 | `session_request_count` | INTEGER | DEFAULT 0* | Requests in current session |
 | `paused` | INTEGER | DEFAULT 0* | 1 if account is paused, 0 if active |
 | `rate_limit_reset` | INTEGER | NULL* | Next rate limit window reset time |
-| `rate_limit_reset_at` | INTEGER | NULL* | Unix timestamp when `rate_limit_reset` was last written; guards the compare-and-set stale-reset clear described in [Automatic Recovery](auto-refresh.md#troubleshooting) |
+| `rate_limit_reset_at` | INTEGER | NULL* | Unix timestamp when `rate_limit_reset` was last written; guards the compare-and-set stale-reset clear described in [session-drain-soonest](routing-architecture.md#session-drain-soonest-sessiondrainsooneststrategy) |
 | `rate_limit_status` | TEXT | NULL* | Current rate limit status message |
 | `rate_limit_remaining` | INTEGER | NULL* | Remaining requests in current window |
 

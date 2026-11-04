@@ -28,7 +28,7 @@ Ordinary account routing is controlled by three independent runtime controls: th
 
 ## Master Pipeline
 
-Every proxied inference request first resolves any configured model route profile and the `x-better-ccflare-account-id` force-route header (used both for manual force-routing and by internal auto-refresh/keepalive probes). A legacy profile creates a server-derived exact-account directive; a capability profile creates a root-capable provider/model pool. Neither profile fabricates or forwards the public force-route header. Conflicting profile and public directives fail closed. A valid exact-account directive bypasses combos and the configured strategy.
+Every proxied inference request first resolves any configured model route profile and the `x-better-ccflare-account-id` force-route header (used both for manual force-routing and by internal cache-keepalive probes). A legacy profile creates a server-derived exact-account directive; a capability profile creates a root-capable provider/model pool. Neither profile fabricates or forwards the public force-route header. Conflicting profile and public directives fail closed. A valid exact-account directive bypasses combos and the configured strategy.
 
 A capability root bypasses combos and restricts selection to accounts matching its root provider plus first physical-model mapping. A descendant compiles one ordered candidate plan: requested model inside that root-capable pool, root model inside the pool, then requested stock model through ordinary same-model routing. The candidate rung outranks account priority; priority and pressure order accounts only inside one rung. Under `session-affinity` and sticky `session-drain-soonest`, the first accepted child candidate becomes a success-conditioned, process-local home for that child/model lane; the default `session` strategy and `least-used` install no child home and order each child turn within the rung plan, and so does `session-drain-soonest-strict` except while Anthropic degraded mode `enforce` retains a native Anthropic OAuth owner for that lane. A healthy home stays first through priority changes and preferred-rung recovery, and replacement occurs only after structural, availability, capacity, credential, or route-circuit evidence proves it unusable.
 
@@ -359,7 +359,7 @@ best-effort, from recent `affinityLane` records; an abandoned restore, helper
 lanes and new session/lane identities can still produce new assignments (see
 [affinity lifetime limits](load-balancing.md#account-and-client-stickiness)).
 
-For Anthropic accounts specifically, a past-reset `rate_limit_reset` that would otherwise sort as "stale telemetry" is also cleared proactively: `accounts.rate_limit_reset_at` (set whenever `rate_limit_reset` is written) lets a compare-and-set update (`clearStaleRateLimitReset`) reset `rate_limit_status`/`rate_limit_reset` back to `allowed` the moment usage polling observes zero utilization with no active weekly window — an out-of-band weekly reset the account's own reset timestamp hadn't caught up to yet. This reduces how often the ranking above has to fall back to "unknown" for an Anthropic account whose window has genuinely rolled over. See [Automatic Recovery](auto-refresh.md#troubleshooting) for the polling side of this.
+For Anthropic accounts specifically, a past-reset `rate_limit_reset` that would otherwise sort as "stale telemetry" is also cleared proactively: `accounts.rate_limit_reset_at` (set whenever `rate_limit_reset` is written) lets a compare-and-set update (`clearStaleRateLimitReset`) reset `rate_limit_status`/`rate_limit_reset` back to `allowed` the moment usage polling observes zero utilization with no active weekly window — an out-of-band weekly reset the account's own reset timestamp hadn't caught up to yet. This reduces how often the ranking above has to fall back to "unknown" for an Anthropic account whose window has genuinely rolled over. The clear is Anthropic-only and fires only on that usage evidence, so it does not mask a window that is still active.
 
 `peek()` uses the same fresh-candidate hook as `select()` for dashboard parity;
 it has no client key and therefore does not mutate affinity. A sooner weekly
@@ -386,11 +386,11 @@ flowchart TD
 
 ## Usage Throttling
 
-Independent of which strategy picked the candidate order, usage-throttling (`usage_throttling_five_hour_enabled` / `usage_throttling_weekly_enabled`) can hold an account back even though it isn't rate-limited yet. For each enabled window class, HoV Router computes its own linear **pacing line** — the percentage of the window's duration that has elapsed — and compares it against Anthropic's real reported utilization: if the account is "ahead of pace" it is throttled until the point where reported usage and the pacing line would realign. A per-model weekly cap only counts against the request's own model family for normal requests — but combo-routed requests assign their per-slot model later in the pipeline, so `applyUsageThrottling` passes no request model for them and model-scoped weekly windows are skipped entirely (only the flat, non-scoped windows and the reactive `out_of_credits` cache still apply). Internal auto-refresh/keepalive probes (identified by the `x-better-ccflare-auto-refresh` / `x-better-ccflare-keepalive` request headers) are exempted from this gate entirely — they exist specifically to hit the real endpoint and observe state changes (window resets, recovered accounts), and without the exemption a throttled-but-healthy account's own probe would get our own 529 back, which the auto-refresh scheduler previously misread as an endpoint failure and counted toward its consecutive-failure pause threshold.
+Independent of which strategy picked the candidate order, usage-throttling (`usage_throttling_five_hour_enabled` / `usage_throttling_weekly_enabled`) can hold an account back even though it isn't rate-limited yet. For each enabled window class, HoV Router computes its own linear **pacing line** — the percentage of the window's duration that has elapsed — and compares it against Anthropic's real reported utilization: if the account is "ahead of pace" it is throttled until the point where reported usage and the pacing line would realign. A per-model weekly cap only counts against the request's own model family for normal requests — but combo-routed requests assign their per-slot model later in the pipeline, so `applyUsageThrottling` passes no request model for them and model-scoped weekly windows are skipped entirely (only the flat, non-scoped windows and the reactive `out_of_credits` cache still apply). Verified cache-keepalive probes (the `x-better-ccflare-keepalive` header, verified by a process-local internal secret; the header alone is stripped) are exempted from this gate entirely — a keepalive exists to keep an account's prompt cache warm, and holding it back would let the cache expire. A request that carries the retired `x-better-ccflare-auto-refresh` header gets no exemption: the proxy strips that header at ingress and paces the request like any client request.
 
 ```mermaid
 flowchart TD
-    A["Candidate accounts<br/>(post strategy + capacity filter)"] --> A2{"Synthetic auto-refresh<br/>or keepalive probe?"}
+    A["Candidate accounts<br/>(post strategy + capacity filter)"] --> A2{"Verified cache-keepalive<br/>probe?"}
     A2 -->|"Yes"| C["All accounts pass through<br/>untouched — probes are exempt<br/>from usage-throttling entirely"]
     A2 -->|"No"| B{"5h or weekly throttling<br/>enabled in config?"}
     B -->|"Neither enabled"| C
@@ -459,10 +459,10 @@ fresh evidence.
 
 **What it does not change.** Auto/quality routes (`evaluateAutoCapacity`) still
 reject spent subscription windows, `weekly_scoped` family exclusions are
-unchanged, and internal probes never ride drain: `evaluateCandidateCapacity`
-skips the relaxation for keepalive (`syntheticProbe`) and authenticated
-auto-refresh requests, so a probe to a spent opted-in account still fails closed
-with `account_capacity_exhausted` instead of spending credits. When credits run out, the next upstream 429 benches the account through
+unchanged, and cache-keepalive probes never ride drain: `evaluateCandidateCapacity`
+skips the relaxation for them (`syntheticProbe`), so a keepalive to a spent
+opted-in account still fails closed with `account_capacity_exhausted` instead of
+spending credits. When credits run out, the next upstream 429 benches the account through
 the normal reactive rate-limit path.
 
 ## Durable Auto quality routing

@@ -1087,7 +1087,7 @@ Manage this via the dashboard (Settings → Advanced → Provider Model Defaults
 - **Account selection keeps only accounts that can serve the requested model as written.** Codex accounts require their own catalog to list the model; an unprimed catalog does not establish support. Other providers retain their namespace check, since a Claude model id can only travel untranslated to a provider that speaks Claude ids. A request with no eligible account gets a `503` with `error.code: force_account_model_no_account` instead of a substitute — this also applies to a request pinned with `x-better-ccflare-account-id`.
 - **Switching accounts to serve the same model is still allowed.** The setting is about the model, not the account, so failover across accounts continues to work.
 
-Internal probes (auto-refresh, keepalive) are exempt: they send a compiled-in model list to whatever account they're checking, independent of what any client asked for, so the switch is treated as off for the lifetime of a verified probe request.
+Verified cache-keepalive probes are exempt: each replays an earlier request to the account that served it, carrying the model that account already resolved, so the switch is treated as off for the lifetime of a verified keepalive request.
 
 This is off by default because it changes what a Claude family model name means for the install: with it on, asking for a Claude model no longer silently reaches an OpenAI-compatible account through a mapping.
 
