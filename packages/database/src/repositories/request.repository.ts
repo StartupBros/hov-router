@@ -827,6 +827,17 @@ export class RequestRepository extends BaseRepository<RequestData> {
 		const promptTokens =
 			"(COALESCE(input_tokens, 0) + COALESCE(cache_read_input_tokens, 0) + COALESCE(cache_creation_input_tokens, 0))";
 		const overThreshold = `${promptTokens} > ${LONG_CONTEXT_PROMPT_TOKENS}`;
+		// Same rows as `billing_type = 'plan'`, but wrapped so no index can
+		// serve it, which keeps both statements below on
+		// idx_requests_account_timestamp. Unwrapped, the planner rates the
+		// billing_type and account indexes the same, with no statistics and with
+		// production's: PRAGMA optimize samples ~400 rows per index
+		// (analysis_limit, incremental-vacuum-worker.ts) and records 401 rows
+		// per value for both. It took the billing_type index, walked every
+		// account's plan rows in the window and read each one's table page:
+		// 3.9 GiB per public-value refresh in production on 2026-11-04, against
+		// 510 MiB on the account index (#710).
+		const planBilled = "COALESCE(billing_type, '') = 'plan'";
 		const rows = await this.queryOffThread<TokenAggregateRow>(
 			`
 			SELECT
@@ -843,7 +854,7 @@ export class RequestRepository extends BaseRepository<RequestData> {
 				SUM(CASE WHEN ${overThreshold} THEN COALESCE(output_tokens, 0) ELSE 0 END) as long_context_output_tokens
 			FROM (
  SELECT model,input_tokens,cache_read_input_tokens,cache_creation_input_tokens,output_tokens,1 AS is_request FROM requests
- WHERE account_used=? AND path='/v1/messages' AND billing_type='plan' AND timestamp>=? AND timestamp<?
+ WHERE account_used=? AND path='/v1/messages' AND ${planBilled} AND timestamp>=? AND timestamp<?
  UNION ALL
  SELECT model,input_tokens,cache_read_input_tokens,0 AS cache_creation_input_tokens,output_tokens,0 AS is_request FROM external_usage_events
  WHERE account_id=? AND event_ts>=? AND event_ts<?
@@ -866,7 +877,7 @@ export class RequestRepository extends BaseRepository<RequestData> {
 			FROM requests
 			WHERE account_used = ?
 			  AND path = '/v1/messages'
-			  AND billing_type = 'plan'
+			  AND ${planBilled}
 			  AND timestamp >= ? AND timestamp < ?
 			  AND advisor_usage IS NOT NULL
 		`,
