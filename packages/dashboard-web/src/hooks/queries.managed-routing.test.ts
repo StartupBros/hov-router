@@ -8,7 +8,6 @@ import {
 	FULL_MANAGED_ROUTING_INVALIDATION,
 	getAccountRoutingOverviewQueryOptions,
 	getApplyFamilyRoutingProposalMutationOptions,
-	getApplyRoutingProposalMutationOptions,
 	getDeviceSetupJobQueryOptions,
 	getExcludeAccountFromFamilyMutationOptions,
 	getForceResetRateLimitMutationOptions,
@@ -19,7 +18,6 @@ import {
 	getRefreshUsageMutationOptions,
 	getRestoreAccountToFamilyMutationOptions,
 	getResumeAccountMutationOptions,
-	getRoutingPreviewMutationOptions,
 	getUpdateAccountAutoRefreshMutationOptions,
 	getUpdateAccountBillingTypeMutationOptions,
 	getUpdateAccountCustomEndpointMutationOptions,
@@ -171,14 +169,6 @@ describe("invalidateManagedRouting", () => {
 });
 
 describe("routing preview mutation", () => {
-	it("does not invalidate any server state", () => {
-		const options = getRoutingPreviewMutationOptions();
-
-		expect(options).toHaveProperty("mutationFn");
-		expect(options).not.toHaveProperty("onSuccess");
-		expect(options).not.toHaveProperty("onSettled");
-	});
-
 	it("keeps family conversion preview read-only", () => {
 		const options = getPreviewFamilyRoutingMutationOptions();
 
@@ -198,7 +188,6 @@ describe("family routing mutation invalidation", () => {
 
 	for (const [name, getOptions] of [
 		["family policy", getUpdateFamilyPolicyMutationOptions],
-		["account proposal apply", getApplyRoutingProposalMutationOptions],
 		["family proposal apply", getApplyFamilyRoutingProposalMutationOptions],
 		["family exclusion", getExcludeAccountFromFamilyMutationOptions],
 		["family restore", getRestoreAccountToFamilyMutationOptions],
