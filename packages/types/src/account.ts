@@ -751,7 +751,8 @@ export function toAccountResponse(account: Account): AccountResponse {
 		sessionInfo,
 		priority: account.priority,
 		autoFallbackEnabled: account.auto_fallback_enabled,
-		autoRefreshEnabled: account.auto_refresh_enabled,
+		// Auto-refresh was removed; the field stays and always reads false.
+		autoRefreshEnabled: false,
 		autoPauseOnOverageEnabled: account.auto_pause_on_overage_enabled,
 		peakHoursPauseEnabled: account.peak_hours_pause_enabled,
 		codexCreditDrainEnabled: !!account.codex_credit_drain_enabled,
@@ -805,7 +806,8 @@ export function toAccountDisplay(account: Account): AccountDisplay {
 		access_token: account.access_token,
 		priority: account.priority,
 		autoFallbackEnabled: account.auto_fallback_enabled,
-		autoRefreshEnabled: account.auto_refresh_enabled,
+		// Auto-refresh was removed; the field stays and always reads false.
+		autoRefreshEnabled: false,
 	};
 }
 

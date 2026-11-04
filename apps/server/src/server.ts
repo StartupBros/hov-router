@@ -145,6 +145,7 @@ import {
 	type StrategyStore,
 } from "@better-ccflare/types";
 import { serve } from "bun";
+import { logAutoRefreshRemovedWarning } from "./auto-refresh-removed-warning";
 import {
 	BODY_ADMISSION_RESERVATION_MULTIPLIER,
 	BodyAdmissionController,
@@ -1694,6 +1695,9 @@ export default async function startServer(options?: {
 	registerDisposable({ dispose: () => alertService.stop() });
 	const memberNoticeWarning = memberNoticeStartupWarning(config);
 	if (memberNoticeWarning) log.warn(memberNoticeWarning);
+	// Auto-refresh was removed; name the accounts that still have it stored on.
+	// The helper logs a failed query rather than throwing.
+	await logAutoRefreshRemovedWarning(db, log);
 	// Each pass reads the destination fresh and does nothing while it is off
 	// or blocked, so the scheduler always runs.
 	const stopMemberNotices = startMemberNoticeScheduler((signal) =>
