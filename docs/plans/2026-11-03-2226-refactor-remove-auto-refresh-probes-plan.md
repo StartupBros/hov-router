@@ -13,7 +13,7 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** HoV Router no longer sends canned prompts on its own to open accounts' usage windows, which removes an inherited source of ban risk for automated use. Everything production relies on today keeps working.
-- **Means:** Remove the inherited auto-refresh scheduler's window-opening probes and its background token refresh. Keep the zai peak-hours pause on its own periodic check, and keep the auto-refresh API as an inert setting for one release (Key Decisions).
+- **Means:** Remove the inherited auto-refresh scheduler's window-opening probes and its background token refresh. Keep the zai peak-hours pause on its own periodic check, and keep the auto-refresh API for one release, able only to turn the setting off (Key Decisions).
 - **Product authority:** On 2026-11-03 the operator told this session to "proceed as recommended", which took idea 1 of the upstream-teardown ideation forward. The remaining calls were resolved from code and production state without the operator. They are recorded under Key Decisions and Dependencies / Assumptions, and the operator may veto any of them. Requirements win on product behavior. Outstanding Questions do not bind.
 - **Open blockers:** None.
 
@@ -25,7 +25,7 @@ execution: code
 
 The router stops sending the auto-refresh probes, the canned prompts it sends to open an account's next usage window. It also stops the background token refresh that runs alongside them.
 The zai peak-hours pause keeps working on its own periodic check.
-For one release the auto-refresh API, list field and stored column keep answering as an inert setting. A startup warning tells anyone who had it on what no longer happens.
+For one release the auto-refresh API, list field and stored column keep answering, and the API can only turn the setting off. A startup warning tells anyone who still has it on what no longer happens and how to turn it off.
 
 ### Problem Frame
 
@@ -82,10 +82,10 @@ flowchart TB
 
 **Compatibility**
 
-- R9. `POST /api/accounts/:id/auto-refresh` keeps answering success for one release, stores nothing, and says in its response that auto-refresh was removed.
+- R9. `POST /api/accounts/:id/auto-refresh` keeps answering success for one release and says in its response that auto-refresh was removed; turning the setting off still clears the stored value, and turning it on stores nothing.
 - R10. Account API responses and `--list` output keep the `autoRefreshEnabled` field, which always reports false.
-- R11. The `auto_refresh_enabled` column stays in the schema with its stored values untouched; this work adds no migration.
-- R12. At startup the router logs one warning naming every account whose stored auto-refresh value is on. The warning says those accounts no longer get their usage windows opened ahead of use or their pauses lifted after a probe.
+- R11. The `auto_refresh_enabled` column stays in the schema and this work adds no migration; stored values change only through R9's turn-off.
+- R12. At startup the router logs one warning naming every account whose stored auto-refresh value is on. The warning says those accounts no longer get their usage windows opened ahead of use or their pauses lifted after a probe, and how to turn the setting off through R9.
 - R13. The notes for the release that ships this name the removed behavior, so a customer who had auto-refresh on can learn about it before upgrading.
 
 **Operator surfaces and docs**
@@ -104,7 +104,7 @@ flowchart TB
 - **Drop the background token refresh instead of moving it elsewhere.** It never ran in production. Request-time refresh, plus the 401 retry for anthropic, claude-oauth, codex and xai, already covers every token. Governs R2.
 - **Keep the zai peak-hours pause.** It is a user-visible setting and the one scheduler job that does not depend on auto-refresh. Governs R4.
 - **Warn instead of replacing the lost pause lifts.** No supported path besides the probe and the existing auto-fallback lifts these pauses, and building a new trigger is beyond the request. Governs R3, R5, R12.
-- **Keep the API, field and column inert for one release.** Scripts and clients that call the endpoint or read the field keep working. Leaving stored values untouched means rolling back to an older build restores the feature as it was. Governs R9, R10, R11.
+- **Keep the API, field and column for one release, with turning off as the only write.** Scripts and clients that call the endpoint or read the field keep working, and with the dashboard toggle gone the endpoint is the warning's only exit. Stored values nobody turns off stay untouched, so rolling back to an older build restores the feature as it was. Governs R9, R10, R11, R12.
 - **Report the field as false, not the stored value.** A stored true would claim behavior that no longer exists. Governs R10.
 - **Remove the dashboard toggle now.** The dashboard ships inside the same binary, so no older dashboard depends on the toggle. Governs R14.
 
@@ -138,6 +138,10 @@ flowchart TB
   - **Given:** a client posts `{"enabled": true}` to the auto-refresh endpoint for an account.
   - **When:** it then reads the account.
   - **Then:** the post succeeded with a removal notice, the stored column is unchanged, and `autoRefreshEnabled` reads false.
+- AE8. **Covers R9, R12.**
+  - **Given:** an account with auto-refresh stored as on, which the startup warning names.
+  - **When:** a client posts `{"enabled": false}` to the auto-refresh endpoint and the router restarts.
+  - **Then:** the stored value is cleared and the startup warning no longer names that account.
 
 ### Scope Boundaries
 
