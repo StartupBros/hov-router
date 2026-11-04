@@ -171,4 +171,5 @@ condition.
 - [verify-fix-ancestry-before-citing-a-measured-rate.md](verify-fix-ancestry-before-citing-a-measured-rate.md)
   makes the same move from a different side: re-check a claim against this deployment's
   current state before acting on it.
-- `UPSTREAM.md`: protected fork contracts and the release synchronization protocol.
+- `UPSTREAM.md`: protected fork contracts, the cherry-pick-only porting rule that
+  applies step 5's four checks to upstream releases, and the removed upstream surfaces.

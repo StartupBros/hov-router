@@ -31,6 +31,8 @@ tags:
 
 # Authenticate upstream sync closeout against the locally reviewed result
 
+> **Retired 2026-11-03.** Wholesale upstream merges ended ([UPSTREAM.md](../../../UPSTREAM.md)), and `scripts/verify-upstream-sync-ledger.ts` was removed. The script and the `UPSTREAM.md` protocol this note cites are last present at commit `337c80cd`. The note stays as the record of how the v3.5.70 and v3.5.78 merges were verified.
+
 ## Context
 
 An upstream release closeout is a provenance and behavior proof, not a version bump or a claim that a conflict-free merge was safe. PR #288 shipped the v3.5.70 integration. Its final locally reviewed result contains a dedicated two-parent integration merge; those object IDs are useful topology examples, but the durable shipment reference is PR #288. Here, “reviewed” means the completed local review-fix rounds recorded in the PR, not a GitHub approval review.
