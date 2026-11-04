@@ -35,7 +35,7 @@ The router runs its SQLite work on several Bun Worker threads inside one process
 
 - the off-thread writer (#686, for #676);
 - the bulk reader for heavy dashboard reads (#606);
-- since #712 (for #709), a second reader labelled `interactive reader`. It serves the accounts page, which used to queue on the single reader behind heavy analytics scans that run 40-90 s.
+- since #712 (for #709), a second reader labelled `interactive reader`. It serves the accounts page, which used to queue on the single reader behind heavy analytics scans that can run for tens of seconds.
 
 Other Workers can run alongside them. After #712 was deployed, the question was whether `GET /api/accounts` really runs on the new thread in production. None of the obvious signals could answer it:
 
@@ -79,7 +79,7 @@ Production `/api` needs the admin key; only `/health` is exempt. Put the `x-api-
 Two cautions:
 
 - Send bursts only to real dashboard routes ([unknown-path doc](./never-poll-an-unknown-path-against-a-local-ccflare.md)). This method uses dashboard reads, never inference traffic.
-- Keep the contention test short. Each heavy bulk endpoint ran 40-90 s, and the dashboard polls `/api/stats` on its own (#711), so one or two runs are enough.
+- Keep the contention test short. Each heavy bulk endpoint ran 39-85 s here, and the dashboard polls `/api/stats` on its own (#711), so one or two runs are enough.
 
 ## Why This Matters
 
