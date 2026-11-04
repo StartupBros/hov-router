@@ -30,7 +30,7 @@ execution: code
   Also stop if BroBot's verifier rejects the router's signature on the shared golden vector.
 - **Execution profile:** Two PRs, one in pushbot (StartupBros-com/pushbot) and one in the router. The pushbot PR deploys first, while the inbox is still empty. The router PR can merge in either order, because member notices stay off until the router is configured. Tests come first in both.
 - **Finishing:** Each implementing session merges its own PR after CI passes. Deploying and configuring follow Rollout and need the operator.
-- **Open blockers:** D1-D4. Each has a recommendation, which the implementer uses unless the operator answers otherwise.
+- **Open blockers:** none. The operator settled D1-D4 on 2026-11-03: the recommendations for D1, D3 and D4, and vendor help articles for D2. The BroBot work is filed as StartupBros-com/pushbot#5518.
 
 ## Why the delivery changes
 
@@ -42,11 +42,16 @@ What changes is the last hop only. Detection, the claim ledger, retries and the 
 
 ## Operator decisions
 
+All four were settled on 2026-11-03. The operator accepted the recommendations for D1, D3 and D4; D2's answer is recorded under it.
+
 - **D1. Which notices become cards.** Recommend all three.
   - Grants and early resets share BroBot's daily reset key, `reset:<vendor>:<Pacific day>` (`x-resets.ts:182`). A vendor still gets at most one reset card a day, so a router event adds a card only on a day X had none: the unannounced case X cannot see.
   - Reminders get their own key, because X has nothing that matches them.
   - Alternative: drop early resets and forward only grants and reminders. The cost is that unannounced early resets go unreported.
 - **D2. The card's link.** BroBot's card always requires a link (`CardParts.link`, `card.ts:62-69`), and members cannot open the router dashboard. Recommend that the operator name one URL per provider. The candidates are the vendor's own usage page, or a House of Vibe guide on redeeming banked resets, if one exists.
+  - **Settled 2026-11-03:** each card links to the vendor's own help article, which BroBot builds from the provider. The event carries no URL.
+    - Codex: https://help.openai.com/en/articles/20001498-how-resets-work-in-codex
+    - Claude: https://support.claude.com/en/articles/17007452-what-is-a-limit-reset
 - **D3. Whether reminders ping.** BroBot pings the 🔔 AI outages & resets role on every card that is not a model card (`card.ts:219`, `discord-server-operations.md:149`).
   - Recommend no ping for reminders. A reminder repeats a grant members already heard about, and two more pings per wave weaken what the role promises. This needs a reminder exception in the ping rule.
   - Alternative: reminders ping like any reset card, which needs no card change.
@@ -105,6 +110,7 @@ The router's existing classification applies unchanged (`member-notices.ts:340-3
   - `MEMBER_NOTICE_WEBHOOK_URL` and `member_notice_webhook_url` now hold the intake URL.
   - A new `MEMBER_NOTICE_SIGNING_SECRET`, or `member_notice_signing_secret` in the config file, follows the same rule: the env value wins over the file value. `getAllSettings` removes it.
   - The destination is `on` only with an https URL and a secret. The states become `off`, `missing_secret` and `on`.
+  - As built, the router PR adds a fourth state, `invalid_address`, for a set address that is not an https URL. The three states above left that case undefined. The address is checked before the secret, so the startup warning names the setting that is actually wrong.
 - **B7. Discord code leaves the member path.** Three things go:
   - the Discord body branch (`member-notices.ts:322-324`);
   - the check that blocks a member address equal to the alert webhook (KTD14; `webhookIdentity` and `blocked_same_as_alert_webhook`, `alerts.ts:916-961`, with its startup warning);
@@ -217,7 +223,7 @@ The router's existing classification applies unchanged (`member-notices.ts:340-3
 
 ## Rollout
 
-1. The operator answers D1-D4 or accepts the recommendations.
+1. Done 2026-11-03: the operator settled D1-D4.
 2. The pushbot PR merges, and Vercel deploys it.
 3. The operator generates the signing secret and sets `AI_ALERTS_ROUTER_SIGNING_SECRET` in Vercel production.
 4. One 10-minute sweep runs. Check with a read-only `supabase-api sql` query that `ai_alert_events` holds `source:hov-router` in state `seeded`.

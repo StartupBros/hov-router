@@ -10,7 +10,10 @@ export interface MemberNoticeRow {
 	noticeKey: string;
 	kind: MemberNoticeKind;
 	provider: string;
-	/** The rendered, account-free notice text. */
+	/**
+	 * The account-free event body (BroBot's version 1 JSON), built at claim
+	 * time and sent unchanged on every attempt.
+	 */
 	content: string;
 	claimedAt: number;
 	/** After this time the notice gives up unsent. */

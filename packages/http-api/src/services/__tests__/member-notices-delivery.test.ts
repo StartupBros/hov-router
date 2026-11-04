@@ -7,15 +7,35 @@ import { DatabaseOperations } from "@better-ccflare/database";
 import {
 	type MemberNoticeFetch,
 	runMemberNoticePass,
+	signMemberNoticeRequest,
 	startMemberNoticeScheduler,
 } from "../member-notices";
 
 const MINUTE = 60_000;
 const NOW = Date.parse("2026-11-03T10:00:00.000Z");
-const MEMBER_URL =
-	"https://discord.com/api/webhooks/1400000000000000001/member-token-abc";
-const KEY = "early:codex:2026-11-03T09:58Z";
-const ENV_KEYS = ["MEMBER_NOTICE_WEBHOOK_URL", "ALERT_WEBHOOK_URL"] as const;
+const INTAKE_PATH = "/api/internal/ai-alerts/router-events";
+const MEMBER_URL = `https://brobot.example.com${INTAKE_PATH}`;
+const SECRET = "router-signing-secret-7f3a";
+const KEY = "early:codex:after:none";
+const ENV_KEYS = [
+	"MEMBER_NOTICE_WEBHOOK_URL",
+	"MEMBER_NOTICE_SIGNING_SECRET",
+	"ALERT_WEBHOOK_URL",
+] as const;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function eventBody(noticeKey: string, provider: "codex" | "claude"): string {
+	return JSON.stringify({
+		version: 1,
+		noticeKey,
+		kind: "early_reset",
+		provider,
+		detectedAt: new Date(NOW).toISOString(),
+		waveExpiresAt: null,
+		lead: null,
+	});
+}
+const BODY = eventBody(KEY, "codex");
 
 let dbOps: DatabaseOperations;
 let directory: string;
@@ -40,9 +60,10 @@ afterEach(async () => {
 	}
 });
 
-function configFor(memberUrl: string): Config {
+function configFor(memberUrl: string, secret = SECRET): Config {
 	const config = new Config(join(directory, "config.json"));
 	config.set("member_notice_webhook_url", memberUrl);
+	config.set("member_notice_signing_secret", secret);
 	return config;
 }
 
@@ -51,7 +72,7 @@ async function claimNotice(expiresAt = NOW + 10 * 24 * 60 * MINUTE) {
 		noticeKey: KEY,
 		kind: "early_reset",
 		provider: "codex",
-		content: "Codex weekly limits appear to have reset early.",
+		content: BODY,
 		claimedAt: NOW,
 		expiresAt,
 	});
@@ -68,6 +89,24 @@ function recorder(replies: Reply[] = []) {
 		return reply;
 	};
 	return { calls, fetch };
+}
+
+const headersOf = (init: RequestInit | undefined) =>
+	(init?.headers ?? {}) as Record<string, string>;
+
+/**
+ * A real fetch to a local plain-HTTP server, while the configured address
+ * stays https as the destination gate requires. Only the origin changes, so
+ * the path the router signs is the path the server receives.
+ */
+function viaLocalServer(port: number): MemberNoticeFetch {
+	return (url, init) => {
+		const target = new URL(url);
+		return globalThis.fetch(
+			`http://127.0.0.1:${port}${target.pathname}${target.search}`,
+			init,
+		);
+	};
 }
 
 function pass(
@@ -91,8 +130,28 @@ function pass(
 
 const row = () => dbOps.getMemberNoticesRepository().findByKey(KEY);
 
+describe("member notice request signature", () => {
+	it("reproduces BroBot's golden v1 vector byte for byte", () => {
+		// Copied from StartupBros-com/pushbot at c8bbfb59,
+		// packages/shared/src/__fixtures__/request-signature-v1.json. BroBot's
+		// intake recomputes this signature with generateRequestSignature, so a
+		// router signer that drifts from it is refused with 401.
+		expect(
+			signMemberNoticeRequest("secret", {
+				method: "POST",
+				pathname: "/api/webhooks/discord-brobot",
+				timestamp: 1788400000000,
+				requestId: "golden-req-0001",
+				body: '{"ok":true,"n":1}',
+			}),
+		).toBe(
+			"v1=f7a5ff9ad239542531621bd0b6032081ab46a0b46c932cc189e41f27a390b274",
+		);
+	});
+});
+
 describe("member notice delivery", () => {
-	it("posts a Discord notice with mentions turned off and the alert User-Agent", async () => {
+	it("posts the stored event body, signed for the intake path when it is sent", async () => {
 		await claimNotice();
 		const config = configFor(MEMBER_URL);
 		const { calls, fetch } = recorder();
@@ -101,18 +160,30 @@ describe("member notice delivery", () => {
 
 		expect(result).toMatchObject({ state: "on", delivered: 1, retried: 0 });
 		expect(calls).toHaveLength(1);
-		const [{ url, init }] = calls;
+		const { url, init } = calls[0] ?? { url: "", init: {} };
 		expect(url).toBe(MEMBER_URL);
 		expect(init.method).toBe("POST");
-		expect(init.headers).toEqual({
+		expect(init.redirect).toBe("manual");
+		expect(init.signal).toBeInstanceOf(AbortSignal);
+		expect(init.body).toBe(BODY);
+		const headers = headersOf(init);
+		const requestId = headers["X-Request-Id"] ?? "";
+		expect(requestId).toMatch(UUID);
+		expect(headers).toEqual({
 			"Content-Type": "application/json",
 			"User-Agent": "better-ccflare-alerts/1.0",
+			"X-Request-Signature": signMemberNoticeRequest(SECRET, {
+				method: "POST",
+				pathname: INTAKE_PATH,
+				timestamp: NOW,
+				requestId,
+				body: BODY,
+			}),
+			"X-Request-Timestamp": String(NOW),
+			"X-Request-Id": requestId,
+			"X-Key-Version": "1",
 		});
-		expect(init.signal).toBeInstanceOf(AbortSignal);
-		expect(JSON.parse(String(init.body))).toEqual({
-			content: "Codex weekly limits appear to have reset early.",
-			allowed_mentions: { parse: [] },
-		});
+		expect(JSON.stringify(headers)).not.toContain(SECRET);
 		expect(await row()).toMatchObject({
 			deliveredAt: NOW,
 			lastStatus: "204",
@@ -124,14 +195,85 @@ describe("member notice delivery", () => {
 		expect(calls).toHaveLength(1);
 	});
 
-	it("posts a small JSON object to an address that is not Discord", async () => {
+	it("sends the same bytes on a retry, with a fresh timestamp, request id and signature", async () => {
 		await claimNotice();
-		const { calls, fetch } = recorder();
-		await pass(configFor("https://hooks.example.com/members"), NOW, fetch);
-		expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
-			kind: "early_reset",
-			text: "Codex weekly limits appear to have reset early.",
+		const config = configFor(MEMBER_URL);
+		const { calls, fetch } = recorder([new Response(null, { status: 503 })]);
+
+		await pass(config, NOW, fetch);
+		await pass(config, NOW + MINUTE, fetch);
+
+		expect(calls).toHaveLength(2);
+		const [first, second] = [calls[0]?.init, calls[1]?.init];
+		expect(first?.body).toBe(BODY);
+		expect(second?.body).toBe(BODY);
+		expect(headersOf(first)["X-Request-Timestamp"]).toBe(String(NOW));
+		expect(headersOf(second)["X-Request-Timestamp"]).toBe(String(NOW + MINUTE));
+		expect(headersOf(second)["X-Request-Id"]).not.toBe(
+			headersOf(first)["X-Request-Id"],
+		);
+		expect(headersOf(second)["X-Request-Signature"]).not.toBe(
+			headersOf(first)["X-Request-Signature"],
+		);
+		expect(await row()).toMatchObject({
+			deliveredAt: NOW + MINUTE,
+			attempts: 2,
 		});
+	});
+
+	it("puts a request on the wire that verifies the way BroBot's intake checks it", async () => {
+		await claimNotice();
+		const received: {
+			pathname: string;
+			body: string;
+			verified: boolean;
+			headers: string;
+		}[] = [];
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			async fetch(request) {
+				// The same reads as authenticateBrobotInternalRequest: the raw
+				// body, the request's own pathname and the three headers.
+				const body = await request.text();
+				const pathname = new URL(request.url).pathname;
+				const expected = signMemberNoticeRequest(SECRET, {
+					method: request.method,
+					pathname,
+					timestamp: Number.parseInt(
+						request.headers.get("X-Request-Timestamp") ?? "",
+						10,
+					),
+					requestId: request.headers.get("X-Request-Id") ?? "",
+					body,
+				});
+				received.push({
+					pathname,
+					body,
+					verified: request.headers.get("X-Request-Signature") === expected,
+					headers: JSON.stringify([...request.headers]),
+				});
+				return Response.json({ ok: true });
+			},
+		});
+		try {
+			const result = await pass(
+				configFor(MEMBER_URL),
+				NOW,
+				viaLocalServer(server.port),
+			);
+
+			expect(result).toMatchObject({ delivered: 1, gaveUp: 0 });
+			expect(received).toHaveLength(1);
+			expect(received[0]).toMatchObject({
+				pathname: INTAKE_PATH,
+				body: BODY,
+				verified: true,
+			});
+			expect(received[0]?.headers).not.toContain(SECRET);
+		} finally {
+			server.stop(true);
+		}
 	});
 
 	it("retries a 429 after its Retry-After, in seconds or as a date", async () => {
@@ -198,36 +340,20 @@ describe("member notice delivery", () => {
 		expect((await row())?.attempts).toBe(7);
 	});
 
-	it("gives up on any other status and raises one delivery-failed alert", async () => {
+	it("gives up on a refused signature or any other status and raises one delivery-failed alert", async () => {
 		await claimNotice();
 		const config = configFor(MEMBER_URL);
 		const failures: string[] = [];
-		const { calls, fetch } = recorder([new Response(null, { status: 404 })]);
+		const { calls, fetch } = recorder([new Response(null, { status: 401 })]);
 
 		const result = await pass(config, NOW, fetch, failures);
 
 		expect(result.gaveUp).toBe(1);
-		expect(failures).toEqual(["404"]);
-		expect(await row()).toMatchObject({ gaveUpAt: NOW, lastStatus: "404" });
+		expect(failures).toEqual(["401"]);
+		expect(await row()).toMatchObject({ gaveUpAt: NOW, lastStatus: "401" });
 		await pass(config, NOW + 60 * MINUTE, fetch, failures);
 		expect(calls).toHaveLength(1);
-		expect(failures).toEqual(["404"]);
-	});
-
-	it("gives up on an address that is not a URL without sending", async () => {
-		await claimNotice();
-		const failures: string[] = [];
-		const { calls, fetch } = recorder();
-		const result = await pass(
-			configFor("not a webhook address"),
-			NOW,
-			fetch,
-			failures,
-		);
-		expect(result).toMatchObject({ state: "on", gaveUp: 1 });
-		expect(calls).toEqual([]);
-		expect(failures).toEqual(["invalid_address"]);
-		expect((await row())?.lastStatus).toBe("invalid_address");
+		expect(failures).toEqual(["401"]);
 	});
 
 	it("lets a notice that is still failing expire when it stops mattering, without an alert", async () => {
@@ -328,9 +454,9 @@ describe("member notice delivery", () => {
 		try {
 			const failures: string[] = [];
 			const result = await pass(
-				configFor(`http://127.0.0.1:${server.port}/hook`),
+				configFor("https://member.test/hook"),
 				NOW,
-				(url, init) => globalThis.fetch(url, init),
+				viaLocalServer(server.port),
 				failures,
 			);
 
@@ -386,13 +512,13 @@ describe("member notice scheduler", () => {
 	});
 
 	it("on stop, sends nothing more and waits until the send in flight is recorded", async () => {
-		const SECOND = "early:claude:2026-11-03T09:58Z";
+		const SECOND = "early:claude:after:none";
 		await claimNotice();
 		await dbOps.getMemberNoticesRepository().claim({
 			noticeKey: SECOND,
 			kind: "early_reset",
 			provider: "claude",
-			content: "Claude weekly limits appear to have reset early.",
+			content: eventBody(SECOND, "claude"),
 			claimedAt: NOW,
 			expiresAt: NOW + 60 * MINUTE,
 		});
@@ -407,7 +533,7 @@ describe("member notice scheduler", () => {
 					now: () => NOW,
 					signal,
 					fetch: async (_url, init) => {
-						sends.push(JSON.parse(String(init.body)).content);
+						sends.push(JSON.parse(String(init.body)).noticeKey);
 						await new Promise<void>((resolve) => {
 							finishSend = resolve;
 						});
@@ -430,7 +556,7 @@ describe("member notice scheduler", () => {
 
 		// The first due notice (by key) was sent and recorded; the second was
 		// never leased, so it is still waiting for the next process.
-		expect(sends).toEqual(["Claude weekly limits appear to have reset early."]);
+		expect(sends).toEqual([SECOND]);
 		expect(
 			await dbOps.getMemberNoticesRepository().findByKey(SECOND),
 		).toMatchObject({ deliveredAt: NOW, lastStatus: "204", leaseOwner: null });
@@ -445,7 +571,7 @@ describe("member notice scheduler", () => {
 		const messages: string[] = [];
 		const stop = startMemberNoticeScheduler(
 			async () => {
-				throw new TypeError(`fetch failed for ${MEMBER_URL}`);
+				throw new TypeError(`fetch failed for ${MEMBER_URL} with ${SECRET}`);
 			},
 			{
 				initialDelayMs: 1,
@@ -459,7 +585,7 @@ describe("member notice scheduler", () => {
 			await stop();
 		}
 		expect(messages[0]).toContain("TypeError");
-		expect(messages[0]).not.toContain("member-token");
-		expect(messages[0]).not.toContain("discord.com");
+		expect(messages[0]).not.toContain("brobot.example.com");
+		expect(messages[0]).not.toContain(SECRET);
 	});
 });
