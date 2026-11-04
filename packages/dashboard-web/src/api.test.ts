@@ -267,11 +267,6 @@ describe("managed-routing dashboard API contracts", () => {
 		await api.updateFamilyPolicy({ family: "opus", comboId: null });
 		await api.updateFamilyPolicy({ family: "opus", managedModel: null });
 		await api.updateFamilyPolicy({ family: "opus", membershipMode: "manual" });
-		await api.assignFamily({
-			family: "fable",
-			comboId: "combo-legacy",
-			enabled: true,
-		});
 
 		const bodies = calls()
 			.filter(([url]) => url === "/api/families/opus")
@@ -284,9 +279,6 @@ describe("managed-routing dashboard API contracts", () => {
 			{ managed_model: null },
 			{ membership_mode: "manual" },
 		]);
-		expect(
-			JSON.parse(callFor("/api/families/fable")[1].body as string),
-		).toEqual({ combo_id: "combo-legacy", enabled: true });
 	});
 
 	it("uses explicit family scope for conversion preview and apply", async () => {

@@ -41,7 +41,7 @@ import until you build once.
 export has no importers left. Still do not touch or commit it, but there is no build
 that will bring it back — deleting it is a deliberate cleanup decision, not a recovery.
 
-**`apps/cli/README.md`** is a short pointer to the root README. Upstream's npm `prepublishOnly` script overwrites it with the root README at publish time, and this fork publishes no npm package. Keep product documentation in `./README.md` and `docs/`.
+**`apps/cli/README.md`** is a short pointer to the root README. This fork publishes no npm package, and the upstream publish hooks that overwrote it with the root README are deleted. Keep product documentation in `./README.md` and `docs/`.
 
 ## Git
 
@@ -57,7 +57,7 @@ Production is a root systemd service, `ccflare-stack.service` (guard on `:8788` 
 
 ## Releases and versions
 
-**NEVER bump the version by hand, and never publish to npm.** Router releases are draft-only GitHub releases produced by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`); publishing a draft is a separate operator decision. Upstream's npm, multi-architecture and signing publishers (`release.yml`, `release-dispatch.yml`, `signpath-*.yml`) are fenced off for this repository and must stay that way. No container image is published; Docker builds from source ([docs/docker.md](docs/docker.md)). Full policy: [docs/hov-router-releases.md](docs/hov-router-releases.md).
+**NEVER bump the version by hand, and never publish to npm.** Router releases are draft-only GitHub releases produced by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`); publishing a draft is a separate operator decision. Upstream's npm, multi-architecture and signing publishers (`release.yml`, `release-dispatch.yml`, `signpath-*.yml`, `.signpath/`) and the npm publish hooks were deleted on 2026-11-03 and must not come back; `scripts/__tests__/router-release-workflow.test.ts` fails if a publisher workflow reappears. No container image is published; Docker builds from source ([docs/docker.md](docs/docker.md)). Full policy: [docs/hov-router-releases.md](docs/hov-router-releases.md).
 
 Commit prefixes drive the version and changelog (`release-please-config.json`, plus the alias map in `scripts/router-release.ts`):
 - `feat:` → minor, under Features (`feature:`/`add:`/`new:` are accepted aliases)
@@ -102,7 +102,7 @@ The owner's own PRs merge normally (squash).
 
 ## Upstream syncs
 
-This is a product fork with intentional hard divergence, not a mirror. Adopt upstream releases deliberately, protecting the fork contracts listed in [UPSTREAM.md](UPSTREAM.md). Never merge or cherry-pick upstream on ahead/behind counts alone. Upstream-only issue reports belong at tombii/better-ccflare.
+This is a product fork with intentional hard divergence, not a mirror. Take upstream fixes by cherry-pick only: wholesale release merges ended on 2026-11-03. Port a fix only after the four checks in [UPSTREAM.md](UPSTREAM.md), protecting the fork contracts listed there, and never port anything to the upstream surfaces it lists as removed. Never merge or cherry-pick upstream on ahead/behind counts alone. Upstream-only issue reports belong at tombii/better-ccflare.
 
 ## Issue Management
 - Never close issues automatically, and use `Refs #N` rather than closing keywords in commits and PR bodies.

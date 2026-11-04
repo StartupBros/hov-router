@@ -2,17 +2,33 @@
 
 - **Upstream:** https://github.com/tombii/better-ccflare
 - **Fork type:** Product fork with intentional hard divergence
-- **Sync cadence:** Manual, pinned source integration when an upstream release is worth adopting; targeted cherry-picks otherwise. To port fixes from the wider fork network rather than from a release, follow [the fork-network survey method](docs/solutions/workflow-issues/survey-the-fork-network-then-check-each-port-applies-here.md)
-- **Current sync record:** [PR #339](https://github.com/StartupBros-com/better-ccflare/pull/339), the [v3.5.78 resolution inventory](docs/plans/2026-09-09-issue-338-v3.5.78-resolution-inventory.json), and its [generated ledger](docs/plans/2026-09-09-issue-338-v3.5.78-resolution-ledger.md)
+- **Sync cadence:** Targeted cherry-picks only. Wholesale release merges ended on 2026-11-03; see [Porting an upstream fix](#porting-an-upstream-fix). To port fixes from the wider fork network rather than from a release, follow [the fork-network survey method](docs/solutions/workflow-issues/survey-the-fork-network-then-check-each-port-applies-here.md)
+- **Last wholesale merge:** upstream v3.5.78, [PR #339](https://github.com/StartupBros-com/better-ccflare/pull/339) (2026-09-10), with its [resolution inventory](docs/plans/2026-09-09-issue-338-v3.5.78-resolution-inventory.json) and [generated ledger](docs/plans/2026-09-09-issue-338-v3.5.78-resolution-ledger.md)
 
 This repository is not a mirror. It substantially rewrites routing, provider,
 persistence, provenance, and operator behavior for StartupBros. Default-branch
 ahead/behind counts do not determine whether the fork is redundant or whether an
 upstream update is safe.
 
-## Protected fork contracts
+## Why wholesale merges ended
 
-A release sync must preserve, at minimum:
+A wholesale merge takes every upstream change since the last one as a single
+two-parent merge and resolves every conflict by hand. The v3.5.78 merge needed a
+dedicated 2,124-line ledger verifier. By 2026-11-03 upstream was 428 commits and
+more than 300 files ahead (v3.6.2), against a fork that has rewritten routing,
+providers and persistence. Porting the fixes that matter one at a time costs less
+than resolving that merge, and deleting an inherited surface no longer turns every
+later merge into a modify/delete conflict.
+
+## Porting an upstream fix
+
+When upstream ships a release, skim its changes for proxy, provider-protocol,
+authentication, persistence and security fixes. For each candidate, run the four
+checks in the [fork-network survey method](docs/solutions/workflow-issues/survey-the-fork-network-then-check-each-port-applies-here.md#5-before-porting-a-confirmed-fix-check-that-it-applies-here):
+call path, production config, client behaviour, and kind of harm. Port only what
+passes, as an ordinary PR with a test, crediting the upstream author.
+
+A port must preserve, at minimum, these protected fork contracts:
 
 - routing precedence, exact-account/model fail-closed behavior, model-route profiles,
   capability pools, session affinity, and strict-drain semantics;
@@ -25,30 +41,33 @@ A release sync must preserve, at minimum:
 - fork build/update provenance, runtime Git-SHA identity, deployment source gates,
   observability, and operator controls.
 
-The v3.5.78 inventory and generated human ledger record the protected behavior,
-selected resolution, evidence, and review state for every upstream-only commit,
-textual conflict, and clean two-sided path in the current integration. Earlier
-issue #260 and v3.5.70 artifacts remain immutable historical checkpoints.
-
-## Release synchronization protocol
-
-1. Create a tracking issue and pin the annotated tag object, peeled commit, direct
-   fork parent, merge base, and required fork ancestors before integration.
-2. Derive and audit every upstream-only commit, predicted conflict, and clean
-   two-sided path. Resolve overlap semantically; do not replace either parent tree
-   wholesale and do not use blanket `ours` or `theirs` resolution.
-3. Integrate the exact peeled target as the second parent of one real two-parent
-   merge commit. Preserve upstream history rather than replaying only release files.
-4. Protect changed behavior with isolated tests, explicit caller sweeps, SQLite/PG
-   parity and restore rehearsal, combined-diff review, static gates, and CI.
-5. Treat deployment as a separate operator-authorized action from clean canonical
-   `refs/heads/main`. A merge, package version, or successful source sync does not
-   prove the installed binary or running service identity.
+Deployment stays a separate operator-authorized action from clean canonical
+`refs/heads/main`. A merge, package version, or ported fix does not prove the
+installed binary or running service identity.
 
 Ordinary dashboard, npm, binary, or Docker update paths may resolve mutable
 upstream-controlled artifacts. They must not replace this fork unless provenance
 proves the intended producer and artifact mode. The StartupBros managed-source
 build is deliberately non-actionable through the ordinary updater.
+
+## Removed upstream surfaces
+
+Do not port upstream changes to these. Each line says what replaced it, or what
+would justify bringing it back.
+
+- **npm, multi-architecture and SignPath publishers** (`release.yml`,
+  `release-dispatch.yml`, `signpath-release.yml`, `signpath-test.yml`,
+  `.signpath/`), the npm `prepublishOnly`/`postpublish` hooks, and the macOS,
+  Windows and arm64 build aliases: removed 2026-11-03. Router releases come from
+  `router-release.yml`; `build:multi` with `CCFLARE_ONLY_PLATFORMS` still builds
+  any platform. `scripts/__tests__/router-release-workflow.test.ts` fails if a
+  publisher workflow reappears.
+- **Docker image publishing workflow:** removed earlier; the
+  [Docker guide](docs/docker.md) builds from source.
+- **Wholesale-merge tooling** (`scripts/verify-upstream-sync-ledger.ts`,
+  `scripts/rehearse-upstream-sync-migrations.ts` and their tests): removed
+  2026-11-03; last present at commit `337c80cd`. Restore them from there only if a
+  deliberate decision resumes wholesale merges.
 
 ## Why this file exists
 
@@ -56,5 +75,5 @@ An org-wide audit on 2026-07-24 found that comparing only the default branch mad
 several forks look like zero-delta mirrors when they actually carried unmerged
 StartupBros fixes on side branches. Any future fork-pruning pass must enumerate and
 author-check all branches and audit behavior, not just default-branch divergence.
-This protocol permits reviewed release merges without promising automatic upstream
+This file sets how upstream fixes come in without promising automatic upstream
 tracking or weakening intentional product-fork ownership.

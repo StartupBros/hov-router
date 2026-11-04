@@ -39,7 +39,6 @@ import type {
 	RequestResponse,
 	RoutingAttemptSummaryResponse,
 	RoutingAttemptSummaryWindow,
-	StatsWithAccounts,
 	UsageHistoryResponse,
 } from "@better-ccflare/types";
 import { API_LIMITS, API_TIMEOUT } from "./constants";
@@ -51,7 +50,6 @@ export type Account = AccountResponse & {
 	/** @deprecated Fallbacks are now merged into modelMappings as arrays */
 	modelFallbacks?: { [key: string]: string } | null;
 };
-export type Stats = StatsWithAccounts;
 export type LogEntry = LogEvent;
 export type RequestSummary = RequestResponse;
 
@@ -390,33 +388,6 @@ class API extends HttpClient {
 			return parseHealthVerdict(await response.json());
 		} catch {
 			return null;
-		}
-	}
-
-	async getStats(opts?: {
-		errorsSinceHours?: number;
-	}): Promise<StatsWithAccounts> {
-		const startTime = Date.now();
-		const hours = opts?.errorsSinceHours;
-		const url =
-			typeof hours === "number" && Number.isFinite(hours) && hours > 0
-				? `/api/stats?errorsSinceHours=${hours}`
-				: "/api/stats";
-
-		this.logger.debug(`→ GET ${url}`);
-
-		try {
-			const response = await this.get<StatsWithAccounts>(url);
-			const duration = Date.now() - startTime;
-			this.logger.debug(`← GET ${url} - 200 (${duration}ms)`);
-			return response;
-		} catch (error) {
-			const duration = Date.now() - startTime;
-			this.logger.error(`✗ GET ${url} - ERROR (${duration}ms)`, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			});
-			throw error;
 		}
 	}
 
@@ -997,26 +968,6 @@ class API extends HttpClient {
 			if (error instanceof HttpError) {
 				throw new Error(error.message, { cause: error });
 			}
-			throw error;
-		}
-	}
-
-	async resetStats(): Promise<void> {
-		const startTime = Date.now();
-		const url = "/api/stats/reset";
-
-		this.logger.debug(`→ POST ${url}`);
-
-		try {
-			await this.post(url);
-			const duration = Date.now() - startTime;
-			this.logger.debug(`← POST ${url} - 200 (${duration}ms)`);
-		} catch (error) {
-			const duration = Date.now() - startTime;
-			this.logger.error(`✗ POST ${url} - ERROR (${duration}ms)`, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			});
 			throw error;
 		}
 	}
@@ -2463,17 +2414,6 @@ class API extends HttpClient {
 				exhaustion_policy: f.exhaustion_policy ?? "legacy",
 			})),
 		};
-	}
-
-	async assignFamily(params: {
-		family: string;
-		comboId: string | null;
-		enabled: boolean;
-	}): Promise<void> {
-		await this.put(`/api/families/${params.family}`, {
-			combo_id: params.comboId,
-			enabled: params.enabled,
-		});
 	}
 
 	async updateFamilyPolicy(params: {
