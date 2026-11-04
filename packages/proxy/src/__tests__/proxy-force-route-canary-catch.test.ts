@@ -456,6 +456,9 @@ describe("handleProxy: force-route 503 retry instruction", () => {
 			"needs reauthentication",
 			{ paused: true, pause_reason: "oauth_invalid_grant" },
 		],
+		// Nothing lifts a failure-threshold pause on its own since the
+		// auto-refresh scheduler was removed (Refs #718); it waits for an operator.
+		["failure-threshold", { paused: true, pause_reason: "failure_threshold" }],
 	] as const)("tells the client not to retry a %s pause", async (_label, state) => {
 		const response = await forceRoute(makeAccount(state));
 
@@ -474,7 +477,6 @@ describe("handleProxy: force-route 503 retry instruction", () => {
 
 	it.each([
 		["overage", { paused: true, pause_reason: "overage" }],
-		["failure-threshold", { paused: true, pause_reason: "failure_threshold" }],
 		["peak-hours", { paused: true, pause_reason: "peak_hours" }],
 		["rate-limit-window", { paused: true, pause_reason: "rate_limit_window" }],
 		["unattributed", { paused: true, pause_reason: null }],
