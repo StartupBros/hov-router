@@ -224,18 +224,38 @@ async function getCachedOrPersistedCodexUsage(
 	// On the reader thread (#606). After a restart the cache is empty, and on the
 	// main thread this read of a cold page cache was the top statement in the
 	// event-loop stall (19-86 s) that froze the proxy at every backend start.
-	const rows = await db.queryOffThread<{
-		json: string;
-		timestamp: number | null;
-	}>(
-		`SELECT rp.json, COALESCE(rp.timestamp, r.timestamp) as timestamp
-		 FROM request_payloads rp
-		 JOIN requests r ON rp.id = r.id
-		 WHERE r.account_used = ?
-		 ORDER BY r.timestamp DESC
-		 LIMIT 20`,
-		[accountId],
-	);
+	// The accounts page waits on it, so it uses the interactive reader (#709).
+	// With no payloads stored (payload storage off, or all pruned) the walk
+	// below would read the account's whole request index to find nothing.
+	let rows: { json: string; timestamp: number | null }[] = [];
+	try {
+		const anyPayload = await db.getOffThread<{ present: number }>(
+			"SELECT 1 AS present FROM request_payloads LIMIT 1",
+			[],
+			"interactive",
+		);
+		if (anyPayload)
+			rows = await db.queryOffThread<{
+				json: string;
+				timestamp: number | null;
+			}>(
+				`SELECT rp.json, COALESCE(rp.timestamp, r.timestamp) as timestamp
+			 FROM request_payloads rp
+			 JOIN requests r ON rp.id = r.id
+			 WHERE r.account_used = ?
+			 ORDER BY r.timestamp DESC
+			 LIMIT 20`,
+				[accountId],
+				"interactive",
+			);
+	} catch (error) {
+		// A busy or failed reader must not fail the whole accounts list; the
+		// durable snapshot below still answers.
+		log.warn(
+			`Failed to read stored payloads for ${accountName}:`,
+			error instanceof Error ? error.message : String(error),
+		);
+	}
 
 	for (const row of rows) {
 		if (!row.json || !row.timestamp) continue;

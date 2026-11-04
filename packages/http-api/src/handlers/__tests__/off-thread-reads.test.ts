@@ -57,6 +57,7 @@ beforeEach(async () => {
 	dir = mkdtempSync(join(tmpdir(), "ccflare-off-thread-equivalence-"));
 	db = new DatabaseOperations(join(dir, "test.db"), { synchronous: "OFF" });
 	db.getAdapter().setOffThreadReader(undefined);
+	db.getAdapter().setOffThreadReader(undefined, "interactive");
 	reader = new OffThreadReader({
 		dbPath: join(dir, "test.db"),
 		busyTimeoutMs: 100,
@@ -337,6 +338,122 @@ describe("heavy read result equivalence", () => {
 			for (const id of ids) usageCache.delete(id);
 		}
 	});
+	it("answers the accounts page while the bulk reader is stuck behind a long scan", async () => {
+		const adapter = db.getAdapter();
+		await adapter.run("UPDATE accounts SET session_start = ? WHERE id = 'a1'", [
+			NOW - 3 * DAY,
+		]);
+		// One stored payload, so the Codex fallback walks the payloads too.
+		await adapter.run(
+			"INSERT INTO request_payloads (id,json,timestamp) VALUES ('0-1-0','{}',?)",
+			[NOW - 60_000],
+		);
+		const readerAll = spyOn(reader, "all");
+		const stuck = {
+			all: mock(<R>() => new Promise<R[]>(() => {})),
+			get: mock(<R>() => new Promise<R | null>(() => {})),
+		};
+		// Interactive first: an adapter that ignored lanes would let the stuck
+		// reader replace it.
+		adapter.setOffThreadReader(reader, "interactive");
+		adapter.setOffThreadReader(stuck);
+		const ids = ["a1", "a2", "a3"];
+		const handler = createAccountsListHandler(db, {
+			getUsageThrottlingFiveHourEnabled: () => false,
+			getUsageThrottlingWeeklyEnabled: () => false,
+		} as unknown as Config);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			// An empty cache sends Codex accounts to the stored-usage fallback too.
+			for (const id of ids) usageCache.delete(id);
+			const before = reader.readsServed;
+			const response = await Promise.race([
+				handler(),
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(
+						() => reject(new Error("accounts page waited on the bulk reader")),
+						5000,
+					);
+				}),
+			]);
+			expect(response.status).toBe(200);
+			const accounts = (await response.json()) as AccountResponse[];
+			// a1 made one request a day; three fall inside its 3-day session.
+			expect(
+				accounts.find((account) => account.id === "a1")?.sessionStats,
+			).toMatchObject({ requests: 3 });
+			expect(stuck.all).not.toHaveBeenCalled();
+			expect(stuck.get).not.toHaveBeenCalled();
+			expect(reader.readsServed - before).toBeGreaterThanOrEqual(1);
+			const walk = ([sql]: unknown[]) =>
+				/JOIN requests r ON rp\.id = r\.id/.test(String(sql));
+			expect(readerAll.mock.calls.filter(walk)).toHaveLength(3);
+		} finally {
+			clearTimeout(timer);
+			for (const id of ids) usageCache.delete(id);
+		}
+	});
+	it("keeps the accounts list when the stored-usage reads fail", async () => {
+		const adapter = db.getAdapter();
+		await adapter.run(
+			"INSERT INTO usage_snapshots (account_id,timestamp,window_key,utilization,resets_at,active) VALUES ('a1',?,'seven_day',42,?,1)",
+			[NOW - 60_000, NOW + DAY],
+		);
+		// What a read gets after waiting its whole timeout for a busy reader.
+		const busy = new Error(
+			"off-thread interactive reader busy: read waited 120000ms: SELECT ?",
+		);
+		const failing = {
+			all: mock(async <R>(): Promise<R[]> => {
+				throw busy;
+			}),
+			get: mock(async <R>(): Promise<R | null> => {
+				throw busy;
+			}),
+		};
+		adapter.setOffThreadReader(failing, "interactive");
+		const ids = ["a1", "a2", "a3"];
+		const handler = createAccountsListHandler(db, {
+			getUsageThrottlingFiveHourEnabled: () => false,
+			getUsageThrottlingWeeklyEnabled: () => false,
+		} as unknown as Config);
+		try {
+			for (const id of ids) usageCache.delete(id);
+			const response = await handler();
+			expect(response.status).toBe(200);
+			const accounts = (await response.json()) as AccountResponse[];
+			expect(accounts.map((account) => account.id).sort()).toEqual(ids);
+			// a1 falls through to its durable weekly snapshot.
+			expect(
+				accounts.find((account) => account.id === "a1")?.usageData,
+			).toMatchObject({ seven_day: { utilization: 42 } });
+			expect(failing.get).toHaveBeenCalled();
+		} finally {
+			for (const id of ids) usageCache.delete(id);
+		}
+	});
+	it("skips the stored-payload walk when no payloads are stored", async () => {
+		const adapter = db.getAdapter();
+		adapter.setOffThreadReader(reader);
+		const ids = ["a1", "a2", "a3"];
+		const handler = createAccountsListHandler(db, {
+			getUsageThrottlingFiveHourEnabled: () => false,
+			getUsageThrottlingWeeklyEnabled: () => false,
+		} as unknown as Config);
+		const mainQuery = spyOn(adapter, "query");
+		const readerAll = spyOn(reader, "all");
+		try {
+			for (const id of ids) usageCache.delete(id);
+			const response = await handler();
+			expect(response.status).toBe(200);
+			const walk = ([sql]: unknown[]) =>
+				/JOIN requests r ON rp\.id = r\.id/.test(String(sql));
+			expect(readerAll.mock.calls.filter(walk)).toEqual([]);
+			expect(mainQuery.mock.calls.filter(walk)).toEqual([]);
+		} finally {
+			for (const id of ids) usageCache.delete(id);
+		}
+	});
 	it("preserves the alerts exhaustion projection after a synchronously committed snapshot", async () => {
 		const adapter = db.getAdapter();
 		const resetsAt = NOW + 60 * 60_000;
@@ -455,6 +572,11 @@ describe("heavy read result equivalence", () => {
 		expect(await wired.getAdapter().queryOffThread("SELECT 7 AS n")).toEqual([
 			{ n: 7 },
 		]);
+		expect(
+			await wired
+				.getAdapter()
+				.queryOffThread("SELECT 7 AS n", [], "interactive"),
+		).toEqual([{ n: 7 }]);
 		expect(mainQuery).not.toHaveBeenCalled();
 		const saved = process.env.BETTER_CCFLARE_DB_READER_WORKER;
 		try {
@@ -466,12 +588,37 @@ describe("heavy read result equivalence", () => {
 				expect(
 					await disabled.getAdapter().queryOffThread("SELECT 8 AS n"),
 				).toEqual([{ n: 8 }]);
-				expect(query).toHaveBeenCalledTimes(1);
+				expect(
+					await disabled
+						.getAdapter()
+						.queryOffThread("SELECT 9 AS n", [], "interactive"),
+				).toEqual([{ n: 9 }]);
+				expect(query).toHaveBeenCalledTimes(2);
 			}
 		} finally {
 			if (saved === undefined)
 				delete process.env.BETTER_CCFLARE_DB_READER_WORKER;
 			else process.env.BETTER_CCFLARE_DB_READER_WORKER = saved;
 		}
+	});
+	it("keeps interactive reads off a busy bulk reader in a wired database", async () => {
+		const wired = new DatabaseOperations(join(dir, "test.db"));
+		others.push(wired);
+		const adapter = wired.getAdapter();
+		// Warm both workers so spawn time is not part of the race.
+		await adapter.queryOffThread("SELECT 1");
+		await adapter.queryOffThread("SELECT 1", [], "interactive");
+		const order: string[] = [];
+		const scan = adapter
+			.queryOffThread(
+				"WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < ?) SELECT count(*) AS n FROM c",
+				[3_000_000],
+			)
+			.then(() => order.push("bulk"));
+		const quick = adapter
+			.getOffThread("SELECT 1 AS n", [], "interactive")
+			.then(() => order.push("interactive"));
+		await Promise.all([scan, quick]);
+		expect(order).toEqual(["interactive", "bulk"]);
 	});
 });

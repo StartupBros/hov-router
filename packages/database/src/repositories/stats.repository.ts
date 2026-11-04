@@ -554,6 +554,8 @@ export class StatsRepository {
 			a.session_start,
 		]);
 
+		// The accounts page waits on this read, so it stays off the bulk reader,
+		// where it queued behind multi-minute analytics scans (#709).
 		const rows = await this.adapter.queryOffThread<{
 			account_used: string;
 			requests: unknown;
@@ -577,6 +579,7 @@ export class StatsRepository {
 			WHERE ${clauses}
 			GROUP BY account_used`,
 			params,
+			"interactive",
 		);
 
 		return new Map(

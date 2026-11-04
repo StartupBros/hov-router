@@ -12,6 +12,14 @@ interface SqlReader {
 	get<R>(sql: string, params: unknown[]): Promise<R | null>;
 }
 
+/**
+ * Which off-thread reader serves a read. Each reader runs its reads one at a
+ * time, so a long analytics scan on `bulk` delays everything queued behind it.
+ * `interactive` is for short, bounded reads a page waits on (#709); without an
+ * interactive reader attached, they share the bulk one.
+ */
+export type OffThreadReadLane = "bulk" | "interactive";
+
 /** The off-thread writer as the adapter sees it (see OffThreadWriter). */
 export interface SqlWriter {
 	run(sql: string, params: unknown[]): Promise<number>;
@@ -151,11 +159,25 @@ export { BatchExpectedChangesError, type BatchStatement };
  * the hood.
  */
 export class BunSqlAdapter {
-	private offThreadReader?: SqlReader;
+	private readonly offThreadReaders: Partial<
+		Record<OffThreadReadLane, SqlReader>
+	> = {};
 	private writer?: SqlWriter;
 
-	setOffThreadReader(reader: SqlReader | undefined): void {
-		this.offThreadReader = reader;
+	setOffThreadReader(
+		reader: SqlReader | undefined,
+		lane: OffThreadReadLane = "bulk",
+	): void {
+		this.offThreadReaders[lane] = reader;
+	}
+
+	private readerFor(lane: OffThreadReadLane): SqlReader | undefined {
+		if (!this.isSQLite) return undefined;
+		return (
+			(lane === "interactive"
+				? this.offThreadReaders.interactive
+				: undefined) ?? this.offThreadReaders.bulk
+		);
 	}
 
 	/**
@@ -214,10 +236,15 @@ export class BunSqlAdapter {
 	}
 
 	/** SELECTs only; never use for reads of uncommitted writes in a main-thread transaction. */
-	async queryOffThread<R>(sql: string, params: unknown[] = []): Promise<R[]> {
-		if (this.isSQLite && this.offThreadReader) {
+	async queryOffThread<R>(
+		sql: string,
+		params: unknown[] = [],
+		lane: OffThreadReadLane = "bulk",
+	): Promise<R[]> {
+		const reader = this.readerFor(lane);
+		if (reader) {
 			try {
-				return await this.offThreadReader.all<R>(sql, params);
+				return await reader.all<R>(sql, params);
 			} catch (error) {
 				if (!(error instanceof OffThreadReaderUnavailableError)) throw error;
 			}
@@ -229,10 +256,12 @@ export class BunSqlAdapter {
 	async getOffThread<R>(
 		sql: string,
 		params: unknown[] = [],
+		lane: OffThreadReadLane = "bulk",
 	): Promise<R | null> {
-		if (this.isSQLite && this.offThreadReader) {
+		const reader = this.readerFor(lane);
+		if (reader) {
 			try {
-				return await this.offThreadReader.get<R>(sql, params);
+				return await reader.get<R>(sql, params);
 			} catch (error) {
 				if (!(error instanceof OffThreadReaderUnavailableError)) throw error;
 			}

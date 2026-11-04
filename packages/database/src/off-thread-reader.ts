@@ -28,6 +28,8 @@ export interface OffThreadReaderOptions {
 	readTimeoutMs?: number;
 	readyTimeoutMs?: number;
 	maxSpawns?: number;
+	/** Names this worker in log lines when a process runs more than one reader. */
+	label?: string;
 	warn?: (message: string) => void;
 	info?: (message: string) => void;
 }
@@ -56,6 +58,7 @@ export class OffThreadWriteOutcomeUnknownError extends Error {
 type PendingRequest = {
 	mode: string;
 	sql: string;
+	params?: unknown[];
 	resolve: (result: unknown) => void;
 	reject: (error: Error) => void;
 	timer?: ReturnType<typeof setTimeout>;
@@ -102,6 +105,8 @@ function rehydrate(detail: ErrorDetail): Error {
 export class OffThreadReader {
 	protected lease?: Lease;
 	protected readonly pending = new Map<number, PendingRequest>();
+	/** Reads not yet given to the worker, oldest first. Never used by the writer. */
+	private readonly waiting: PendingRequest[] = [];
 	protected nextId = 0;
 	protected faults = 0;
 	protected closed = false;
@@ -123,7 +128,7 @@ export class OffThreadReader {
 	}
 
 	protected get label(): string {
-		return "reader";
+		return this.options.label ?? "reader";
 	}
 	protected get fallbackNoun(): string {
 		return "reads";
@@ -158,22 +163,106 @@ export class OffThreadReader {
 				"off-thread reader unavailable",
 			);
 		return new Promise((resolve, reject) => {
+			const request: PendingRequest = { mode, sql, params, resolve, reject };
+			request.timer = setTimeout(() => this.shed(request), this.readTimeoutMs);
+			this.waiting.push(request);
+			this.pump(lease);
+		});
+	}
+
+	/**
+	 * The worker runs reads one at a time, so it is given one at a time and the
+	 * rest wait here (#709). A read's timeout then measures its own run, a read
+	 * that waits too long can give up without touching the worker, and the reads
+	 * waiting when the worker faults never reached it and can go to a fresh one.
+	 */
+	private pump(lease: Lease): void {
+		while (this.pending.size === 0 && this.lease === lease && !this.closed) {
+			const request = this.waiting.shift();
+			if (!request) return;
+			clearTimeout(request.timer);
 			const id = ++this.nextId;
-			const timer = setTimeout(() => {
+			try {
+				lease.worker.postMessage({
+					kind: "read",
+					id,
+					mode: request.mode,
+					sql: request.sql,
+					params: request.params,
+				});
+			} catch (error) {
+				// Not cloneable, so the worker never saw it: fail only this read, and
+				// the caller's main-thread fallback runs it.
+				request.reject(
+					new OffThreadReaderUnavailableError(
+						`off-thread ${this.label} could not take the read: ${error instanceof Error ? error.message : String(error)}`,
+					),
+				);
+				continue;
+			}
+			this.pending.set(id, request);
+			request.timer = setTimeout(() => {
 				this.pending.delete(id);
 				const error = new Error(
-					`off-thread read timed out after ${this.readTimeoutMs}ms: ${fingerprintSql(sql)}`,
+					`off-thread read timed out after ${this.readTimeoutMs}ms: ${fingerprintSql(request.sql)}`,
 				);
-				reject(error);
+				request.reject(error);
 				this.fault("read timeout", error, lease);
 			}, this.readTimeoutMs);
-			this.pending.set(id, { mode, sql, resolve, reject, timer });
-			try {
-				lease.worker.postMessage({ kind: "read", id, mode, sql, params });
-			} catch (error) {
-				this.fault("read postMessage failed", error, lease);
-			}
-		});
+		}
+	}
+
+	/**
+	 * A read that waited its whole timeout behind others fails on its own. Not
+	 * unavailable, so it is not re-run on the main thread, which would block
+	 * the serving thread for as long as the worker is behind.
+	 */
+	private shed(request: PendingRequest): void {
+		const index = this.waiting.indexOf(request);
+		if (index === -1) return;
+		this.waiting.splice(index, 1);
+		const error = new Error(
+			`off-thread ${this.label} busy: read waited ${this.readTimeoutMs}ms: ${fingerprintSql(request.sql)}`,
+		);
+		this.warn(error.message);
+		request.reject(error);
+	}
+
+	/**
+	 * After a fault, take the reads that were waiting to a fresh worker. Past
+	 * the spawn budget they reject as unavailable and fall back to the main
+	 * thread, as reads do once the reader has given up.
+	 */
+	private resume(): void {
+		if (this.closed || this.waiting.length === 0) return;
+		if (this.faults >= this.maxSpawns) {
+			this.rejectWaiting(
+				new OffThreadReaderUnavailableError(
+					`off-thread ${this.label} spawn budget exhausted`,
+				),
+			);
+			return;
+		}
+		let lease: Lease;
+		try {
+			lease = this.lease ?? this.spawn();
+		} catch {
+			// spawn() counted the fault; try again or give up on the budget.
+			this.resume();
+			return;
+		}
+		// A failed open faults this lease, and that fault resumes again.
+		lease.ready.then(
+			() => this.pump(lease),
+			() => {},
+		);
+	}
+
+	private rejectWaiting(error: Error): void {
+		for (const request of this.waiting.splice(0)) {
+			clearTimeout(request.timer);
+			request.reject(error);
+		}
 	}
 
 	protected openPayload(): Record<string, unknown> {
@@ -273,16 +362,17 @@ export class OffThreadReader {
 		clearTimeout(request.timer);
 		if (Number(message.ms) >= SLOW_SQL_STATEMENT_MS)
 			this.warn(
-				`Slow off-thread SQL: ${Math.round(Number(message.ms))}ms ${request.mode} ${fingerprintSql(request.sql)}`,
+				`Slow off-thread SQL: ${Math.round(Number(message.ms))}ms ${request.mode} ${fingerprintSql(request.sql)}${this.options.label ? ` (${this.options.label})` : ""}`,
 			);
 		this.settle(lease, request, message);
 	}
 
 	protected settle(
-		_lease: Lease,
+		lease: Lease,
 		read: PendingRequest,
 		message: Record<string, unknown>,
 	): void {
+		this.pump(lease);
 		if (message.ok) {
 			this.served++;
 			read.resolve(read.mode === "all" ? message.rows : (message.row ?? null));
@@ -328,6 +418,7 @@ export class OffThreadReader {
 			this.warn(
 				`falling back to main-thread ${this.fallbackNoun} for the rest of this process`,
 			);
+		if (lease) this.resume();
 		return unavailable;
 	}
 
@@ -359,6 +450,7 @@ export class OffThreadReader {
 		const error = new OffThreadReaderUnavailableError(
 			`off-thread ${this.label} closed`,
 		);
+		this.rejectWaiting(error);
 		this.rejectPending(error);
 		this.closePromise = this.retire(error);
 		return this.closePromise;
@@ -387,7 +479,7 @@ export interface WorkerPragma {
 }
 
 export interface OffThreadWriterOptions
-	extends Omit<OffThreadReaderOptions, "readTimeoutMs"> {
+	extends Omit<OffThreadReaderOptions, "readTimeoutMs" | "label"> {
 	/** Per-connection PRAGMAs, in order; the main connection's own settings. */
 	pragmas: WorkerPragma[];
 	/** How long the worker keeps retrying one SQLITE_BUSY write. Default 10 min. */

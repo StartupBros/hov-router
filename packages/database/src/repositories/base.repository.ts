@@ -1,4 +1,7 @@
-import type { BunSqlAdapter } from "../adapters/bun-sql-adapter";
+import type {
+	BunSqlAdapter,
+	OffThreadReadLane,
+} from "../adapters/bun-sql-adapter";
 
 export abstract class BaseRepository<_T> {
 	constructor(protected adapter: BunSqlAdapter) {}
@@ -6,15 +9,17 @@ export abstract class BaseRepository<_T> {
 	protected queryOffThread<R>(
 		sql: string,
 		params: unknown[] = [],
+		lane?: OffThreadReadLane,
 	): Promise<R[]> {
-		return this.adapter.queryOffThread<R>(sql, params);
+		return this.adapter.queryOffThread<R>(sql, params, lane);
 	}
 
 	protected getOffThread<R>(
 		sql: string,
 		params: unknown[] = [],
+		lane?: OffThreadReadLane,
 	): Promise<R | null> {
-		return this.adapter.getOffThread<R>(sql, params);
+		return this.adapter.getOffThread<R>(sql, params, lane);
 	}
 
 	protected async query<R>(sql: string, params: unknown[] = []): Promise<R[]> {
