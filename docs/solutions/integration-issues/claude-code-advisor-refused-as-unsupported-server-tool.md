@@ -59,7 +59,7 @@ Advisor is now a native Anthropic passthrough requirement. In outline (the routi
 
 - `deriveNativeAnthropicToolRequirement` (`packages/providers/src/server-tool-capabilities.ts:467`) detects the advisor declaration. Account selection, the dispatch backstop and Auto admission then keep the request on first-party Anthropic accounts.
 - When no first-party account can serve it, the refusal uses the exact text Claude Code recovers from. `the advisor tool is not available` makes Claude Code drop the tool and retry, and `Advisor tool result content could not be processed` makes it strip advisor history (`packages/proxy/src/server-tool-routing-errors.ts:84`, `:91`).
-- Advisor tokens are stored per model in `requests.advisor_usage`, a `TEXT` column in both SQLite and PostgreSQL (`packages/database/src/migrations.ts:496`, `:1578`; `packages/database/src/migrations-pg.ts:701`, `:1622`).
+- Advisor tokens are stored per model in `requests.advisor_usage`, a `TEXT` column (`packages/database/src/migrations.ts:624` in `ensureSchema` for new installs, `:1841` in `runMigrations` for upgrades). The PostgreSQL copy went with PostgreSQL support in #723.
 
 Checking it live: the operator runs `/advisor` in an interactive Claude Code session (`AGENTS.md` forbids scripted traffic to Anthropic accounts), then reads the result without writing anything:
 
@@ -95,7 +95,7 @@ The refusals work because Claude Code recovers from advisor errors by matching s
 ## Related Issues
 
 - #425: the original report (closed after the live check). Fixed in PR #432.
-- #437: review items PR #432 deferred, including a PostgreSQL test for `advisor_usage`.
+- #437: review items PR #432 deferred. Its PostgreSQL test for `advisor_usage` no longer applies, since #723 removed PostgreSQL support.
 - #431: a nearby server-tool refusal. Long conversations past the replay-scan caps may be refused with `server_tool_no_implementation`.
 - [Commit-bound routing](../architecture-patterns/commit-bound-routing.md): the advisor filter applies its rule of checking which candidates are allowed before ranking them.
 - [Codex trace input tokens are cache-inclusive](../observability/codex-trace-input-tokens-are-cache-inclusive.md): another case where token fields need care before you read cache behaviour from them.
