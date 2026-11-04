@@ -127,6 +127,7 @@ import {
 	startExternalCodexScheduler,
 	startGlobalTokenHealthChecks,
 	startIntegrityScheduler,
+	startZaiPeakHoursPause,
 	stopGlobalTokenHealthChecks,
 	unregisterAutoRefreshTrackingClearer,
 	unregisterCodexResetRedeemer,
@@ -720,6 +721,7 @@ let stopModelCatalogRefreshJob: (() => void) | null = null;
 let stopCodexCatalogRefreshJob: (() => void) | null = null;
 let stopDeviceSetupRecoveryJob: (() => Promise<void>) | null = null;
 let autoRefreshScheduler: AutoRefreshScheduler | null = null;
+let stopZaiPeakHoursPauseJob: (() => void) | null = null;
 let usagePollingLifecycle: UsagePollingLifecycle<NodeJS.Timeout> | null = null;
 let cacheFlightCohortSealService: CohortSealService | null = null;
 let cacheKeepaliveScheduler: CacheKeepaliveScheduler | null = null;
@@ -2500,6 +2502,9 @@ export default async function startServer(options?: {
 		createUsagePollingTrackingClearer(pollingLifecycle, scheduler),
 	);
 
+	// Pause and resume opted-in zai accounts around zai peak hours.
+	stopZaiPeakHoursPauseJob = startZaiPeakHoursPause(db);
+
 	// Initialize cache keepalive scheduler
 	cacheKeepaliveScheduler = new CacheKeepaliveScheduler(proxyContext, config);
 	cacheKeepaliveScheduler.start();
@@ -3472,6 +3477,10 @@ function stopPeriodicWork(): Promise<void> {
 		if (autoRefreshScheduler) {
 			autoRefreshScheduler.stop();
 			autoRefreshScheduler = null;
+		}
+		if (stopZaiPeakHoursPauseJob) {
+			stopZaiPeakHoursPauseJob();
+			stopZaiPeakHoursPauseJob = null;
 		}
 		if (cacheKeepaliveScheduler) {
 			cacheKeepaliveScheduler.stop();

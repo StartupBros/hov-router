@@ -283,3 +283,4 @@ export type {
 	StartMessage,
 	WorkerMessage,
 } from "./worker-messages";
+export { startZaiPeakHoursPause } from "./zai-peak-hours-pause";

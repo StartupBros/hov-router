@@ -138,6 +138,7 @@ mock.module("@better-ccflare/proxy", () => {
 		startGlobalTokenHealthChecks: () => {},
 		startExternalCodexScheduler,
 		startIntegrityScheduler: () => () => {},
+		startZaiPeakHoursPause: () => () => {},
 		stopGlobalTokenHealthChecks: () => {},
 		unregisterAutoRefreshTrackingClearer: () => {},
 		unregisterCodexResetRedeemer: () => {},

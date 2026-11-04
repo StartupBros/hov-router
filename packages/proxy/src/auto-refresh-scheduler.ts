@@ -75,19 +75,6 @@ function normalizeRawCreatedAt(
 }
 
 /**
- * Z.ai peak is Monday to Friday 14:00-18:00 Singapore time (UTC+8); weekends
- * are off-peak. The weekday is read from the Singapore-shifted date, so a UTC
- * evening that is already the next day in Singapore counts as that next day.
- */
-export function isZaiPeakHour(ts = Date.now()): boolean {
-	const sgt = new Date(ts + 8 * 60 * 60 * 1000);
-	const day = sgt.getUTCDay();
-	if (day === 0 || day === 6) return false;
-	const sgtHour = sgt.getUTCHours() + sgt.getUTCMinutes() / 60;
-	return sgtHour >= 14 && sgtHour < 18;
-}
-
-/**
  * Auto-refresh scheduler that monitors accounts with auto-refresh enabled
  * and sends dummy messages when their usage window resets
  */
@@ -234,8 +221,6 @@ export class AutoRefreshScheduler {
 			// Periodically clean up the tracking map - remove entries for accounts that no longer exist
 			// or have auto-refresh disabled
 			await this.cleanupTracking();
-
-			await this.checkPeakHoursPause();
 
 			// Get all accounts with auto-refresh enabled that have reset windows OR need immediate refresh
 			const accounts = (
@@ -1662,51 +1647,6 @@ export class AutoRefreshScheduler {
 				);
 			}
 			// Don't throw - this is a non-critical cleanup operation
-		}
-	}
-
-	/**
-	 * Pause or resume zai accounts based on per-account peak_hours_pause_enabled flag.
-	 * Only touches accounts that have opted in to peak hours auto-pause.
-	 */
-	private async checkPeakHoursPause(): Promise<void> {
-		const inPeak = isZaiPeakHour();
-
-		const zaiAccounts = await this.db.query<{
-			id: string;
-			name: string;
-			paused: number;
-			pause_reason: string | null;
-			peak_hours_pause_enabled: number;
-		}>(
-			`SELECT id, name, COALESCE(paused, 0) as paused, pause_reason, COALESCE(peak_hours_pause_enabled, 0) as peak_hours_pause_enabled
-			 FROM accounts WHERE provider = 'zai' AND peak_hours_pause_enabled = 1`,
-		);
-
-		for (const account of zaiAccounts) {
-			if (inPeak && !account.paused) {
-				// Pause account during peak hours
-				// SQL-level guard prevents race: if another actor paused the account
-				// with a different reason between SELECT and UPDATE, skip it
-				await this.db.run(
-					"UPDATE accounts SET paused = 1, pause_reason = 'peak_hours' WHERE id = ? AND COALESCE(paused, 0) = 0",
-					[account.id],
-				);
-				log.info(`Peak hours pause: paused zai account '${account.name}'`);
-			} else if (
-				!inPeak &&
-				account.paused &&
-				account.pause_reason === "peak_hours"
-			) {
-				// Resume account after peak hours (only if we paused it)
-				// SQL-level guard prevents race condition: if manual-pause API changed pause_reason
-				// between SELECT and UPDATE, this UPDATE will not affect that account
-				await this.db.run(
-					"UPDATE accounts SET paused = 0, pause_reason = NULL WHERE id = ? AND pause_reason = 'peak_hours'",
-					[account.id],
-				);
-				log.info(`Peak hours resume: resumed zai account '${account.name}'`);
-			}
 		}
 	}
 
