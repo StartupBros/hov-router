@@ -13,9 +13,9 @@ import { UsagePollingLifecycle } from "./usage-polling-lifecycle";
  * paused account before refreshing its token, nor restores the pause
  * afterward -- see the JSDoc above the function in server.ts for the full
  * investigation (neither getValidAccessToken nor anything it calls ever
- * reads or gates on `paused`, and auto-refresh-scheduler.ts's proactive
- * Codex/OpenAI-compatible refreshers already refresh tokens on paused rows
- * directly with no resume/restore dance).
+ * reads or gates on `paused`, and the since-removed auto-refresh scheduler's
+ * proactive Codex/OpenAI-compatible refreshers refreshed tokens on paused
+ * rows directly with no resume/restore dance).
  *
  * These tests prove the resulting invariant: refreshPollingAccessToken never
  * reads or writes `paused`/`pause_reason` at all, regardless of what

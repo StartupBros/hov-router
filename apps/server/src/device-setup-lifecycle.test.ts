@@ -86,7 +86,6 @@ mock.module("@better-ccflare/proxy", () => {
 	}
 	return {
 		AnthropicDegradedModeCoordinator: class {},
-		AutoRefreshScheduler: Scheduler,
 		CacheAffinityOrderer: class {},
 		CacheKeepaliveScheduler: Scheduler,
 		CohortSealService: class {

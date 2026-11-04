@@ -84,7 +84,6 @@ import {
 } from "@better-ccflare/providers/bedrock";
 import {
 	AnthropicDegradedModeCoordinator,
-	AutoRefreshScheduler,
 	CacheAffinityOrderer,
 	CacheKeepaliveScheduler,
 	CohortSealService,
@@ -721,7 +720,6 @@ let stopIntegritySchedulerJob: (() => void) | null = null;
 let stopModelCatalogRefreshJob: (() => void) | null = null;
 let stopCodexCatalogRefreshJob: (() => void) | null = null;
 let stopDeviceSetupRecoveryJob: (() => Promise<void>) | null = null;
-let autoRefreshScheduler: AutoRefreshScheduler | null = null;
 let stopZaiPeakHoursPauseJob: (() => void) | null = null;
 let usagePollingLifecycle: UsagePollingLifecycle<NodeJS.Timeout> | null = null;
 let cacheFlightCohortSealService: CohortSealService | null = null;
@@ -998,10 +996,10 @@ async function prewarmBedrockCache(account: Account, region: string) {
  * that's false: neither getValidAccessToken nor anything it calls
  * (refreshAccessTokenSafe, checkRefreshTokenHealth, every OAuth provider's
  * refreshToken implementation, AccountRepository.updateTokens's raw SQL)
- * reads or gates on `paused` anywhere. auto-refresh-scheduler.ts's proactive
- * Codex and OpenAI-compatible token refreshers already refresh tokens on
- * paused rows directly, with no resume/restore dance at all, confirming this
- * is the established pattern elsewhere in this exact codebase. The temporary
+ * reads or gates on `paused` anywhere. The since-removed auto-refresh
+ * scheduler's proactive Codex and OpenAI-compatible token refreshers
+ * refreshed tokens on paused rows directly, with no resume/restore dance at
+ * all, which confirmed the pattern. The temporary
  * resume was therefore structurally unnecessary, and it created a real race:
  * getValidAccessToken can legitimately ROTATE the refresh token as part of a
  * normal, successful refresh (some providers, e.g. Codex, rotate on every
@@ -1569,8 +1567,8 @@ export default async function startServer(options?: {
 		runtime.port = port;
 	}
 
-	// Process-local secret gating internal-probe markers (auto-refresh /
-	// cache-keepalive self-loop requests) — see proxy-types.ts isInternalProbe
+	// Process-local secret gating the internal-probe marker (cache-keepalive
+	// self-loop requests) — see proxy-types.ts isInternalProbe
 	// and AuthService#isInternalProbeRequest. Intentionally re-minted every
 	// process start (not persisted): these self-loops originate from the same
 	// process that mints the secret, so nothing outside this process ever
@@ -2495,15 +2493,12 @@ export default async function startServer(options?: {
 		};
 	});
 
-	// Initialize auto-refresh scheduler (now that proxyContext is available).
-	// Capture this concrete scheduler and polling owner in the deletion callback;
-	// consulting mutable module state here could clear a later server instance.
-	const scheduler = new AutoRefreshScheduler(db, proxyContext);
-	autoRefreshScheduler = scheduler;
-	scheduler.start();
+	// Retire this server's usage polling when an account is removed. Capture the
+	// concrete polling owner in the deletion callback; consulting mutable module
+	// state here could clear a later server instance.
 	registerAutoRefreshTrackingClearer(
 		serverId,
-		createUsagePollingTrackingClearer(pollingLifecycle, scheduler),
+		createUsagePollingTrackingClearer(pollingLifecycle),
 	);
 
 	// Pause and resume opted-in zai accounts around zai peak hours.
@@ -3477,10 +3472,6 @@ function stopPeriodicWork(): Promise<void> {
 		if (stopCodexCatalogRefreshJob) {
 			stopCodexCatalogRefreshJob();
 			stopCodexCatalogRefreshJob = null;
-		}
-		if (autoRefreshScheduler) {
-			autoRefreshScheduler.stop();
-			autoRefreshScheduler = null;
 		}
 		if (stopZaiPeakHoursPauseJob) {
 			stopZaiPeakHoursPauseJob();

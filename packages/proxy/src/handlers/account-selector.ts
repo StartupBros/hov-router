@@ -910,13 +910,17 @@ const CONFIGURATION_FORCE_ROUTE_REASONS: ReadonlySet<ForceRouteUnavailableReason
 
 /**
  * True when the account stays unavailable until an operator resumes or
- * reauthenticates it. Overage, failure-threshold, peak-hours and
- * rate-limit-window pauses (and an unattributed one) clear on their own.
+ * reauthenticates it: a reauth pause, a manual pause, or a failure-threshold
+ * pause (nothing lifts that one on its own since auto-refresh was removed).
+ * Overage, peak-hours and rate-limit-window pauses (and an unattributed one)
+ * clear on their own.
  */
 function needsOperatorToResume(account: Account): boolean {
 	return (
 		account.pause_reason === PAUSE_REASON_NEEDS_REAUTH ||
-		(account.paused && account.pause_reason === "manual")
+		(account.paused &&
+			(account.pause_reason === "manual" ||
+				account.pause_reason === "failure_threshold"))
 	);
 }
 

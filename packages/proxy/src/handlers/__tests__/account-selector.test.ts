@@ -1029,6 +1029,36 @@ describe("selectAccountsForRequest — x-better-ccflare-account-id header", () =
 		expect(ctx.strategy.select).not.toHaveBeenCalled();
 	});
 
+	// Nothing lifts a failure-threshold pause on its own since auto-refresh was
+	// removed, so retrying a forced route to it cannot succeed until an
+	// operator resumes the account.
+	for (const [pauseReason, retryable] of [
+		["failure_threshold", false],
+		["manual", false],
+		[null, true],
+		["overage", true],
+	] as const) {
+		it(`refuses a forced route to a ${pauseReason ?? "unattributed"} pause with retryable ${retryable}`, async () => {
+			const paused = makeAccount({
+				id: "acc-paused",
+				paused: true,
+				pause_reason: pauseReason,
+			});
+			const ctx = makeCtx({ accounts: [paused] });
+			const meta = makeRequestMeta({
+				headers: new Headers({ "x-better-ccflare-account-id": paused.id }),
+			});
+
+			await expect(selectAccountsForRequest(meta, ctx)).rejects.toMatchObject({
+				name: "ForceRouteUnavailableError",
+				accountId: paused.id,
+				reason: "paused",
+				retryable,
+			});
+			expect(ctx.strategy.select).not.toHaveBeenCalled();
+		});
+	}
+
 	it("fails closed when the forced account is rate-limited", async () => {
 		const rateLimitedAcc = makeAccount({
 			id: "acc-rl",

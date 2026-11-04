@@ -1163,9 +1163,8 @@ export function createAccountRemoveHandler(dbOps: DatabaseOperations) {
 			// 5-minute TTL sweep or the 1000-entry cap evicts it.
 			clearAccountRefreshCache(accountId);
 
-			// And clear auto-refresh-scheduler tracking state — otherwise it
-			// lingers until the scheduler's next periodic cleanup sweep (up to
-			// 60s later) or server shutdown.
+			// And retire every server's usage polling for the removed account —
+			// otherwise its timers keep firing until server shutdown.
 			clearAutoRefreshTrackingForAccount(accountId);
 
 			// Retire catalog evidence and any in-flight discovery for this exact id.

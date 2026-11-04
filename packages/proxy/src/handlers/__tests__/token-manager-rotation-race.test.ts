@@ -611,11 +611,10 @@ describe("refreshAccessTokenSafe — join in-flight before backoff", () => {
 		expect(ctx.refreshInFlight.has(account.id)).toBe(false);
 		expect(refreshToken).toHaveBeenCalledTimes(1);
 
-		// Simulate a refresh already in flight via another path that shares
-		// this same ctx.refreshInFlight map — e.g. the auto-refresh scheduler,
-		// which registers its own promise directly into the map
-		// (auto-refresh-scheduler.ts) so concurrent request-triggered
-		// refreshes can join it.
+		// Simulate a refresh already in flight via another caller that shares
+		// this same ctx.refreshInFlight map and registered its own promise
+		// directly into it, so concurrent request-triggered refreshes can join
+		// it.
 		const joinedRefresh = mock(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 			return {
