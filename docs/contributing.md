@@ -681,44 +681,17 @@ We use semantic versioning (SemVer):
 
 ### Release Workflow
 
-1. **Prepare Release**
-   ```bash
-   # Update version in package.json files
-   # Create/Update CHANGELOG.md (if not exists, create following Keep a Changelog format)
-   git checkout -b release/vX.Y.Z
-   ```
+Releases are automated and draft-only. Never edit a version number, write `CHANGELOG.md` entries or push a release tag by hand.
 
-2. **Create Release PR**
-   - Title: `Release vX.Y.Z`
-   - Include changelog in description
-   - Get approval from maintainers
+1. Give each commit a conventional prefix (see [Commit Message Format](#commit-message-format)). The prefix decides the next version: `fix:` gives a patch, `feat:` a minor, and `!` or a `BREAKING CHANGE` footer a major. `docs:`, `chore:`, `test:` and `style:` alone produce no release.
+2. After the foundation gate passes on `main`, release-please keeps one release pull request open with the next version and its `CHANGELOG.md` entries.
+3. Merging that pull request tags the release and stages a verified **draft** GitHub release. Publishing the draft is a separate maintainer decision.
 
-3. **Merge and Tag**
-   ```bash
-   git checkout main
-   git pull upstream main
-   git tag -a vX.Y.Z -m "Release version X.Y.Z"
-   git push upstream vX.Y.Z
-   ```
-
-4. **Create GitHub Release**
-   - Use the tag
-   - Copy changelog entries
-   - Attach built binaries if applicable
-
-5. **Post-Release**
-   - Announce in discussions/Discord
-   - Update documentation site
-   - Monitor for issues
-
-**Note**: There is no CHANGELOG.md file in the repository yet. When implementing releases, create and maintain a CHANGELOG.md file following the [Keep a Changelog](https://keepachangelog.com/) format.
+The full policy is in [HoV Router release automation](hov-router-releases.md).
 
 ### Emergency Patches
 
-For critical fixes:
-1. Create patch from the release tag
-2. Follow expedited review process
-3. Release as patch version
+Land the fix on `main` as a `fix:` pull request with an expedited review. release-please then proposes it as a patch release like any other change.
 
 ## Getting Help
 

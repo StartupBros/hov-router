@@ -47,7 +47,7 @@ const planBilled = "COALESCE(billing_type, '') = 'plan'";
 
 The two predicates select the same rows. That was checked against NULL, `''`, `'PLAN'`, `'plan '`, an integer and a blob. Both statements now plan on `idx_requests_account_timestamp`. The plan test loads production's 17 `sqlite_stat1` rows for `requests` into a migrated in-memory database, captures the SQL the repository sends, and asserts each statement's `EXPLAIN QUERY PLAN`. With the old predicate restored it fails and shows the billing_type index.
 
-SQLite's own ways to steer the planner, a unary `+billing_type` or `INDEXED BY`, were not used: they are SQLite syntax, and the repository's SQL also ran on PostgreSQL when the fix landed. `COALESCE` is plain SQL.
+SQLite's own ways to steer the planner, a unary `+billing_type` or `INDEXED BY`, were not used: they are SQLite syntax, and the repository's SQL also ran on PostgreSQL when the fix landed. `COALESCE` is plain SQL. #723 removed PostgreSQL support later that day, so those hints are now allowed; the `COALESCE` predicate stays because it already plans on the right index.
 
 Measured on the production database, read-only, 2026-11-04, running Bun's SQLite with the reader worker's cache settings, for one refresh:
 
