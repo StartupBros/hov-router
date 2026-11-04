@@ -1,24 +1,21 @@
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { Config } from "@better-ccflare/config";
-import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import type {
 	DatabaseOperations,
 	MemberNoticeAttemptResult,
+	MemberNoticeKind,
 	MemberNoticeRow,
 } from "@better-ccflare/database";
 import { Logger } from "@better-ccflare/logger";
 import type { MemberNoticeState } from "@better-ccflare/types";
-import {
-	ALERT_WEBHOOK_USER_AGENT,
-	getMemberNoticeDestination,
-	isDiscordWebhookUrl,
-} from "./alerts";
+import { ALERT_WEBHOOK_USER_AGENT, getMemberNoticeDestination } from "./alerts";
 
 /**
- * Member notices: account-free posts to the members' channel when a Codex
- * reset wave arrives (KTD17), before a wave expires (KTD18), and when several
- * accounts' weekly limits reset early (KTD19). Each notice is a claimed row
- * (KTD16) delivered under a lease (KTD20) by one pass a minute (KTD21).
+ * Member notices: account-free reset events for HoV members, sent to BroBot,
+ * which reviews them and posts the member cards. An event is claimed when a
+ * Codex reset wave arrives (KTD17), before a wave expires (KTD18), and when
+ * several accounts' weekly limits reset early (KTD19). Each event is a claimed
+ * row (KTD16) delivered under a lease (KTD20) by one pass a minute (KTD21).
  */
 
 const MINUTE_MS = 60_000;
@@ -36,7 +33,7 @@ const REMINDER_LEADS = [
 	{ lead: "3d", ms: 3 * DAY_MS },
 	{ lead: "1d", ms: DAY_MS },
 ] as const;
-export type MemberNoticeReminderLead = (typeof REMINDER_LEADS)[number]["lead"];
+type ReminderLead = (typeof REMINDER_LEADS)[number]["lead"];
 /** A reminder is claimed only this soon after its lead point, never late. */
 const REMINDER_WINDOW_MS = 6 * HOUR_MS;
 
@@ -54,90 +51,75 @@ const BACKOFF_BASE_MS = MINUTE_MS;
 const BACKOFF_CAP_MS = 30 * MINUTE_MS;
 const DELIVERY_BATCH = 20;
 
-export type MemberNoticeProviderName = "Codex" | "Claude";
+/** The member-facing provider an event is about. */
+type NoticeProvider = "codex" | "claude";
 
-/** Account providers whose weekly rollovers count, by member-facing group. */
-const EARLY_RESET_GROUPS: ReadonlyMap<
-	string,
-	{ group: string; providerName: MemberNoticeProviderName }
-> = new Map([
-	["codex", { group: "codex", providerName: "Codex" }],
-	["anthropic", { group: "claude", providerName: "Claude" }],
-	["claude-oauth", { group: "claude", providerName: "Claude" }],
+/** Account providers whose weekly rollovers count, by member-facing provider. */
+const EARLY_RESET_PROVIDERS: ReadonlyMap<string, NoticeProvider> = new Map([
+	["codex", "codex"],
+	["anthropic", "claude"],
+	["claude-oauth", "claude"],
 ]);
-
-const USAGE_COMMAND: Record<MemberNoticeProviderName, string> = {
-	Codex: "/usage in the Codex CLI",
-	Claude: "/usage in Claude Code",
-};
-
-const MONTHS = [
-	"January",
-	"February",
-	"March",
-	"April",
-	"May",
-	"June",
-	"July",
-	"August",
-	"September",
-	"October",
-	"November",
-	"December",
-];
-
-/** "November 30, 2026 at 20:04 UTC", built by hand so no locale data is needed. */
-function formatUtc(ms: number): string {
-	const date = new Date(ms);
-	const hours = String(date.getUTCHours()).padStart(2, "0");
-	const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-	return `${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}, ${date.getUTCFullYear()} at ${hours}:${minutes} UTC`;
-}
 
 function utcMinute(ms: number): string {
 	return `${new Date(ms).toISOString().slice(0, 16)}Z`;
 }
 
-function signed(lines: string[]): string {
-	return `${lines.join(" ")}\n— ${PRODUCT_NAME}`;
+/**
+ * The body of one event, built when the notice is claimed and stored as the
+ * row's content, so every retry sends the same bytes. The fields are BroBot's
+ * contract (version 1) in a fixed order, and the only inputs are a key, a
+ * kind, a provider, dates and a lead time (KTD15): an event can never carry an
+ * account name, id, email or count.
+ */
+function memberNoticeEvent(event: {
+	noticeKey: string;
+	kind: MemberNoticeKind;
+	provider: NoticeProvider;
+	detectedAt: number;
+	waveExpiresAt: number | null;
+	lead: ReminderLead | null;
+}): string {
+	return JSON.stringify({
+		version: 1,
+		noticeKey: event.noticeKey,
+		kind: event.kind,
+		provider: event.provider,
+		detectedAt: new Date(event.detectedAt).toISOString(),
+		waveExpiresAt:
+			event.waveExpiresAt === null
+				? null
+				: new Date(event.waveExpiresAt).toISOString(),
+		lead: event.lead,
+	});
 }
 
-// Templates take only a provider name, a date and a lead time (KTD15), so a
-// notice can never carry an account name, id, email or count.
-
-export function renderGrantNotice(input: {
-	providerName: MemberNoticeProviderName;
-	expiresAt: number | null;
-}): string {
-	const lines = [
-		`New ${input.providerName} banked resets may be on your account.`,
-		"To use one, open /usage in the Codex CLI and choose Redeem reset.",
-	];
-	if (input.expiresAt !== null) {
-		lines.push(`This wave expires ${formatUtc(input.expiresAt)}.`);
-	}
-	return signed(lines);
-}
-
-export function renderReminderNotice(input: {
-	providerName: MemberNoticeProviderName;
-	expiresAt: number;
-	lead: MemberNoticeReminderLead;
-}): string {
-	const left = input.lead === "3d" ? "3 days" : "1 day";
-	return signed([
-		`${input.providerName} banked resets from a recent wave expire in ${left}, on ${formatUtc(input.expiresAt)}.`,
-		"If you still have one, open /usage in the Codex CLI and choose Redeem reset before then.",
-	]);
-}
-
-export function renderEarlyResetNotice(input: {
-	providerName: MemberNoticeProviderName;
-}): string {
-	return signed([
-		`${input.providerName} weekly limits appear to have reset early.`,
-		`Check your own limits with ${USAGE_COMMAND[input.providerName]}.`,
-	]);
+/**
+ * BroBot's v1 request signature: `v1=` and the hex HMAC-SHA256, under the
+ * shared secret, of the method, path, millisecond timestamp, request id and
+ * the body's SHA-256 hex, one per line. It must match
+ * `generateRequestSignature` in BroBot's `packages/shared`, which the golden
+ * vector in the tests pins.
+ */
+export function signMemberNoticeRequest(
+	secret: string,
+	request: {
+		method: string;
+		pathname: string;
+		timestamp: number;
+		requestId: string;
+		body: string;
+	},
+): string {
+	const bodyHash = createHash("sha256").update(request.body).digest("hex");
+	const message = [
+		request.method,
+		request.pathname,
+		String(request.timestamp),
+		request.requestId,
+		bodyHash,
+	].join("\n");
+	return `v1=${createHmac("sha256", secret).update(message).digest("hex")}`;
 }
 
 type NoticeStore = Pick<
@@ -172,13 +154,18 @@ export async function detectMemberNotices(
 			sinceNewest >= GRANT_QUIET_MS &&
 			sinceNewest < GRANT_ELIGIBLE_MS
 		) {
+			const noticeKey = `grant:${wave.waveId}`;
 			await claim({
-				noticeKey: `grant:${wave.waveId}`,
+				noticeKey,
 				kind: "grant",
 				provider: "codex",
-				content: renderGrantNotice({
-					providerName: "Codex",
-					expiresAt: wave.expiresAt,
+				content: memberNoticeEvent({
+					noticeKey,
+					kind: "grant",
+					provider: "codex",
+					detectedAt: now,
+					waveExpiresAt: wave.expiresAt,
+					lead: null,
 				}),
 				claimedAt: now,
 				expiresAt: now + GRANT_NOTICE_TTL_MS,
@@ -188,13 +175,17 @@ export async function detectMemberNotices(
 		for (const { lead, ms } of REMINDER_LEADS) {
 			const from = wave.expiresAt - ms;
 			if (now < from || now >= from + REMINDER_WINDOW_MS) continue;
+			const noticeKey = `remind:${wave.waveId}:${lead}`;
 			await claim({
-				noticeKey: `remind:${wave.waveId}:${lead}`,
+				noticeKey,
 				kind: "reminder",
 				provider: "codex",
-				content: renderReminderNotice({
-					providerName: "Codex",
-					expiresAt: wave.expiresAt,
+				content: memberNoticeEvent({
+					noticeKey,
+					kind: "reminder",
+					provider: "codex",
+					detectedAt: now,
+					waveExpiresAt: wave.expiresAt,
 					lead,
 				}),
 				claimedAt: now,
@@ -203,8 +194,8 @@ export async function detectMemberNotices(
 		}
 	}
 
-	for (const event of await findEarlyResets(dbOps, now)) {
-		const previous = await notices.latestClaim("early_reset", event.group);
+	for (const provider of await findEarlyResets(dbOps, now)) {
+		const previous = await notices.latestClaim("early_reset", provider);
 		if (previous !== null && previous.claimedAt > now - EARLY_REPEAT_MS) {
 			continue;
 		}
@@ -213,11 +204,19 @@ export async function detectMemberNotices(
 		// that see the same previous notice try the same key, and the unique
 		// key lets only one of them claim it.
 		const after = previous === null ? "none" : utcMinute(previous.claimedAt);
+		const noticeKey = `early:${provider}:after:${after}`;
 		await claim({
-			noticeKey: `early:${event.group}:after:${after}`,
+			noticeKey,
 			kind: "early_reset",
-			provider: event.group,
-			content: renderEarlyResetNotice({ providerName: event.providerName }),
+			provider,
+			content: memberNoticeEvent({
+				noticeKey,
+				kind: "early_reset",
+				provider,
+				detectedAt: now,
+				waveExpiresAt: null,
+				lead: null,
+			}),
 			claimedAt: now,
 			expiresAt: now + EARLY_NOTICE_TTL_MS,
 		});
@@ -226,15 +225,15 @@ export async function detectMemberNotices(
 }
 
 /**
- * Provider groups where at least two accounts' weekly windows rolled over
- * early with nothing on the account to explain it. A rollover counts once it
- * is 10 minutes old and until it is 60, so two accounts pair only when their
- * rollovers were seen within about 50 minutes of each other.
+ * Member-facing providers where at least two accounts' weekly windows rolled
+ * over early with nothing on the account to explain it. A rollover counts
+ * once it is 10 minutes old and until it is 60, so two accounts pair only
+ * when their rollovers were seen within about 50 minutes of each other.
  */
 async function findEarlyResets(
 	dbOps: NoticeStore,
 	now: number,
-): Promise<{ group: string; providerName: MemberNoticeProviderName }[]> {
+): Promise<NoticeProvider[]> {
 	// The ledger dates an early row from its reset anchor, at most a week
 	// before the poll that saw it, so this bound misses no recent rollover.
 	const candidates = await dbOps
@@ -242,13 +241,10 @@ async function findEarlyResets(
 		.listEarlyResetCandidates(now - WEEK_MS - EARLY_OPENED_WITHIN_MS);
 	const credits = dbOps.getCodexResetCreditsRepository();
 	const redemptions = dbOps.getCodexResetRedemptionsRepository();
-	const groups = new Map<
-		string,
-		{ providerName: MemberNoticeProviderName; accounts: Set<string> }
-	>();
+	const accountsByProvider = new Map<NoticeProvider, Set<string>>();
 	for (const candidate of candidates) {
-		const mapping = EARLY_RESET_GROUPS.get(candidate.provider);
-		if (!mapping) continue;
+		const provider = EARLY_RESET_PROVIDERS.get(candidate.provider);
+		if (!provider) continue;
 		const openedAt = candidate.previousClosedAt ?? candidate.startedAt;
 		if (
 			openedAt <= now - EARLY_OPENED_WITHIN_MS ||
@@ -265,16 +261,13 @@ async function findEarlyResets(
 		) {
 			continue;
 		}
-		const entry = groups.get(mapping.group) ?? {
-			providerName: mapping.providerName,
-			accounts: new Set<string>(),
-		};
-		entry.accounts.add(candidate.accountId);
-		groups.set(mapping.group, entry);
+		const accounts = accountsByProvider.get(provider) ?? new Set<string>();
+		accounts.add(candidate.accountId);
+		accountsByProvider.set(provider, accounts);
 	}
-	return [...groups]
-		.filter(([, entry]) => entry.accounts.size >= EARLY_MIN_ACCOUNTS)
-		.map(([group, entry]) => ({ group, providerName: entry.providerName }));
+	return [...accountsByProvider]
+		.filter(([, accounts]) => accounts.size >= EARLY_MIN_ACCOUNTS)
+		.map(([provider]) => provider);
 }
 
 export type MemberNoticeFetch = (
@@ -300,37 +293,41 @@ function backoffMs(attempt: number): number {
 }
 
 /**
- * Post one notice. The address carries the webhook's secret token, so it,
- * any error message (which can embed it) and the response body stay out of
- * every log and stored status.
+ * Post one stored event to BroBot's intake, signed now, so each attempt has
+ * its own timestamp and request id while the body stays the bytes claimed.
+ * The secret goes into the signature only, never a header. The address, any
+ * error message (which can embed it) and the response body stay out of every
+ * log and stored status.
  */
 async function sendMemberNotice(
-	address: string,
+	destination: { url: string; secret: string },
 	notice: MemberNoticeRow,
 	fetchImpl: MemberNoticeFetch,
 	now: () => number,
 ): Promise<SendOutcome> {
-	let url: URL;
-	try {
-		url = new URL(address);
-	} catch {
-		return { outcome: "gave_up", status: "invalid_address" };
-	}
-	if (url.protocol !== "https:" && url.protocol !== "http:") {
-		return { outcome: "gave_up", status: "invalid_address" };
-	}
-	const body = isDiscordWebhookUrl(url)
-		? { content: notice.content, allowed_mentions: { parse: [] } }
-		: { kind: notice.kind, text: notice.content };
+	const body = notice.content;
+	const timestamp = now();
+	const requestId = randomUUID();
+	const signature = signMemberNoticeRequest(destination.secret, {
+		method: "POST",
+		pathname: new URL(destination.url).pathname,
+		timestamp,
+		requestId,
+		body,
+	});
 	let response: Response;
 	try {
-		response = await fetchImpl(address, {
+		response = await fetchImpl(destination.url, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				"User-Agent": ALERT_WEBHOOK_USER_AGENT,
+				"X-Request-Signature": signature,
+				"X-Request-Timestamp": String(timestamp),
+				"X-Request-Id": requestId,
+				"X-Key-Version": "1",
 			},
-			body: JSON.stringify(body),
+			body,
 			// A followed redirect turns the POST into a GET of some other page,
 			// whose 200 would count an unsent notice as delivered.
 			redirect: "manual",
@@ -399,8 +396,7 @@ export async function runMemberNoticePass(
 		gaveUp: 0,
 		expired: 0,
 	};
-	if (destination.state !== "on" || destination.url === null) return result;
-	const address = destination.url;
+	if (destination.state !== "on") return result;
 	const owner = deps.owner ?? randomUUID();
 	const notices = deps.dbOps.getMemberNoticesRepository();
 
@@ -411,7 +407,12 @@ export async function runMemberNoticePass(
 		if (!(await notices.lease(notice.noticeKey, owner, deps.now(), LEASE_MS))) {
 			continue;
 		}
-		const sent = await sendMemberNotice(address, notice, deps.fetch, deps.now);
+		const sent = await sendMemberNotice(
+			destination,
+			notice,
+			deps.fetch,
+			deps.now,
+		);
 		const at = deps.now();
 		const attempt = notice.attempts + 1;
 		const attemptResult: MemberNoticeAttemptResult =
@@ -442,7 +443,7 @@ export async function runMemberNoticePass(
  * Run `pass` once a minute, one at a time, until the returned stop function
  * is called. Stop aborts the signal handed to `pass`, so it starts no further
  * send, and resolves once the running pass has finished. Shutdown awaits it,
- * so a notice the webhook accepted is recorded as delivered before the
+ * so a notice BroBot accepted is recorded as delivered before the
  * database closes, rather than posted again after restart. It lives here
  * rather than in server.ts so it can be tested.
  */

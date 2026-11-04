@@ -746,10 +746,14 @@ describe("AlertService webhook wiring (end-to-end)", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(0);
 	});
 
-	it("delivers a member notice delivery failure to the operator webhook by default, once per cooldown, without the member address", async () => {
-		const memberAddress = "https://discord.com/api/webhooks/999/member-secret";
+	it("delivers a member notice delivery failure to the operator webhook by default, once per cooldown, without the member address or secret", async () => {
+		const memberAddress =
+			"https://brobot.example.com/api/internal/ai-alerts/router-events";
+		const signingSecret = "router-signing-secret-7f3a";
 		const saved = process.env.MEMBER_NOTICE_WEBHOOK_URL;
+		const savedSecret = process.env.MEMBER_NOTICE_SIGNING_SECRET;
 		process.env.MEMBER_NOTICE_WEBHOOK_URL = memberAddress;
+		process.env.MEMBER_NOTICE_SIGNING_SECRET = signingSecret;
 		try {
 			const fetchMock = mock(
 				async () => new Response(null, { status: 204 }),
@@ -757,7 +761,7 @@ describe("AlertService webhook wiring (end-to-end)", () => {
 			globalThis.fetch = fetchMock;
 			service = new AlertService(new BunSqlAdapter(sqlite), makeConfig());
 
-			await service.handleMemberNoticeDeliveryFailed("404");
+			await service.handleMemberNoticeDeliveryFailed("401");
 			await waitFor(() => fetchMock.mock.calls.length === 1);
 
 			const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -766,29 +770,34 @@ describe("AlertService webhook wiring (end-to-end)", () => {
 			expect(body.allowed_mentions).toEqual({ parse: [] });
 			expect(body.content).toContain("member notice");
 			expect(body.content).toContain("Affected: member notices.");
+			// The guidance names the settings to check, never their values.
+			expect(body.content).toContain("MEMBER_NOTICE_SIGNING_SECRET");
 
 			const alerts = await service.listAlerts();
 			expect(alerts).toHaveLength(1);
 			expect(alerts[0]?.type).toBe("member_notice_delivery_failed");
 			expect(alerts[0]?.severity).toBe("warning");
 			expect(alerts[0]?.account).toBeNull();
-			expect(alerts[0]?.message).toContain("404");
+			expect(alerts[0]?.message).toContain("401");
 			for (const text of [
 				String(init.body),
 				alerts[0]?.title ?? "",
 				alerts[0]?.message ?? "",
 			]) {
-				expect(text).not.toContain("member-secret");
-				expect(text).not.toContain("webhooks/999");
+				expect(text).not.toContain("brobot.example.com");
+				expect(text).not.toContain(signingSecret);
 			}
 
-			await service.handleMemberNoticeDeliveryFailed("404");
+			await service.handleMemberNoticeDeliveryFailed("401");
 			await Bun.sleep(20);
 			expect(fetchMock).toHaveBeenCalledTimes(1);
 			expect(await service.listAlerts()).toHaveLength(1);
 		} finally {
 			if (saved === undefined) delete process.env.MEMBER_NOTICE_WEBHOOK_URL;
 			else process.env.MEMBER_NOTICE_WEBHOOK_URL = saved;
+			if (savedSecret === undefined) {
+				delete process.env.MEMBER_NOTICE_SIGNING_SECRET;
+			} else process.env.MEMBER_NOTICE_SIGNING_SECRET = savedSecret;
 		}
 	});
 });

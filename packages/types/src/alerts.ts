@@ -184,12 +184,16 @@ export interface AlertHistoryResponse {
 }
 
 /**
- * Whether member notices (banked-reset posts to the member channel) run.
- * The member address itself never leaves the server: `off` when no address
- * is set, `blocked_same_as_alert_webhook` when it points at the operator
- * alert webhook, `on` otherwise.
+ * Whether member notices (signed reset events sent to BroBot's intake) run.
+ * The address and the signing secret never leave the server: `off` when no
+ * address is set, `invalid_address` when it is not an https URL,
+ * `missing_secret` when no signing secret is set, `on` otherwise.
  */
-export type MemberNoticeState = "off" | "on" | "blocked_same_as_alert_webhook";
+export type MemberNoticeState =
+	| "off"
+	| "invalid_address"
+	| "missing_secret"
+	| "on";
 
 /** Alert configuration payload exchanged with the settings API. */
 export interface AlertsConfigPayload {

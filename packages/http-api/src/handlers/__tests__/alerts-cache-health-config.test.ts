@@ -6,7 +6,6 @@ import { Config } from "@better-ccflare/config";
 import {
 	getAlertsConfig,
 	getMemberNoticeDestination,
-	MEMBER_NOTICES_BLOCKED_WARNING,
 	memberNoticeStartupWarning,
 	setAlertsConfig,
 } from "../../services/alerts";
@@ -128,19 +127,18 @@ describe("cache health alert config API", () => {
 });
 
 describe("member notice destination state", () => {
-	const ID = "1400000000000000001";
-	const TOKEN = "member-token-abc";
-	const DISCORD = `https://discord.com/api/webhooks/${ID}/${TOKEN}`;
+	const HOST = "brobot.example.com";
+	const ADDRESS = `https://${HOST}/api/internal/ai-alerts/router-events`;
+	const SECRET = "router-signing-secret-7f3a";
 	let directory: string;
 	let config: Config;
 	let context: APIContext;
 	let environment: Record<string, string | undefined>;
+	const isScoped = (key: string) =>
+		key.startsWith("ALERT_") || key.startsWith("MEMBER_NOTICE_");
 	beforeEach(() => {
 		environment = Object.fromEntries(
-			Object.entries(process.env).filter(
-				([key]) =>
-					key.startsWith("ALERT_") || key === "MEMBER_NOTICE_WEBHOOK_URL",
-			),
+			Object.entries(process.env).filter(([key]) => isScoped(key)),
 		);
 		for (const key of Object.keys(environment)) delete process.env[key];
 		directory = mkdtempSync(join(tmpdir(), "member-notice-state-"));
@@ -150,10 +148,11 @@ describe("member notice destination state", () => {
 	afterEach(() => {
 		rmSync(directory, { recursive: true, force: true });
 		for (const key of Object.keys(process.env))
-			if (key.startsWith("ALERT_") || key === "MEMBER_NOTICE_WEBHOOK_URL")
-				delete process.env[key];
+			if (isScoped(key)) delete process.env[key];
 		Object.assign(process.env, environment);
 	});
+	const payload = async () =>
+		JSON.stringify(await createAlertsConfigGetHandler(context)().json());
 	const state = async () =>
 		(
 			(await createAlertsConfigGetHandler(context)().json()) as {
@@ -161,69 +160,70 @@ describe("member notice destination state", () => {
 			}
 		).memberNotices?.state;
 
-	it("is off when no member address is set", async () => {
-		config.setAlertWebhookUrl(DISCORD);
+	it("is off when no member address is set, even with a signing secret", async () => {
+		config.set("member_notice_signing_secret", SECRET);
 		expect(await state()).toBe("off");
 		expect(getMemberNoticeDestination(config)).toEqual({
 			state: "off",
 			url: null,
+			secret: null,
 		});
 		expect(memberNoticeStartupWarning(config)).toBeNull();
 	});
 
-	it("is on for a separate address, and the payload names no part of it", async () => {
-		config.setAlertWebhookUrl(
-			"https://discord.com/api/webhooks/1399999999999999999/alert-token",
-		);
-		config.set("member_notice_webhook_url", DISCORD);
+	it("is on with an https address and a secret, and the payload names neither", async () => {
+		process.env.MEMBER_NOTICE_WEBHOOK_URL = `  ${ADDRESS}\n`;
+		process.env.MEMBER_NOTICE_SIGNING_SECRET = SECRET;
 		expect(await state()).toBe("on");
 		expect(getMemberNoticeDestination(config)).toEqual({
 			state: "on",
-			url: DISCORD,
+			url: ADDRESS,
+			secret: SECRET,
 		});
-		const serialized = JSON.stringify(
-			await createAlertsConfigGetHandler(context)().json(),
-		);
-		expect(serialized).not.toContain(ID);
-		expect(serialized).not.toContain(TOKEN);
-		expect(serialized).not.toContain("discord.com/api/webhooks/1400");
+		const serialized = await payload();
+		expect(serialized).not.toContain(HOST);
+		expect(serialized).not.toContain(SECRET);
 		expect(memberNoticeStartupWarning(config)).toBeNull();
 	});
 
-	it("is on when only the token differs from the alert webhook", async () => {
-		config.setAlertWebhookUrl(`https://discord.com/api/webhooks/${ID}/other`);
-		process.env.MEMBER_NOTICE_WEBHOOK_URL = DISCORD;
-		expect(await state()).toBe("on");
-	});
-
-	it("is blocked when the member address is the alert webhook under another Discord host spelling", async () => {
-		config.setAlertWebhookUrl(DISCORD);
-		for (const spelling of [
-			`https://discordapp.com/api/webhooks/${ID}/${TOKEN}`,
-			`https://canary.discord.com/api/webhooks/${ID}/${TOKEN}?wait=true`,
-			`  https://PTB.Discord.com/api/webhooks/${ID}/${TOKEN}  `,
+	it("is invalid_address for an address that is not an https URL, with a fixed warning", async () => {
+		process.env.MEMBER_NOTICE_SIGNING_SECRET = SECRET;
+		for (const address of [
+			`http://${HOST}/api/internal/ai-alerts/router-events`,
+			`${HOST}/api/internal/ai-alerts/router-events`,
 		]) {
-			process.env.MEMBER_NOTICE_WEBHOOK_URL = spelling;
-			expect(await state()).toBe("blocked_same_as_alert_webhook");
-			expect(getMemberNoticeDestination(config).url).toBeNull();
+			process.env.MEMBER_NOTICE_WEBHOOK_URL = address;
+			expect(await state()).toBe("invalid_address");
+			expect(getMemberNoticeDestination(config)).toEqual({
+				state: "invalid_address",
+				url: null,
+				secret: null,
+			});
+			const warning = memberNoticeStartupWarning(config) ?? "";
+			expect(warning).toContain("not an https URL");
+			expect(warning).not.toContain(HOST);
+			expect(warning).not.toContain(SECRET);
+			expect(await payload()).not.toContain(HOST);
 		}
 	});
 
-	it("is blocked for a non-Discord address equal to the alert webhook once trimmed", async () => {
-		config.setAlertWebhookUrl("https://example.com/hooks/alerts");
-		process.env.MEMBER_NOTICE_WEBHOOK_URL =
-			" https://example.com/hooks/alerts\n";
-		expect(await state()).toBe("blocked_same_as_alert_webhook");
-	});
-
-	it("gives a fixed startup warning that names neither address when blocked", () => {
-		config.setAlertWebhookUrl(DISCORD);
-		process.env.MEMBER_NOTICE_WEBHOOK_URL = `https://discordapp.com/api/webhooks/${ID}/${TOKEN}`;
-		const warning = memberNoticeStartupWarning(config);
-		expect(warning).toBe(MEMBER_NOTICES_BLOCKED_WARNING);
-		expect(warning).not.toContain(ID);
-		expect(warning).not.toContain(TOKEN);
-		expect(warning).not.toContain("discord");
+	it("is missing_secret for an https address with no secret, with a fixed warning", async () => {
+		config.set("member_notice_webhook_url", ADDRESS);
+		expect(await state()).toBe("missing_secret");
+		// The environment wins over the file, including when it is empty.
+		config.set("member_notice_signing_secret", SECRET);
+		process.env.MEMBER_NOTICE_SIGNING_SECRET = "";
+		expect(await state()).toBe("missing_secret");
+		expect(getMemberNoticeDestination(config)).toEqual({
+			state: "missing_secret",
+			url: null,
+			secret: null,
+		});
+		const warning = memberNoticeStartupWarning(config) ?? "";
+		expect(warning).toContain("MEMBER_NOTICE_SIGNING_SECRET");
+		expect(warning).not.toContain(HOST);
+		expect(warning).not.toContain(SECRET);
+		expect(await payload()).not.toContain(SECRET);
 	});
 
 	it("cannot be set through the alerts config API", async () => {
@@ -232,13 +232,15 @@ describe("member notice destination state", () => {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					memberNotices: { state: "on", url: DISCORD },
-					member_notice_webhook_url: DISCORD,
+					memberNotices: { state: "on", url: ADDRESS, secret: SECRET },
+					member_notice_webhook_url: ADDRESS,
+					member_notice_signing_secret: SECRET,
 				}),
 			}),
 		);
 		expect(response.status).toBe(200);
 		expect(config.getMemberNoticeWebhookUrl()).toBe("");
+		expect(config.getMemberNoticeSigningSecret()).toBe("");
 		expect(await state()).toBe("off");
 	});
 });
