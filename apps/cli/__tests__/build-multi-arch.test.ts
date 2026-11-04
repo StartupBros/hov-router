@@ -389,13 +389,14 @@ describe("release binary provenance", () => {
 		});
 	});
 
-	it("wires the tagged npm producer through prepublish and embeds its actionable identity", () => {
+	it("has no npm publish hooks but still classifies upstream's tagged npm builds", () => {
 		const packageJson = JSON.parse(
 			readFileSync(join(import.meta.dir, "../package.json"), "utf8"),
 		) as { scripts: Record<string, string> };
-		expect(packageJson.scripts.prepublishOnly).toContain(
-			"CCFLARE_BUILD_PRODUCER=npm-package bun run build",
-		);
+		// This fork publishes no npm package; upstream's hooks were deleted when
+		// wholesale upstream merges ended (UPSTREAM.md).
+		for (const hook of ["prepublishOnly", "prepublish", "postpublish"])
+			expect(packageJson.scripts[hook]).toBeUndefined();
 		expect(packageJson.scripts.build).toContain(
 			"$(bun run --silent build-provenance.ts)",
 		);
@@ -543,12 +544,10 @@ describe("release binary provenance", () => {
 		);
 		expect(builder).toContain('"src/compiled.ts"');
 		expect(builder).toContain('"--no-compile-autoload-dotenv"');
+		// The router ships only the Linux x86_64 asset; build:multi still builds
+		// any platform through CCFLARE_ONLY_PLATFORMS.
 		const expectedScripts = {
 			"build:linux-amd64": "bun-linux-amd64",
-			"build:linux-arm64": "bun-linux-arm64",
-			"build:macos-x86_64": "bun-darwin-x64",
-			"build:macos-arm64": "bun-darwin-arm64",
-			"build:windows-x64": "bun-windows-x64",
 		};
 		for (const [script, target] of Object.entries(expectedScripts)) {
 			expect(packageJson.scripts[script]).toBe(
@@ -574,30 +573,5 @@ describe("release binary provenance", () => {
 			"CCFLARE_ONLY_PLATFORMS contains an unknown platform",
 		);
 		expect(releaseBuildDefines(null, "github-release-binary")).toEqual([]);
-	});
-
-	it("proves production tag builds but leaves every dispatch and test signing unproven", () => {
-		const release = readFileSync(
-			join(import.meta.dir, "../../../.github/workflows/release.yml"),
-			"utf8",
-		);
-		const signpathRelease = readFileSync(
-			join(import.meta.dir, "../../../.github/workflows/signpath-release.yml"),
-			"utf8",
-		);
-		const signpathTest = readFileSync(
-			join(import.meta.dir, "../../../.github/workflows/signpath-test.yml"),
-			"utf8",
-		);
-		const tagReleaseProducer =
-			"CCFLARE_BUILD_PRODUCER: $" +
-			"{{ github.event_name == 'push' && github.ref_type == 'tag' && 'github-release-binary' || '' }}";
-		expect(release).toContain(tagReleaseProducer);
-		expect(release).not.toContain(
-			"CCFLARE_BUILD_PRODUCER=github-release-binary",
-		);
-		expect(signpathRelease).toContain(tagReleaseProducer);
-		expect(signpathRelease).toContain("bun run build:windows-x64");
-		expect(signpathTest).not.toContain("CCFLARE_BUILD_PRODUCER");
 	});
 });
