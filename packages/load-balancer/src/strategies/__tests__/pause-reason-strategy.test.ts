@@ -16,7 +16,11 @@
  * account's in-memory `paused` flag is (or is not) cleared.
  */
 import { beforeEach, describe, expect, it } from "bun:test";
-import { SessionStrategy } from "@better-ccflare/load-balancer";
+import {
+	LeastUsedStrategy,
+	SessionAffinityStrategy,
+	SessionStrategy,
+} from "@better-ccflare/load-balancer";
 import type {
 	Account,
 	RequestMeta,
@@ -529,3 +533,82 @@ describe("SessionStrategy — pause_reason auto-unpause logic", () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Auto-refresh was removed, so the strategies' auto-unpause is the only thing
+// that lifts a pause on its own. It must lift only the pauses that clear by
+// themselves, and only for accounts that opted into auto-fallback. Every
+// strategy that auto-unpauses is checked.
+// ---------------------------------------------------------------------------
+
+const AUTO_UNPAUSING_STRATEGIES = [
+	["SessionStrategy", () => new SessionStrategy(5 * 60 * 60 * 1_000)],
+	["LeastUsedStrategy", () => new LeastUsedStrategy()],
+	["SessionAffinityStrategy", () => new SessionAffinityStrategy()],
+] as const;
+
+for (const [strategyName, createStrategy] of AUTO_UNPAUSING_STRATEGIES) {
+	describe(`${strategyName} — pauses nothing else lifts`, () => {
+		let strategy: ReturnType<typeof createStrategy>;
+		let store: MockStrategyStore;
+		const expiredReset = Date.now() - 2_000;
+		const meta: RequestMeta = {
+			id: "strategy-pause-request",
+			headers: new Headers(),
+			path: "/v1/messages",
+			method: "POST",
+			timestamp: Date.now(),
+		};
+
+		beforeEach(() => {
+			strategy = createStrategy();
+			store = new MockStrategyStore();
+			strategy.initialize(store);
+		});
+
+		it("keeps a failure_threshold pause even with auto-fallback on and an elapsed reset window", async () => {
+			const account = makeAccount({
+				id: "failure-threshold",
+				paused: true,
+				pause_reason: "failure_threshold",
+				auto_fallback_enabled: true,
+				rate_limit_reset: expiredReset,
+			});
+
+			await strategy.select([account], meta);
+
+			expect(store.hasResumeCall("failure-threshold")).toBe(false);
+			expect(account.paused).toBe(true);
+		});
+
+		it("keeps an overage pause when auto-fallback is off", async () => {
+			const account = makeAccount({
+				id: "overage-no-fallback",
+				paused: true,
+				pause_reason: "overage",
+				auto_fallback_enabled: false,
+				rate_limit_reset: expiredReset,
+			});
+
+			await strategy.select([account], meta);
+
+			expect(store.hasResumeCall("overage-no-fallback")).toBe(false);
+			expect(account.paused).toBe(true);
+		});
+
+		it("lifts an overage pause when auto-fallback is on and the reset window has elapsed", async () => {
+			const account = makeAccount({
+				id: "overage-fallback",
+				paused: true,
+				pause_reason: "overage",
+				auto_fallback_enabled: true,
+				rate_limit_reset: expiredReset,
+			});
+
+			await strategy.select([account], meta);
+
+			expect(store.hasResumeCall("overage-fallback")).toBe(true);
+			expect(account.paused).toBe(false);
+		});
+	});
+}

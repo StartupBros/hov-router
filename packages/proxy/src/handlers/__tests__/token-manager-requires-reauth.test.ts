@@ -209,6 +209,25 @@ describe("refreshAccessTokenSafe requires_reauth detection", () => {
 		expect(ctx.dbOps.flagRequiresReauthIfTokenMatches).not.toHaveBeenCalled();
 	});
 
+	it("flags requires_reauth for a structured OAuth error code with no code in its message", async () => {
+		const account = makeAccount("structured-code");
+		const structured = new Error("structured OAuth failure") as Error & {
+			error: { code: string };
+		};
+		structured.error = { code: "invalid_grant" };
+		const { ctx } = makeContext(structured, account);
+
+		await expect(refreshAccessTokenSafe(account, ctx as never)).rejects.toThrow(
+			"Failed to refresh access token",
+		);
+
+		expect(ctx.dbOps.flagRequiresReauthIfTokenMatches).toHaveBeenCalledWith(
+			"structured-code",
+			"refresh-token",
+			1,
+		);
+	});
+
 	it("ignores invalid_grant in the account name when the provider error is harmless", async () => {
 		const account = makeAccount("name-false-positive", "test_invalid_grant");
 		const { ctx, queuedJobs, setRequiresReauth } = makeContext(
