@@ -81,13 +81,9 @@ sha256sum -c SHA256SUMS
 
 Expect `better-ccflare-linux-amd64: OK`. A checksum detects a byte mismatch against the manifest; it does **not** authenticate the publisher. An untagged preparation build has no proven release SHA or distribution identity, even if its version output looks familiar. Do not use its `--git-sha` output as release proof. The updater remains non-actionable.
 
-The CI counterpart is the separate [artifact preparation](../.github/workflows/prepare-router-artifacts.yml) job for pull requests and manual runs, with read-only repository permissions and no artifact uploads. It is not any of the existing publishing workflows:
+The CI counterpart is the separate [artifact preparation](../.github/workflows/prepare-router-artifacts.yml) job for pull requests and manual runs, with read-only repository permissions and no artifact uploads. It is not a publishing workflow: router releases come from `router-release.yml` and `router-release-artifacts.yml` ([release policy](hov-router-releases.md)). Upstream's npm, multi-architecture and SignPath publishers were deleted from this fork on 2026-11-03.
 
-- `release-dispatch.yml` bumps versions, commits, pushes a tag, and publishes to npm.
-- `release.yml` runs on version tags or manual dispatch and creates releases/uploads assets.
-- `signpath-release.yml` and `signpath-test.yml` submit signing requests; they are not local smoke checks.
-
-Do not invoke those workflows for preparation, change versions manually, or push a tag to test this path. Actual publication requires separate approval and validation of release wiring, version/tag agreement, provenance, and intended destinations **before** creating a release tag. These locally prepared files are not a published downloadable release. For the current published artifact, use the [consumer installation](reference.md#install-the-linux-x86_64-release).
+Do not invoke the release workflows for preparation, change versions manually, or push a tag to test this path. Actual publication requires separate approval and validation of release wiring, version/tag agreement, provenance, and intended destinations **before** creating a release tag. These locally prepared files are not a published downloadable release. For the current published artifact, use the [consumer installation](reference.md#install-the-linux-x86_64-release).
 
 ## Repository move
 

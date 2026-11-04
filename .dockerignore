@@ -58,10 +58,9 @@ tmp
 temp
 *.tmp
 
-# Agent worktrees (full repo copies), tests, benchmarks and release signing
-# config are not needed to build the image.
+# Agent worktrees (full repo copies), tests and benchmarks are not needed to
+# build the image.
 .claude
-.signpath
 .worktrees
 **/__tests__
 **/*.test.ts

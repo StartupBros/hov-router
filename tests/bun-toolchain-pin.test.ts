@@ -9,12 +9,8 @@ const workflowsDir = join(repositoryRoot, ".github/workflows");
 const PINNED_WORKFLOWS = [
 	"managed-routing-postgres.yml",
 	"prepare-router-artifacts.yml",
-	"release.yml",
-	"release-dispatch.yml",
 	"router-release-artifacts.yml",
 	"router-release.yml",
-	"signpath-release.yml",
-	"signpath-test.yml",
 ];
 
 type Step = Record<string, unknown>;
