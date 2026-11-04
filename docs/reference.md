@@ -321,7 +321,7 @@ BETTER_CCFLARE_CONFIG_PATH=/path/to/config.json  # Custom config location
 BETTER_CCFLARE_DB_PATH=/path/to/database.db  # Custom database path (default: ~/.config/better-ccflare/better-ccflare.db)
                                        # Use this for development/testing with a separate database
 
-BETTER_CCFLARE_DB_READER_WORKER=0       # Set 0, false, or off to disable the off-thread reader; heavy reads run on the main thread as before.
+BETTER_CCFLARE_DB_READER_WORKER=0       # Set 0, false, or off to disable the off-thread readers (one for heavy reads, one for the accounts page); their reads run on the main thread as before. With the readers on, a read that waits 120 s for its reader fails with an "off-thread reader busy" warning instead of running.
 BETTER_CCFLARE_DB_WRITER_WORKER=0       # Set 0, false, or off to keep server writes on the main thread. By default `--serve` commits SQLite writes on a worker thread, so a slow fsync or a held write lock no longer freezes request handling.
 
 # Logging and Debugging
