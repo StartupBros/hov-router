@@ -38,10 +38,6 @@ export {
 	writeHeartbeat,
 } from "./multi-instance-guard";
 export { getLegacyDbPath, resolveDbPath } from "./paths";
-export {
-	assertNotPostgresUrl,
-	PostgresUrlRefusedError,
-} from "./postgres-refusal";
 // Public encryption API — only init/status helpers are exported.
 // `encryptPayload`/`decryptPayload` are internal to the database package.
 export {
@@ -49,6 +45,10 @@ export {
 	isEncryptionEnabled,
 } from "./payload-encryption";
 export { analyzeIndexUsage } from "./performance-indexes";
+export {
+	assertNotPostgresUrl,
+	PostgresUrlRefusedError,
+} from "./postgres-refusal";
 export type {
 	MarkAccountRateLimitedResult,
 	PublishedPublicValueRow,

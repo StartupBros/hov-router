@@ -97,14 +97,14 @@ export function getInstance(_fastMode?: boolean): DatabaseOperations {
 }
 
 /**
- * Get or create the database instance, running async initialization for PostgreSQL.
+ * Get or create the database instance, running async initialization.
  * Use this in server startup code where async is available.
  */
 export async function getInstanceAsync(
 	_fastMode?: boolean,
 ): Promise<DatabaseOperations> {
 	const db = getInstance();
-	// Initialize PostgreSQL schema/migrations if needed
+	// Start the multi-instance guard and heartbeat
 	await db.initializeAsync();
 	return db;
 }

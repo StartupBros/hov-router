@@ -22,14 +22,12 @@ const log = new Logger("AccountPublicValueHandler");
 const CONFLICT_MESSAGE =
 	"Another published account already uses this label, or the published-account limit was reached";
 
-/** SQLite SQLITE_CONSTRAINT_UNIQUE or PostgreSQL 23505. */
+/** SQLite SQLITE_CONSTRAINT_UNIQUE. */
 function isUniqueViolation(error: unknown): boolean {
 	if (!error || typeof error !== "object") return false;
 	const e = error as { code?: unknown; errno?: unknown; message?: unknown };
 	return (
 		e.code === "SQLITE_CONSTRAINT_UNIQUE" ||
-		e.code === "23505" ||
-		e.errno === "23505" ||
 		(typeof e.message === "string" && /UNIQUE constraint/i.test(e.message))
 	);
 }

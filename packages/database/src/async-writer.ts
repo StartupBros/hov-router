@@ -173,11 +173,8 @@ export class AsyncDbWriter implements Disposable {
 	/**
 	 * Run a single job to completion, logging if it runs long.
 	 *
-	 * There is deliberately no hard-abort/cancel here. On the PostgreSQL path
-	 * every job's `run()` bottoms out in a `BunSqlAdapter` call, which already
-	 * enforces a client+server-side timeout (see bun-sql-adapter.ts /
-	 * database-operations.ts), so a job cannot hang the queue indefinitely
-	 * there. The SQLite path is not bounded the same way — `withBusyRetry` in
+	 * There is deliberately no hard-abort/cancel here. A job is not
+	 * time-bounded — `withBusyRetry` in
 	 * BunSqlAdapter can legitimately retry SQLITE_BUSY for up to 10 minutes
 	 * while a separate Worker holds an exclusive lock (e.g. VACUUM) — so a
 	 * SQLite job can still stall the writer queue for that long. That is an

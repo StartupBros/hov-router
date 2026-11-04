@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite";
-import type { SQL } from "bun";
 import { OffThreadReaderUnavailableError } from "../off-thread-reader";
 import {
 	assertExpectedChanges,
@@ -29,109 +28,6 @@ export interface SqlWriter {
 }
 
 /**
- * Convert SQLite-style `?` and `?N` placeholders to PostgreSQL-style `$N` placeholders.
- * Handles both `?` (sequential) and `?1`, `?2` (positional) styles.
- *
- * Three regions are copied through untouched:
- *
- *   1. Single-quoted string literals, so a `?` a caller meant as data is not
- *      renumbered. Escaped quotes (`''`) fall out of the toggle naturally.
- *   2. `--` line comments, up to the end of the line.
- *   3. block comments, up to and including the closing marker.
- *
- * Without 2 and 3, one apostrophe in a comment left the scanner believing a
- * string literal was open, so every later `?` reached PostgreSQL verbatim
- * (a confusing syntax error), and a `?` inside a comment was renumbered,
- * shifting every following `$N`. SQLite never sees the converted form, so
- * the unit tests call this function directly.
- */
-export function convertPlaceholders(sql: string): string {
-	let result = "";
-	let paramIndex = 0;
-	let inString = false;
-
-	for (let i = 0; i < sql.length; i++) {
-		const ch = sql[i];
-
-		// Toggle string literal tracking (handle escaped quotes '')
-		if (ch === "'") {
-			inString = !inString;
-			result += ch;
-			continue;
-		}
-
-		if (inString) {
-			result += ch;
-			continue;
-		}
-
-		// Copy a `--` line comment through verbatim. Runs only outside a string
-		// literal, so a legitimate '--' operand is unaffected.
-		if (ch === "-" && sql[i + 1] === "-") {
-			const nl = sql.indexOf("\n", i);
-			const end = nl === -1 ? sql.length : nl;
-			result += sql.slice(i, end);
-			i = end - 1;
-			continue;
-		}
-
-		// Copy a block comment through verbatim. Nesting is not tracked: a
-		// nested one closes early and fails loudly at Parse time rather than
-		// misnumbering a placeholder.
-		if (ch === "/" && sql[i + 1] === "*") {
-			const close = sql.indexOf("*/", i + 2);
-			const end = close === -1 ? sql.length : close + 2;
-			result += sql.slice(i, end);
-			i = end - 1;
-			continue;
-		}
-
-		if (ch === "?") {
-			// Check for ?N style (e.g., ?1, ?2)
-			let numStr = "";
-			let j = i + 1;
-			while (j < sql.length && sql[j] >= "0" && sql[j] <= "9") {
-				numStr += sql[j];
-				j++;
-			}
-			if (numStr.length > 0) {
-				// ?N -> $N (keep the original number)
-				result += `$${numStr}`;
-				i = j - 1; // skip the digits
-			} else {
-				// ? -> $N (sequential)
-				paramIndex++;
-				result += `$${paramIndex}`;
-			}
-		} else {
-			result += ch;
-		}
-	}
-
-	return result;
-}
-
-/**
- * Client-side timeout (ms) for the PostgreSQL Promise.race guard in
- * withPgTimeout(). The server-side `statement_timeout` (set in
- * DatabaseOperations) must always be configured below this value so PG
- * cancels the query and frees the connection before the client gives up —
- * otherwise the client unblocks while the query (and its pool connection)
- * is still running on the server.
- *
- * Configurable via BETTER_CCFLARE_DB_CLIENT_TIMEOUT (default 8000ms) — the
- * server-side statement_timeout clamp in DatabaseOperations derives its
- * ceiling from this value. See issue #412.
- */
-const requestedClientTimeout = Number(
-	process.env.BETTER_CCFLARE_DB_CLIENT_TIMEOUT,
-);
-export const PG_CLIENT_QUERY_TIMEOUT_MS =
-	Number.isInteger(requestedClientTimeout) && requestedClientTimeout > 0
-		? requestedClientTimeout
-		: 8000;
-
-/**
  * Row batch size (per DELETE statement) used by retention cleanup loops.
  * Configurable via BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE — lower this if rows
  * are large (e.g. TOASTed payload JSON) and batches are hitting the
@@ -149,14 +45,10 @@ export function getCleanupBatchSize(): number {
 export { BatchExpectedChangesError, type BatchStatement };
 
 /**
- * Unified SQL adapter that abstracts over bun:sqlite (sync) and Bun.SQL/PostgreSQL (async).
- *
- * For SQLite: wraps the existing bun:sqlite Database for synchronous operations.
- * For PostgreSQL: wraps Bun.SQL for async operations.
+ * SQL adapter over bun:sqlite, wrapping the existing synchronous Database.
  *
  * The `query`, `get`, `run`, `runWithChanges`, and `runReturningOne` methods
- * return Promises in both cases — for SQLite they resolve synchronously under
- * the hood.
+ * return Promises that resolve synchronously under the hood.
  */
 export class BunSqlAdapter {
 	private readonly offThreadReaders: Partial<
@@ -172,7 +64,6 @@ export class BunSqlAdapter {
 	}
 
 	private readerFor(lane: OffThreadReadLane): SqlReader | undefined {
-		if (!this.isSQLite) return undefined;
 		return (
 			(lane === "interactive"
 				? this.offThreadReaders.interactive
@@ -182,12 +73,11 @@ export class BunSqlAdapter {
 
 	/**
 	 * Route run/runWithChanges/runBatchWithChanges/runReturningOne to an
-	 * off-thread writer (SQLite only, #676). While one is attached the main
+	 * off-thread writer (#676). While one is attached the main
 	 * connection is `PRAGMA query_only`, so a write that bypasses the adapter
 	 * fails loudly (SQLITE_READONLY) instead of racing the writer's order.
 	 */
 	setWriter(writer: SqlWriter | undefined): void {
-		if (!this.isSQLite || !this.sqliteDb) return;
 		this.writer = writer;
 		this.sqliteDb.exec(`PRAGMA query_only = ${writer ? 1 : 0}`);
 	}
@@ -268,104 +158,16 @@ export class BunSqlAdapter {
 		}
 		return this.get<R>(sql, params);
 	}
-	readonly isSQLite: boolean;
+	/** The underlying bun:sqlite Database */
+	private readonly sqliteDb: Database;
 
-	/** The underlying bun:sqlite Database — only set when isSQLite is true */
-	private sqliteDb?: Database;
-	/** The Bun.SQL instance — set for PostgreSQL, and also for SQLite via Bun.SQL URL */
-	private sql?: InstanceType<typeof SQL>;
-
-	constructor(sqliteDb: Database);
-	constructor(sqlClient: InstanceType<typeof SQL>, isSQLite: false);
-	constructor(
-		dbOrSql: Database | InstanceType<typeof SQL>,
-		isSQLiteHint?: boolean,
-	) {
-		// Detect whether we received a bun:sqlite Database or a Bun.SQL instance
-		if (isSQLiteHint === false) {
-			this.isSQLite = false;
-			this.sql = dbOrSql as InstanceType<typeof SQL>;
-		} else {
-			// bun:sqlite Database instance
-			this.isSQLite = true;
-			this.sqliteDb = dbOrSql as Database;
-		}
+	constructor(sqliteDb: Database) {
+		this.sqliteDb = sqliteDb;
 	}
 
-	/** Return the underlying bun:sqlite Database. Only valid when isSQLite is true. */
+	/** Return the underlying bun:sqlite Database. */
 	getSQLiteDb(): Database {
-		if (!this.sqliteDb) {
-			throw new Error("getSQLiteDb() called on a PostgreSQL adapter");
-		}
 		return this.sqliteDb;
-	}
-
-	/** Return the Bun.SQL instance. Only valid when isSQLite is false. */
-	getSQL(): InstanceType<typeof SQL> {
-		if (!this.sql) {
-			throw new Error("getSQL() called on a non-SQL adapter");
-		}
-		return this.sql;
-	}
-
-	/**
-	 * Convert SQL for PostgreSQL if needed (? -> $N placeholders).
-	 */
-	private pgSql(sqlStr: string): string {
-		return this.isSQLite ? sqlStr : convertPlaceholders(sqlStr);
-	}
-
-	/**
-	 * Race a PG query promise against a timeout. Rejects if the query does not
-	 * settle within `ms` milliseconds. Only used for the PostgreSQL path.
-	 */
-	private withPgTimeout<T>(
-		promise: Promise<T>,
-		ms: number,
-		queryHint: string,
-	): Promise<T> {
-		// Client-side belt-and-suspenders guard. The primary protection is the
-		// server-side statement_timeout set at connection time in DatabaseOperations,
-		// which causes PG to cancel the query and release the connection. This race
-		// just ensures the caller unblocks even if the PG cancel is delayed.
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		const timeout = new Promise<never>((_, reject) => {
-			timer = setTimeout(
-				() =>
-					reject(
-						new Error(
-							`PG query timeout after ${ms}ms: ${queryHint.slice(0, 80)}`,
-						),
-					),
-				ms,
-			);
-		});
-		return Promise.race([promise.finally(() => clearTimeout(timer)), timeout]);
-	}
-
-	/**
-	 * Retry once on ERR_POSTGRES_UNSUPPORTED_INTEGER_SIZE — a known Bun native
-	 * PG driver bug (oven-sh/bun#16774) where concurrent queries sharing a
-	 * pooled connection can misattribute a cached statement's column
-	 * metadata, corrupting binary integer decoding (#284). The error is a
-	 * transient decode race, not a data problem, so re-running the query on a
-	 * fresh pool connection self-heals it. The callback re-issues the query
-	 * (rather than re-awaiting the original promise) since the corruption
-	 * happens during the original send/receive cycle and can't be recovered
-	 * from after the fact. Only used for read paths (query/get). Returning DML
-	 * goes through runReturningOne(), which must never retry a possibly committed
-	 * mutation.
-	 */
-	private async withPgIntegerSizeRetry<T>(run: () => Promise<T>): Promise<T> {
-		try {
-			return await run();
-		} catch (err) {
-			const code = (err as { code?: string } | undefined)?.code;
-			if (code !== "ERR_POSTGRES_UNSUPPORTED_INTEGER_SIZE") {
-				throw err;
-			}
-			return run();
-		}
 	}
 
 	/**
@@ -403,116 +205,55 @@ export class BunSqlAdapter {
 	 * Execute a SELECT query returning multiple rows.
 	 */
 	async query<R>(sqlStr: string, params: unknown[] = []): Promise<R[]> {
-		if (this.isSQLite && this.sqliteDb) {
-			const db = this.sqliteDb;
-			return this.withBusyRetry(() =>
-				// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-				db.query<R, any[]>(sqlStr).all(...(params as any[])),
-			);
-		}
-		// PostgreSQL via Bun.SQL unsafe
-		const pgQuery = this.pgSql(sqlStr);
-		const result = await this.withPgIntegerSizeRetry(() =>
-			this.withPgTimeout(
-				// biome-ignore lint/suspicious/noExplicitAny: Bun.SQL accepts various binding types
-				this.sql?.unsafe(pgQuery, params as any[]) as Promise<unknown>,
-				PG_CLIENT_QUERY_TIMEOUT_MS,
-				sqlStr,
-			),
+		const db = this.sqliteDb;
+		return this.withBusyRetry(() =>
+			// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+			db.query<R, any[]>(sqlStr).all(...(params as any[])),
 		);
-		// Bun.SQL's query result is an array-like that also carries extra own
-		// enumerable properties (`count`, `command`, `lastInsertRowid`,
-		// `affectedRows` — the same DML metadata runWithChanges() reads via
-		// `.count`) even for a plain SELECT. Object.keys()/for-in/spread on the
-		// raw result therefore enumerate those alongside the real row indices
-		// (3 rows read back as 7 keys). Normalize to a genuine plain array so
-		// callers see exactly the rows; .length/.map/indexing are unaffected.
-		return Array.from(result as ArrayLike<R>);
 	}
 
 	/**
 	 * Execute a SELECT query returning a single row or null.
 	 */
 	async get<R>(sqlStr: string, params: unknown[] = []): Promise<R | null> {
-		if (this.isSQLite && this.sqliteDb) {
-			const db = this.sqliteDb;
-			const result = await this.withBusyRetry(() =>
-				// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-				db.query<R, any[]>(sqlStr).get(...(params as any[])),
-			);
-			return (result as R) ?? null;
-		}
-		const pgQuery = this.pgSql(sqlStr);
-		const rows = await this.withPgIntegerSizeRetry(() =>
-			this.withPgTimeout(
-				// biome-ignore lint/suspicious/noExplicitAny: Bun.SQL accepts various binding types
-				this.sql?.unsafe(pgQuery, params as any[]) as Promise<unknown>,
-				PG_CLIENT_QUERY_TIMEOUT_MS,
-				sqlStr,
-			),
+		const db = this.sqliteDb;
+		const result = await this.withBusyRetry(() =>
+			// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+			db.query<R, any[]>(sqlStr).get(...(params as any[])),
 		);
-		return ((rows as unknown as R[])[0] ?? null) as R | null;
+		return (result as R) ?? null;
 	}
 
 	/**
 	 * Execute one DML statement with a RETURNING clause and return its row.
-	 *
-	 * Unlike get(), the PostgreSQL path deliberately does not retry
-	 * ERR_POSTGRES_UNSUPPORTED_INTEGER_SIZE. The mutation may already have
-	 * committed before the driver reports a decode error, so issuing the
-	 * statement again could double-apply it. Callers should cast portable
-	 * integer/timestamp values to text and validate them after return.
 	 */
 	async runReturningOne<R>(
 		sqlStr: string,
 		params: unknown[] = [],
 	): Promise<R | null> {
-		if (this.isSQLite && this.sqliteDb) {
-			const db = this.sqliteDb;
-			return this.viaWriter(
-				(writer) => writer.runGet<R>(sqlStr, params),
-				async () => {
-					const result = await this.withBusyRetry(() =>
-						// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-						db.query<R, any[]>(sqlStr).get(...(params as any[])),
-					);
-					return (result as R) ?? null;
-				},
-			);
-		}
-		if (!this.sql) {
-			throw new Error("SQL client not available for returning DML");
-		}
-		const pgQuery = this.pgSql(sqlStr);
-		const rows = await this.withPgTimeout(
-			// biome-ignore lint/suspicious/noExplicitAny: Bun.SQL accepts various binding types
-			this.sql.unsafe(pgQuery, params as any[]) as Promise<unknown>,
-			PG_CLIENT_QUERY_TIMEOUT_MS,
-			sqlStr,
+		const db = this.sqliteDb;
+		return this.viaWriter(
+			(writer) => writer.runGet<R>(sqlStr, params),
+			async () => {
+				const result = await this.withBusyRetry(() =>
+					// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+					db.query<R, any[]>(sqlStr).get(...(params as any[])),
+				);
+				return (result as R) ?? null;
+			},
 		);
-		return ((rows as unknown as R[])[0] ?? null) as R | null;
 	}
 
 	/**
 	 * Execute an INSERT/UPDATE/DELETE query with no return value.
 	 */
 	async run(sqlStr: string, params: unknown[] = []): Promise<void> {
-		if (this.isSQLite && this.sqliteDb) {
-			const db = this.sqliteDb;
-			// run() resolves to void, so the two paths' results are not compared.
-			await this.viaWriter<unknown>(
-				(writer) => writer.run(sqlStr, params),
-				// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-				() => this.withBusyRetry(() => db.run(sqlStr, params as any[])),
-			);
-			return;
-		}
-		const pgQuery = this.pgSql(sqlStr);
-		await this.withPgTimeout(
-			// biome-ignore lint/suspicious/noExplicitAny: Bun.SQL accepts various binding types
-			this.sql?.unsafe(pgQuery, params as any[]) as Promise<unknown>,
-			PG_CLIENT_QUERY_TIMEOUT_MS,
-			sqlStr,
+		const db = this.sqliteDb;
+		// run() resolves to void, so the two paths' results are not compared.
+		await this.viaWriter<unknown>(
+			(writer) => writer.run(sqlStr, params),
+			// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+			() => this.withBusyRetry(() => db.run(sqlStr, params as any[])),
 		);
 	}
 
@@ -523,152 +264,98 @@ export class BunSqlAdapter {
 		sqlStr: string,
 		params: unknown[] = [],
 	): Promise<number> {
-		if (this.isSQLite && this.sqliteDb) {
-			const db = this.sqliteDb;
-			return this.viaWriter(
-				(writer) => writer.run(sqlStr, params),
-				() =>
-					this.withBusyRetry(() => {
-						// `db.run().changes` includes writes made by AFTER triggers. The SQL
-						// changes() function reports only the outer statement, which is the
-						// portable count checked by the PostgreSQL path and repository CAS.
-						// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-						db.run(sqlStr, params as any[]);
-						return (
-							db
-								.query<{ changes: number }, []>("SELECT changes() AS changes")
-								.get()?.changes ?? 0
-						);
-					}),
-			);
-		}
-		const pgQuery = this.pgSql(sqlStr);
-		const result = await this.withPgTimeout(
-			// biome-ignore lint/suspicious/noExplicitAny: Bun.SQL accepts various binding types
-			this.sql?.unsafe(pgQuery, params as any[]) as Promise<unknown>,
-			PG_CLIENT_QUERY_TIMEOUT_MS,
-			sqlStr,
+		const db = this.sqliteDb;
+		return this.viaWriter(
+			(writer) => writer.run(sqlStr, params),
+			() =>
+				this.withBusyRetry(() => {
+					// `db.run().changes` includes writes made by AFTER triggers. The SQL
+					// changes() function reports only the outer statement, which is the
+					// count repository CAS checks.
+					// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+					db.run(sqlStr, params as any[]);
+					return (
+						db
+							.query<{ changes: number }, []>("SELECT changes() AS changes")
+							.get()?.changes ?? 0
+					);
+				}),
 		);
-		// Bun.SQL returns an array-like with a `count` property for DML statements
-		return (result as unknown as { count: number }).count ?? 0;
 	}
 
 	/** Execute a fixed DML batch atomically and return each affected-row count. */
 	async runBatchWithChanges(statements: BatchStatement[]): Promise<number[]> {
-		if (this.isSQLite && this.sqliteDb) {
-			const db = this.sqliteDb;
-			return this.viaWriter(
-				(writer) => writer.batch(statements),
-				() =>
-					this.withBusyRetry(() =>
-						db.transaction(() => {
-							const changesQuery = db.query<{ changes: number }, []>(
-								"SELECT changes() AS changes",
-							);
-							return statements.map((statement, index) => {
-								db.run(statement.sql, (statement.params ?? []) as never[]);
-								const actualChanges = changesQuery.get()?.changes ?? 0;
-								assertExpectedChanges(statement, actualChanges, index);
-								return actualChanges;
-							});
-						})(),
-					),
-			);
-		}
-		if (!this.sql) throw new Error("SQL client not available for transaction");
-		return this.sql.begin(async (tx) => {
-			const changes: number[] = [];
-			for (const [index, statement] of statements.entries()) {
-				const result = await tx.unsafe(
-					this.pgSql(statement.sql),
-					(statement.params ?? []) as never[],
-				);
-				const actualChanges =
-					(result as unknown as { count?: number }).count ?? 0;
-				assertExpectedChanges(statement, actualChanges, index);
-				changes.push(actualChanges);
-			}
-			return changes;
-		});
+		const db = this.sqliteDb;
+		return this.viaWriter(
+			(writer) => writer.batch(statements),
+			() =>
+				this.withBusyRetry(() =>
+					db.transaction(() => {
+						const changesQuery = db.query<{ changes: number }, []>(
+							"SELECT changes() AS changes",
+						);
+						return statements.map((statement, index) => {
+							db.run(statement.sql, (statement.params ?? []) as never[]);
+							const actualChanges = changesQuery.get()?.changes ?? 0;
+							assertExpectedChanges(statement, actualChanges, index);
+							return actualChanges;
+						});
+					})(),
+				),
+		);
 	}
 
 	/**
 	 * Execute a function within a transaction.
-	 * For SQLite: uses bun:sqlite's synchronous transaction API.
-	 * For PostgreSQL: uses Bun.SQL's async begin().
+	 * Uses bun:sqlite's synchronous transaction API.
 	 */
 	async transaction<T>(fn: () => Promise<T>): Promise<T> {
-		if (this.isSQLite && this.sqliteDb) {
-			// bun:sqlite transactions are sync; wrap fn result
-			let _result!: T;
-			const tx = this.sqliteDb.transaction(() => {
-				// Execute async fn synchronously (SQLite Bun.SQL resolves immediately)
-				_result = undefined as unknown as T;
-				// For SQLite we need to handle this differently — run as sync transaction
-				// The fn is expected to use adapter methods which for SQLite execute synchronously
-				return null;
-			});
-			tx();
-			// Actually run fn outside transaction for SQLite compatibility
-			// Note: Real transactional safety for SQLite uses the sync API
-			return fn();
-		}
-		if (!this.sql) {
-			throw new Error("SQL client not available for transaction");
-		}
-		return this.sql.begin(async () => {
-			return fn();
+		// bun:sqlite transactions are sync; wrap fn result
+		let _result!: T;
+		const tx = this.sqliteDb.transaction(() => {
+			// Execute async fn synchronously (SQLite Bun.SQL resolves immediately)
+			_result = undefined as unknown as T;
+			// For SQLite we need to handle this differently — run as sync transaction
+			// The fn is expected to use adapter methods which for SQLite execute synchronously
+			return null;
 		});
+		tx();
+		// Actually run fn outside transaction for SQLite compatibility
+		// Note: Real transactional safety for SQLite uses the sync API
+		return fn();
 	}
 
 	/**
 	 * Execute raw SQL string (for PRAGMAs and DDL).
-	 * For SQLite: uses exec().
-	 * For PostgreSQL: uses sql.unsafe().
+	 * Uses exec().
 	 */
 	async unsafe(sqlStr: string, params?: unknown[]): Promise<unknown> {
-		if (this.isSQLite && this.sqliteDb) {
-			if (params && params.length > 0) {
-				// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
-				return this.sqliteDb.run(sqlStr, params as any[]);
-			}
-			this.sqliteDb.exec(sqlStr);
-			return;
+		if (params && params.length > 0) {
+			// biome-ignore lint/suspicious/noExplicitAny: SQLite params can be any binding type
+			return this.sqliteDb.run(sqlStr, params as any[]);
 		}
-		const pgQuery = params && params.length > 0 ? this.pgSql(sqlStr) : sqlStr;
-		return this.withPgTimeout(
-			// biome-ignore lint/suspicious/noExplicitAny: Bun.SQL accepts various binding types
-			this.sql?.unsafe(pgQuery, params as any[]) as Promise<unknown>,
-			PG_CLIENT_QUERY_TIMEOUT_MS,
-			sqlStr,
-		);
+		this.sqliteDb.exec(sqlStr);
+		return;
 	}
 
 	/**
 	 * Close the database connection.
 	 */
 	async close(): Promise<void> {
-		if (this.isSQLite && this.sqliteDb) {
-			// PRAGMA wal_checkpoint is best-effort cleanup. It can fail with
-			// SQLITE_IOERR_VNODE (errno 6922) when the underlying file or its
-			// -wal/-shm siblings have been unlinked by a concurrent cleanup
-			// path before this close runs (e.g. a test that calls fs.unlinkSync
-			// on /tmp/<test>.db in afterAll before DatabaseFactory.reset()).
-			// close() must not throw — callers like DatabaseFactory.closeAll()
-			// discard the returned promise via `void instance.close()`, so any
-			// rejection here surfaces as an "Unhandled error between tests"
-			// even though every assertion already passed.
-			try {
-				this.sqliteDb.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-			} catch (error) {
-				console.warn(
-					"PRAGMA wal_checkpoint failed during SQLite close:",
-					error,
-				);
-			}
-			this.sqliteDb.close();
-		} else if (this.sql) {
-			await this.sql.end();
+		// PRAGMA wal_checkpoint is best-effort cleanup. It can fail with
+		// SQLITE_IOERR_VNODE (errno 6922) when the underlying file or its
+		// -wal/-shm siblings have been unlinked by a concurrent cleanup
+		// path before this close runs (e.g. a test that calls fs.unlinkSync
+		// on /tmp/<test>.db in afterAll before DatabaseFactory.reset()).
+		// close() must not throw — callers like DatabaseFactory.closeAll()
+		// discard the returned promise via `void instance.close()`, so any
+		// rejection here surfaces as an "Unhandled error between tests"
+		// even though every assertion already passed.
+		try {
+			this.sqliteDb.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+		} catch (error) {
+			console.warn("PRAGMA wal_checkpoint failed during SQLite close:", error);
 		}
+		this.sqliteDb.close();
 	}
 }

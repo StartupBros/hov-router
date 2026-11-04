@@ -904,8 +904,8 @@ export class ComboRepository extends BaseRepository<Combo> {
 	 * Replace whole `accounts.model_mappings` values in one adapter batch: a
 	 * routing-policy revision compare-and-set, then one write per account that
 	 * only lands while the row still holds the caller's previewed raw value.
-	 * `IS NOT DISTINCT FROM` keeps that comparison NULL-safe on SQLite and
-	 * PostgreSQL alike, where `=` would never match a NULL row. Any stale guard
+	 * `IS NOT DISTINCT FROM` keeps that comparison NULL-safe, where
+	 * `=` would never match a NULL row. Any stale guard
 	 * rolls back every statement; nothing is partially written.
 	 */
 	async applyGuardedModelMappingsWrites(
@@ -988,7 +988,7 @@ export class ComboRepository extends BaseRepository<Combo> {
 		};
 	}
 
-	/** Apply a fixed set of policy mutations atomically on SQLite and PostgreSQL. */
+	/** Apply a fixed set of policy mutations atomically. */
 	async applyFamilyPolicyChanges(
 		changes: ComboFamilyPolicyChanges,
 	): Promise<ComboFamilyPolicyApplyResult> {

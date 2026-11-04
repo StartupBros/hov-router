@@ -32,6 +32,8 @@ tags:
   - baseline-diff
 ---
 
+> **Superseded in part (2026-11-03):** PostgreSQL support was removed and no test suite is gated on `DATABASE_URL` any more, so the live-PostgreSQL steps below no longer apply. The general lesson (typecheck excludes test files) stands. Body kept as history.
+
 # A green typecheck does not prove callers are safe — the root script excludes test files
 
 ## Context

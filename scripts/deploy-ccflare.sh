@@ -470,7 +470,7 @@ sudo cp --preserve=all "$PIN" "$PIN_BACKUP"
 # the proposed pin to the file revision that rollback will restore and that the
 # compare-and-swap installation below requires to remain current.
 SCHEMA_DIGEST="$(node - "$BUILD_SOURCE_ROOT" <<'NODE'
-const fs=require("node:fs"),crypto=require("node:crypto"),root=process.argv[2],h=crypto.createHash("sha256");for(const p of ["packages/database/src/migrations.ts","packages/database/src/migrations-pg.ts"]){const b=fs.readFileSync(root+"/"+p);h.update(p+"\0"+b.length+"\0");h.update(b);}process.stdout.write(h.digest("hex"));
+const fs=require("node:fs"),crypto=require("node:crypto"),root=process.argv[2],h=crypto.createHash("sha256");for(const p of ["packages/database/src/migrations.ts"]){const b=fs.readFileSync(root+"/"+p);h.update(p+"\0"+b.length+"\0");h.update(b);}process.stdout.write(h.digest("hex"));
 NODE
 )"
 if [[ -f "$HANDOFF_DIR/runtime.json" ]] && backend_handoff_eligible "$HANDOFF_DIR/runtime.json" "$DEST_BIN" "$RUNNER_SCRIPT" "$GUARD_SCRIPT" "$GUARD_POLICY" "$GUARD_TIMING" "$SOURCE_TRANSACTION" "$SCHEMA_DIGEST"; then

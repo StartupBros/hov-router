@@ -178,7 +178,7 @@ inspection.
 
 **Cooldown state is in memory only.** What it protects is "did we send this in
 the last day"; a restart losing it costs a 1-in-500 chance of an early repeat,
-which does not justify a schema migration (and its PostgreSQL port).
+which does not justify a schema migration.
 
 ### Why the Prompts Are Varied (Do Not "Optimise" This)
 

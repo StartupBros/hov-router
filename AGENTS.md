@@ -120,18 +120,12 @@ Check if recent commits already partially or fully address the issue. Rate limit
 - Custom: Set `BETTER_CCFLARE_DB_PATH=/path/to/dev.db` in env or .env
 - Query: `sqlite3 ~/.config/better-ccflare/better-ccflare.db "SELECT name, provider, custom_endpoint FROM accounts;"`
 
-## ⚠️ CRITICAL: Database Migrations — Port to PostgreSQL
+## Database migrations
 
-**Every migration added to `packages/database/src/migrations.ts` MUST also be ported to `packages/database/src/migrations-pg.ts`.**
-
-When adding a new column or table to SQLite:
-1. Add it to `ensureSchema()` in `migrations.ts` (SQLite CREATE TABLE)
-2. Add it to `runMigrations()` in `migrations.ts` (SQLite ALTER TABLE for existing DBs)
-3. Add it to `ensureSchemaPg()` in `migrations-pg.ts` (PG CREATE TABLE for new installs)
-4. Add an entry to the `columnsToAdd` array in `runMigrationsPg()` in `migrations-pg.ts` (PG ALTER TABLE for existing DBs)
-5. If there's a backfill/data migration in SQLite, add the equivalent `adapter.unsafe(UPDATE ...)` call in `runMigrationsPg()` as well.
-
-New tables also need to be created in `ensureSchemaPg()` AND in `runMigrationsPg()` (using `CREATE TABLE IF NOT EXISTS` so upgrades work).
+SQLite is the only backend. When adding a column or table in `packages/database/src/migrations.ts`:
+1. Add it to `ensureSchema()` (CREATE TABLE for new installs).
+2. Add it to `runMigrations()` (ALTER TABLE for existing DBs).
+3. Put any backfill/data migration in `runMigrations()` as well.
 
 ## Test-Driven Development
 When creating new functionality: write tests first, then implement, then run tests. This ensures the implementation matches the specs/request before and after coding.
@@ -143,7 +137,7 @@ Always run: `bun run lint && bun run typecheck && bun run format`
 `**/__tests__` and `**/*.test.ts`, so stale call sites in tests compile green and fail
 only when that suite actually runs. After changing a shared repository/facade signature,
 grep its call sites yourself (`grep -a`, not plain `grep` — see the doc) and run the
-affected suites, including any gated behind `DATABASE_URL`. Details:
+affected suites. Details:
 [docs/solutions/workflow-issues/typecheck-does-not-cover-test-call-sites.md](docs/solutions/workflow-issues/typecheck-does-not-cover-test-call-sites.md)
 
 Run affected suites one file at a time (`bun test <file>`). A full `bun test` batch shows cross-file mock-isolation failures that do not occur in isolation.

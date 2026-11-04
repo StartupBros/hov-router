@@ -9,9 +9,6 @@ import { BaseRepository } from "./base.repository";
 
 const log = new Logger("AccountRepository");
 
-/** PostgreSQL advisory-lock key that serializes public-value publishes. */
-const PUBLIC_VALUE_PUBLISH_LOCK_KEY = 536_536;
-
 /**
  * Result of {@link AccountRepository.markAccountRateLimited}. `applied`
  * distinguishes an actually-persisted write from one the 529 forward guard
@@ -273,7 +270,7 @@ export class AccountRepository extends BaseRepository<Account> {
 	 * `rate_limited_until` / `rate_limited_reason` only advance when the new
 	 * `until` is strictly later than whatever is already persisted (a
 	 * portable MAX-style clamp, expressed as CASE so it works identically on
-	 * SQLite and PostgreSQL). This guards against a stale/delayed concurrent
+	 * SQLite). This guards against a stale/delayed concurrent
 	 * writer (e.g. a slow retry of an earlier observation) landing after a
 	 * fresher, longer cooldown and shortening it back down. The reason stays
 	 * paired with whichever `until` value wins the clamp, never overwritten
@@ -326,7 +323,7 @@ export class AccountRepository extends BaseRepository<Account> {
 			// while the DB silently keeps the old one. This mirrors the in-process
 			// guard but covers the cross-request DB race that guard can't see. A
 			// plain WHERE predicate (not GREATEST/MAX) so the same SQL runs
-			// unchanged on both SQLite and PostgreSQL.
+			// unchanged.
 			const changes = await this.runWithChanges(
 				`UPDATE accounts
            SET rate_limited_until      = ?,
@@ -553,10 +550,7 @@ export class AccountRepository extends BaseRepository<Account> {
 	 * `IS DISTINCT FROM` (rather than `!=`) is required so a legacy row that
 	 * is paused with a NULL reason is still treated as resumable instead of
 	 * being NULL-swallowed by a plain inequality comparison. `IS DISTINCT
-	 * FROM` is NULL-safe on both backends: SQLite >= 3.39 and PostgreSQL.
-	 * Plain `IS NOT` is SQLite-only syntax (a unary null-check operator
-	 * there) and is a hard syntax error against PostgreSQL, so it cannot be
-	 * used here now that this guard also runs against the PG adapter.
+	 * FROM` is NULL-safe on SQLite >= 3.39.
 	 *
 	 * Returns `resumed: true` when this call cleared the pause, or
 	 * `resumed: false` with the account's current `pause_reason` (null when
@@ -694,24 +688,10 @@ export class AccountRepository extends BaseRepository<Account> {
 				value.label,
 			],
 		};
-		if (this.adapter.isSQLite) {
-			// SQLite admits one writer at a time, and an autocommit UPDATE takes
-			// the write lock before its subqueries read, so they see every
-			// committed publish.
-			return (await this.runWithChanges(publish.sql, publish.params)) > 0;
-		}
-		// Under READ COMMITTED two publishes of different rows do not block each
-		// other, so both COUNT subqueries can see the pre-publish roster and the
-		// cap overshoots. The transaction-scoped lock queues every publish on
-		// the same reserved connection as its UPDATE, whose fresh statement
-		// snapshot then sees the previous publish. Released at commit.
-		const [, changes] = await this.adapter.runBatchWithChanges([
-			{
-				sql: `SELECT pg_advisory_xact_lock(${PUBLIC_VALUE_PUBLISH_LOCK_KEY})`,
-			},
-			publish,
-		]);
-		return (changes ?? 0) > 0;
+		// SQLite admits one writer at a time, and an autocommit UPDATE takes
+		// the write lock before its subqueries read, so they see every
+		// committed publish.
+		return (await this.runWithChanges(publish.sql, publish.params)) > 0;
 	}
 
 	async setBillingType(

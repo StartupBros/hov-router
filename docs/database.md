@@ -2,25 +2,16 @@
 
 ## Overview
 
-HoV Router supports two database backends:
+HoV Router stores its data in SQLite (via `bun:sqlite`), a zero-configuration embedded database. SQLite is the only backend. PostgreSQL support was removed; a PostgreSQL `DATABASE_URL` is refused at startup. See [PostgreSQL support removed](hov-router-migration.md#postgresql-support-removed).
 
-- **SQLite** (default) — zero-configuration, embedded, great for single-node deployments
-- **PostgreSQL** — set `DATABASE_URL` to a `postgresql://` connection string; required for Kubernetes / multi-pod deployments where pods cannot safely share a SQLite file
+### Database file
 
-Both backends use [Bun's built-in SQL client (`Bun.SQL`)](https://bun.sh/docs/api/sql) — a zero-dependency, first-party unified API that covers SQLite and PostgreSQL with the same interface. No external npm database drivers are required.
-
-### Backend Selection
-
-| Backend | Trigger | Notes |
-|---------|---------|-------|
-| SQLite | `DATABASE_URL` not set (or starts with `sqlite://`) | Default; database file at `~/.config/better-ccflare/better-ccflare.db` or `BETTER_CCFLARE_DB_PATH` |
-| PostgreSQL | `DATABASE_URL` starts with `postgres://` or `postgresql://` | Shared database for multi-pod; full schema created on first start |
+The database file is `~/.config/better-ccflare/better-ccflare.db` (platform config directory) unless `BETTER_CCFLARE_DB_PATH` points elsewhere. `DATABASE_URL` does not choose the file and is not used.
 
 ### Key Features
 - **Zero-configuration** deployment with SQLite
-- **PostgreSQL support** for Kubernetes multi-pod deployments
-- **Automatic migrations** to handle schema evolution on both backends
-- **Unified async API** using `Bun.SQL` — same code path for SQLite and PostgreSQL
+- **Automatic migrations** to handle schema evolution
+- **Async API** over `bun:sqlite` through `BunSqlAdapter`
 - **Comprehensive indexing** for fast query performance
 - **Foreign key constraints** for data integrity
 - **Asynchronous write operations** for improved performance
@@ -246,21 +237,11 @@ The database uses an incremental migration system that:
 
 ### Migration Process
 
-**SQLite:**
 ```typescript
 // Migration execution order (sync, at startup):
 1. ensureSchema(adapter)      // Creates base tables via bun:sqlite
 2. runMigrations(adapter)     // Applies incremental column additions
 ```
-
-**PostgreSQL:**
-```typescript
-// Migration execution order (async, at startup via getInstanceAsync()):
-1. ensureSchemaPg(adapter)    // CREATE TABLE IF NOT EXISTS for all tables
-2. runMigrationsPg(adapter)   // information_schema column checks + ALTER TABLE
-```
-
-Schema inspection for PostgreSQL uses `information_schema.columns` (ANSI standard) rather than SQLite's `PRAGMA table_info`, so the migration code is completely separate and portable.
 
 Key migrations include:
 - Rate limiting columns (`rate_limited_until`, `rate_limit_status`, etc.)
@@ -276,14 +257,13 @@ Key migrations include:
 ### Core Components
 
 #### BunSqlAdapter
-Thin wrapper around `Bun.SQL` (for PostgreSQL) and `bun:sqlite` (for SQLite) that provides a unified async interface:
+Thin wrapper around `bun:sqlite` that provides an async interface:
 - `query<R>(sql, params)` — SELECT returning multiple rows
 - `get<R>(sql, params)` — SELECT returning one row or `null`
 - `run(sql, params)` — INSERT/UPDATE/DELETE with no return value
 - `runWithChanges(sql, params)` — INSERT/UPDATE/DELETE returning affected-row count
-- `transaction(fn)` — wraps `fn` in a database transaction (async for both backends)
+- `transaction(fn)` — transaction helper (async)
 - `unsafe(sql)` — raw DDL / PRAGMA execution
-- `isSQLite: boolean` — flag for backend-specific conditional logic
 
 #### DatabaseOperations
 The main database access layer that implements both `StrategyStore` and `Disposable` interfaces:
@@ -291,13 +271,10 @@ The main database access layer that implements both `StrategyStore` and `Disposa
 - All public methods are `async` and return Promises
 - `getAdapter()` — returns the `BunSqlAdapter` for direct SQL access
 - Supports runtime configuration injection for session management
-- Works with both SQLite and PostgreSQL via `BunSqlAdapter`
 
 #### DatabaseFactory
 Singleton pattern implementation for global database instance management:
-- `getInstance()` — synchronous (SQLite only, for CLI usage)
-- `getInstanceAsync()` — async factory that also runs PostgreSQL schema initialization
-- Detects `DATABASE_URL` env var to select backend
+- `getInstance()` — opens the SQLite database; refuses a PostgreSQL `DATABASE_URL` before opening any file
 - Integrates with the dependency injection container
 
 #### AsyncDbWriter
@@ -334,7 +311,7 @@ const db = container.resolve<DatabaseOperations>(SERVICE_KEYS.Database);
 
 ## Database Location and Configuration
 
-### SQLite (default)
+### SQLite
 
 The database file is stored in a platform-specific configuration directory:
 
@@ -348,41 +325,13 @@ You can override the default location using the `BETTER_CCFLARE_DB_PATH` environ
 export BETTER_CCFLARE_DB_PATH=/custom/path/to/database.db
 ```
 
-### PostgreSQL
+`DATABASE_URL` is not used to choose the file. A `DATABASE_URL` starting with `postgres://` or `postgresql://` is refused at startup; see [PostgreSQL support removed](hov-router-migration.md#postgresql-support-removed). Any other value is ignored.
 
-Set `DATABASE_URL` to use PostgreSQL instead of SQLite:
-
-```bash
-export DATABASE_URL=postgresql://ccflare_user:secret@localhost:5432/ccflare
-```
-
-The full schema is created automatically on first startup (`CREATE TABLE IF NOT EXISTS ...`). Column migrations are applied automatically using `information_schema` checks, so upgrading an existing deployment is seamless.
-
-**When to use PostgreSQL:**
-- Kubernetes deployments with multiple replicas (pods cannot share a SQLite file)
-- Environments where you already operate a PostgreSQL cluster
-- High-write-concurrency scenarios benefiting from PostgreSQL connection pooling
-
-#### PostgreSQL Connection Tuning
-
-These environment variables only apply when `DATABASE_URL` points to PostgreSQL:
+### Cleanup batch size
 
 | Variable | Default | Description |
 |----------|---------|--------------|
-| `BETTER_CCFLARE_DB_POOL_MAX` | `10` | Maximum number of pooled connections |
-| `BETTER_CCFLARE_DB_IDLE_TIMEOUT` | `0` (disabled) | Seconds before an idle pooled connection is closed |
-| `BETTER_CCFLARE_DB_STATEMENT_TIMEOUT` | `7000` | Server-side `statement_timeout` in milliseconds. Clamped to stay below the client-side query timeout (see `BETTER_CCFLARE_DB_CLIENT_TIMEOUT`, default 8000ms) so PostgreSQL cancels and frees the connection before the client gives up; invalid or out-of-range values fall back to the default |
-| `BETTER_CCFLARE_DB_CLIENT_TIMEOUT` | `8000` | Client-side query timeout in milliseconds for PostgreSQL — the `statement_timeout` ceiling above is derived from this value minus 1000ms. Raising this also raises that ceiling (#412) |
-| `BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE` | `200` | Row batch size per DELETE statement during retention cleanup — lower this if rows are large (e.g. big JSON payloads) and cleanup batches are timing out (#412) |
-| `BETTER_CCFLARE_DB_PG_PREPARE` | `false` | Set to `true` to enable named prepared statement caching. Left disabled by default to avoid a known class of bugs in Bun's native PostgreSQL driver ([oven-sh/bun#16774](https://github.com/oven-sh/bun/issues/16774)) where concurrent queries sharing a pooled connection can corrupt binary integer decoding under load |
-
-```bash
-export BETTER_CCFLARE_DB_POOL_MAX=20
-export BETTER_CCFLARE_DB_IDLE_TIMEOUT=30
-export BETTER_CCFLARE_DB_STATEMENT_TIMEOUT=5000
-export BETTER_CCFLARE_DB_CLIENT_TIMEOUT=8000
-export BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE=200
-```
+| `BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE` | `200` | Row batch size per DELETE statement during retention cleanup. Lower it if rows are large (e.g. big JSON payloads) and cleanup batches are slow (#412) |
 
 ### Runtime Configuration
 
@@ -476,10 +425,6 @@ The database includes comprehensive performance indexes that are automatically a
 
 ## Performance Considerations
 
-### PostgreSQL
-
-When using `DATABASE_URL`, Bun.SQL manages a built-in connection pool automatically. No additional configuration is required. PostgreSQL is well-suited for high-concurrency write loads and Kubernetes deployments where multiple pods share a single database.
-
 ### SQLite Optimization
 
 The database is automatically configured with the following optimizations:
@@ -521,7 +466,7 @@ The server performs automatic cleanup once at startup, then hourly for the lifet
 
 You can change retention windows via environment variables, the config file, or the dashboard (Overview → Data Retention). A manual "Clean up now" action is also available for use between the hourly ticks.
 
-Deletes are batched (200 rows per statement by default, looped until exhausted) rather than issued as one unbounded `DELETE`, so cleanup keeps working on tables large enough to exceed PostgreSQL's `statement_timeout` (see `BETTER_CCFLARE_DB_STATEMENT_TIMEOUT` above) instead of failing permanently. The batch size is configurable via `BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE` — lower it further if rows are large (e.g. TOASTed JSON payloads) and batches are still timing out (#412). Batches on `usage_snapshots` — which has no unique surrogate key — bound each statement by physical row identity (SQLite `rowid` / PostgreSQL `ctid`) rather than by its natural key, so a batch of duplicate-keyed rows can't expand into an unbounded delete.
+Deletes are batched (200 rows per statement by default, looped until exhausted) rather than issued as one unbounded `DELETE`, so cleanup keeps working on tables large enough that a single delete would hold the write lock for too long. The batch size is configurable via `BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE` — lower it further if rows are large (e.g. big JSON payloads) and batches are still slow (#412). Batches on `usage_snapshots` — which has no unique surrogate key — bound each statement by physical row identity (SQLite `rowid`) rather than by its natural key, so a batch of duplicate-keyed rows can't expand into an unbounded delete.
 
 1. **Payload Storage**: Batched cleanup of old payloads, plus orphaned payloads left behind by deleted requests:
 ```sql
@@ -546,13 +491,8 @@ DELETE FROM requests WHERE id IN (
 
 3. **Usage History**: Batched cleanup of old usage snapshots, bounded by physical row identity:
 ```sql
--- SQLite
 DELETE FROM usage_snapshots WHERE rowid IN (
   SELECT rowid FROM usage_snapshots WHERE timestamp < ? LIMIT 200
-);
--- PostgreSQL
-DELETE FROM usage_snapshots WHERE ctid IN (
-  SELECT ctid FROM usage_snapshots WHERE timestamp < ? LIMIT 200
 );
 ```
 
@@ -752,8 +692,6 @@ chmod 700 ~/.config/better-ccflare
    - Custom routing rules
    - Performance tuning parameters
 
-10. **Connection Pooling**: Built-in for PostgreSQL via `Bun.SQL`; not applicable for SQLite.
+10. **Streaming Backups**: Implement streaming backups to cloud storage providers.
 
-11. **Streaming Backups**: Implement streaming backups to cloud storage providers.
-
-12. **Request Archival**: Implement automatic archival of old request data to separate tables or external storage.
+11. **Request Archival**: Implement automatic archival of old request data to separate tables or external storage.

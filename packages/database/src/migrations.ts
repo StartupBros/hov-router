@@ -656,9 +656,8 @@ export function ensureSchema(db: Database): void {
 	);
 
 	// Per-account time-range queries (usage-window aggregation, account analytics).
-	// Mirrors idx_requests_account_timestamp in migrations-pg.ts — PG gained it in
-	// runMigrationsPg long ago; SQLite was missing the equivalent until the
-	// usage-windows live-value endpoint made the gap load-bearing (#252).
+	// Added when the usage-windows live-value endpoint made the missing
+	// index load-bearing (#252).
 	db.run(
 		`CREATE INDEX IF NOT EXISTS idx_requests_account_timestamp ON requests(account_used, timestamp DESC)`,
 	);
@@ -1155,7 +1154,7 @@ export function ensureSchema(db: Database): void {
  *      intuition that the newer row represents the operator's "current"
  *      intent for that account name).
  *   4. Lexicographically smallest logical account `id` (final tiebreak,
- *      stable across SQLite and PostgreSQL when all three timestamps tie).
+ *      stable when all three timestamps tie).
  *
  * For each tuple group the non-survivor rows are deleted only after their
  * state has been merged into the survivor and every dependent row

@@ -2387,7 +2387,7 @@ export class UsageCollector {
 
 	/**
 	 * Take and clear the current buffer, then write each entry sequentially
-	 * (await one at a time) so PostgreSQL never sees unbounded concurrency
+	 * (await one at a time) so the database never sees unbounded concurrency
 	 * from this path. Failures are best effort: log and continue with the
 	 * remaining entries, never throw.
 	 */
@@ -2557,7 +2557,7 @@ let _usageCollector: UsageCollector | null = null;
  *
  * Awaits schema setup/migrations (initializeAsync is idempotent — safe to
  * call on an already-initialized shared instance) before returning, so no
- * caller can enqueue a write against a PostgreSQL database that hasn't been
+ * caller can enqueue a write against a database that hasn't been
  * migrated yet.
  *
  * The `onSummary` callback is called once per completed request and should

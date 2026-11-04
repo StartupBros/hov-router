@@ -429,8 +429,7 @@ export class CacheFlightRecorderRepository extends BaseRepository<Timeline> {
 	): Promise<number> {
 		// Turn timestamps are `new Date(...).toISOString()`: UTC Zulu
 		// ISO-8601, which sorts lexicographically the same as chronologically,
-		// so a plain string comparison works identically on SQLite and
-		// PostgreSQL without any date parsing in SQL.
+		// so a plain string comparison works without any date parsing in SQL.
 		const isoCutoff = new Date(cutoffTs).toISOString();
 		const [expired] = await this.adapter.runBatchWithChanges([
 			{
@@ -512,11 +511,9 @@ export class CacheFlightRecorderRepository extends BaseRepository<Timeline> {
 			{
 				// A partition can look like a zero-turn orphan while a
 				// concurrent live append is still attaching a fresh turn to
-				// it: on PostgreSQL the insert-or-verify batch and this
-				// cleanup run as separate transactions (bun-sql-adapter.ts
-				// runBatchWithChanges), so this DELETE's snapshot can miss
-				// the appending transaction's uncommitted turn row under
-				// READ COMMITTED.
+				// it: the insert-or-verify batch and this cleanup are separate
+				// statements (bun-sql-adapter.ts runBatchWithChanges), so this
+				// DELETE can run before the appending turn row is visible.
 				//
 				// Gating on created_at alone is not enough: the registry
 				// verify UPDATE is a no-op guard (`id = id` historically, now
@@ -532,9 +529,8 @@ export class CacheFlightRecorderRepository extends BaseRepository<Timeline> {
 				// exists to close.
 				//
 				// last_verified_at lives on the SAME row this DELETE
-				// targets, so PostgreSQL's EvalPlanQual recheck (after a
-				// concurrent append's FK KEY SHARE lock unblocks this
-				// DELETE) observes the freshly committed refresh — closing
+				// targets, so this DELETE observes the freshly committed
+				// refresh — closing
 				// the gap a created_at-only guard cannot, since a live
 				// append always writes recordedAt strictly after this pass's
 				// own cutoffTs. created_at <= last_verified_at always holds
@@ -545,7 +541,7 @@ export class CacheFlightRecorderRepository extends BaseRepository<Timeline> {
 				// COALESCE because the column is nullable: the upgrade path
 				// ALTERs it on before backfilling, the fresh-install schema
 				// leaves it nullable so a rolled-back prior binary can still
-				// insert, and on PostgreSQL a mid-rolling-deploy instance on
+				// insert, and a mid-rolling-deploy instance on
 				// the old binary can write a row after this pass's backfill
 				// already ran. `NULL < cutoff` is NULL, not true, so without
 				// the fallback any such row would never satisfy this
@@ -596,9 +592,8 @@ export class CacheFlightRecorderRepository extends BaseRepository<Timeline> {
 			partition.unavailableDimensions,
 		);
 		const sealUnavailable = JSON.stringify(receipt.unavailableDimensions);
-		// PostgreSQL cannot infer a bare bind parameter's type in `? IS NULL`.
-		// COALESCE with the typed column preserves the cross-dialect null-safe
-		// comparison while giving each nullable bind an explicit type context.
+		// COALESCE with the typed column keeps the null-safe comparison
+		// while giving each nullable bind an explicit type context.
 		const nullableEquals = (column: string) =>
 			`((${column} IS NULL AND COALESCE(?, ${column}) IS NULL) OR ${column} = ?)`;
 

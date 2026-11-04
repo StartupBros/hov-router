@@ -121,7 +121,9 @@ describe("PostgreSQL DATABASE_URL refusal", () => {
 		const configHome = join(dir, "config");
 		const legacyDir = join(configHome, "ccflare");
 		mkdirSync(legacyDir, { recursive: true });
-		const legacy = new Database(join(legacyDir, "ccflare.db"), { create: true });
+		const legacy = new Database(join(legacyDir, "ccflare.db"), {
+			create: true,
+		});
 		legacy.exec("CREATE TABLE legacy_marker (id INTEGER)");
 		legacy.close();
 		writeFileSync(join(legacyDir, "ccflare.db-shm"), "");

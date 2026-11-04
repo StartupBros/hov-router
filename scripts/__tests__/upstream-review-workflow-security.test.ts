@@ -80,16 +80,14 @@ jobs:
 		);
 	});
 
-	test("preserves the managed-routing PostgreSQL gate and exact Bun pin", async () => {
+	test("preserves the managed-routing foundation gate and exact Bun pin", async () => {
 		const workflow = await Bun.file(
 			join(workflowsDir, "managed-routing-postgres.yml"),
 		).text();
 
 		expect(workflow).toContain("managed-routing-foundation:");
-		expect(workflow).toContain("image: postgres:16");
-		expect(workflow).toContain(
-			"DATABASE_URL: postgresql://postgres:postgres@localhost:5432/better_ccflare_test",
-		);
+		expect(workflow).not.toContain("services:");
+		expect(workflow).not.toContain("image: postgres");
 		expect(workflow).toContain("bun-version-file: .bun-version");
 		expect(workflow).toContain(
 			`run: test "$(bun --version)" = "$(tr -d '[:space:]' < .bun-version)"`,

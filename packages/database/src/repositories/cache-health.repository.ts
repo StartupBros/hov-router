@@ -13,10 +13,10 @@ const DAY_MS = 24 * 60 * 60_000;
 const MAX_TOKENS = Number.MAX_SAFE_INTEGER;
 
 /** Central stored-usage normalization; only protocol-specific writes may default to zero. */
-export function cacheHealthBucketQuery(sqlite: boolean): string {
-	const real = sqlite ? "REAL" : "DOUBLE PRECISION";
+export function cacheHealthBucketQuery(): string {
+	const real = "REAL";
 	const valid = (column: string) =>
-		`(${sqlite ? `typeof(${column}) IN ('integer', 'real') AND ` : ""}${column} >= 0 AND ${column} <= ${MAX_TOKENS} AND ${column} = CAST(${column} AS BIGINT))`;
+		`(typeof(${column}) IN ('integer', 'real') AND ${column} >= 0 AND ${column} <= ${MAX_TOKENS} AND ${column} = CAST(${column} AS BIGINT))`;
 	return `WITH source AS (
 		SELECT r.account_used, r.path, r.success, r.status_code,
 			r.stream_terminal_state, r.internal_origin, r.cache_health_native,
@@ -139,7 +139,7 @@ export class CacheHealthRepository extends BaseRepository<CacheHealthState> {
 		)
 			throw new Error("Invalid cache health query window");
 		const rows = await this.queryOffThread<BucketRow>(
-			cacheHealthBucketQuery(this.adapter.isSQLite),
+			cacheHealthBucketQuery(),
 			[startMs, endMs],
 		);
 		return rows.map((row) => {
@@ -289,8 +289,7 @@ export class CacheHealthRepository extends BaseRepository<CacheHealthState> {
 		const active = state.reuse.incident || state.telemetry.incident ? 1 : 0;
 		try {
 			await this.adapter.runBatchWithChanges([
-				// Lock account generations until this batch commits on PG as well as
-				// SQLite. A separate preflight SELECT would race deletion/recreation.
+				// Lock account generations until this batch commits. A separate preflight SELECT would race deletion/recreation.
 				// Stable ordering avoids deadlocks across provider/account evaluations.
 				...unique.map((c) => ({
 					sql: "UPDATE accounts SET created_at = created_at WHERE id = ? AND created_at = ?",

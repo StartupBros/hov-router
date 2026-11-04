@@ -657,7 +657,7 @@ graph TB
     
     subgraph "Shared Data Layer"
         REDIS[(Redis<br/>Session Store)]
-        PG[(PostgreSQL<br/>Main Database)]
+        DB[(Per-instance<br/>SQLite database)]
         S3[S3-Compatible<br/>Object Storage]
     end
     
@@ -670,26 +670,26 @@ graph TB
     LB --> APP3
     
     APP1 --> REDIS
-    APP1 --> PG
+    APP1 --> DB
     APP1 --> S3
     APP1 --> CONSUL
     
     APP2 --> REDIS
-    APP2 --> PG
+    APP2 --> DB
     APP2 --> S3
     APP2 --> CONSUL
     
     APP3 --> REDIS
-    APP3 --> PG
+    APP3 --> DB
     APP3 --> S3
     APP3 --> CONSUL
 ```
 
 ### Database Considerations
 
-HoV Router uses SQLite by default, which is suitable for single-instance deployments. For Kubernetes deployments where the pod's local disk isn't durable across restarts, set `DATABASE_URL` to use PostgreSQL instead (see [PostgreSQL Support for Kubernetes Deployments](#postgresql-support-for-kubernetes-deployments) above). This does not permit running multiple replicas — see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database) below.
+HoV Router stores its data in SQLite, which suits single-instance deployments. On Kubernetes, keep the database file on a persistent volume so it survives a restart or reschedule (see [Kubernetes Deployment](#kubernetes-deployment)). This does not permit running multiple replicas — see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database) below. PostgreSQL is not supported; see [PostgreSQL support removed](hov-router-migration.md#postgresql-support-removed).
 
-#### SQLite Optimization (Default)
+#### SQLite Optimization
 
 ```sql
 -- These optimizations are automatically applied by HoV Router
@@ -700,25 +700,9 @@ PRAGMA temp_store = MEMORY;
 PRAGMA mmap_size = 268435456;
 ```
 
-### PostgreSQL Support for Kubernetes Deployments
-
-SQLite is unsuitable for Kubernetes deployments because a pod's local disk is not guaranteed to survive a restart or reschedule. HoV Router has first-class PostgreSQL support via `Bun.SQL` — set the `DATABASE_URL` environment variable and the schema is created automatically on startup. Note this solves *durability*, not *concurrency*: HoV Router is still [single-instance-per-database](#multi-instance-deployment-single-instance-per-database), so this is for a single pod (`replicas: 1`), not a multi-pod fleet sharing one database.
-
-```bash
-# Create a PostgreSQL database
-psql -U postgres -c "CREATE DATABASE ccflare;"
-psql -U postgres -c "CREATE USER ccflare_user WITH PASSWORD 'secret';"
-psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ccflare TO ccflare_user;"
-
-# Set DATABASE_URL — that's all that's needed
-export DATABASE_URL=postgresql://ccflare_user:secret@postgres-host:5432/ccflare
-```
-
-The full schema (`accounts`, `requests`, `request_payloads`, `oauth_sessions`, `agent_preferences`, `api_keys`, `model_translations`, `strategies`) is created with `CREATE TABLE IF NOT EXISTS` on first start. Column migrations use `information_schema` checks and are applied automatically on every startup.
-
 ### Kubernetes Deployment
 
-> **Important**: HoV Router is [single-instance-per-database](#multi-instance-deployment-single-instance-per-database) — run exactly **one** replica per `DATABASE_URL`. Use PostgreSQL (not SQLite) so the pod's state survives a restart or reschedule, but do not scale this deployment horizontally; two pods sharing one database will silently diverge (as of [PR #376](https://github.com/tombii/better-ccflare/pull/376), the startup guard will warn — but not refuse by default — when this happens). To scale, run separate `DATABASE_URL`-per-deployment stacks with disjoint account sets (see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database)).
+> **Important**: HoV Router is [single-instance-per-database](#multi-instance-deployment-single-instance-per-database) — run exactly **one** replica per database. Put the SQLite file on a persistent volume so the pod's state survives a restart or reschedule, and do not scale this deployment horizontally. To scale, run separate deployments, each with its own database and a disjoint account set (see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database)).
 
 ```yaml
 # better-ccflare-deployment.yaml
@@ -729,7 +713,7 @@ metadata:
   labels:
     app: better-ccflare
 spec:
-  replicas: 1 # single-instance-per-database — do not scale this without a separate DATABASE_URL
+  replicas: 1 # single-instance-per-database — do not scale this without a separate database
   selector:
     matchLabels:
       app: better-ccflare
@@ -744,17 +728,17 @@ spec:
         ports:
         - containerPort: 8080
         env:
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: better-ccflare-secrets
-              key: database-url
+        - name: BETTER_CCFLARE_DB_PATH
+          value: "/data/better-ccflare.db"
         - name: LB_STRATEGY
           value: "session"
         - name: LOG_LEVEL
           value: "INFO"
         - name: LOG_FORMAT
           value: "json"
+        volumeMounts:
+        - name: data
+          mountPath: /data
         resources:
           requests:
             memory: "512Mi"
@@ -774,6 +758,20 @@ spec:
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 5
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: better-ccflare-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: better-ccflare-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
 ---
 apiVersion: v1
 kind: Service
@@ -786,20 +784,11 @@ spec:
   - port: 80
     targetPort: 8080
   type: LoadBalancer
----
-# Store the PostgreSQL connection string as a Secret
-apiVersion: v1
-kind: Secret
-metadata:
-  name: better-ccflare-secrets
-type: Opaque
-stringData:
-  database-url: "postgresql://ccflare_user:secret@postgres-svc:5432/ccflare"
 ```
 
 ### High Availability Checklist
 
-- [ ] Database replication configured
+- [ ] Database file on a persistent volume, with backups
 - [ ] Redis sentinel or cluster mode enabled
 - [ ] Load balancer health checks configured
 - [ ] Automatic failover tested
@@ -1098,8 +1087,8 @@ find /backup/better-ccflare -name "*.tar.gz" -mtime +30 -delete
 | `RETRY_DELAY_MS` | 1000 | Initial delay between retries in milliseconds |
 | `RETRY_BACKOFF` | 2 | Backoff multiplier for exponential retry delays |
 | `BETTER_CCFLARE_CONFIG_PATH` | Platform-specific | Path to configuration file |
-| `BETTER_CCFLARE_DB_PATH` | Platform-specific | Path to SQLite database file (ignored when `DATABASE_URL` is set) |
-| `DATABASE_URL` | - | PostgreSQL connection string. When set, PostgreSQL is used instead of SQLite. Recommended for single-pod Kubernetes deployments (durable state across restarts). Each better-ccflare instance requires its own database — see [Multi-Instance Deployment](#multi-instance-deployment-single-instance-per-database). Example: `postgresql://user:pass@host:5432/db` |
+| `BETTER_CCFLARE_DB_PATH` | Platform-specific | Path to SQLite database file |
+| `DATABASE_URL` | - | Not used. A value starting with `postgres://` or `postgresql://` is refused at startup; see [PostgreSQL support removed](hov-router-migration.md#postgresql-support-removed). |
 
 ### Configuration File
 
@@ -1201,7 +1190,7 @@ When the running backend's `/health` advertises `handoff: {"protocol": "quiesce-
 
 A retiring request that would need a guard retry after the fence gets a 503 instead, because the port now belongs to the replacement. A backend that does not advertise the capability (Bun exits on an unhandled `SIGUSR2`), or that still listens after `RUNNER_QUIESCE_PORT_TIMEOUT_MS` (default 10000, range 100-120000), takes the drain path described below. A deployment that arrives while the previous handoff's backend is still retiring waits for it first, for up to the retire timer plus the backend stop allowance. Run one deployment at a time: if `lifecycle.retiring` is not `null`, that wait plus a drain fallback can outlast the deployment script's 800-second verification window.
 
-The official deployment script selects backend-only handoff only when the running runner, guard, recovery policy, timing module and transaction module have exactly the same bytes as the candidate artifacts, and the SQLite/PostgreSQL migration-source digest is unchanged. Lifecycle changes and schema changes take the existing full-stack bootstrap path. The first deployment introducing this protocol therefore still requires a measured full restart. No database-sharing blue/green instance is started.
+The official deployment script selects backend-only handoff only when the running runner, guard, recovery policy, timing module and transaction module have exactly the same bytes as the candidate artifacts, and the migration-source digest is unchanged. Lifecycle changes and schema changes take the existing full-stack bootstrap path. The first deployment introducing this protocol therefore still requires a measured full restart. No database-sharing blue/green instance is started.
 
 The runner records a private, fsynced intent with a transaction ID, old generation and PID/start identity, exact prior pin hash, immutable candidate binary hash/source, candidate nonce and compatibility digest. It authenticates a permissioned local control command. On the drain path it records draining, fences dispatch, then reaps the old PID/start before starting the candidate. While draining, the guard still sends dashboard reads (GET or HEAD outside `/v1/`, excluding paths ending in `/stream`) to the old backend; they join its generation, so the drain waits for them. Guard verification checks the executable, listener ownership, source, nonce, generation, readiness and timing contract. The candidate remains fenced until the exact systemd pin and committed phase are durable. Attach rotates the per-generation credential before releasing queued requests. Health reports the retained ingress source separately from `backendSourceSha`.
 

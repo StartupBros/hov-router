@@ -21,10 +21,9 @@ import { Logger } from "@better-ccflare/logger";
  * JS event loop for tens of seconds (~30 s observed on a 7.6 GiB DB),
  * during which the proxy can't accept connections or flush in-flight
  * streaming responses — downstream sockets get reset and clients see
- * "socket connection was closed unexpectedly". For PostgreSQL or when no
- * SQLite path is resolvable, the probe falls back to a direct
- * `DatabaseOperations` call (lightweight on PG; this branch only exists for
- * the non-SQLite case).
+ * "socket connection was closed unexpectedly". When no SQLite path is
+ * resolvable (for example an in-memory database), the probe falls back to a
+ * direct `DatabaseOperations` call.
  *
  * Mutex: only one probe runs at a time. If a probe is in flight, the next
  * tick logs and skips rather than queueing — checks are idempotent reads,
@@ -276,9 +275,8 @@ export function startIntegrityScheduler(
  * mutex via `markIntegrityCheckRunning(kind)`. Routes through the
  * `integrity-check-worker` when a SQLite path is resolvable so the
  * (synchronous) `bun:sqlite` pragma doesn't freeze the proxy event loop;
- * falls back to `DatabaseOperations.run{Quick,Full}IntegrityCheck` for the
- * non-SQLite case (PostgreSQL, or any backend without a file path —
- * lightweight there, so blocking is fine).
+ * falls back to `DatabaseOperations.run{Quick,Full}IntegrityCheck` when
+ * there is no file path (for example an in-memory database).
  *
  * Records the result and (implicitly) releases the mutex via
  * `recordIntegrityResult` (or `recordIntegritySkipped` for size-threshold /

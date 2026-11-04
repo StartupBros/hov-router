@@ -51,8 +51,8 @@ export interface CodexWaveSummary {
 	hasNonBaseline: boolean;
 }
 
-// Raw rows: PostgreSQL's driver can hand BIGINT back as a string, so every
-// numeric column is normalised through num()/numOrNull() in the mappers.
+// Raw rows: every numeric column is normalised through num()/numOrNull() in
+// the mappers.
 type Raw = Record<string, unknown>;
 
 function numOrNull(value: unknown): number | null {

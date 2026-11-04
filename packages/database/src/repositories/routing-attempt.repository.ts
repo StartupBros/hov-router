@@ -50,7 +50,7 @@ interface SummaryRow {
 	attempt_count: unknown;
 }
 
-/** Normalize SQLite numbers and PostgreSQL bigint strings at this boundary. */
+/** Normalize numeric timestamps at this boundary. */
 function formatObservedAt(timestamp: unknown): string | null {
 	if (timestamp == null) return null;
 	const value = Number(timestamp);

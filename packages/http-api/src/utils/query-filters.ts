@@ -113,9 +113,7 @@ export function buildRequestFilters(
 		// unattributed requests regardless of how they were originally written.
 		//
 		// We branch in JS rather than emitting "? IN (...)" with the bind
-		// parameter on the left side. PostgreSQL leaves an untyped parameter
-		// on the left of IN rejected at Parse time; SQLite's lack of
-		// parameter typing hides this. The presence of the NO_ACCOUNT_ID
+		// parameter on the left side. The presence of the NO_ACCOUNT_ID
 		// sentinel in the filter is known here, so we split it out before
 		// emitting SQL.
 		const includesNoAccount = accountsFilter.includes(NO_ACCOUNT_ID);

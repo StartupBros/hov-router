@@ -1384,7 +1384,7 @@ graph TB
     
     subgraph "Data Tier"
         REDIS[(Redis Cache)]
-        PG[(PostgreSQL)]
+        DB[(SQLite per instance)]
         S3[S3-Compatible<br/>Log Storage]
         CONSUL[Consul<br/>Agent Registry]
     end
@@ -1403,9 +1403,9 @@ graph TB
     APP2 --> REDIS
     APP3 --> REDIS
     
-    APP1 --> PG
-    APP2 --> PG
-    APP3 --> PG
+    APP1 --> DB
+    APP2 --> DB
+    APP3 --> DB
     
     APP1 --> S3
     APP2 --> S3

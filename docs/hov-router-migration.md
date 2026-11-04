@@ -25,7 +25,7 @@ Record the current executable location with `command -v` and the command name yo
 | Windows config directory | `better-ccflare` beneath `LOCALAPPDATA`, then `APPDATA`, then `~/AppData/Local` |
 | Default SQLite database | `better-ccflare.db` in the platform config directory |
 | Config override | `BETTER_CCFLARE_CONFIG_PATH`, with legacy `ccflare_CONFIG_PATH` fallback |
-| Database override | `BETTER_CCFLARE_DB_PATH`; `DATABASE_URL` still selects PostgreSQL |
+| Database override | `BETTER_CCFLARE_DB_PATH`; a PostgreSQL `DATABASE_URL` is refused (see [PostgreSQL support removed](#postgresql-support-removed)) |
 | Other integration names | Existing `BETTER_CCFLARE_*`, `CCFLARE_*`, and other environment variables; `x-better-ccflare-*` headers |
 | Default server port | `8080`; existing port overrides and deployment ports remain unchanged |
 | Build/package names | `apps/cli/dist/better-ccflare`, the `better-ccflare` package identity, and internal `@better-ccflare/*` packages |
@@ -33,6 +33,21 @@ Record the current executable location with `command -v` and the command name yo
 There is no new HoV configuration namespace and no config or credential migration. Do not rename storage directories, recovery files, environment variables, headers, or database files to match the product name. Existing deployments keep their paths, service names, and ports.
 
 `hov-router --get-model` reads the default agent model from configuration without opening the account database or contacting a provider. `--help` and `--version` alone do not prove that configuration was loaded. `--show-config` provides a broader diagnostic view, but its normal default-loading behavior may persist missing defaults; it is not a byte-preservation check.
+
+## PostgreSQL support removed
+
+**What changed.** HoV Router now runs on SQLite only. Upstream added PostgreSQL support for multi-pod deployments. This fork removed it because no install of this fork uses it and it doubled every schema change.
+
+**What happens now.** If `DATABASE_URL` starts with `postgres://` or `postgresql://`, the server and every command that opens the database stop at startup with a message. Before this change such a URL would have let the router start on an empty SQLite database. `--version`, `--help` and the other commands that never open the database still work. Any other `DATABASE_URL` value is ignored, as before; the SQLite file is chosen by `BETTER_CCFLARE_DB_PATH` or the default.
+
+**Ways forward.**
+
+1. Stay on v3.7.1, the last release that supports PostgreSQL.
+2. Unset `DATABASE_URL` and start fresh on SQLite, at `BETTER_CCFLARE_DB_PATH` or the default `~/.config/better-ccflare/better-ccflare.db`.
+
+There is no PostgreSQL-to-SQLite migration tool, so option 2 starts with an empty database: accounts and history in PostgreSQL are not carried over.
+
+**Environment variables no longer read:** `BETTER_CCFLARE_DB_POOL_MAX`, `BETTER_CCFLARE_DB_IDLE_TIMEOUT`, `BETTER_CCFLARE_DB_STATEMENT_TIMEOUT`, `BETTER_CCFLARE_DB_CLIENT_TIMEOUT`, `BETTER_CCFLARE_DB_PG_PREPARE`, `BETTER_CCFLARE_TEST_POSTGRES_URL`, and the `CCFLARE_REQUIRE_LIVE_PG_*` family. `BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE` and every SQLite setting still work.
 
 ## Manual source updates
 
