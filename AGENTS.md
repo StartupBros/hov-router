@@ -47,13 +47,13 @@ that will bring it back — deleting it is a deliberate cleanup decision, not a 
 
 This repo has both a `main` branch and a `main` tag:
 - **Push/fetch:** use `refs/heads/main` (`git push origin refs/heads/main:refs/heads/main`, `git fetch origin refs/heads/main`).
-- **Checkout:** use `git switch main`. `git checkout refs/heads/main` detaches HEAD, and the deploy gate then refuses with "checkout has detached HEAD".
+- **Checkout:** use `git switch main`. `git checkout refs/heads/main` detaches HEAD.
 - **Comparisons:** use `origin/main` (`git merge-base`, `git log X..origin/main`) to avoid the ambiguous-refspec warning.
 
 Branch from a freshly fetched `origin/main`; never change `main` directly. Before changing anything, run `git status` and note pre-existing changes so you can tell them apart from yours. Stage files by name (`git add <files>`), never `git add .`, which picks up generated workers.
 
 ## Deployment source (production)
-Production is a root systemd service, `ccflare-stack.service` (guard on `:8788` in front of the binary on `:8789`). Deploys build from `main` ONLY, via `scripts/deploy-ccflare.sh` — it refuses to build or ship any commit that is not an ancestor of `origin/main`. The binary embeds its git SHA at build time, verifiable at runtime via the health endpoint's `git_sha` field (no need to trust the binary filename). The systemd pin lives at `/etc/systemd/system/ccflare-stack.service.d/50-pinned-build.conf`. Never let a long-lived feature branch become the de-facto trunk again — merge to `main` and deploy from there. Merging never deploys; the script is the only deploy path.
+Production is a root systemd service, `ccflare-stack.service` (guard on `:8788` in front of the binary on `:8789`). Deploys ship only the freshly fetched `origin/main` tip, via `scripts/deploy-ccflare.sh`. Run it from any checkout: it snapshots that tip and runs the snapshot's own copy of the script, so the invoking branch, HEAD and uncommitted files never ship. `scripts/deploy-ccflare.sh --check` prints the target and live SHAs and whether a deploy would be backend-only or a full restart (naming the first field that forces one), without a build, sudo or systemd. The binary embeds its git SHA at build time, verifiable at runtime via the health endpoint's `git_sha` field (no need to trust the binary filename). The systemd pin lives at `/etc/systemd/system/ccflare-stack.service.d/50-pinned-build.conf`. Never let a long-lived feature branch become the de-facto trunk again — merge to `main` and deploy from there. Merging never deploys; the script is the only deploy path.
 
 ## Releases and versions
 

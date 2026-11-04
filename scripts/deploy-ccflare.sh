@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy-ccflare.sh — deploy better-ccflare to the production systemd stack
-# from a local checkout.
+# deploy-ccflare.sh — deploy better-ccflare to the production systemd stack.
 #
 # WHY THIS SCRIPT EXISTS
 #   Production has historically been deployed by hand: build whatever branch
@@ -10,9 +9,10 @@
 #   deployed code to actually be on `main` — see the pile of hand-named
 #   binaries (better-ccflare-v*-drill-*, -logfix-*, -progate-*, ...) in
 #   /home/will/.config/better-ccflare. This script replaces that process
-#   with one command, and — the actual point — it REFUSES to build/deploy
-#   unless the checkout is the local `main` branch at the exact freshly
-#   fetched origin/main tip. Production may only run current main.
+#   with one command, and — the actual point — it only ever ships the freshly
+#   fetched origin/main tip. Run it from any checkout of the repository: that
+#   checkout's branch, HEAD and uncommitted files are never built, and the
+#   deploy itself runs origin/main's own copy of this script.
 #
 # USAGE
 #   scripts/deploy-ccflare.sh            Build, deploy, restart, verify.
@@ -20,23 +20,30 @@
 #                                        binaries, guards, runners and pin
 #                                        backups (including recovery backups).
 #                                        Skips only step 8; all gates still run.
-#   scripts/deploy-ccflare.sh --check    Run ONLY the main-source gate,
-#                                        print OK/refuse, and exit. Builds
-#                                        and deploys nothing. Safe to run
-#                                        any time, from any branch, to test
-#                                        the gate itself.
+#   scripts/deploy-ccflare.sh --check    Run the source gate, then report what
+#                                        a deploy would do: the target SHA, the
+#                                        live git_sha, and "backend-only",
+#                                        "full restart: <first differing
+#                                        field>" or "unknown: <reason>". Takes
+#                                        no lock, builds nothing, and never
+#                                        uses sudo or systemd; it creates and
+#                                        removes a temporary worktree. Exits 0
+#                                        when the gate passes.
 #
 # WHAT A FULL RUN DOES
-#   1. Fetch the explicit refs/heads/main ref (quiet), then refuse unless the
-#      checkout is refs/heads/main exactly at refs/remotes/origin/main, HEAD is
-#      an ancestor of that remote tip, the working tree is clean, and package
-#      versions are not behind the highest v* tag already contained in HEAD.
+#   0. Fetch the explicit refs/heads/main ref (quiet), create a detached
+#      worktree at that tip, and run the worktree's own copy of this script
+#      from it. The worktree is removed afterwards, also on failure or
+#      interrupt, and the exit status passes through.
+#   1. Fetch again, then refuse unless that worktree is detached at the SHA
+#      step 0 named, the SHA is still refs/remotes/origin/main, the worktree
+#      is clean, and package versions are not behind the highest v* tag
+#      already contained in HEAD.
 #   2. Require the pinned-build drop-in to contain no operator policy outside
-#      its deploy-owned markers, then create a detached worktree at the
-#      verified SHA, install its locked dependencies, and build there. The
-#      shared checkout is never a build or runtime-artifact source after
-#      verification. Refuse a `bun` on PATH, or a built binary's embedded
-#      runtime, that differs from the snapshot's .bun-version.
+#      its deploy-owned markers, then create a second detached worktree at the
+#      verified SHA, install its locked dependencies, and build there. Refuse
+#      a `bun` on PATH, or a built binary's embedded runtime, that differs
+#      from the snapshot's .bun-version.
 #   3. Copy the binary to
 #      /home/will/.config/better-ccflare/better-ccflare-v<version>-<short-sha>
 #      and install the source-controlled guard + policy as an immutable pair
@@ -45,7 +52,10 @@
 #      (/etc/systemd/system/ccflare-stack.service.d/50-pinned-build.conf).
 #      Operator policy must live in a later drop-in such as
 #      90-operator-policy.conf.
-#   5. `systemctl daemon-reload && systemctl restart ccflare-stack.service`.
+#   5. `systemctl daemon-reload && systemctl restart ccflare-stack.service`,
+#      unless the running runner, guard, policy, timing and transaction
+#      modules match the candidate byte for byte and the schema digest is
+#      unchanged: then only the backend is replaced (backend-only handoff).
 #   6. Poll both proxy and guard health endpoints until they respond.
 #   7. Require exact binary SHA, guard source ID, and guard policy ID matches.
 #      Any failure after the pin backup restores the old pin and restarts it.
@@ -84,6 +94,8 @@ BACKEND_DEPLOYMENT=0
 HANDOFF_DIR="$DEST/handoff"
 GUARD_STAGE_DIR=""
 RUNNER_STAGE_DIR=""
+BOOTSTRAP_PARENT=""
+BOOTSTRAP_ROOT=""
 BUILD_SNAPSHOT_PARENT=""
 BUILD_SOURCE_ROOT=""
 BUILD_SOURCE_REGISTERED=0
@@ -126,10 +138,70 @@ verify_service_process_identity() {
 	printf '%s\n' "$main_pid"
 }
 
+# --check: report what a deploy of HEAD_SHA would do, without a lock, a build,
+# sudo or systemd. The verdict comes from the same backend_handoff_eligible the
+# deploy calls in step 4, given this snapshot's own copies of the files step 4
+# installs and verifies byte for byte.
+report_deploy_plan() {
+	local live_json live_sha schema verdict verdict_status=0
+	echo "==> What a deploy would do:"
+	echo "target:  ${HEAD_SHA:0:12} (refs/remotes/origin/main, v$VERSION)"
+	live_json="$(curl -sf --max-time 5 "$HEALTH_URL" 2>/dev/null || true)"
+	live_sha="$(
+		node -e '
+			try {
+				const value = JSON.parse(process.argv[1])?.git_sha;
+				if (typeof value === "string" && /^[0-9a-f]{7,40}$/.test(value)) process.stdout.write(value);
+			} catch {}
+		' "$live_json"
+	)"
+	if [[ -z "$live_sha" ]]; then
+		echo "live:    unavailable ($HEALTH_URL reported no git_sha)"
+	elif [[ "$HEAD_SHA" == "$live_sha"* ]]; then
+		echo "live:    $live_sha (already the target; a deploy would rebuild and re-verify it)"
+	else
+		echo "live:    $live_sha"
+	fi
+	if ! schema="$(deploy_schema_digest "$REPO_ROOT")"; then
+		echo "restart: unknown: could not compute the target's schema digest"
+		return 0
+	fi
+	verdict="$(
+		backend_handoff_eligible user "$HANDOFF_DIR/runtime.json" \
+			"$REPO_ROOT/scripts/run-ccflare-stack.sh" \
+			"$REPO_ROOT/scripts/ccflare-guard.mjs" \
+			"$REPO_ROOT/scripts/ccflare-guard-policy.mjs" \
+			"$REPO_ROOT/scripts/ccflare-managed-timing.mjs" \
+			"$REPO_ROOT/scripts/ccflare-deployment-transaction.mjs" \
+			"$schema"
+	)" || verdict_status=$?
+	case "$verdict_status" in
+		0) echo "restart: backend-only (the running guard and runner stay up)" ;;
+		1) echo "restart: full restart: $verdict" ;;
+		*) echo "restart: unknown: $verdict" ;;
+	esac
+}
+
 rollback_on_failure() {
 	local status="$1"
 	trap - EXIT
+	# A TERM or HUP may have started this cleanup; another one (a process-group
+	# signal that step 0 also forwards) must not cut it short.
+	trap '' TERM HUP
 	set +e
+
+	# Step 0's worktree. A deploy running from it removes only its own build
+	# snapshot; the invoking script removes this one after that deploy exits.
+	if [[ -n "$BOOTSTRAP_ROOT" ]]; then
+		if ! remove_verified_source_snapshot "$REPO_ROOT" "$BOOTSTRAP_ROOT"; then
+			echo "WARNING: could not remove deploy bootstrap snapshot $BOOTSTRAP_ROOT" >&2
+		fi
+	fi
+	if [[ -n "$BOOTSTRAP_PARENT" && -d "$BOOTSTRAP_PARENT" ]]; then
+		if ! rmdir "$BOOTSTRAP_PARENT" 2>/dev/null; then
+			echo "WARNING: deploy bootstrap snapshot parent was not empty: $BOOTSTRAP_PARENT" >&2
+		fi
+	fi
 
 	if [[ "$BUILD_SOURCE_REGISTERED" == "1" && -n "$BUILD_SOURCE_ROOT" ]]; then
 		if ! remove_verified_source_snapshot "$REPO_ROOT" "$BUILD_SOURCE_ROOT"; then
@@ -211,10 +283,69 @@ for arg in "$@"; do
 	case "$arg" in
 		--check) CHECK_ONLY=1 ;;
 		--no-prune) NO_PRUNE=1 ;;
-		-h|--help) sed -n '2,54p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,66p' "$0"; exit 0 ;;
 		*) echo "Unknown arg: $arg" >&2; exit 2 ;;
 	esac
 done
+
+# ---------------------------------------------------------------------------
+# 0) Bootstrap — run origin/main's own copy of this script from a detached
+#    snapshot of that tip. The checkout this was started from supplies only
+#    the Git repository: its branch, HEAD and working tree are never built,
+#    and its copy of this script (possibly older or edited) never deploys.
+# ---------------------------------------------------------------------------
+if [[ -z "${CCFLARE_DEPLOY_BOOTSTRAP_SHA:-}" ]]; then
+	echo "==> Fetching refs/heads/main from origin…"
+	git fetch origin refs/heads/main:refs/remotes/origin/main --quiet
+	BOOTSTRAP_SHA="$(git rev-parse refs/remotes/origin/main)"
+	CALLER_REF="$(git symbolic-ref -q --short HEAD 2>/dev/null || echo "detached HEAD")"
+	echo "==> Target: refs/remotes/origin/main at ${BOOTSTRAP_SHA:0:12}. This checkout ($CALLER_REF at $(git rev-parse --short HEAD)) and its uncommitted files are not what ships."
+	BOOTSTRAP_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/better-ccflare-deploy-bootstrap.XXXXXX")"
+	BOOTSTRAP_ROOT="$(cd "$BOOTSTRAP_PARENT" && pwd -P)/source"
+	create_verified_source_snapshot "$REPO_ROOT" "$BOOTSTRAP_ROOT" "$BOOTSTRAP_SHA"
+	# The deploy owns interrupts. Ctrl-C reaches it directly through the
+	# process group, and a TERM or HUP sent to this shell alone is forwarded,
+	# so `kill <pid>` still runs the deploy's rollback. Either way this shell
+	# waits for that cleanup, exits with the deploy's status, and its EXIT trap
+	# then removes the snapshot. The deploy runs asynchronously so these traps
+	# can fire while it runs: env restores the SIGINT that bash ignores in an
+	# asynchronous child, and <&0 keeps the caller's stdin.
+	BOOTSTRAP_PID=""
+	BOOTSTRAP_SIGNALLED=0
+	forward_to_deploy() {
+		BOOTSTRAP_SIGNALLED=1
+		if [[ -n "$1" && -n "$BOOTSTRAP_PID" ]]; then
+			kill -s "$1" "$BOOTSTRAP_PID" 2>/dev/null || true
+		fi
+	}
+	trap 'forward_to_deploy TERM' TERM
+	trap 'forward_to_deploy HUP' HUP
+	trap 'forward_to_deploy ""' INT
+	CCFLARE_DEPLOY_BOOTSTRAP_SHA="$BOOTSTRAP_SHA" CCFLARE_DEPLOY_BOOTSTRAP_ROOT="$BOOTSTRAP_ROOT" \
+		env --default-signal=INT,QUIT bash "$BOOTSTRAP_ROOT/scripts/deploy-ccflare.sh" "$@" <&0 &
+	BOOTSTRAP_PID=$!
+	# wait returns early (status > 128) whenever a trap runs, so wait again
+	# until the deploy has exited.
+	BOOTSTRAP_STATUS=0
+	wait "$BOOTSTRAP_PID" || BOOTSTRAP_STATUS=$?
+	while kill -0 "$BOOTSTRAP_PID" 2>/dev/null; do
+		BOOTSTRAP_SIGNALLED=0
+		BOOTSTRAP_STATUS=0
+		wait "$BOOTSTRAP_PID" || BOOTSTRAP_STATUS=$?
+	done
+	if ((BOOTSTRAP_SIGNALLED)); then
+		# A trap interrupted the last wait after the deploy exited: collect the
+		# status the shell recorded (127 means that wait already returned it).
+		BOOTSTRAP_RECORDED=0
+		wait "$BOOTSTRAP_PID" 2>/dev/null || BOOTSTRAP_RECORDED=$?
+		((BOOTSTRAP_RECORDED == 127)) || BOOTSTRAP_STATUS=$BOOTSTRAP_RECORDED
+	fi
+	exit "$BOOTSTRAP_STATUS"
+fi
+if [[ "$(pwd -P)" != "${CCFLARE_DEPLOY_BOOTSTRAP_ROOT:-}" ]]; then
+	echo "refusing to deploy: CCFLARE_DEPLOY_BOOTSTRAP_SHA is set, but this script is not running from the bootstrap snapshot named by CCFLARE_DEPLOY_BOOTSTRAP_ROOT" >&2
+	exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # 1) Main source gate — the actual guardrail. Everything else is convenience.
@@ -222,7 +353,8 @@ done
 echo "==> Fetching refs/heads/main from origin…"
 # The repository also has a local tag named `main`. Use fully qualified refs
 # for fetch, branch identity, and comparison so the tag can never satisfy (or
-# make ambiguous) the production source gate.
+# make ambiguous) the production source gate. Fetching again here makes a
+# push to main after step 0 a refusal rather than a silent older deploy.
 git fetch origin refs/heads/main:refs/remotes/origin/main --quiet
 
 HEAD_SHA="$(git rev-parse HEAD)"
@@ -234,7 +366,8 @@ MAIN_SOURCE_OK=0
 if validate_main_deploy_source \
 	"$CURRENT_BRANCH_REF" \
 	"$HEAD_SHA" \
-	"$ORIGIN_MAIN_SHA"; then
+	"$ORIGIN_MAIN_SHA" \
+	"$CCFLARE_DEPLOY_BOOTSTRAP_SHA"; then
 	MAIN_SOURCE_OK=1
 fi
 
@@ -249,14 +382,14 @@ else
 	echo "refusing to deploy: $SHORT is not an ancestor of refs/remotes/origin/main" >&2
 fi
 
-# Clean-tree gate: the build below uses an immutable snapshot, so a later edit
-# cannot change what ships. Still require a clean operator checkout to make the
-# deploy invocation intentional and keep the canonical main checkout auditable.
+# Clean-tree gate: this script runs from step 0's fresh snapshot, and the build
+# below uses a second one, so nothing should ever have touched this tree. A
+# dirty tree means this copy of the script is not the one origin/main carries.
 TREE_OK=0
 if [[ -z "$(git status --porcelain)" ]]; then
 	TREE_OK=1
 else
-	echo "refusing to deploy: working tree has uncommitted changes — commit or stash them so the built binary matches the verified commit" >&2
+	echo "refusing to deploy: the deploy snapshot $REPO_ROOT has uncommitted changes" >&2
 fi
 
 # Version consistency gate: refuse to ship a binary whose package version is
@@ -302,7 +435,11 @@ else
 fi
 
 if [[ "$CHECK_ONLY" == "1" ]]; then
-	{ [[ "$MAIN_SOURCE_OK" == "1" && "$ANCESTRY_OK" == "1" && "$TREE_OK" == "1" && "$VERSION_OK" == "1" ]]; } && exit 0 || exit 1
+	if [[ "$MAIN_SOURCE_OK" == "1" && "$ANCESTRY_OK" == "1" && "$TREE_OK" == "1" && "$VERSION_OK" == "1" ]]; then
+		report_deploy_plan
+		exit 0
+	fi
+	exit 1
 fi
 
 if [[ "$MAIN_SOURCE_OK" != "1" || "$ANCESTRY_OK" != "1" || "$TREE_OK" != "1" || "$VERSION_OK" != "1" ]]; then
@@ -469,11 +606,14 @@ sudo cp --preserve=all "$PIN" "$PIN_BACKUP"
 # Render from the exact backup snapshot, not the mutable live path. This binds
 # the proposed pin to the file revision that rollback will restore and that the
 # compare-and-swap installation below requires to remain current.
-SCHEMA_DIGEST="$(node - "$BUILD_SOURCE_ROOT" <<'NODE'
-const fs=require("node:fs"),crypto=require("node:crypto"),root=process.argv[2],h=crypto.createHash("sha256");for(const p of ["packages/database/src/migrations.ts"]){const b=fs.readFileSync(root+"/"+p);h.update(p+"\0"+b.length+"\0");h.update(b);}process.stdout.write(h.digest("hex"));
-NODE
-)"
-if [[ -f "$HANDOFF_DIR/runtime.json" ]] && backend_handoff_eligible "$HANDOFF_DIR/runtime.json" "$DEST_BIN" "$RUNNER_SCRIPT" "$GUARD_SCRIPT" "$GUARD_POLICY" "$GUARD_TIMING" "$SOURCE_TRANSACTION" "$SCHEMA_DIGEST"; then
+SCHEMA_DIGEST="$(deploy_schema_digest "$BUILD_SOURCE_ROOT")"
+HANDOFF_STATUS=0
+HANDOFF_REASON="$(
+	backend_handoff_eligible sudo "$HANDOFF_DIR/runtime.json" "$RUNNER_SCRIPT" "$GUARD_SCRIPT" "$GUARD_POLICY" "$GUARD_TIMING" "$SOURCE_TRANSACTION" "$SCHEMA_DIGEST"
+)" || HANDOFF_STATUS=$?
+if ((HANDOFF_STATUS != 0)); then
+	echo "==> Full restart required: $HANDOFF_REASON"
+else
 	BACKEND_DEPLOYMENT=1
 	readarray -t retained_paths < <(node - "$PRIOR_GUARD_HEALTH_JSON" <<'NODE'
 const h=JSON.parse(process.argv[2]);for(const v of [h.runtime.artifacts.runner.path,h.runtime.artifacts.guard.path,h.runtime.artifacts.policy.path,h.sourceId])console.log(v);

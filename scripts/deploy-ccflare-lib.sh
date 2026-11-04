@@ -4,32 +4,49 @@
 # the one pre-restart activation helper isolates its sudo/systemd mutation so the
 # exact reload, effective-policy check, and no-restart rollback can be mocked.
 
+# A deploy runs from the detached snapshot of refs/remotes/origin/main that the
+# invoked script created (step 0 of deploy-ccflare.sh). Accept only that commit:
+# detached, at the SHA the bootstrap named, which must still be the freshly
+# fetched origin/main tip.
 validate_main_deploy_source() {
-	if [[ "$#" -ne 3 ]]; then
-		echo "validate_main_deploy_source requires: checkout-ref HEAD-SHA origin-main-SHA" >&2
+	if [[ "$#" -ne 4 ]]; then
+		echo "validate_main_deploy_source requires: checkout-ref HEAD-SHA origin-main-SHA bootstrap-SHA" >&2
 		return 2
 	fi
 
-	local checkout_ref="$1" head_sha="$2" origin_main_sha="$3"
-	if [[ ! "$head_sha" =~ ^[0-9a-f]{40}$ || ! "$origin_main_sha" =~ ^[0-9a-f]{40}$ ]]; then
+	local checkout_ref="$1" head_sha="$2" origin_main_sha="$3" bootstrap_sha="$4"
+	if [[ ! "$head_sha" =~ ^[0-9a-f]{40}$ || ! "$origin_main_sha" =~ ^[0-9a-f]{40}$ || ! "$bootstrap_sha" =~ ^[0-9a-f]{40}$ ]]; then
 		echo "validate_main_deploy_source requires full lowercase Git SHAs" >&2
 		return 2
 	fi
 
-	if [[ -z "$checkout_ref" ]]; then
-		echo "refusing to deploy: checkout has detached HEAD; checkout must be refs/heads/main" >&2
+	if [[ -n "$checkout_ref" ]]; then
+		echo "refusing to deploy: the deploy snapshot is on $checkout_ref; it must be a detached snapshot of refs/remotes/origin/main" >&2
 		return 1
 	fi
-	if [[ "$checkout_ref" != "refs/heads/main" ]]; then
-		echo "refusing to deploy: checkout is $checkout_ref; checkout must be refs/heads/main" >&2
+	if [[ "$head_sha" != "$bootstrap_sha" ]]; then
+		echo "refusing to deploy: the deploy snapshot is at ${head_sha:0:12}, not at the bootstrap-named ${bootstrap_sha:0:12}" >&2
 		return 1
 	fi
-	if [[ "$head_sha" != "$origin_main_sha" ]]; then
-		echo "refusing to deploy: refs/heads/main at ${head_sha:0:12} does not exactly match refs/remotes/origin/main at ${origin_main_sha:0:12}" >&2
+	if [[ "$bootstrap_sha" != "$origin_main_sha" ]]; then
+		echo "refusing to deploy: refs/remotes/origin/main moved from ${bootstrap_sha:0:12} to ${origin_main_sha:0:12} after this deploy started; run it again" >&2
 		return 1
 	fi
 
-	echo "OK: ${head_sha:0:12} is refs/heads/main at refs/remotes/origin/main."
+	echo "OK: ${head_sha:0:12} is a detached snapshot of refs/remotes/origin/main."
+}
+
+# Digest of the migration sources. The runner records the digest its backend was
+# started with; a different digest rules out a backend-only handoff, because only
+# a full restart runs migrations before the guard admits traffic.
+deploy_schema_digest() {
+	if [[ "$#" -ne 1 || ! -d "$1" ]]; then
+		echo "deploy_schema_digest requires: source-root" >&2
+		return 2
+	fi
+	node - "$1" <<'NODE'
+const fs=require("node:fs"),crypto=require("node:crypto"),root=process.argv[2],h=crypto.createHash("sha256");for(const p of ["packages/database/src/migrations.ts"]){let b;try{b=fs.readFileSync(root+"/"+p);}catch(error){process.stderr.write("schema digest input "+p+" is unreadable in "+root+" ("+(error?.code??"error")+")\n");process.exit(1);}h.update(p+"\0"+b.length+"\0");h.update(b);}process.stdout.write(h.digest("hex"));
+NODE
 }
 
 create_verified_source_snapshot() {
@@ -1597,11 +1614,64 @@ guard_prune_candidates() {
 # Backend-only deployment uses the running runner's authenticated control. It
 # requires identical ingress/protocol bytes and unchanged migration code. Any
 # mismatch deliberately takes the ordinary full-stack bootstrap path.
+#
+# This is the only copy of that decision: the deploy calls it in sudo mode, and
+# `deploy-ccflare.sh --check` calls it in user mode against the target's source
+# files. Prints the first field that rules out backend-only, then returns
+#   0  backend-only is possible
+#   1  a full restart is required
+#   2  unknown: something needed for the decision could not be read
+# The deploy treats 1 and 2 alike, as a full restart.
 backend_handoff_eligible() {
- local runtime="$1" binary="$2" runner="$3" guard="$4" policy="$5" timing="$6" transaction="$7" schema="$8"
- sudo node - "$runtime" "$binary" "$runner" "$guard" "$policy" "$timing" "$transaction" "$schema" <<'NODE'
-const fs=require("node:fs"),crypto=require("node:crypto");const [file,binary,runner,guard,policy,timing,transaction,schema]=process.argv.slice(2);try{const r=JSON.parse(fs.readFileSync(file)),hash=p=>crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");if(r.schemaDigest!==schema||r.ingress.runner!==hash(runner)||r.ingress.guard!==hash(guard)||r.ingress.policy!==hash(policy)||r.ingress.timing!==hash(timing)||r.ingress.transaction!==hash(transaction)||r.pinHash!==hash(r.pinPath)||!fs.existsSync(r.controlDir+"/deploy.sock"))process.exit(1);for(const key of ["oldPid","generation"])if(!Number.isSafeInteger(r[key]))process.exit(1);}catch{process.exit(1);}
+	if [[ "$#" -ne 8 || ( "$1" != sudo && "$1" != user ) ]]; then
+		printf 'backend_handoff_eligible requires: sudo|user runtime runner guard policy timing transaction schema'
+		return 2
+	fi
+	local privilege="$1" runtime="$2" status=0
+	shift
+	# Evaluated as the invoking user in both modes, as the deploy always has.
+	if [[ ! -f "$runtime" ]]; then
+		if [[ -e "$runtime" ]]; then
+			printf '%s is not a regular file' "$runtime"
+			return 2
+		fi
+		if [[ -e "$(dirname "$runtime")" && ! -x "$(dirname "$runtime")" ]]; then
+			printf 'cannot search %s' "$(dirname "$runtime")"
+			return 2
+		fi
+		printf 'no %s, so no running backend-handoff runtime is recorded' "$runtime"
+		return 1
+	fi
+	local -a node_command=(node)
+	if [[ "$privilege" == sudo ]]; then
+		node_command=(sudo node)
+	fi
+	"${node_command[@]}" - "$@" <<'NODE' || status=$?
+const fs=require("node:fs"),crypto=require("node:crypto");const [file,runner,guard,policy,timing,transaction,schema]=process.argv.slice(2);const FULL=10,UNKNOWN=11;
+const stop=(code,reason)=>{process.stdout.write(reason);process.exit(code);};
+const read=(path,label,missing)=>{try{return fs.readFileSync(path);}catch(error){if(error?.code==="ENOENT"||error?.code==="ENOTDIR")stop(missing,label+" is missing");stop(UNKNOWN,"cannot read "+label+" ("+(error?.code??"error")+")");}};
+const hash=(path,label,missing)=>crypto.createHash("sha256").update(read(path,label,missing)).digest("hex");
+const short=value=>typeof value==="string"?value.slice(0,12):String(value);
+let r;try{r=JSON.parse(read(file,"runtime.json",FULL));}catch{stop(FULL,"runtime.json is not valid JSON");}
+try{
+if(r.schemaDigest!==schema)stop(FULL,"schema digest changed (running "+short(r.schemaDigest)+", target "+short(schema)+")");
+for(const [key,path] of [["runner",runner],["guard",guard],["policy",policy],["timing",timing],["transaction",transaction]])if(r.ingress[key]!==hash(path,"target "+key,UNKNOWN))stop(FULL,key+" bytes differ from the running ingress");
+if(typeof r.pinPath!=="string")stop(FULL,"runtime.json has no pinPath");
+if(r.pinHash!==hash(r.pinPath,"systemd pin "+r.pinPath,FULL))stop(FULL,"systemd pin changed since the running generation started");
+try{fs.statSync(r.controlDir+"/deploy.sock");}catch(error){if(error?.code==="ENOENT"||error?.code==="ENOTDIR")stop(FULL,"control socket "+r.controlDir+"/deploy.sock is missing");stop(UNKNOWN,"cannot inspect control socket ("+(error?.code??"error")+")");}
+for(const key of ["oldPid","generation"])if(!Number.isSafeInteger(r[key]))stop(FULL,"runtime.json "+key+" is not an integer");
+}catch{stop(FULL,"runtime.json is malformed");}
+process.exit(0);
 NODE
+	case "$status" in
+		0) return 0 ;;
+		10) return 1 ;;
+		11) return 2 ;;
+		*)
+			printf 'eligibility check exited %s' "$status"
+			return 2
+			;;
+	esac
 }
 request_backend_handoff() {
  local dir="$1" module="$2" binary="$3" source="$4" rendered="$5" schema="$6" command
