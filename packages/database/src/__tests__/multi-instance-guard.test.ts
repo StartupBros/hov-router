@@ -412,7 +412,7 @@ describe("multi-instance-guard (SQLite)", () => {
 		// The warning names the divergence categories so the operator
 		// understands the consequence.
 		expect(warnings[0]).toContain("SessionAffinityStrategy");
-		expect(warnings[0]).toContain("AutoRefreshScheduler");
+		expect(warnings[0]).toContain("refreshInFlight");
 		expect(warnings[0]).toContain("#351");
 	});
 
@@ -434,9 +434,13 @@ describe("multi-instance-guard (SQLite)", () => {
 		expect(msg).toContain("SessionDrainSoonestStrategy");
 		expect(msg).toContain("UsageCache");
 		expect(msg).toContain("CacheBodyStore");
-		expect(msg).toContain("AutoRefreshScheduler");
+		expect(msg).toContain("OAuth token refresh");
+		expect(msg).toContain("refreshInFlight");
 		expect(msg).toContain("probeLeases");
 		expect(msg).toContain("SessionGovernor");
+		// The auto-refresh scheduler was removed; item 5 names the
+		// request-time refresh state that still diverges.
+		expect(msg).not.toContain("AutoRefreshScheduler");
 	});
 
 	it("writeHeartbeat is upsert: same instance_id refreshes the row", async () => {

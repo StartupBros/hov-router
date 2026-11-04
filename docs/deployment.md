@@ -826,7 +826,7 @@ In operator terms, the seven categories of in-process coordination state are:
 - **Account recency penalty.** Recently-used accounts are penalised to spread load. Two instances independently keep this recency map, so they can both pick the same "fresh" account, or both penalise the same account.
 - **In-memory usage cache.** Used to make rate-limit decisions. Two instances have two views of the same account's recent usage. Each instance may decide the account has headroom when the other has seen it exhausted.
 - **Keepalive body replay cache.** Cached upstream responses can be replayed by one instance and missed by another, leading to duplicate upstream requests or missed replay-style fast paths.
-- **OAuth refresh scheduler.** A second instance refreshes the same OAuth token concurrently. This is a **race against the upstream provider**, not just a duplicate request — concurrent refreshes can invalidate the token the other instance is about to use.
+- **OAuth token refresh.** Each instance keeps its own single-flight refresh lock and pending-rotation registry, so a second instance refreshes the same OAuth token concurrently. This is a **race against the upstream provider**, not just a duplicate request — concurrent refreshes can invalidate the token the other instance is about to use.
 - **Rate-limit recovery probe lease map.** A single-flight probe map prevents two probes from running at once on the same account. Two instances each run their own probe map, so the recovery probe can run twice in parallel.
 - **Session-volume circuit breaker.** A circuit breaker that opens on session overage fires per-instance. Sessions can be ended earlier or later than expected depending on which instance handles them.
 
