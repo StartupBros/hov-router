@@ -3,18 +3,12 @@
  * treated as off.
  *
  * The setting suppresses every model rename, which is right for a client
- * request and wrong for a probe. The auto-refresh and cache-keepalive
- * schedulers send a compiled-in list of Claude ids — `HAIKU_4_5`, then
- * `SONNET_4_5`, then `SONNET_4` — to whatever account they are aimed at,
- * because the point is to touch the endpoint and read the answer, not to
- * deliver anyone's choice of model. Mapping is what makes that land on a
- * non-Claude account. Leaving the setting on for a probe therefore honours
- * nothing: `claude-haiku-4-5` goes to Codex untranslated, comes back as a
- * rejection that is neither 404 nor 529, counts as a refresh failure, and five
- * of those pause a healthy account with `pause_reason = 'failure_threshold'`.
+ * request and wrong for a cache-keepalive replay aimed at a specific account.
  *
- * The exemption is keyed on the process-local probe secret, so a client that
- * copies the marker header out of a log gets nothing.
+ * The exemption is keyed on the process-local probe secret and the keepalive
+ * marker, so a client that copies a marker header out of a log gets nothing.
+ * The `x-better-ccflare-auto-refresh` marker never earns the exemption, even
+ * with the secret.
  */
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import {
@@ -92,16 +86,16 @@ afterEach(() => {
 });
 
 describe("force_account_model — internal-probe exemption on the request path", () => {
-	it("treats the setting as off for a secret-verified auto-refresh probe", async () => {
+	it("keeps the setting on for an auto-refresh marker sent with the right secret", async () => {
 		expect(
 			await observeFlag({
 				"x-better-ccflare-auto-refresh": "true",
 				[INTERNAL_PROBE_SECRET_HEADER]: SECRET,
 			}),
-		).toBe(false);
+		).toBe(true);
 	});
 
-	it("does the same for the cache-keepalive probe", async () => {
+	it("treats the setting as off for a secret-verified cache-keepalive probe", async () => {
 		expect(
 			await observeFlag({
 				"x-better-ccflare-keepalive": "true",
@@ -113,14 +107,14 @@ describe("force_account_model — internal-probe exemption on the request path",
 	it("keeps the setting on for a marker sent with the wrong secret", async () => {
 		expect(
 			await observeFlag({
-				"x-better-ccflare-auto-refresh": "true",
+				"x-better-ccflare-keepalive": "true",
 				[INTERNAL_PROBE_SECRET_HEADER]: "not-the-secret",
 			}),
 		).toBe(true);
 	});
 
 	it("keeps the setting on for a marker sent with no secret at all", async () => {
-		expect(await observeFlag({ "x-better-ccflare-auto-refresh": "true" })).toBe(
+		expect(await observeFlag({ "x-better-ccflare-keepalive": "true" })).toBe(
 			true,
 		);
 	});
@@ -131,7 +125,7 @@ describe("force_account_model — internal-probe exemption on the request path",
 
 	it("restores the flag once the request is done", async () => {
 		await observeFlag({
-			"x-better-ccflare-auto-refresh": "true",
+			"x-better-ccflare-keepalive": "true",
 			[INTERNAL_PROBE_SECRET_HEADER]: SECRET,
 		});
 

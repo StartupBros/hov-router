@@ -280,9 +280,6 @@ describe("handleProxy usage throttling", () => {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
-					// The integration harness does not initialize the request-history
-					// collector; this header suppresses only terminal history logging.
-					"x-better-ccflare-auto-refresh": "true",
 				},
 				body: JSON.stringify({
 					model: "claude-fable-5",

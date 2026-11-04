@@ -11,7 +11,7 @@
  * either. The breaker as written had no path to `closed` at all.
  *
  * Fix A adds the missing request-path success call in `response-processor.ts`
- * (gated on `response.ok`, `!isKeepalive`, and `!isInternalProbe(..., "auto-refresh")`),
+ * (gated on `response.ok` and `!isKeepalive`),
  * AND adds `forceClose` for the active-clear path so the two events are no
  * longer conflated. This file pins both behaviours end-to-end so a future
  * "simplification" that removes the success call cannot regress silently.

@@ -359,25 +359,26 @@ describe("selectAccountsForRequest — force account model, forced-account heade
 });
 
 /**
- * The auto-refresh scheduler is not a client asking for a model. It sends a
- * compiled-in list of Claude model ids to whatever account it is probing —
- * including Codex accounts — because its job is to touch the endpoint and read
- * what comes back, not to deliver a caller's choice. Judging it by model
- * compatibility is therefore a category error, and an expensive one: a refused
- * probe counts as a refresh failure, and enough of those pause a perfectly
- * healthy account with pause_reason='failure_threshold'.
+ * A cache-keepalive replay is not a client asking for a model: it replays the
+ * original request to the account whose cache it keeps warm, so judging it by
+ * model compatibility is a category error.
  *
  * The exemption is keyed on `isInternalProbe`, which checks the process-local
- * probe secret. A client that copies the marker header out of a log gets
- * nothing, so this is a carve-out for us rather than a hole in the rule.
+ * probe secret and the keepalive marker. A client that copies a marker header
+ * out of a log gets nothing, so this is a carve-out for us rather than a hole
+ * in the rule. The auto-refresh marker never earns it, even with the secret.
  */
 describe("selectAccountsForRequest — force account model, internal probes", () => {
 	const SECRET = "probe-secret";
 
-	function probeMeta(accountId: string, secret: string | null): RequestMeta {
+	function probeMeta(
+		accountId: string,
+		secret: string | null,
+		marker = "x-better-ccflare-keepalive",
+	): RequestMeta {
 		const headers = new Headers({
 			"x-better-ccflare-account-id": accountId,
-			"x-better-ccflare-auto-refresh": "true",
+			[marker]: "true",
 		});
 		if (secret !== null) {
 			headers.set(INTERNAL_PROBE_SECRET_HEADER, secret);
@@ -385,7 +386,24 @@ describe("selectAccountsForRequest — force account model, internal probes", ()
 		return { ...makeRequestMeta(), headers };
 	}
 
-	it("lets a secret-verified probe reach an account the model does not match", async () => {
+	it("refuses an auto-refresh marker sent with the right secret", async () => {
+		clearCodexModelCacheForTests();
+		const { ctx } = makeCtx({
+			accounts: [claudeAccount, codexAccount],
+			forceAccountModel: true,
+			internalProbeSecret: SECRET,
+		});
+
+		const result = await selectAccountsForRequest(
+			probeMeta("codex-1", SECRET, "x-better-ccflare-auto-refresh"),
+			ctx,
+			CLAUDE_MODEL_IDS.HAIKU_4_5,
+		);
+
+		expect(result).toEqual([]);
+	});
+
+	it("lets a secret-verified keepalive replay reach an account the model does not match", async () => {
 		clearCodexModelCacheForTests();
 		const { ctx } = makeCtx({
 			accounts: [claudeAccount, codexAccount],
@@ -399,8 +417,7 @@ describe("selectAccountsForRequest — force account model, internal probes", ()
 			CLAUDE_MODEL_IDS.HAIKU_4_5,
 		);
 
-		// The probe reaches the Codex account it was aimed at. Refusing here is
-		// what would pause it.
+		// The replay reaches the Codex account it was aimed at.
 		expect(result.map((a) => a.id)).toEqual(["codex-1"]);
 	});
 

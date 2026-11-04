@@ -155,14 +155,10 @@ function makeContext(
 	} as unknown as ProxyContext;
 }
 
-function makeProxyRequest(
-	model = "claude-opus-4-5",
-	synthetic = false,
-): Request {
+function makeProxyRequest(model = "claude-opus-4-5"): Request {
 	const headers: Record<string, string> = {
 		"content-type": "application/json",
 	};
-	if (synthetic) headers["x-better-ccflare-auto-refresh"] = "true";
 	return new Request("https://proxy.local/v1/messages", {
 		method: "POST",
 		headers,

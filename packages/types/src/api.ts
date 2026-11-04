@@ -258,8 +258,6 @@ export interface RequestMeta {
 	 * catalog published after admission.
 	 */
 	routeCatalogRoleTargetByAccountId?: ReadonlyMap<string, string> | null;
-	/** Authenticated in-process auto-refresh probe; never derived from public hint headers. */
-	trustedInternalAutoRefresh?: boolean;
 	/** Frozen content-minimal server-tool constraints derived from the final request body. */
 	serverToolRequirements?: ServerToolRequirements;
 	/**

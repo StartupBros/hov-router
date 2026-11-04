@@ -898,19 +898,15 @@ async function handleProxyCoreImpl(
 	// rely on for the same schedulers' probe requests. Either one, backed by its
 	// matching secret, is sufficient here — an unverified marker alone never is.
 	const trustedInternalScheduler = consumeInternalAutoRefreshAuth(req.headers);
-	const trustedInternalAutoRefresh =
-		(trustedInternalScheduler &&
-			req.headers.get("x-better-ccflare-auto-refresh") === "true") ||
-		isInternalProbe(req.headers, ctx, "auto-refresh");
 	const trustedInternalKeepalive =
 		(trustedInternalScheduler &&
 			req.headers.get("x-better-ccflare-keepalive") === "true") ||
-		isInternalProbe(req.headers, ctx, "keepalive");
-	// The public marker is meaningful only after internal authentication. Remove
-	// spoofed markers so they cannot suppress pacing, analytics, or cache staging.
-	if (!trustedInternalAutoRefresh) {
-		req.headers.delete("x-better-ccflare-auto-refresh");
-	}
+		isInternalProbe(req.headers, ctx);
+	// The auto-refresh marker is trusted nowhere: delete it at ingress so it
+	// cannot suppress pacing or analytics, or reach an upstream.
+	req.headers.delete("x-better-ccflare-auto-refresh");
+	// The keepalive marker is meaningful only after internal authentication.
+	// Remove spoofed markers so they cannot suppress pacing or cache staging.
 	if (!trustedInternalKeepalive) {
 		req.headers.delete("x-better-ccflare-keepalive");
 		req.headers.delete(CACHE_REPLAY_MODEL_HEADER);
@@ -1034,7 +1030,6 @@ async function handleProxyCoreImpl(
 		ctx.guardCorrelationVerifier,
 	);
 	bindObservedRequestId(observation, requestMeta.id);
-	requestMeta.trustedInternalAutoRefresh = trustedInternalAutoRefresh;
 	requestMeta.routingTrustedKeepalive = trustedInternalKeepalive;
 	requestMeta.routingRequestedLogicalModel =
 		typeof originalParsedBody?.model === "string"
@@ -1070,7 +1065,6 @@ async function handleProxyCoreImpl(
 			upstreamAttempts: routingAttemptLedger.attemptedCount,
 			apiKeyId,
 			apiKeyName,
-			skip: trustedInternalAutoRefresh,
 			onError: (error) => {
 				log.error(
 					`handleEnd failed for ${terminalKind} request ${requestMeta.id}`,
@@ -1096,7 +1090,6 @@ async function handleProxyCoreImpl(
 				upstreamAttempts: routingAttemptLedger.attemptedCount,
 				apiKeyId,
 				apiKeyName,
-				skip: trustedInternalAutoRefresh,
 				onError: (error) => {
 					log.error(`Cancellation history failed for ${requestMeta.id}`, error);
 				},
@@ -1194,7 +1187,6 @@ async function handleProxyCoreImpl(
 			upstreamAttempts: routingAttemptLedger.attemptedCount,
 			apiKeyId,
 			apiKeyName,
-			skip: trustedInternalAutoRefresh,
 			onError: (error) => {
 				log.error(
 					`handleEnd failed for ${terminalKind} request ${requestMeta.id}`,
@@ -1725,8 +1717,7 @@ async function handleProxyCoreImpl(
 									)
 								)
 									return false;
-								if (trustedInternalAutoRefresh || trustedInternalKeepalive)
-									return true;
+								if (trustedInternalKeepalive) return true;
 								const now = Date.now();
 								return (
 									(getPredictiveThrottleUntil(
@@ -2112,9 +2103,7 @@ async function handleProxyCoreImpl(
 	// A candidate resolving elsewhere is paced before any upstream call and
 	// reselected afterward so Anthropic never receives stale or unpaced traffic.
 	const pacingEligible =
-		url.pathname === "/v1/messages" &&
-		!trustedInternalKeepalive &&
-		!trustedInternalAutoRefresh;
+		url.pathname === "/v1/messages" && !trustedInternalKeepalive;
 	const pacingCohortKey = pacingEligible
 		? derivePacingCohortKey(requestMeta.clientSessionId, parsedBody)
 		: null;
@@ -2129,7 +2118,7 @@ async function handleProxyCoreImpl(
 	setNativeRemovalUsageGate(
 		requestMeta,
 		(account, model): NativeRemovalUsageBlockKind | null => {
-			if (trustedInternalAutoRefresh || trustedInternalKeepalive) return null;
+			if (trustedInternalKeepalive) return null;
 			const now = Date.now();
 			const comboRouted = requestMeta.comboName != null;
 			const candidateModel = comboRouted
@@ -2305,23 +2294,15 @@ async function handleProxyCoreImpl(
 		return true;
 	};
 	const applyUsageThrottling = (accounts: Account[]) => {
-		// Internal synthetic probes (auto-refresh window-reset checks, cache
-		// keepalive replays) must never be usage-throttled. They exist
-		// specifically to hit the real endpoint and observe state changes
-		// (window resets, recovered accounts) — the same reason
-		// selectAccountsForRequest already lets them bypass pause/rate-limit
-		// checks (see account-selector.ts's isAutoRefreshBypass). Without this
-		// exemption, a throttled-but-healthy account's own synthetic probe gets
-		// our own 529 back; the auto-refresh scheduler then misreads that as an
-		// endpoint failure and counts it toward its consecutive-failure pause
-		// threshold (recordRefreshFailure), auto-pausing a healthy account the
-		// instant its usage window resets and the scheduler re-probes it.
-		// trustedInternalAutoRefresh/trustedInternalKeepalive already fold in
-		// both internal-probe trust mechanisms (see the comment where they're
-		// computed above), so they're the single canonical trust signal here —
+		// Cache keepalive replays must never be usage-throttled. Without this
+		// exemption, a throttled-but-healthy account's own synthetic replay gets
+		// our own 529 back.
+		// trustedInternalKeepalive already folds in both internal-probe trust
+		// mechanisms (see the comment where it is computed above), so it is the
+		// single canonical trust signal here —
 		// consistent with how they gate pacing, session tracking, and cache
 		// staging elsewhere in this function.
-		if (trustedInternalAutoRefresh || trustedInternalKeepalive) {
+		if (trustedInternalKeepalive) {
 			return {
 				available: accounts,
 				predictivelyThrottled: [] as Account[],
@@ -2620,7 +2601,6 @@ async function handleProxyCoreImpl(
 				upstreamAttempts: error.physicalAttempts,
 				apiKeyId,
 				apiKeyName,
-				skip: trustedInternalAutoRefresh,
 				onError: (recordError) => {
 					log.error(
 						`handleEnd failed for physical_attempt_budget_exhausted request ${requestMeta.id}`,
@@ -2970,7 +2950,6 @@ async function handleProxyCoreImpl(
 		if (
 			effectiveModel &&
 			isForceAccountModelEnabled(ctx) &&
-			!trustedInternalAutoRefresh &&
 			!trustedInternalKeepalive
 		) {
 			return finishPacing(
@@ -3093,7 +3072,6 @@ async function handleProxyCoreImpl(
 			upstreamAttempts: 0,
 			apiKeyId,
 			apiKeyName,
-			skip: trustedInternalAutoRefresh,
 			onError: (error) => {
 				log.error(
 					`handleEnd failed for ${terminal.kind} request ${requestMeta.id}`,
@@ -3789,10 +3767,9 @@ async function handleProxyCoreImpl(
 		};
 
 		const now = Date.now();
-		const predictiveThrottleUntil =
-			trustedInternalAutoRefresh || trustedInternalKeepalive
-				? null
-				: getPredictiveThrottleUntil(route.account, route.model, now);
+		const predictiveThrottleUntil = trustedInternalKeepalive
+			? null
+			: getPredictiveThrottleUntil(route.account, route.model, now);
 		observeRoutingSelectionCandidate(
 			requestMeta,
 			"usage_throttle",
@@ -4787,10 +4764,9 @@ async function handleProxyCoreImpl(
 			)
 				return false;
 			const now = Date.now();
-			const predictiveThrottleUntil =
-				trustedInternalAutoRefresh || trustedInternalKeepalive
-					? null
-					: getPredictiveThrottleUntil(route.account, route.model, now);
+			const predictiveThrottleUntil = trustedInternalKeepalive
+				? null
+				: getPredictiveThrottleUntil(route.account, route.model, now);
 			observeRoutingSelectionCandidate(
 				requestMeta,
 				"usage_throttle",
@@ -4845,10 +4821,9 @@ async function handleProxyCoreImpl(
 			requestMeta.comboName = route.comboName;
 			requestMeta.comboSlotIndex = route.comboSlotIndex;
 			const now = Date.now();
-			const predictiveThrottleUntil =
-				trustedInternalAutoRefresh || trustedInternalKeepalive
-					? null
-					: getPredictiveThrottleUntil(route.account, route.model, now);
+			const predictiveThrottleUntil = trustedInternalKeepalive
+				? null
+				: getPredictiveThrottleUntil(route.account, route.model, now);
 			observeRoutingSelectionCandidate(
 				requestMeta,
 				"usage_throttle",
@@ -5149,7 +5124,6 @@ async function handleProxyCoreImpl(
 			upstreamAttempts: 0,
 			apiKeyId,
 			apiKeyName,
-			skip: trustedInternalAutoRefresh,
 			onError: (error) => {
 				log.error(
 					`handleEnd failed for context_length_exceeded request ${requestMeta.id}`,
@@ -5239,7 +5213,6 @@ async function handleProxyCoreImpl(
 		upstreamAttempts: actualUpstreamAttempts,
 		apiKeyId,
 		apiKeyName,
-		skip: trustedInternalAutoRefresh,
 		onError: (error) => {
 			log.error(
 				`handleEnd failed for ${terminal.kind} request ${requestMeta.id}`,

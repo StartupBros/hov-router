@@ -42,6 +42,7 @@ import {
 	prepareRequestBody,
 } from "../packages/proxy/src/handlers/request-handler";
 import { RequestBodyContext } from "../packages/proxy/src/request-body-context";
+import { getRequestLifecycleCoordinator } from "../packages/proxy/src/routing-terminal-recorder";
 import type {
 	RequestBodyUpstreamReadyMessage,
 	RequestBodyUpstreamState,
@@ -1054,7 +1055,7 @@ export async function runProxyRequestBodyWorkload(
 					method: "POST",
 					headers: {
 						"content-type": "application/json",
-						"x-better-ccflare-auto-refresh": "true",
+						"x-better-ccflare-keepalive": "true",
 						"x-better-ccflare-internal-probe-secret": "memory-loopback-secret",
 					},
 					body: generated,
@@ -1082,11 +1083,17 @@ export async function runProxyRequestBodyWorkload(
 				}
 				recorder.record("request-body-context-parsed");
 				const requestUrl = new URL(request.url);
+				const requestMeta = createRequestMetadata(request, requestUrl);
+				// This workload measures request-body ownership only. Marking the
+				// request's usage lifecycle as already settled keeps forwardToClient
+				// from doing response lifecycle work (no usage collector, no
+				// analytics writes), which the auto-refresh probe marker used to do.
+				getRequestLifecycleCoordinator(requestMeta).state = "finalized";
 				const response = await proxyWithAccount(
 					request,
 					requestUrl,
 					account,
-					createRequestMetadata(request, requestUrl),
+					requestMeta,
 					prepared.buffer,
 					prepared.createStream,
 					0,

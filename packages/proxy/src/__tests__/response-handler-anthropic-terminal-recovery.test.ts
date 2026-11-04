@@ -4,10 +4,10 @@ import type { ProxyContext } from "../handlers";
 
 // The source worktree intentionally excludes generated database worker bundles.
 // ResponseHandler only reaches DatabaseOperations/AsyncDbWriter construction
-// through UsageCollector's getUsageCollector() fallback, which this filtered
-// probe path never initializes or calls: every ProxyContext below passes
-// hand-rolled dbOps: {} / asyncWriter: {} fakes, and getUsageCollector itself
-// is spied/replaced per-test where needed. So @better-ccflare/database's real
+// through UsageCollector's getUsageCollector() fallback, which these tests
+// never initialize: every ProxyContext below passes hand-rolled dbOps: {} /
+// asyncWriter: {} fakes, and getUsageCollector itself is spied/replaced
+// per-test. So @better-ccflare/database's real
 // exports are never touched here — do NOT add a
 // mock.module("@better-ccflare/database", ...) stub for
 // DatabaseOperations/AsyncDbWriter/DatabaseFactory: it isn't needed, and
@@ -60,6 +60,14 @@ function stalledCommittedStream(
 	});
 }
 
+function stubUsageCollector() {
+	return spyOn(usageCollectorModule, "getUsageCollector").mockReturnValue({
+		handleStart: mock(() => undefined),
+		handleChunk: mock(() => undefined),
+		handleEnd: mock(() => Promise.resolve()),
+	} as unknown as usageCollectorModule.UsageCollector);
+}
+
 function nativeAnthropicCtx(providerName = "anthropic"): ProxyContext {
 	return {
 		strategy: {},
@@ -72,7 +80,6 @@ function nativeAnthropicCtx(providerName = "anthropic"): ProxyContext {
 		},
 		refreshInFlight: new Map<string, Promise<string>>(),
 		asyncWriter: {},
-		internalProbeSecret: "test-secret",
 	} as unknown as ProxyContext;
 }
 
@@ -91,34 +98,37 @@ async function forwardClosedStream({
 	status?: number;
 	contentType?: string;
 }): Promise<string> {
-	const response = await forwardToClient(
-		{
-			requestId: crypto.randomUUID(),
-			method,
-			path,
-			account: null,
-			requestHeaders,
-			requestBody: bytes("{}"),
-			response: new Response(immediateStream(bytes(terminalDelta)), {
-				status,
-				headers: { "content-type": contentType },
-			}),
-			timestamp: Date.now(),
-			retryAttempt: 0,
-			failoverAttempts: 0,
-		},
-		nativeAnthropicCtx(providerName),
-	);
+	const collectorSpy = stubUsageCollector();
+	try {
+		const response = await forwardToClient(
+			{
+				requestId: crypto.randomUUID(),
+				method,
+				path,
+				account: null,
+				requestHeaders,
+				requestBody: bytes("{}"),
+				response: new Response(immediateStream(bytes(terminalDelta)), {
+					status,
+					headers: { "content-type": contentType },
+				}),
+				timestamp: Date.now(),
+				retryAttempt: 0,
+				failoverAttempts: 0,
+			},
+			nativeAnthropicCtx(providerName),
+		);
 
-	return response.text();
+		return await response.text();
+	} finally {
+		collectorSpy.mockRestore();
+	}
 }
 
 describe("forwardToClient Anthropic terminal recovery integration", () => {
 	it("recovers native Anthropic Messages SSE responses", async () => {
 		const requestHeaders = new Headers({
 			"anthropic-version": "2023-06-01",
-			"x-better-ccflare-auto-refresh": "true",
-			"x-better-ccflare-internal-probe-secret": "test-secret",
 		});
 
 		await expect(forwardClosedStream({ requestHeaders })).resolves.toBe(
@@ -129,11 +139,6 @@ describe("forwardToClient Anthropic terminal recovery integration", () => {
 	it("recovers provider-transformed downstream Anthropic Messages SSE exactly once", async () => {
 		const requestHeaders = new Headers({
 			"anthropic-version": "2023-06-01",
-			"x-better-ccflare-auto-refresh": "true",
-			// This fork authenticates internal probes with a process-local secret
-			// (internal-probe-auth.ts), so the marker header alone is not enough to
-			// classify the request as a probe — it must match ctx.internalProbeSecret.
-			"x-better-ccflare-internal-probe-secret": "test-secret",
 		});
 
 		const body = await forwardClosedStream({
@@ -215,12 +220,8 @@ describe("forwardToClient Anthropic terminal recovery integration", () => {
 		// only, so any anthropic-compatible provider speaking the same wire
 		// format (e.g. minimax) on /v1/messages with text/event-stream also
 		// gets the recovery synthesis. Non-Messages paths still bypass.
-		const filteredHeaders = new Headers({
-			"x-better-ccflare-auto-refresh": "true",
-			"x-better-ccflare-internal-probe-secret": "test-secret",
-		});
-		const nativeHeaders = new Headers(filteredHeaders);
-		nativeHeaders.set("anthropic-version", "2023-06-01");
+		const filteredHeaders = new Headers();
+		const nativeHeaders = new Headers({ "anthropic-version": "2023-06-01" });
 
 		// Missing anthropic-version header on native anthropic still gets
 		// recovery — the header is no longer part of the gate.
@@ -248,8 +249,6 @@ describe("forwardToClient Anthropic terminal recovery integration", () => {
 	it("leaves GET, non-2xx, and non-SSE Anthropic Messages responses unchanged", async () => {
 		const nativeHeaders = new Headers({
 			"anthropic-version": "2023-06-01",
-			"x-better-ccflare-auto-refresh": "true",
-			"x-better-ccflare-internal-probe-secret": "test-secret",
 		});
 
 		await expect(
@@ -278,6 +277,7 @@ describe("forwardToClient Anthropic terminal recovery integration", () => {
 		const ctx = nativeAnthropicCtx();
 		ctx.strategy.reportCandidateFailure = reportCandidateFailure;
 		let cancelCount = 0;
+		const collectorSpy = stubUsageCollector();
 
 		try {
 			const response = await forwardToClient(
@@ -288,9 +288,6 @@ describe("forwardToClient Anthropic terminal recovery integration", () => {
 					account: null,
 					requestHeaders: new Headers({
 						"anthropic-version": "2023-06-01",
-						"x-better-ccflare-auto-refresh": "true",
-						// See note above: this fork requires the probe secret to match.
-						"x-better-ccflare-internal-probe-secret": "test-secret",
 					}),
 					requestBody: bytes("{}"),
 					response: new Response(
@@ -315,6 +312,7 @@ describe("forwardToClient Anthropic terminal recovery integration", () => {
 			expect(cancelCount).toBe(1);
 			expect(reportCandidateFailure).not.toHaveBeenCalled();
 		} finally {
+			collectorSpy.mockRestore();
 			if (originalTimeout === undefined) delete process.env[timeoutEnv];
 			else process.env[timeoutEnv] = originalTimeout;
 			if (originalProgress === undefined) delete process.env[progressEnv];

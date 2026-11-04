@@ -169,13 +169,11 @@ export function captureRoutingDecision(
 				: meta.path === "/v1/messages"
 					? "messages"
 					: "other",
-		origin: meta.trustedInternalAutoRefresh
-			? "trusted_auto_refresh"
-			: meta.routingTrustedKeepalive
-				? "trusted_keepalive"
-				: meta.routeLineage?.kind === "helper"
-					? "trusted_helper"
-					: "unknown",
+		origin: meta.routingTrustedKeepalive
+			? "trusted_keepalive"
+			: meta.routeLineage?.kind === "helper"
+				? "trusted_helper"
+				: "unknown",
 		reason,
 		evidence,
 		inventory: meta.routingInventoryOutcome ?? "unknown",

@@ -246,14 +246,10 @@ function makeContext(
 	} as unknown as ProxyContext;
 }
 
-function makeProxyRequest(
-	model = "claude-opus-4-5",
-	synthetic = true,
-): Request {
+function makeProxyRequest(model = "claude-opus-4-5"): Request {
 	const headers: Record<string, string> = {
 		"content-type": "application/json",
 	};
-	if (synthetic) headers["x-better-ccflare-auto-refresh"] = "true";
 	return new Request("https://proxy.local/v1/messages", {
 		method: "POST",
 		headers,
@@ -352,7 +348,7 @@ describe("routing observations", () => {
 				}),
 		) as unknown as typeof fetch;
 
-		const request = makeProxyRequest("claude-opus-4-5", false);
+		const request = makeProxyRequest("claude-opus-4-5");
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(response.status).toBe(200);
@@ -398,7 +394,7 @@ describe("combo fallback disabled terminal persistence", () => {
 
 		try {
 			const request = addSensitivePersistenceHeaders(
-				makeProxyRequest("claude-opus-4-5", false),
+				makeProxyRequest("claude-opus-4-5"),
 			);
 			const response = await handleProxy(request, new URL(request.url), ctx);
 
@@ -452,7 +448,7 @@ describe("combo fallback disabled terminal persistence", () => {
 
 		try {
 			const request = addSensitivePersistenceHeaders(
-				makeProxyRequest("claude-opus-4-5", false),
+				makeProxyRequest("claude-opus-4-5"),
 			);
 			const response = await handleProxy(request, new URL(request.url), ctx);
 
@@ -906,7 +902,7 @@ describe("post-combo normal fallback", () => {
 					});
 		}) as unknown as typeof fetch;
 
-		const request = makeProxyRequest("claude-opus-4-5", false);
+		const request = makeProxyRequest("claude-opus-4-5");
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(response.status).toBe(200);
@@ -974,7 +970,7 @@ describe("post-combo normal fallback", () => {
 					});
 		}) as unknown as typeof fetch;
 
-		const request = makeProxyRequest("claude-opus-4-5", false);
+		const request = makeProxyRequest("claude-opus-4-5");
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(response.status).toBe(200);
@@ -1044,7 +1040,7 @@ describe("post-combo normal fallback", () => {
 		const previousRetrySetting = process.env.CCFLARE_OVERLOAD_RETRY_ENABLED;
 		process.env.CCFLARE_OVERLOAD_RETRY_ENABLED = "false";
 		try {
-			const request = makeProxyRequest("claude-opus-4-5", false);
+			const request = makeProxyRequest("claude-opus-4-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 
 			expect(fetchCount).toBe(1);
@@ -1113,7 +1109,7 @@ describe("post-combo normal fallback", () => {
 			);
 		}) as unknown as typeof fetch;
 
-		const request = makeProxyRequest("claude-opus-4-5", false);
+		const request = makeProxyRequest("claude-opus-4-5");
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(fetchCount).toBe(1);
@@ -1198,7 +1194,7 @@ describe("post-combo normal fallback", () => {
 		const previousRetrySetting = process.env.CCFLARE_OVERLOAD_RETRY_ENABLED;
 		process.env.CCFLARE_OVERLOAD_RETRY_ENABLED = "false";
 		try {
-			const request = makeProxyRequest("claude-opus-4-5", false);
+			const request = makeProxyRequest("claude-opus-4-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 
 			expect(fetchCount).toBe(1);
@@ -1290,7 +1286,7 @@ describe("post-combo normal fallback", () => {
 			);
 		}) as unknown as typeof fetch;
 
-		const request = makeProxyRequest("claude-opus-4-5", false);
+		const request = makeProxyRequest("claude-opus-4-5");
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(fetchCount).toBe(1);
@@ -1364,7 +1360,7 @@ describe("implicit fallback policy integration", () => {
 				});
 			}) as unknown as typeof fetch;
 
-			const request = makeProxyRequest("claude-opus-4-5", false);
+			const request = makeProxyRequest("claude-opus-4-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 
 			expect(response.status).toBe(200);
@@ -1417,7 +1413,7 @@ describe("implicit fallback policy integration", () => {
 			});
 			globalThis.fetch = upstreamFetch as unknown as typeof fetch;
 
-			const request = makeProxyRequest("claude-opus-4-5", false);
+			const request = makeProxyRequest("claude-opus-4-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			const payload = (await response.json()) as {
 				error?: {
@@ -1634,7 +1630,7 @@ describe("native quota wait execution", () => {
 		}) as typeof fetch;
 		let restoreClock = () => {};
 		try {
-			const first = makeProxyRequest("claude-fable-5", false);
+			const first = makeProxyRequest("claude-fable-5");
 			const firstResponse = await handleProxy(first, new URL(first.url), ctx);
 			await Promise.all(writes.map((write) => write()));
 			expect(firstResponse.status).toBe(529);
@@ -1658,7 +1654,7 @@ describe("native quota wait execution", () => {
 						})
 					: null;
 			try {
-				const second = makeProxyRequest("claude-fable-5", false);
+				const second = makeProxyRequest("claude-fable-5");
 				const secondResponse = await handleProxy(
 					second,
 					new URL(second.url),
@@ -1697,7 +1693,7 @@ describe("native quota wait execution", () => {
 				});
 				return Response.json({ type: "message", content: [] });
 			}) as typeof fetch;
-			const third = makeProxyRequest("claude-fable-5", false);
+			const third = makeProxyRequest("claude-fable-5");
 			const thirdResponse = await handleProxy(third, new URL(third.url), ctx);
 			expect(await thirdResponse.clone().json()).toMatchObject({
 				type: "message",
@@ -1727,7 +1723,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(429);
 			expect(transport).not.toHaveBeenCalled();
@@ -1758,7 +1754,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect(response.status).toBe(429);
@@ -1788,7 +1784,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(429);
 			expect(transport).not.toHaveBeenCalled();
@@ -1823,7 +1819,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			request.headers.set(
 				"x-better-ccflare-exclude-providers",
 				"anthropic-oauth",
@@ -1860,7 +1856,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(503);
 			expect(transport).not.toHaveBeenCalled();
@@ -1892,7 +1888,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(529);
 			expect(transport).not.toHaveBeenCalled();
@@ -1932,7 +1928,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(529);
 			expect(transport).not.toHaveBeenCalled();
@@ -1955,7 +1951,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(529);
 			expect(transport).not.toHaveBeenCalled();
@@ -1981,7 +1977,7 @@ describe("native quota wait execution", () => {
 			return Response.json({ type: "message", content: [] });
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(200);
 			expect(calls).toEqual([
@@ -2029,7 +2025,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect(response.status).toBe(503);
@@ -2062,7 +2058,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			if (denial !== "implicit")
 				request.headers.set("x-better-ccflare-exclude-providers", denial);
 			const response = await handleProxy(request, new URL(request.url), ctx);
@@ -2125,7 +2121,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(denied).toBe(true);
 			expect(transport).not.toHaveBeenCalled();
@@ -2352,7 +2348,7 @@ describe("native quota wait execution", () => {
 		}) as typeof fetch;
 		let restoreClock = () => {};
 		try {
-			const first = makeProxyRequest("claude-fable-5", false);
+			const first = makeProxyRequest("claude-fable-5");
 			const firstResponse = await handleProxy(first, new URL(first.url), ctx);
 			expect(firstResponse.status).toBe(529);
 			expect(calls).toHaveLength(2);
@@ -2360,7 +2356,7 @@ describe("native quota wait execution", () => {
 				usageCache.getModelScopedExhaustion(account.id, "claude-fable-5"),
 			);
 			expect(markers.every((marker) => marker !== null)).toBe(true);
-			const second = makeProxyRequest("claude-fable-5", false);
+			const second = makeProxyRequest("claude-fable-5");
 			const secondResponse = await handleProxy(
 				second,
 				new URL(second.url),
@@ -2391,7 +2387,7 @@ describe("native quota wait execution", () => {
 				});
 				return Response.json({ type: "message", content: [] });
 			}) as typeof fetch;
-			const third = makeProxyRequest("claude-fable-5", false);
+			const third = makeProxyRequest("claude-fable-5");
 			const thirdResponse = await handleProxy(third, new URL(third.url), ctx);
 			expect(thirdResponse.status).toBe(200);
 			expect(calls).toHaveLength(3);
@@ -2509,7 +2505,7 @@ describe("native quota wait execution", () => {
 			);
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(200);
 			expect(calls).toEqual([
@@ -2543,7 +2539,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect(response.status).toBe(503);
@@ -2565,7 +2561,7 @@ describe("native quota wait execution", () => {
 			throw new Error("offline connection reset before response");
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(calls.map((call) => call.model)).toEqual([
 				"claude-fable-5",
@@ -2612,7 +2608,7 @@ describe("native quota wait execution", () => {
 			});
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			expect(
 				(await handleProxy(request, new URL(request.url), ctx)).status,
 			).toBe(200);
@@ -2646,7 +2642,7 @@ describe("native quota wait execution", () => {
 			});
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			expect(
 				(await handleProxy(request, new URL(request.url), ctx)).status,
 			).toBe(200);
@@ -2676,7 +2672,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = new Request(makeProxyRequest("claude-fable-5", false), {
+			const request = new Request(makeProxyRequest("claude-fable-5"), {
 				signal: cancellation.signal,
 			});
 			const response = await handleProxy(request, new URL(request.url), ctx);
@@ -2702,7 +2698,7 @@ describe("native quota wait execution", () => {
 			);
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(calls.map((call) => call.model)).toEqual([
 				"claude-fable-5",
@@ -2725,7 +2721,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect(response.status).toBe(503);
@@ -2750,7 +2746,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect(response.status).toBe(503);
@@ -2785,7 +2781,7 @@ describe("native quota wait execution", () => {
 		);
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).toHaveBeenCalledTimes(1);
 			expect(response.status).toBe(503);
@@ -2828,7 +2824,7 @@ describe("native quota wait execution", () => {
 			});
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(200);
 			expect(calls).toEqual([
@@ -2857,7 +2853,7 @@ describe("native quota wait execution", () => {
 			);
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(calls.length).toBeGreaterThan(0);
 			expect(
@@ -2882,7 +2878,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect(response.status).toBe(429);
@@ -2931,7 +2927,7 @@ describe("native quota wait execution", () => {
 			});
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			expect(
 				(await handleProxy(request, new URL(request.url), ctx)).status,
 			).toBe(200);
@@ -2960,7 +2956,7 @@ describe("native quota wait execution", () => {
 			});
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			expect(
 				(await handleProxy(request, new URL(request.url), ctx)).status,
 			).toBe(200);
@@ -2988,7 +2984,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect(response.status).toBe(429);
@@ -3008,7 +3004,7 @@ describe("native quota wait execution", () => {
 			throw new TypeError("fetch failed: offline fixture");
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(529);
 			expect(await response.json()).toMatchObject({
@@ -3060,7 +3056,7 @@ describe("native quota wait execution", () => {
 			);
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(new Set(calls.map((call) => call.account)).size).toBe(2);
 			expect(calls.every((call) => call.model === "claude-fable-5")).toBe(true);
@@ -3083,7 +3079,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect([429, 529]).not.toContain(response.status);
@@ -3106,7 +3102,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(transport).not.toHaveBeenCalled();
 			expect([429, 529]).not.toContain(response.status);
@@ -3126,7 +3122,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = new Request(makeProxyRequest("claude-fable-5", false), {
+			const request = new Request(makeProxyRequest("claude-fable-5"), {
 				signal: controller.signal,
 			});
 			const response = await handleProxy(request, new URL(request.url), ctx);
@@ -3225,7 +3221,7 @@ describe("native quota wait execution", () => {
 		});
 		globalThis.fetch = transport as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(503);
 			expect(await response.json()).toMatchObject({
@@ -3282,7 +3278,7 @@ describe("native quota wait execution", () => {
 			});
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(calls.map((call) => call.model)).toEqual(
 				authoritative
@@ -3318,7 +3314,7 @@ describe("native quota wait execution", () => {
 			});
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			expect(
 				(await handleProxy(request, new URL(request.url), ctx)).status,
 			).toBe(200);
@@ -3345,7 +3341,7 @@ describe("native quota wait execution", () => {
 			});
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			expect(
 				(await handleProxy(request, new URL(request.url), ctx)).status,
 			).toBe(200);
@@ -3380,7 +3376,7 @@ describe("native quota wait execution", () => {
 			);
 		}) as typeof fetch;
 		try {
-			const request = makeProxyRequest("claude-fable-5", false);
+			const request = makeProxyRequest("claude-fable-5");
 			const response = await handleProxy(request, new URL(request.url), ctx);
 			expect(response.status).toBe(200);
 			expect(calls.map((call) => call.model)).toEqual([

@@ -137,9 +137,9 @@ export class AuthService {
 
 	/**
 	 * Mirrors isInternalProbe() in packages/proxy/src/handlers/proxy-types.ts:
-	 * a request is a legitimate internal probe (auto-refresh or
-	 * cache-keepalive self-loop) only if the process-local secret matches AND
-	 * one of the marker headers is present. Fails closed (false) if the
+	 * a request is a legitimate cache-keepalive self-loop only if
+	 * the process-local secret matches AND the keepalive marker is present.
+	 * The auto-refresh marker earns nothing here. Fails closed (false) if the
 	 * secret is missing/unset or doesn't match.
 	 */
 	private isInternalProbeRequest(headers: Headers): boolean {
@@ -147,10 +147,7 @@ export class AuthService {
 		const provided = headers.get(INTERNAL_PROBE_SECRET_HEADER);
 		if (!provided || !timingSafeStringEqual(provided, this.internalProbeSecret))
 			return false;
-		const hasAutoRefresh =
-			headers.get("x-better-ccflare-auto-refresh") === "true";
-		const hasKeepalive = headers.get("x-better-ccflare-keepalive") === "true";
-		return hasAutoRefresh || hasKeepalive;
+		return headers.get("x-better-ccflare-keepalive") === "true";
 	}
 
 	/**

@@ -103,7 +103,7 @@ it("denies revoked/bootstrap/local-secret authority and keeps disabled controls 
 	const probe = new Request(req.url, {
 		headers: {
 			"x-better-ccflare-internal-probe-secret": "synthetic-probe",
-			"x-better-ccflare-auto-refresh": "true",
+			"x-better-ccflare-keepalive": "true",
 		},
 	});
 	expect((await router.handleRequest(new URL(probe.url), probe))?.status).toBe(

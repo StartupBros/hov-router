@@ -502,10 +502,7 @@ function degradedSuppressionReason(
 }
 
 function isSyntheticInternalRequest(headers: Headers): boolean {
-	return (
-		!!headers.get("x-better-ccflare-keepalive") ||
-		!!headers.get("x-better-ccflare-auto-refresh")
-	);
+	return !!headers.get("x-better-ccflare-keepalive");
 }
 
 const SYNTHETIC_RESPONSE_HEADER = "x-better-ccflare-synthetic-response";
@@ -6783,11 +6780,7 @@ export async function proxyWithAccount(
 							// account at the same instant. Applying real cooldowns
 							// here drains the pool to zero routable accounts even
 							// though no real user-facing rate limit was hit.
-							const isKeepalive = isInternalProbe(
-								req.headers,
-								ctx,
-								"keepalive",
-							);
+							const isKeepalive = isInternalProbe(req.headers, ctx);
 							if (isKeepalive) {
 								log.warn(
 									`Keepalive replay for ${account.name} got 429 — skipping cooldown (synthetic burst, not a real per-account rate limit)`,
@@ -7290,7 +7283,7 @@ export async function proxyWithAccount(
 						// Same keepalive-skip as the no-fallback path above: synthetic
 						// keepalive bursts can trip Anthropic's per-IP limit even when
 						// individual accounts are healthy.
-						const isKeepalive = isInternalProbe(req.headers, ctx, "keepalive");
+						const isKeepalive = isInternalProbe(req.headers, ctx);
 						if (isKeepalive) {
 							log.warn(
 								`Keepalive replay for ${account.name} got 429 (post-model-list) — skipping cooldown`,

@@ -79,10 +79,7 @@ export function stripCacheControlFromReplayBody(
 }
 
 function isSyntheticInternalRequest(headers: Headers): boolean {
-	return (
-		!!headers.get("x-better-ccflare-keepalive") ||
-		!!headers.get("x-better-ccflare-auto-refresh")
-	);
+	return !!headers.get("x-better-ccflare-keepalive");
 }
 
 /**

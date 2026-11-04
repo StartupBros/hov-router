@@ -428,7 +428,7 @@ export async function processProxyResponse(
 	// recovered. The header is set by cache-keepalive-scheduler.ts and only
 	// synthetic replays carry it, so it cannot be confused for a real
 	// user-driven request.
-	const isKeepalive = isInternalProbe(requestMeta?.headers, ctx, "keepalive");
+	const isKeepalive = isInternalProbe(requestMeta?.headers, ctx);
 
 	if (rateLimitInfo.isRateLimited) {
 		// Skip cooldown application on synthetic cache-keepalive replays. The
@@ -550,28 +550,19 @@ export async function processProxyResponse(
 		// side-effect is `forceClose` from clearExpiredRateLimits, which
 		// cannot transition a `half-open` entry to `closed` (that is the
 		// half-open-only branch in `CircuitBreaker.recordSuccess`). The
-		// gate must survive three filters to fire:
+		// gate must survive two filters to fire:
 		//
 		//   1. response.ok — a 5xx against an open upstream is not
 		//      evidence of recovery; calling recordSuccess on a 500 would
 		//      close a circuit the upstream has not actually healed.
 		//   2. !isKeepalive — symmetric with the cooldown-skip above; see
 		//      comment on the hoisted constant.
-		//   3. !isInternalProbe(requestMeta?.headers, ctx, "auto-refresh")
-		//      — auto-refresh probes run on an internal cadence and
-		//      bypass user-quota state; treating one of their 200s as a
-		//      recovery signal would erase an open circuit any time the
-		//      auto-refresh scheduler happens to land successfully.
 		//
 		// The half-open close is the only mutation that matters here;
 		// `recordSuccess` on a `closed` entry with `failureCount > 0`
 		// clears the streak, which is also the right behaviour for a
 		// healthy stream of successful requests.
-		if (
-			response.ok &&
-			!isKeepalive &&
-			!isInternalProbe(requestMeta?.headers, ctx, "auto-refresh")
-		) {
+		if (response.ok && !isKeepalive) {
 			recordSuccess(circuitKeyFor(account));
 		}
 

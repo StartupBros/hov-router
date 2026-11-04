@@ -1,15 +1,15 @@
 /**
  * Tests for the internal-probe exemption added to AuthService (issue #216,
- * stage 1). Auto-refresh-scheduler.ts and cache-keepalive-scheduler.ts
- * self-loop over HTTP to `localhost:{port}/v1/messages` (or the cached
- * request's path) to probe/refresh accounts. When API-key auth is enabled,
+ * stage 1). cache-keepalive-scheduler.ts self-loops over HTTP to
+ * `localhost:{port}/v1/messages` (or the cached request's path) to keep
+ * prompt caches warm. When API-key auth is enabled,
  * these synthetic internal requests were 401'd because they never carried an
  * API key — only the process-local internal-probe-secret marker headers
  * already used deeper in the proxy pipeline (see proxy-types.ts
  * isInternalProbe).
  *
  * This suite verifies AuthService.authenticateRequest/isPathExempt now
- * exempts correctly-marked internal probe requests to proxy endpoints
+ * exempts correctly-marked keepalive requests to proxy endpoints
  * (/v1/*, /messages/*) when constructed with a matching internalProbeSecret,
  * and fails closed (still requires an API key) when the secret is wrong,
  * missing, or the marker header is absent.
@@ -41,7 +41,7 @@ function makeRequest(
 
 describe("AuthService — internal probe exemption (#216)", () => {
 	describe("auto-refresh marker", () => {
-		it("exempts a request to /v1/messages with matching secret + auto-refresh marker", async () => {
+		it("refuses a request to /v1/messages with matching secret + auto-refresh marker and no key", async () => {
 			const auth = new AuthService(makeDbOpsWithApiKeys(), SECRET);
 			const req = makeRequest("/v1/messages", {
 				[INTERNAL_PROBE_SECRET_HEADER]: SECRET,
@@ -54,7 +54,7 @@ describe("AuthService — internal probe exemption (#216)", () => {
 				"POST",
 			);
 
-			expect(result.isAuthenticated).toBe(true);
+			expect(result.isAuthenticated).toBe(false);
 		});
 	});
 
@@ -110,7 +110,7 @@ describe("AuthService — internal probe exemption (#216)", () => {
 			const auth = new AuthService(makeDbOpsWithApiKeys(), SECRET);
 			const req = makeRequest("/v1/messages", {
 				[INTERNAL_PROBE_SECRET_HEADER]: "wrong-secret",
-				"x-better-ccflare-auto-refresh": "true",
+				"x-better-ccflare-keepalive": "true",
 			});
 
 			const result = await auth.authenticateRequest(
@@ -125,7 +125,7 @@ describe("AuthService — internal probe exemption (#216)", () => {
 		it("rejects when the secret header is missing entirely", async () => {
 			const auth = new AuthService(makeDbOpsWithApiKeys(), SECRET);
 			const req = makeRequest("/v1/messages", {
-				"x-better-ccflare-auto-refresh": "true",
+				"x-better-ccflare-keepalive": "true",
 			});
 
 			const result = await auth.authenticateRequest(
@@ -156,7 +156,7 @@ describe("AuthService — internal probe exemption (#216)", () => {
 			const auth = new AuthService(makeDbOpsWithApiKeys(), undefined);
 			const req = makeRequest("/v1/messages", {
 				[INTERNAL_PROBE_SECRET_HEADER]: "anything",
-				"x-better-ccflare-auto-refresh": "true",
+				"x-better-ccflare-keepalive": "true",
 			});
 
 			const result = await auth.authenticateRequest(
@@ -172,7 +172,7 @@ describe("AuthService — internal probe exemption (#216)", () => {
 			const auth = new AuthService(makeDbOpsWithApiKeys(), SECRET);
 			const req = makeRequest("/api/accounts", {
 				[INTERNAL_PROBE_SECRET_HEADER]: SECRET,
-				"x-better-ccflare-auto-refresh": "true",
+				"x-better-ccflare-keepalive": "true",
 			});
 
 			const result = await auth.authenticateRequest(

@@ -102,23 +102,17 @@ export function isResponsesAdapterRequest(
 }
 
 /**
- * Determines whether a request is a legitimate internal probe (auto-refresh
- * or cache-keepalive) rather than an external client forging the marker
- * headers. Requires the process-local secret to match in addition to the
- * marker header(s).
+ * Determines whether a request is a legitimate cache-keepalive replay rather
+ * than an external client forging the marker header. Requires the
+ * process-local secret to match in addition to the keepalive marker. The
+ * auto-refresh marker is never trusted.
  */
 export function isInternalProbe(
 	headers: Headers | null | undefined,
 	ctx: Pick<ProxyContext, "internalProbeSecret">,
-	marker: "auto-refresh" | "keepalive" | "any" = "any",
 ): boolean {
 	if (!headers || !ctx.internalProbeSecret) return false;
 	if (headers.get(INTERNAL_PROBE_SECRET_HEADER) !== ctx.internalProbeSecret)
 		return false;
-	const hasAutoRefresh =
-		headers.get("x-better-ccflare-auto-refresh") === "true";
-	const hasKeepalive = headers.get("x-better-ccflare-keepalive") === "true";
-	if (marker === "auto-refresh") return hasAutoRefresh;
-	if (marker === "keepalive") return hasKeepalive;
-	return hasAutoRefresh || hasKeepalive;
+	return headers.get("x-better-ccflare-keepalive") === "true";
 }
