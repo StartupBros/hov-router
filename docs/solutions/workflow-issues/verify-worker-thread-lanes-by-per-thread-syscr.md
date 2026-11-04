@@ -1,6 +1,7 @@
 ---
 title: Prove which worker lane serves an endpoint by per-thread read-syscall deltas, not thread names or logs
 date: 2026-11-03
+last_updated: 2026-11-04
 category: workflow-issues
 module: off-thread-sqlite-workers
 problem_type: workflow_issue
@@ -83,7 +84,7 @@ Production `/api` needs the admin key; only `/health` is exempt. Put the `x-api-
 Two cautions:
 
 - Send bursts only to real dashboard routes ([unknown-path doc](./never-poll-an-unknown-path-against-a-local-ccflare.md)). This method uses dashboard reads, never inference traffic.
-- Keep the contention test short. Each heavy bulk endpoint ran 39-85 s here, and the bulk reader already carries recurring scans: the subscription value (#710, up to 83 s) and the Codex scanner's usage report (up to 25 s). One or two runs are enough.
+- Keep the contention test short. Each heavy bulk endpoint ran 39-85 s when this was written. Since #722 (2026-11-04) the recurring bulk-lane scans are cheap: a public subscription-value refresh takes about 0.33 s warm, and the Codex scanner's usage report about 0.19 s run alone. So the endpoint you start in step 4 supplies the contention. One or two runs are enough.
 
 ### Thread names
 
@@ -143,7 +144,7 @@ Before #712, those same accounts reads queued behind the single reader while a s
 
 - Issue #709 and PR #712: the interactive reader lane this method verified.
 - Issue #676 and PR #686: the off-thread writer. Its rollout identified the writer from per-thread io (session history).
-- Issue #606: where the off-thread bulk reader came from. Issue #710 and the Codex scanner's `report()` call (`packages/http-api/src/services/external-codex-scanner.ts`): the recurring bulk-lane load that makes the contention test meaningful. Since #601 the dashboard no longer polls `/api/stats`, so #711 is not part of it.
+- Issue #606: where the off-thread bulk reader came from. Issue #710 and the Codex scanner's `report()` call (`packages/http-api/src/services/external-codex-scanner.ts`) were the recurring bulk-lane load until #722 fixed #710's query plan; after that deploy `report()` all but stopped logging as slow (once, at 1.0 s, in the first 51 minutes) ([planner-tie learning](../performance-issues/sqlite-planner-tie-between-low-cardinality-and-account-index.md)). Since #601 the dashboard no longer polls `/api/stats`, so #711 is not part of it.
 - [Worker SQLite connections run compile-default pragmas](../performance-issues/worker-sqlite-connections-run-compile-default-pragmas.md): how the worker connections are configured, and the inventory of worker sites.
 - [Verify fix ancestry before citing a measured rate](./verify-fix-ancestry-before-citing-a-measured-rate.md): confirm the live `git_sha` carries the change before citing a measurement.
 - [Never poll an unknown path against a local ccflare](./never-poll-an-unknown-path-against-a-local-ccflare.md): send bursts to known routes only.
