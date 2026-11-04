@@ -236,7 +236,7 @@ export interface AccountRow {
 	cross_region_mode?: string | null; // Bedrock cross-region inference mode
 	model_fallbacks?: string | null; // JSON string for model family fallback mappings
 	billing_type?: string | null; // Per-account billing override
-	pause_reason?: string | null; // null=not paused, 'manual'=user paused, 'failure_threshold'=auto-refresh failures, 'overage'=billing overage
+	pause_reason?: string | null; // null=not paused, 'manual'=user paused, 'failure_threshold'=auto-refresh failures (setter removed; legacy rows), 'overage'=billing overage
 	refresh_token_issued_at?: number | null; // Timestamp when the current refresh token was issued (updated on each token refresh)
 	consecutive_rate_limits?: number | null;
 }
@@ -288,7 +288,7 @@ export interface Account {
 	cross_region_mode: string | null; // Bedrock cross-region inference mode
 	model_fallbacks: string | null; // JSON string for model family fallback mappings
 	billing_type: string | null;
-	pause_reason: string | null; // null=not paused, 'manual'=user paused, 'failure_threshold'=auto-refresh failures, 'overage'=billing overage
+	pause_reason: string | null; // null=not paused, 'manual'=user paused, 'failure_threshold'=auto-refresh failures (setter removed; legacy rows), 'overage'=billing overage
 	refresh_token_issued_at: number | null; // Timestamp when the current refresh token was issued (updated on each token refresh)
 	consecutive_rate_limits: number;
 }

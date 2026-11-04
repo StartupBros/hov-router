@@ -138,7 +138,7 @@ export function handleRateLimitResponse(
  * @param response - The response to extract metadata from
  * @param ctx - The proxy context
  * @param requestId - The request ID for usage tracking
- * @param bypassSession - Whether to bypass session tracking (for auto-refresh)
+ * @param bypassSession - Whether to bypass session tracking (for cache-keepalive replays)
  */
 export function updateAccountMetadata(
 	account: Account,
@@ -233,7 +233,7 @@ export function updateAccountMetadata(
 				).then(() => undefined),
 			);
 
-			// Update rate_limit_reset from usage headers so auto-refresh can track windows
+			// Update rate_limit_reset from usage headers so routing can track windows
 			const resetTimes = [
 				codexUsage.five_hour?.resets_at,
 				codexUsage.seven_day?.resets_at,

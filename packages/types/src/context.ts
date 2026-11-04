@@ -191,8 +191,8 @@ export interface APIContext {
 		} | null>;
 	};
 	/**
-	 * Process-local secret gating internal-probe requests (auto-refresh /
-	 * cache-keepalive self-loops) at the AuthService HTTP auth gate (#216).
+	 * Process-local secret gating internal-probe requests (the cache-keepalive
+	 * self-loop) at the AuthService HTTP auth gate (#216).
 	 * Optional so older entrypoints/tests that don't wire it still construct
 	 * an APIRouter; AuthService fails closed (no exemption) when absent.
 	 */

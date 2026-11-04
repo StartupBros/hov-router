@@ -858,8 +858,8 @@ export async function forwardToClient(
 	// stale association instead of recording one (KTD-5). Headers.get is
 	// case-insensitive and the header is not stripped from the live request.
 	//
-	// Skip synthetic internal traffic (cache-keepalive replays, auto-refresh
-	// probes) via the shared chokepoint, so a keepalive replay's account never
+	// Skip synthetic internal traffic (cache-keepalive replays) via the shared
+	// chokepoint, so a keepalive replay's account never
 	// overwrites the active session's badge (see sessionIdForObservation).
 	const servedSessionId = sessionIdForObservation(requestHeaders);
 	if (servedSessionId) {

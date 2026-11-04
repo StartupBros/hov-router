@@ -979,7 +979,8 @@ async function handleProxyCoreImpl(
 		);
 	}
 
-	// 1. Track client version from user-agent for use in auto-refresh
+	// 1. Track client version from user-agent (getClientVersion has no
+	// production reader since the auto-refresh scheduler was removed)
 	trackClientVersion(req.headers.get("user-agent"));
 
 	// Claude Code session id (sent since CLI v2.1.86) used to correlate this
@@ -987,8 +988,8 @@ async function handleProxyCoreImpl(
 	// every no-account-served exit below can clear the association, degrading the
 	// badge to unknown instead of showing the last healthy account (KTD-5). The
 	// success path records the account in forwardToClient (KTD-1). Synthetic
-	// internal traffic (cache-keepalive replays that carry the original session id,
-	// auto-refresh probes) is excluded via the shared chokepoint so a failed
+	// internal traffic (cache-keepalive replays that carry the original session id)
+	// is excluded via the shared chokepoint so a failed
 	// replay reaching a clear exit can't wipe the active session's real mapping.
 	const sessionId = sessionIdForObservation(req.headers);
 
@@ -3056,12 +3057,12 @@ async function handleProxyCoreImpl(
 		}
 		log.error(`Routing terminal: ${terminal.kind}`);
 
-		// Skip request-log staging for synthetic auto-refresh probes that
-		// 503 because their target account is on a known cooldown. Logging
-		// these as user-facing 503s inflates the dashboard fail-rate without
-		// reflecting any real client impact (issue #199, bug 2). The keepalive
-		// scheduler already gets the equivalent treatment via its loop-prevention
-		// header path; this brings auto-refresh in line.
+		// Skip request-log staging for synthetic internal probes that 503
+		// because their target account is on a known cooldown. Logging these
+		// as user-facing 503s inflates the dashboard fail-rate without
+		// reflecting any real client impact (issue #199, bug 2). Added for
+		// the since-removed auto-refresh probes; cache-keepalive replays are
+		// the internal probes that remain.
 		void recordRoutingTerminalRequest({
 			collector: tryGetUsageCollector(),
 			requestMeta,

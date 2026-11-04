@@ -421,8 +421,7 @@ export async function pauseAccountForUpstreamAuthFailure(
  * legacy error context. Human-readable Error messages cannot trigger a durable
  * pause. Returns true if it paused.
  *
- * Shared by every refresh path: `refreshAccessTokenSafe` (real requests) and
- * the proactive Codex refresher in the auto-refresh scheduler.
+ * Used by the request-time refresh path, `refreshAccessTokenSafe`.
  */
 export async function pauseAccountForReauthIfInvalidGrant(
 	error: unknown,
@@ -801,9 +800,9 @@ export async function refreshAccessTokenSafe(
 		backoffCounters.delete(account.id);
 	}
 
-	// The caller's account object may be a stale snapshot (the auto-refresh
-	// scheduler builds one from a loop-start SELECT). Re-read the row and adopt
-	// fresher credentials before initiating a refresh — refreshing with an
+	// The caller's account object may be a stale snapshot, read before a
+	// concurrent rotation landed. Re-read the row and adopt fresher
+	// credentials before initiating a refresh — refreshing with an
 	// already-rotated refresh token produces a false-definitive invalid_grant.
 	if (!getRefreshInFlightForAccount(ctx, account)) {
 		const adopted = await adoptDbTokensIfFresher(account, ctx);

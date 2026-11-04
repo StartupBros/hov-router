@@ -6853,7 +6853,7 @@ export async function proxyWithAccount(
 						// forwardToClient, so record the serving account for the status-line
 						// badge here too — otherwise a force-routed request that ends in
 						// model-not-found leaves the badge showing a previously-served
-						// account (skips synthetic keepalive/auto-refresh traffic).
+						// account (skips synthetic cache-keepalive traffic).
 						const modelUnavailableProxyContext = attemptProxyContext();
 						const modelUnavailableForwardBase: Omit<
 							ResponseHandlerOptions,
@@ -7422,7 +7422,7 @@ export async function proxyWithAccount(
 		// In-place retry for reset-less 529 (overloaded_error) — bounded attempts with
 		// full-jitter exponential backoff before applying account cooldown. This prevents
 		// all accounts cooling simultaneously under concurrency spikes. Skipped for
-		// synthetic (keepalive / auto-refresh) requests to avoid loop amplification.
+		// synthetic (cache-keepalive) requests to avoid loop amplification.
 		if (
 			response.status === 529 &&
 			!modelFallbackPolicy?.qualityAttempt &&

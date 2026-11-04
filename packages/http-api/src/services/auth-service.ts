@@ -431,8 +431,8 @@ export class AuthService {
 	 *
 	 * `headers`, when provided, allows two narrow internal exemptions
 	 * (issue #216 stage 1) on top of the static/API-key rules below:
-	 *  - a correctly-marked internal probe (auto-refresh / cache-keepalive
-	 *    self-loop) hitting a proxy endpoint (/v1/*, /messages/*)
+	 *  - a correctly-marked internal probe (the cache-keepalive self-loop)
+	 *    hitting a proxy endpoint (/v1/*, /messages/*)
 	 *  - a correctly-marked local-control request (the user's own CLI
 	 *    notifying their own locally-running server) hitting one of the
 	 *    small allowlisted account-notify endpoints

@@ -220,7 +220,7 @@ export class SessionStrategy implements LoadBalancingStrategy {
 			meta,
 		);
 
-		// Check if session tracking should be bypassed (for auto-refresh messages)
+		// Check if session tracking should be bypassed (cache-keepalive replays set this)
 		const bypassHeader = meta.headers?.get("x-better-ccflare-bypass-session");
 		const bypassSession = bypassHeader === "true";
 

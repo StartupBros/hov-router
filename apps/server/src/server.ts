@@ -367,12 +367,12 @@ export async function refreshCodexUsageFromMetadata(
 				: [];
 		});
 		const exhausted = windows.filter((w) => w.utilization >= 100);
-		// The auto-refresh scheduler treats an account as probe-due once
-		// rate_limit_reset passes (its query includes codex). Persisting
-		// the EARLIEST reset while a LATER hard window is exhausted would
-		// schedule guaranteed-fail probes at the short-window boundary —
-		// when any window is exhausted, persist the latest exhausted
-		// window's reset instead (pro-gate round 2).
+		// rate_limit_reset is read as "this account is usable again after
+		// this time". Persisting the EARLIEST reset while a LATER hard
+		// window is exhausted would claim the account is back at the
+		// short-window boundary when it is not — so when any window is
+		// exhausted, persist the latest exhausted window's reset instead
+		// (pro-gate round 2).
 		const candidateMs =
 			exhausted.length > 0
 				? Math.max(...exhausted.map((w) => w.resetMs))

@@ -2,6 +2,12 @@
  * Which accounts are currently deep in auto-refresh probe backoff, and should
  * therefore lose their place in the queue.
  *
+ * Nothing writes this any more. Its only writer was the auto-refresh
+ * scheduler, which was removed (Refs #718), so the map stays empty and the
+ * load balancer's tie-break ranks every account the same. The module is kept
+ * inert rather than deleted with the scheduler; the text below describes how
+ * it behaved while the scheduler existed.
+ *
  * The auto-refresh scheduler probes each account periodically to keep its
  * session window alive. When a probe fails in a way the scheduler deliberately
  * does not count as a failure — a 529 overload, or a request that never
