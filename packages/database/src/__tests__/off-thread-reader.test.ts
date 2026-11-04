@@ -151,6 +151,35 @@ it("spawns lazily from embedded code, logs readiness once per process, and selec
 	expect(source.info).not.toHaveBeenCalled();
 });
 
+it("spawns its worker under threadName, and a respawn keeps the name", async () => {
+	const workerFactory = mock(
+		(_url: string, _options?: WorkerOptions) => new FakeWorker(),
+	);
+	const { reader } = fakeFixture({
+		workerFactory,
+		threadName: "db-read-inter",
+	});
+	void reader.get("SELECT 1", []).catch(() => {});
+	await turns();
+	expect(workerFactory).toHaveBeenCalledWith("blob:test-reader", {
+		smol: true,
+		name: "db-read-inter",
+	});
+	const first = workerFactory.mock.results[0]?.value as FakeWorker;
+	first.onerror?.({
+		message: "worker broke",
+		preventDefault() {},
+	} as ErrorEvent);
+	await turns();
+	void reader.get("SELECT 2", []).catch(() => {});
+	await turns();
+	expect(workerFactory).toHaveBeenCalledTimes(2);
+	expect(workerFactory.mock.calls[1]?.[1]).toEqual({
+		smol: true,
+		name: "db-read-inter",
+	});
+});
+
 describe("off-thread reader real protocol", () => {
 	it("preserves all/get binding types, missing rows, and SQLite errors", async () => {
 		const { adapter, reader } = realFixture();
