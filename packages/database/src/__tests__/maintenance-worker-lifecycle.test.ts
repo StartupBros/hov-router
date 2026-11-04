@@ -85,10 +85,12 @@ function fixture(
 ) {
 	const dir = mkdtempSync(join(tmpdir(), "ccflare-maintenance-owner-"));
 	const workers: FakeWorker[] = [];
+	const spawnOptions: (WorkerOptions | undefined)[] = [];
 	const events: string[] = [];
 	let failures = settings.spawnFails ?? 0;
 	const options = {
-		workerFactory: () => {
+		workerFactory: (_specifier: string, workerOptions?: WorkerOptions) => {
+			spawnOptions.push(workerOptions);
 			events.push("spawn");
 			if (failures-- > 0) throw new Error("spawn failed");
 			const worker = new FakeWorker();
@@ -132,7 +134,7 @@ function fixture(
 		}
 		rmSync(dir, { recursive: true, force: true });
 	});
-	return { db, workers, events };
+	return { db, workers, events, spawnOptions };
 }
 
 async function turns() {
@@ -244,6 +246,12 @@ describe("database maintenance worker ownership", () => {
 		expect(events.indexOf("url-revoked")).toBeLessThan(
 			events.indexOf("adapter-close"),
 		);
+	});
+
+	it("names the incremental-vacuum worker's thread db-incvac", async () => {
+		const { db, spawnOptions } = fixture();
+		expect((await db.optimizeAsync()).ok).toBe(true);
+		expect(spawnOptions).toEqual([{ smol: true, name: "db-incvac" }]);
 	});
 
 	it("revokes a compiled URL on failed spawn and retries without a retained owner", async () => {

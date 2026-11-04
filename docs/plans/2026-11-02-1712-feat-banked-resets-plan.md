@@ -471,7 +471,7 @@ stateDiagram-v2
 | "Applies now" is inferred from three accounts | The gate shows OpenAI's number as given (KTD7). A surprising `nothing_to_reset` still reports spend from the count (KTD11). |
 | OpenAI changes the count or list shape | Missing fields mark the account stale (KTD4). Unknown statuses are stored but not counted (KTD6). Unknown consume codes record `unknown` (KTD10). |
 | Two processes overlap during a backend handoff | Notice claims, delivery leases and redemption rows are database-level (KTD8, KTD16, KTD20). The redeemer and scheduler stop in `stopPeriodicWork`. |
-| The production alert webhook may already post to ai-alerts | Unverified. If it does, operational alerts already show account names to members, outside this plan, and KTD14 keeps member notices off until the addresses differ. |
+| The production alert webhook may already post to ai-alerts | Resolved 2026-11-04: it posts to the team-only #agent-ops channel, and ai-alerts has no webhooks. Before that check: if it does, operational alerts already show account names to members, outside this plan, and KTD14 keeps member notices off until the addresses differ. |
 | `GET /api/alerts/config` already returns the alert webhook address in full (`packages/http-api/src/handlers/alerts.ts:36`, `packages/http-api/src/services/alerts.ts:198`) | Pre-existing; flagged, not fixed here. The member address never enters that payload (KTD13). |
 | Early resets on idle accounts or of only the 5-hour window go unnoticed | Accepted in KTD19 and stated in `docs/configuration.md`. |
 | With no API keys configured, any process or page that reaches the router passes API authorization (`packages/http-api/src/services/auth-service.ts:562-567`) | KTD8's JSON-only rule stops cross-site form and no-cors posts. DNS rebinding and local processes remain, as for every existing account action; configuring an API key closes them. Pre-existing, not fixed here. |
@@ -708,6 +708,8 @@ Waits on: PR1 merged first (merge order only). No deployment must be live first.
 - **Verification:** both component suites pass, and the dashboard builds.
 
 ### PR3: Member notices
+
+> **Delivery superseded 2026-11-03.** PR3 shipped as #708. Its last hop, a Discord webhook into the members' channel, is replaced by a signed event to BroBot, which publishes after founder review: `docs/plans/2026-11-03-2103-feat-member-notices-via-brobot-plan.md`. Detection, the claim ledger and retries below stay. KTD13's destination now means BroBot's intake URL. KTD14 and the Discord body in KTD15 and U13 are replaced.
 
 Waits on: PR1 and PR2 merged first (merge order only; PR3 reads credits, waves and redemptions). No deployment must be live first.
 

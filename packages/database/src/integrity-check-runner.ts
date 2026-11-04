@@ -1,5 +1,6 @@
 import { EMBEDDED_INTEGRITY_CHECK_WORKER_CODE } from "./inline-integrity-check-worker";
 import type { IntegrityCheckKind } from "./integrity-check-worker";
+import { DB_WORKER_THREAD_NAMES } from "./worker-thread-names";
 
 export type { IntegrityCheckKind } from "./integrity-check-worker";
 
@@ -54,10 +55,14 @@ export async function runIntegrityCheckInWorker(
 		).toString("utf8");
 		const blob = new Blob([workerCode], { type: "text/javascript" });
 		workerUrl = URL.createObjectURL(blob);
-		worker = new Worker(workerUrl, { smol: true });
+		worker = new Worker(workerUrl, {
+			smol: true,
+			name: DB_WORKER_THREAD_NAMES.integrityCheck,
+		});
 	} else {
 		worker = new Worker(
 			new URL("./integrity-check-worker.ts", import.meta.url).href,
+			{ name: DB_WORKER_THREAD_NAMES.integrityCheck },
 		);
 	}
 

@@ -241,7 +241,8 @@ that order every turn afresh do not restore owners.
 
 One session and model can run several lanes at once, each with its own owner, so a
 session's successive requests can alternate accounts while no owner moves. It is unrelated to
-the quality lane, the physical-model lane, and the hosted and native web-search lanes.
+the quality lane, the physical-model lane, the hosted and native web-search lanes, and the
+database's *Reader lane*.
 
 ### Drain-soonest
 
@@ -586,6 +587,35 @@ upstream bytes alone. Post-commit liveness counts every ping by design (#636): t
 has output, and the aim is not to cut a working stream. The commitment deadline never counts a
 ping; only *Meaningful progress* meets it.
 
+## Off-thread database work
+
+### Reader lane
+
+A read-only database connection on its own worker thread that dashboard reads can be sent to,
+so a slow read never blocks the thread serving proxy traffic. There are two: the bulk lane
+takes every read not marked otherwise, including the heavy analytics and statistics scans, and
+the interactive lane takes the small reads a page waits on before it can render.
+
+A lane runs one read at a time while the rest wait their turn, which is why the interactive
+lane exists: on a shared lane a page read waits behind whatever scan is running. A read that
+waits too long fails as busy instead of falling back to the main thread, because running it
+there would block traffic for as long as the lane is behind. When a lane's worker faults, the
+reads still waiting go to a fresh worker; only once the lane has given up for good do reads
+fall back to the main connection. Without an interactive lane, interactive reads use the bulk
+lane.
+
+### Off-thread writer
+
+The single database connection that performs the router's writes, on its own worker thread,
+so a slow commit makes the waiting caller slower instead of freezing the thread that serves
+traffic. While it runs, the main connection refuses writes, so nothing can race its order.
+
+Writes run one at a time in the order they were posted, so they commit in that order. A write
+the worker never received runs on the main connection instead, and the writer is retired for
+good. Once the worker has received a write, a fault leaves that write's outcome unknown: the
+caller gets the failure and the write is never re-run, because running it again could apply
+it twice.
+
 ## Flagged ambiguities
 
 - *Idle timeout* names several unrelated clocks: the client's own stream watchdog, the guard's
@@ -613,6 +643,10 @@ ping; only *Meaningful progress* meets it.
   lists route profiles, and the fetch of a provider's live catalog for one account. These are
   distinct: the picker list never fetches a provider catalog, and the client refreshes its copy
   of that list only when its own discovery runs.
+- *Lane* names unrelated things in routing and in the database: an *Affinity lane* is the unit
+  session affinity pins an owner account to, while a *Reader lane* is a database connection that
+  dashboard reads are sent to. The quality, physical-model and web-search lanes are routing
+  lanes as well. Say which one is meant.
 
 ## Retained ingress and cold backend handoff
 
