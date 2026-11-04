@@ -21,14 +21,13 @@ let forceAccountModel = false;
  *
  * The switch is a promise about *client* requests: serve the model the caller
  * named, or serve nothing. better-ccflare's own probes are not callers. The
- * auto-refresh and cache-keepalive schedulers send a compiled-in list of Claude
- * model ids to whatever account they are probing, provider and all, because
- * their job is to touch the endpoint and read what comes back — not to deliver
- * anyone's choice of model. Mapping is what makes that work on a non-Claude
- * account, so suppressing mapping for a probe does not honour the promise, it
- * just breaks the probe: the untranslated id comes back as an upstream
- * rejection, which counts as a refresh failure, and five of those pause a
- * perfectly healthy account.
+ * cache-keepalive scheduler replays an earlier request to whatever account
+ * served it, provider and all, because its job is to touch the endpoint and
+ * keep the prompt cache warm — not to deliver anyone's choice of model. Mapping
+ * is what makes that work on a non-Claude account, so suppressing mapping for a
+ * probe does not honour the promise, it just breaks the probe: the untranslated
+ * id comes back as an upstream rejection. (The since-removed auto-refresh
+ * scheduler was the other probe this exemption covered.)
  *
  * This is a scope rather than a parameter because the flag it overrides is
  * ambient by necessity. `mapModelName` is the funnel every provider maps

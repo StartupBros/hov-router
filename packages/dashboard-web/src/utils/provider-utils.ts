@@ -9,8 +9,8 @@ import {
 } from "@better-ccflare/types";
 
 /**
- * Check if a provider supports auto-fallback and auto-refresh features
- * Currently only Anthropic OAuth accounts support these features
+ * Check if a provider supports auto-fallback
+ * Anthropic, Codex and Zai accounts support it
  */
 export function providerSupportsAutoFeatures(provider: string): boolean {
 	return (

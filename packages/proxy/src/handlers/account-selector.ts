@@ -910,13 +910,17 @@ const CONFIGURATION_FORCE_ROUTE_REASONS: ReadonlySet<ForceRouteUnavailableReason
 
 /**
  * True when the account stays unavailable until an operator resumes or
- * reauthenticates it. Overage, failure-threshold, peak-hours and
- * rate-limit-window pauses (and an unattributed one) clear on their own.
+ * reauthenticates it: a reauth pause, a manual pause, or a failure-threshold
+ * pause (nothing lifts that one on its own since auto-refresh was removed).
+ * Overage, peak-hours and rate-limit-window pauses (and an unattributed one)
+ * clear on their own.
  */
 function needsOperatorToResume(account: Account): boolean {
 	return (
 		account.pause_reason === PAUSE_REASON_NEEDS_REAUTH ||
-		(account.paused && account.pause_reason === "manual")
+		(account.paused &&
+			(account.pause_reason === "manual" ||
+				account.pause_reason === "failure_threshold"))
 	);
 }
 
@@ -1517,11 +1521,9 @@ function evaluateCandidateCapacity(
 	const enforceModelScopedCapacity = enforcesModelScopedCapacity(options);
 
 	if (snapshot) {
-		// Credit drain serves client traffic only: internal probes (auto-refresh,
+		// Credit drain serves client traffic only: internal probes (cache
 		// keepalive) keep the spent-window gate rather than spend credits.
-		const internalProbe =
-			options.syntheticProbe ||
-			options.observationMeta?.trustedInternalAutoRefresh === true;
+		const internalProbe = options.syntheticProbe;
 		const hardCapacity = evaluateHardCapacity(snapshot.data, {
 			requestModel: model,
 			observedAt: snapshot.observedAt,
@@ -3644,27 +3646,6 @@ async function selectAccountsForRequestInternal(
 				}
 			}
 			{
-				// The auto-refresh scheduler sends authenticated internal probes
-				// to intentionally refresh accounts that are paused due to auto_pause_on_overage,
-				// or to probe accounts that are rate-limited (to detect when the window has reset).
-				// For trusted probes we allow through an overage-paused or rate-limited account
-				// so the scheduler can hit the real endpoint and trigger the window-reset + auto-resume logic.
-				// Only an overage pause qualifies: a manual pause (pause_reason='manual') or a
-				// failure-threshold / peak_hours pause must still win even when the overage feature
-				// flag is enabled, because the auto-resume guard would never un-pause those accounts.
-				// This mirrors the scheduler eligibility query and the sendDummyMessage resume guard
-				// (auto_pause_on_overage_enabled=1 AND pause_reason IN (NULL,'overage')).
-				const isAutoRefreshBypass = meta.trustedInternalAutoRefresh === true;
-				const available = isAccountAvailable(forcedAccount);
-				const isOveragePaused =
-					forcedAccount.paused &&
-					forcedAccount.auto_pause_on_overage_enabled &&
-					(!forcedAccount.pause_reason ||
-						forcedAccount.pause_reason === "overage");
-				const isRateLimited =
-					!available &&
-					!forcedAccount.paused &&
-					!!forcedAccount.rate_limited_until;
 				// Fail closed for every provider: a client that explicitly
 				// force-routes to a specific account id must never be silently
 				// redirected to a *different* account it did not ask for, and must
@@ -3674,9 +3655,8 @@ async function selectAccountsForRequestInternal(
 				// && isOfficialXaiEndpoint); it now applies unconditionally to any
 				// unavailable or capacity-exhausted forced account, regardless of
 				// provider, custom-endpoint status, or the xaiCacheNativeActive flag.
-				const mayProbeUnavailableAccount =
-					isAutoRefreshBypass && (isOveragePaused || isRateLimited);
-				if (!available && !mayProbeUnavailableAccount) {
+				const available = isAccountAvailable(forcedAccount);
+				if (!available) {
 					throw new ForceRouteUnavailableError(
 						forcedAccountId,
 						forcedAccount.paused ? "paused" : "rate_limited_or_unavailable",

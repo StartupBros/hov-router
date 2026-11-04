@@ -86,7 +86,6 @@ mock.module("@better-ccflare/proxy", () => {
 	}
 	return {
 		AnthropicDegradedModeCoordinator: class {},
-		AutoRefreshScheduler: Scheduler,
 		CacheAffinityOrderer: class {},
 		CacheKeepaliveScheduler: Scheduler,
 		CohortSealService: class {
@@ -138,6 +137,7 @@ mock.module("@better-ccflare/proxy", () => {
 		startGlobalTokenHealthChecks: () => {},
 		startExternalCodexScheduler,
 		startIntegrityScheduler: () => () => {},
+		startZaiPeakHoursPause: () => () => {},
 		stopGlobalTokenHealthChecks: () => {},
 		unregisterAutoRefreshTrackingClearer: () => {},
 		unregisterCodexResetRedeemer: () => {},

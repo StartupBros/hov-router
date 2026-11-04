@@ -1,10 +1,12 @@
 /**
- * Tests for synthetic probe pollution fixes added in PR #200 (bug 2).
- *
- * Three sites guard against auto-refresh probe pollution:
- *   1. proxy-operations.ts  — isSyntheticInternal skips cacheBodyStore.stageRequest
- *   2. response-handler.ts  — shouldProcessRequest is false for auto-refresh probes
- *   3. proxy.ts             — pool-exhausted path skips usageCollector calls for probes
+ * The auto-refresh marker earns no exemption from request accounting or cache
+ * staging; only the cache-keepalive marker is synthetic.
+ *   1. cache-transport-staging.ts — keepalive skips cacheBodyStore staging,
+ *      the auto-refresh marker is an ordinary request
+ *   2. response-handler.ts        — a request carrying the auto-refresh marker
+ *      and the probe secret still reaches usageCollector.handleStart
+ *   3. proxy.ts                   — the pool-exhausted path still records a
+ *      request carrying the auto-refresh marker and the private credential
  */
 import {
 	afterEach,
@@ -122,13 +124,7 @@ describe("proxy-operations — cache-body staging policy", () => {
 		).not.toBeNull();
 	});
 
-	it("preserves truthy synthetic-header semantics", () => {
-		expect(
-			getCacheBodyStagingAction(
-				new Headers({ "x-better-ccflare-auto-refresh": "false" }),
-				"anthropic",
-			),
-		).toBe("skip");
+	it("preserves truthy keepalive-header semantics", () => {
 		expect(
 			getCacheBodyStagingAction(
 				new Headers({ "x-better-ccflare-keepalive": "1" }),
@@ -137,16 +133,27 @@ describe("proxy-operations — cache-body staging policy", () => {
 		).toBe("skip");
 		expect(
 			getCacheBodyStagingAction(
-				new Headers({ "x-better-ccflare-auto-refresh": "" }),
+				new Headers({ "x-better-ccflare-keepalive": "" }),
 				"anthropic",
 			),
 		).toBe("stage");
 		expect(
 			getCacheBodyStagingAction(
-				new Headers({ "x-better-ccflare-auto-refresh": "true" }),
+				new Headers({ "x-better-ccflare-keepalive": "true" }),
 				"codex",
 			),
 		).toBe("discard");
+	});
+
+	it("stages a request carrying the auto-refresh marker like any other", () => {
+		for (const value of ["true", "false", "1"]) {
+			expect(
+				getCacheBodyStagingAction(
+					new Headers({ "x-better-ccflare-auto-refresh": value }),
+					"anthropic",
+				),
+			).toBe("stage");
+		}
 	});
 
 	it("discards an Anthropic staged entry when the same request fails over to Codex", () => {
@@ -182,7 +189,7 @@ describe("proxy-operations — cache-body staging policy", () => {
 // Site 2: shouldProcessRequest in response-handler.ts
 // ---------------------------------------------------------------------------
 
-describe("response-handler — shouldProcessRequest suppresses auto-refresh probes", () => {
+describe("response-handler — shouldProcessRequest keeps requests carrying the auto-refresh marker", () => {
 	function createMockCollector() {
 		const handleStart = mock(() => {});
 		const handleChunk = mock(() => {});
@@ -197,7 +204,7 @@ describe("response-handler — shouldProcessRequest suppresses auto-refresh prob
 		return { collector, handleStart, spy };
 	}
 
-	it("does not call usageCollector.handleStart for auto-refresh probe requests", async () => {
+	it("calls usageCollector.handleStart for a request carrying the auto-refresh marker and the probe secret", async () => {
 		const { handleStart } = createMockCollector();
 		const { forwardToClient } = await import("../response-handler");
 
@@ -238,7 +245,7 @@ describe("response-handler — shouldProcessRequest suppresses auto-refresh prob
 			ctx as never,
 		);
 
-		expect(handleStart).not.toHaveBeenCalled();
+		expect(handleStart).toHaveBeenCalled();
 	});
 
 	it("calls usageCollector.handleStart for normal (non-probe) requests", async () => {
@@ -288,7 +295,7 @@ describe("response-handler — shouldProcessRequest suppresses auto-refresh prob
 // Site 3: pool-exhausted path in proxy.ts
 // ---------------------------------------------------------------------------
 
-describe("proxy.ts — pool-exhausted path skips usageCollector for auto-refresh probes", () => {
+describe("proxy.ts — pool-exhausted path records requests carrying the auto-refresh marker", () => {
 	let savedPassthrough: string | undefined;
 
 	beforeEach(() => {
@@ -317,7 +324,7 @@ describe("proxy.ts — pool-exhausted path skips usageCollector for auto-refresh
 		return { collector, handleStart, handleEnd, spy };
 	}
 
-	it("does not call usageCollector when pool is exhausted and request is an auto-refresh probe", async () => {
+	it("calls usageCollector when pool is exhausted and the request carries the auto-refresh marker plus a private credential", async () => {
 		const { handleStart, handleEnd } = createMockCollector();
 		const { handleProxy } = await import("../proxy");
 
@@ -366,15 +373,14 @@ describe("proxy.ts — pool-exhausted path skips usageCollector for auto-refresh
 			ctx as never,
 		);
 
-		// Should still return 503
 		expect(response.status).toBe(503);
 
-		// But must NOT call usageCollector
-		expect(handleStart).not.toHaveBeenCalled();
-		expect(handleEnd).not.toHaveBeenCalled();
+		// The marker earns nothing: the request is recorded like any other.
+		expect(handleStart).toHaveBeenCalled();
+		expect(handleEnd).toHaveBeenCalled();
 	});
 
-	it("calls usageCollector when pool is exhausted and request is NOT an auto-refresh probe", async () => {
+	it("calls usageCollector when pool is exhausted and the request carries no marker", async () => {
 		const { handleStart } = createMockCollector();
 		const { handleProxy } = await import("../proxy");
 

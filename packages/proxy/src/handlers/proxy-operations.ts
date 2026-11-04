@@ -502,10 +502,7 @@ function degradedSuppressionReason(
 }
 
 function isSyntheticInternalRequest(headers: Headers): boolean {
-	return (
-		!!headers.get("x-better-ccflare-keepalive") ||
-		!!headers.get("x-better-ccflare-auto-refresh")
-	);
+	return !!headers.get("x-better-ccflare-keepalive");
 }
 
 const SYNTHETIC_RESPONSE_HEADER = "x-better-ccflare-synthetic-response";
@@ -6783,11 +6780,7 @@ export async function proxyWithAccount(
 							// account at the same instant. Applying real cooldowns
 							// here drains the pool to zero routable accounts even
 							// though no real user-facing rate limit was hit.
-							const isKeepalive = isInternalProbe(
-								req.headers,
-								ctx,
-								"keepalive",
-							);
+							const isKeepalive = isInternalProbe(req.headers, ctx);
 							if (isKeepalive) {
 								log.warn(
 									`Keepalive replay for ${account.name} got 429 — skipping cooldown (synthetic burst, not a real per-account rate limit)`,
@@ -6860,7 +6853,7 @@ export async function proxyWithAccount(
 						// forwardToClient, so record the serving account for the status-line
 						// badge here too — otherwise a force-routed request that ends in
 						// model-not-found leaves the badge showing a previously-served
-						// account (skips synthetic keepalive/auto-refresh traffic).
+						// account (skips synthetic cache-keepalive traffic).
 						const modelUnavailableProxyContext = attemptProxyContext();
 						const modelUnavailableForwardBase: Omit<
 							ResponseHandlerOptions,
@@ -7290,7 +7283,7 @@ export async function proxyWithAccount(
 						// Same keepalive-skip as the no-fallback path above: synthetic
 						// keepalive bursts can trip Anthropic's per-IP limit even when
 						// individual accounts are healthy.
-						const isKeepalive = isInternalProbe(req.headers, ctx, "keepalive");
+						const isKeepalive = isInternalProbe(req.headers, ctx);
 						if (isKeepalive) {
 							log.warn(
 								`Keepalive replay for ${account.name} got 429 (post-model-list) — skipping cooldown`,
@@ -7429,7 +7422,7 @@ export async function proxyWithAccount(
 		// In-place retry for reset-less 529 (overloaded_error) — bounded attempts with
 		// full-jitter exponential backoff before applying account cooldown. This prevents
 		// all accounts cooling simultaneously under concurrency spikes. Skipped for
-		// synthetic (keepalive / auto-refresh) requests to avoid loop amplification.
+		// synthetic (cache-keepalive) requests to avoid loop amplification.
 		if (
 			response.status === 529 &&
 			!modelFallbackPolicy?.qualityAttempt &&

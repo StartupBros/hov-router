@@ -151,7 +151,8 @@ export function extractClaudeVersion(userAgent: string | null): string | null {
 }
 
 // Track the most recent Claude CLI version seen from client requests
-// This allows auto-refresh to use newer client versions even after app restart
+// (its only production reader, the auto-refresh scheduler, was removed;
+// getClientVersion is kept for its tests and any future reader)
 let lastSeenClientVersion: string | null = null;
 
 /**

@@ -1029,6 +1029,36 @@ describe("selectAccountsForRequest — x-better-ccflare-account-id header", () =
 		expect(ctx.strategy.select).not.toHaveBeenCalled();
 	});
 
+	// Nothing lifts a failure-threshold pause on its own since auto-refresh was
+	// removed, so retrying a forced route to it cannot succeed until an
+	// operator resumes the account.
+	for (const [pauseReason, retryable] of [
+		["failure_threshold", false],
+		["manual", false],
+		[null, true],
+		["overage", true],
+	] as const) {
+		it(`refuses a forced route to a ${pauseReason ?? "unattributed"} pause with retryable ${retryable}`, async () => {
+			const paused = makeAccount({
+				id: "acc-paused",
+				paused: true,
+				pause_reason: pauseReason,
+			});
+			const ctx = makeCtx({ accounts: [paused] });
+			const meta = makeRequestMeta({
+				headers: new Headers({ "x-better-ccflare-account-id": paused.id }),
+			});
+
+			await expect(selectAccountsForRequest(meta, ctx)).rejects.toMatchObject({
+				name: "ForceRouteUnavailableError",
+				accountId: paused.id,
+				reason: "paused",
+				retryable,
+			});
+			expect(ctx.strategy.select).not.toHaveBeenCalled();
+		});
+	}
+
 	it("fails closed when the forced account is rate-limited", async () => {
 		const rateLimitedAcc = makeAccount({
 			id: "acc-rl",
@@ -3166,7 +3196,7 @@ describe("selectAccountsForRequest — Grok cache-native force-route fail-closed
 		expect(ctx.strategy.select).not.toHaveBeenCalled();
 	});
 
-	it("still allows an authenticated scheduler probe for an official xAI account", async () => {
+	it("fails closed for an auto-refresh marker on a rate-limited official xAI account", async () => {
 		const rateLimitedAcc = makeAccount({
 			id: "acc-rl",
 			provider: "xai",
@@ -3176,15 +3206,17 @@ describe("selectAccountsForRequest — Grok cache-native force-route fail-closed
 		const ctx = makeCtx({ accounts: [rateLimitedAcc, activeAcc] });
 		const meta = makeRequestMeta({
 			xaiCacheNativeActive: true,
-			trustedInternalAutoRefresh: true,
 			headers: new Headers({
 				"x-better-ccflare-account-id": "acc-rl",
 				"x-better-ccflare-bypass-session": "true",
+				"x-better-ccflare-auto-refresh": "true",
 			}),
 		});
 
-		const result = await selectAccountsForRequest(meta, ctx);
-		expect(result).toEqual([rateLimitedAcc]);
+		await expect(selectAccountsForRequest(meta, ctx)).rejects.toMatchObject({
+			accountId: "acc-rl",
+			reason: "rate_limited_or_unavailable",
+		});
 	});
 
 	it("remains fail-closed when the cache-native feature is off", async () => {
@@ -4011,11 +4043,10 @@ describe("selectAccountsForRequest — combo routing", () => {
 
 // ── selectAccountsForRequest — auto-refresh bypass for overage-paused accounts ─
 
-describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
+describe("selectAccountsForRequest — auto-refresh marker earns no routing bypass", () => {
 	/**
-	 * The auto-refresh scheduler intentionally refreshes accounts that are paused
-	 * due to auto_pause_on_overage. Only the authenticated in-process credential,
-	 * not caller-controlled routing hints, may grant that narrow exception.
+	 * A force-routed request never reaches a paused or rate-limited account,
+	 * whatever routing hints or markers it carries.
 	 */
 	it("rejects spoofed public auto-refresh headers for an overage-paused account", async () => {
 		const overagePausedAcc = makeAccount({
@@ -4049,7 +4080,7 @@ describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
 		});
 	});
 
-	it("allows an authenticated internal probe through an overage pause", async () => {
+	it("refuses an auto-refresh marker aimed at an overage-paused account", async () => {
 		const overagePausedAcc = makeAccount({
 			id: "acc-overage",
 			paused: true,
@@ -4063,11 +4094,12 @@ describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
 				"x-better-ccflare-bypass-session": "true",
 				"x-better-ccflare-auto-refresh": "true",
 			}),
-			trustedInternalAutoRefresh: true,
 		});
 
-		const result = await selectAccountsForRequest(meta, ctx);
-		expect(result).toEqual([overagePausedAcc]);
+		await expect(selectAccountsForRequest(meta, ctx)).rejects.toMatchObject({
+			accountId: "acc-overage",
+			reason: "paused",
+		});
 	});
 
 	it("blocks an overage-paused account without trusted internal authentication", async () => {
@@ -4090,7 +4122,6 @@ describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
 		const meta = makeRequestMeta({
 			headers: new Headers({
 				"x-better-ccflare-account-id": "acc-overage",
-				// Public traffic has no trustedInternalAutoRefresh bit.
 			}),
 		});
 
@@ -4101,11 +4132,7 @@ describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
 		expect(ctx.strategy.select).not.toHaveBeenCalled();
 	});
 
-	it("blocks a manually-paused account even for an authenticated internal probe", async () => {
-		// A manual pause must win even when auto_pause_on_overage_enabled is set:
-		// the auto-resume guard would never un-pause it, so admitting it on a
-		// bypass-session force-route just produces an endless probe loop. Mirrors
-		// the scheduler eligibility query and the sendDummyMessage resume guard.
+	it("blocks a manually-paused account even for an auto-refresh marker", async () => {
 		const manualPausedAcc = makeAccount({
 			id: "acc-manual",
 			name: "manual-paused",
@@ -4127,8 +4154,8 @@ describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
 			headers: new Headers({
 				"x-better-ccflare-account-id": "acc-manual",
 				"x-better-ccflare-bypass-session": "true",
+				"x-better-ccflare-auto-refresh": "true",
 			}),
-			trustedInternalAutoRefresh: true,
 		});
 
 		await expect(selectAccountsForRequest(meta, ctx)).rejects.toMatchObject({
@@ -4138,10 +4165,7 @@ describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
 		expect(ctx.strategy.select).not.toHaveBeenCalled();
 	});
 
-	it("allows an authenticated internal probe through an account cooldown", async () => {
-		// The scheduler probes rate-limited accounts to detect when the window has reset.
-		// Without this fix the account selector falls through to SessionStrategy and routes
-		// to a *different* account, corrupting the intended account's rate_limit_reset row.
+	it("refuses an auto-refresh marker aimed at an account in cooldown", async () => {
 		const rateLimitedAcc = makeAccount({
 			id: "acc-rl",
 			name: "rate-limited",
@@ -4162,17 +4186,18 @@ describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
 			headers: new Headers({
 				"x-better-ccflare-account-id": "acc-rl",
 				"x-better-ccflare-bypass-session": "true",
+				"x-better-ccflare-auto-refresh": "true",
 			}),
-			trustedInternalAutoRefresh: true,
 		});
 
-		const result = await selectAccountsForRequest(meta, ctx);
-		// Rate-limited account must be returned directly — bypass-session overrides the guard
-		expect(result).toHaveLength(1);
-		expect(result[0]?.id).toBe("acc-rl");
+		await expect(selectAccountsForRequest(meta, ctx)).rejects.toMatchObject({
+			accountId: "acc-rl",
+			reason: "rate_limited_or_unavailable",
+		});
+		expect(ctx.strategy.select).not.toHaveBeenCalled();
 	});
 
-	it("blocks a failure-paused account even for an authenticated internal probe", async () => {
+	it("blocks a failure-paused account even for an auto-refresh marker", async () => {
 		// A failure-paused account: paused=true, auto_pause_on_overage_enabled=false
 		const failurePausedAcc = makeAccount({
 			id: "acc-broken",
@@ -4194,8 +4219,8 @@ describe("selectAccountsForRequest — trusted auto-refresh bypass", () => {
 			headers: new Headers({
 				"x-better-ccflare-account-id": "acc-broken",
 				"x-better-ccflare-bypass-session": "true",
+				"x-better-ccflare-auto-refresh": "true",
 			}),
-			trustedInternalAutoRefresh: true,
 		});
 
 		await expect(selectAccountsForRequest(meta, ctx)).rejects.toMatchObject({
@@ -4808,13 +4833,8 @@ describe("selectAccountsForRequest — model-lane hard capacity", () => {
 		expect(opus).toEqual([forced]);
 	});
 
-	it("still enforces hard model capacity for an authenticated internal probe", async () => {
-		const forced = makeAccount({
-			id: "forced-refresh-capacity",
-			paused: true,
-			auto_pause_on_overage_enabled: true,
-			pause_reason: "overage",
-		});
+	it("still enforces hard model capacity for a request carrying the auto-refresh marker", async () => {
+		const forced = makeAccount({ id: "forced-refresh-capacity" });
 		cacheUsage(forced.id, weeklyScoped("Fable"));
 		const ctx = makeCtx({ accounts: [forced] });
 		const meta = makeRequestMeta({
@@ -4823,7 +4843,6 @@ describe("selectAccountsForRequest — model-lane hard capacity", () => {
 				"x-better-ccflare-bypass-session": "true",
 				"x-better-ccflare-auto-refresh": "true",
 			}),
-			trustedInternalAutoRefresh: true,
 		});
 
 		await expect(

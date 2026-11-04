@@ -84,7 +84,6 @@ import {
 } from "@better-ccflare/providers/bedrock";
 import {
 	AnthropicDegradedModeCoordinator,
-	AutoRefreshScheduler,
 	CacheAffinityOrderer,
 	CacheKeepaliveScheduler,
 	CohortSealService,
@@ -127,6 +126,7 @@ import {
 	startExternalCodexScheduler,
 	startGlobalTokenHealthChecks,
 	startIntegrityScheduler,
+	startZaiPeakHoursPause,
 	stopGlobalTokenHealthChecks,
 	unregisterAutoRefreshTrackingClearer,
 	unregisterCodexResetRedeemer,
@@ -144,6 +144,7 @@ import {
 	type StrategyStore,
 } from "@better-ccflare/types";
 import { serve } from "bun";
+import { logAutoRefreshRemovedWarning } from "./auto-refresh-removed-warning";
 import {
 	BODY_ADMISSION_RESERVATION_MULTIPLIER,
 	BodyAdmissionController,
@@ -366,12 +367,12 @@ export async function refreshCodexUsageFromMetadata(
 				: [];
 		});
 		const exhausted = windows.filter((w) => w.utilization >= 100);
-		// The auto-refresh scheduler treats an account as probe-due once
-		// rate_limit_reset passes (its query includes codex). Persisting
-		// the EARLIEST reset while a LATER hard window is exhausted would
-		// schedule guaranteed-fail probes at the short-window boundary —
-		// when any window is exhausted, persist the latest exhausted
-		// window's reset instead (pro-gate round 2).
+		// rate_limit_reset is read as "this account is usable again after
+		// this time". Persisting the EARLIEST reset while a LATER hard
+		// window is exhausted would claim the account is back at the
+		// short-window boundary when it is not — so when any window is
+		// exhausted, persist the latest exhausted window's reset instead
+		// (pro-gate round 2).
 		const candidateMs =
 			exhausted.length > 0
 				? Math.max(...exhausted.map((w) => w.resetMs))
@@ -719,7 +720,7 @@ let stopIntegritySchedulerJob: (() => void) | null = null;
 let stopModelCatalogRefreshJob: (() => void) | null = null;
 let stopCodexCatalogRefreshJob: (() => void) | null = null;
 let stopDeviceSetupRecoveryJob: (() => Promise<void>) | null = null;
-let autoRefreshScheduler: AutoRefreshScheduler | null = null;
+let stopZaiPeakHoursPauseJob: (() => void) | null = null;
 let usagePollingLifecycle: UsagePollingLifecycle<NodeJS.Timeout> | null = null;
 let cacheFlightCohortSealService: CohortSealService | null = null;
 let cacheKeepaliveScheduler: CacheKeepaliveScheduler | null = null;
@@ -995,10 +996,10 @@ async function prewarmBedrockCache(account: Account, region: string) {
  * that's false: neither getValidAccessToken nor anything it calls
  * (refreshAccessTokenSafe, checkRefreshTokenHealth, every OAuth provider's
  * refreshToken implementation, AccountRepository.updateTokens's raw SQL)
- * reads or gates on `paused` anywhere. auto-refresh-scheduler.ts's proactive
- * Codex and OpenAI-compatible token refreshers already refresh tokens on
- * paused rows directly, with no resume/restore dance at all, confirming this
- * is the established pattern elsewhere in this exact codebase. The temporary
+ * reads or gates on `paused` anywhere. The since-removed auto-refresh
+ * scheduler's proactive Codex and OpenAI-compatible token refreshers
+ * refreshed tokens on paused rows directly, with no resume/restore dance at
+ * all, which confirmed the pattern. The temporary
  * resume was therefore structurally unnecessary, and it created a real race:
  * getValidAccessToken can legitimately ROTATE the refresh token as part of a
  * normal, successful refresh (some providers, e.g. Codex, rotate on every
@@ -1566,8 +1567,8 @@ export default async function startServer(options?: {
 		runtime.port = port;
 	}
 
-	// Process-local secret gating internal-probe markers (auto-refresh /
-	// cache-keepalive self-loop requests) — see proxy-types.ts isInternalProbe
+	// Process-local secret gating the internal-probe marker (cache-keepalive
+	// self-loop requests) — see proxy-types.ts isInternalProbe
 	// and AuthService#isInternalProbeRequest. Intentionally re-minted every
 	// process start (not persisted): these self-loops originate from the same
 	// process that mints the secret, so nothing outside this process ever
@@ -1692,6 +1693,9 @@ export default async function startServer(options?: {
 	registerDisposable({ dispose: () => alertService.stop() });
 	const memberNoticeWarning = memberNoticeStartupWarning(config);
 	if (memberNoticeWarning) log.warn(memberNoticeWarning);
+	// Auto-refresh was removed; name the accounts that still have it stored on.
+	// The helper logs a failed query rather than throwing.
+	await logAutoRefreshRemovedWarning(db, log);
 	// Each pass reads the destination fresh and does nothing while it is off
 	// or blocked, so the scheduler always runs.
 	const stopMemberNotices = startMemberNoticeScheduler((signal) =>
@@ -2489,16 +2493,16 @@ export default async function startServer(options?: {
 		};
 	});
 
-	// Initialize auto-refresh scheduler (now that proxyContext is available).
-	// Capture this concrete scheduler and polling owner in the deletion callback;
-	// consulting mutable module state here could clear a later server instance.
-	const scheduler = new AutoRefreshScheduler(db, proxyContext);
-	autoRefreshScheduler = scheduler;
-	scheduler.start();
+	// Retire this server's usage polling when an account is removed. Capture the
+	// concrete polling owner in the deletion callback; consulting mutable module
+	// state here could clear a later server instance.
 	registerAutoRefreshTrackingClearer(
 		serverId,
-		createUsagePollingTrackingClearer(pollingLifecycle, scheduler),
+		createUsagePollingTrackingClearer(pollingLifecycle),
 	);
+
+	// Pause and resume opted-in zai accounts around zai peak hours.
+	stopZaiPeakHoursPauseJob = startZaiPeakHoursPause(db);
 
 	// Initialize cache keepalive scheduler
 	cacheKeepaliveScheduler = new CacheKeepaliveScheduler(proxyContext, config);
@@ -3469,9 +3473,9 @@ function stopPeriodicWork(): Promise<void> {
 			stopCodexCatalogRefreshJob();
 			stopCodexCatalogRefreshJob = null;
 		}
-		if (autoRefreshScheduler) {
-			autoRefreshScheduler.stop();
-			autoRefreshScheduler = null;
+		if (stopZaiPeakHoursPauseJob) {
+			stopZaiPeakHoursPauseJob();
+			stopZaiPeakHoursPauseJob = null;
 		}
 		if (cacheKeepaliveScheduler) {
 			cacheKeepaliveScheduler.stop();

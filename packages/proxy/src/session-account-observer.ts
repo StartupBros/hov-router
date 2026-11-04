@@ -229,16 +229,12 @@ const observer = new SessionAccountObserver();
  * request is synthetic internal traffic that must never mutate the session→
  * account map. Cache-keepalive REPLAYS the original client request (session id
  * and all), force-routed to a specific account, so recording/clearing on it
- * would corrupt the active session's badge; auto-refresh probes carry no session
- * id but are excluded for symmetry. This single chokepoint keeps every observer
+ * would corrupt the active session's badge. This single chokepoint keeps every observer
  * mutation site (forwardToClient, handleProxy exits, the model-not-found direct
  * return) guarding synthetic traffic identically.
  */
 export function sessionIdForObservation(headers: Headers): string | null {
-	if (
-		headers.get("x-better-ccflare-keepalive") === "true" ||
-		headers.get("x-better-ccflare-auto-refresh") === "true"
-	) {
+	if (headers.get("x-better-ccflare-keepalive") === "true") {
 		return null;
 	}
 	return headers.get("x-claude-code-session-id");

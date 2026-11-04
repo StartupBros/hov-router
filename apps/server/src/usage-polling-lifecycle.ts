@@ -138,13 +138,11 @@ export async function isCurrentUsagePollingAccount(
 	return current?.created_at === lease.createdAt;
 }
 
-/** Bind deletion cleanup to this server's concrete polling and scheduler owners. */
+/** Bind deletion cleanup to this server's concrete polling owner. */
 export function createUsagePollingTrackingClearer<Timer>(
 	lifecycle: UsagePollingLifecycle<Timer>,
-	scheduler: { clearAccountTracking(accountId: string): void },
 ): (accountId: string) => void {
 	return (accountId) => {
 		lifecycle.retire(accountId);
-		scheduler.clearAccountTracking(accountId);
 	};
 }

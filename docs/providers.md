@@ -353,6 +353,12 @@ prepareHeaders(headers: Headers, accessToken?: string, apiKey?: string): Headers
 
 The API key is stored in the `api_key` field of the account record for consistency with the authentication system.
 
+### Z.ai Peak-Hours Pause
+
+A zai account can be paused automatically during Z.ai's peak hours: Monday to Friday, 14:00-18:00 Singapore time (UTC+8). It is off by default and set per account, from the peak-hours toggle on a zai account in the dashboard or with `POST /api/accounts/:id/peak-hours-pause` and `{"enabled": 1}` (or `0`). Any other provider gets a `400`.
+
+A job in `packages/proxy/src/zai-peak-hours-pause.ts` runs once at startup and then every minute. During peak hours it pauses each opted-in account that is not already paused, with `pause_reason = 'peak_hours'`. Outside them it resumes only accounts whose `pause_reason` is still `peak_hours`, so a manual pause or any other pause is never lifted. Turning the setting off lifts a peak-hours pause at once.
+
 ## DeepSeekProvider Implementation
 
 The `DeepSeekProvider` (`deepseek`) extends `BaseAnthropicCompatibleProvider` and targets DeepSeek's native Anthropic-compatible API at `https://api.deepseek.com`. It uses an API key in the `x-api-key` header and preserves Claude request model IDs so DeepSeek can apply its server-side family remapping. `deepseek-v4-flash` is a response usage/cost-attribution fallback when DeepSeek omits the response model; it does not rewrite outbound request model. It inherits the same request/response compatibility pattern as Minimax, and account-specific `model_mappings` remain available when an explicit mapping is required.
@@ -644,7 +650,7 @@ The `CodexProvider` (registered as `"codex"`) extends `BaseProvider` directly ra
    - **It pings the weakest listed model, not the frontier one.** The headers report the *subscription's* windows, not the model's, so the frontier model buys nothing here and costs the most per ping. `normalize()` sorts by OpenAI's own `priority`, so position is the tier: the last entry is the weakest, and nothing needs maintenance when OpenAI reshuffles the list. A one-model plan still gets that model.
    - **`reasoning.effort` is pinned to `"low"`.** A body-level parameter the model dislikes is rejected *after* accounting, so the usage headers still arrive — the opposite of the model-name case. `"low"` is the cheapest effort every measured model accepts.
 
-   This probe spends quota, and the button's tooltip says so. It fires only on an explicit click; the periodic probe is a separate mechanism with different rules (see `docs/auto-refresh.md`).
+   This probe spends quota, and the button's tooltip says so. It fires only on an explicit click; nothing sends it on a schedule.
 
 ## QwenProvider Implementation
 

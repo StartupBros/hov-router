@@ -421,8 +421,7 @@ export async function pauseAccountForUpstreamAuthFailure(
  * legacy error context. Human-readable Error messages cannot trigger a durable
  * pause. Returns true if it paused.
  *
- * Shared by every refresh path: `refreshAccessTokenSafe` (real requests) and
- * the proactive Codex refresher in the auto-refresh scheduler.
+ * Used by the request-time refresh path, `refreshAccessTokenSafe`.
  */
 export async function pauseAccountForReauthIfInvalidGrant(
 	error: unknown,
@@ -699,10 +698,10 @@ export async function refreshAccessTokenSafe(
 ): Promise<string> {
 	// (finding 5) Join an in-flight refresh FIRST — before backoff — so a
 	// concurrent caller shares the outcome instead of failing on a backoff
-	// seeded by an earlier, unrelated failure (e.g. the auto-refresh
-	// scheduler registers its own in-flight promise into this same map;
-	// a request-triggered caller must join that refresh, not bounce off a
-	// stale backoff record for the account).
+	// seeded by an earlier, unrelated failure (e.g. another caller has
+	// registered its in-flight promise into this same map; a request-triggered
+	// caller must join that refresh, not bounce off a stale backoff record for
+	// the account).
 	const inFlight = getRefreshInFlightForAccount(ctx, account);
 	if (inFlight) {
 		// A compatible promise still may have outlived its row. Verify the durable
@@ -801,9 +800,9 @@ export async function refreshAccessTokenSafe(
 		backoffCounters.delete(account.id);
 	}
 
-	// The caller's account object may be a stale snapshot (the auto-refresh
-	// scheduler builds one from a loop-start SELECT). Re-read the row and adopt
-	// fresher credentials before initiating a refresh — refreshing with an
+	// The caller's account object may be a stale snapshot, read before a
+	// concurrent rotation landed. Re-read the row and adopt fresher
+	// credentials before initiating a refresh — refreshing with an
 	// already-rotated refresh token produces a false-definitive invalid_grant.
 	if (!getRefreshInFlightForAccount(ctx, account)) {
 		const adopted = await adoptDbTokensIfFresher(account, ctx);
@@ -1186,7 +1185,10 @@ export async function refreshAccessTokenSafe(
 // Global registry for account refresh clearing functions
 const refreshClearers: Map<string, (accountId: string) => void> = new Map();
 
-// Global registry for auto-refresh-scheduler tracking clearing functions
+// Global registry for per-server account-removal tracking clearers (each
+// server retires its usage polling for the removed account). The names keep
+// their auto-refresh prefix because the http-api account removal and the
+// proxy barrel import them.
 const autoRefreshTrackingClearers: Map<string, (accountId: string) => void> =
 	new Map();
 
@@ -1527,10 +1529,9 @@ export function clearAccountRefreshCache(accountId: string): void {
 }
 
 /**
- * Register a function to clear auto-refresh-scheduler tracking state for a
- * specific account. Used by the server to expose its scheduler's per-account
- * cleanup so account removal doesn't have to wait for the scheduler's next
- * periodic sweep.
+ * Register a function that clears a server's per-account tracking state when
+ * an account is removed. The server registers one that retires its usage
+ * polling for that account.
  */
 export function registerAutoRefreshTrackingClearer(
 	serverId: string,
@@ -1540,26 +1541,25 @@ export function registerAutoRefreshTrackingClearer(
 }
 
 /**
- * Unregister a previously registered auto-refresh tracking clearer.
+ * Unregister a previously registered account-removal tracking clearer.
  */
 export function unregisterAutoRefreshTrackingClearer(serverId: string): void {
 	autoRefreshTrackingClearers.delete(serverId);
 }
 
 /**
- * Clear auto-refresh-scheduler tracking state for an account across all
- * registered servers.
+ * Clear a removed account's tracking state across all registered servers.
  */
 export function clearAutoRefreshTrackingForAccount(accountId: string): void {
 	for (const [serverId, clearer] of autoRefreshTrackingClearers) {
 		try {
 			clearer(accountId);
 			log.info(
-				`Cleared auto-refresh tracking for account ${accountId} on ${serverId}`,
+				`Cleared account-removal tracking for account ${accountId} on ${serverId}`,
 			);
 		} catch (error) {
 			log.error(
-				`Failed to clear auto-refresh tracking for account ${accountId} on ${serverId}:`,
+				`Failed to clear account-removal tracking for account ${accountId} on ${serverId}:`,
 				error,
 			);
 		}

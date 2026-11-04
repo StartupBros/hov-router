@@ -369,7 +369,6 @@ export function createAccountsListHandler(
 			rate_limited: 0 | 1;
 			session_info: string | null;
 			auto_fallback_enabled: 0 | 1;
-			auto_refresh_enabled: 0 | 1;
 			auto_pause_on_overage_enabled: 0 | 1;
 			peak_hours_pause_enabled: 0 | 1;
 			codex_credit_drain_enabled: 0 | 1;
@@ -405,7 +404,6 @@ export function createAccountsListHandler(
 					COALESCE(paused, 0) as paused,
 					COALESCE(priority, 0) as priority,
 					COALESCE(auto_fallback_enabled, 0) as auto_fallback_enabled,
-					COALESCE(auto_refresh_enabled, 0) as auto_refresh_enabled,
 					custom_endpoint,
 					COALESCE(auto_pause_on_overage_enabled, 0) as auto_pause_on_overage_enabled,
 					COALESCE(peak_hours_pause_enabled, 0) as peak_hours_pause_enabled,
@@ -815,7 +813,8 @@ export function createAccountsListHandler(
 							: null,
 					sessionInfo: account.session_info || "",
 					autoFallbackEnabled: account.auto_fallback_enabled === 1,
-					autoRefreshEnabled: account.auto_refresh_enabled === 1,
+					// Auto-refresh was removed; the column is kept but never reported on.
+					autoRefreshEnabled: false,
 					autoPauseOnOverageEnabled:
 						account.auto_pause_on_overage_enabled === 1,
 					peakHoursPauseEnabled: account.peak_hours_pause_enabled === 1,
@@ -1164,9 +1163,8 @@ export function createAccountRemoveHandler(dbOps: DatabaseOperations) {
 			// 5-minute TTL sweep or the 1000-entry cap evicts it.
 			clearAccountRefreshCache(accountId);
 
-			// And clear auto-refresh-scheduler tracking state — otherwise it
-			// lingers until the scheduler's next periodic cleanup sweep (up to
-			// 60s later) or server shutdown.
+			// And retire every server's usage polling for the removed account —
+			// otherwise its timers keep firing until server shutdown.
 			clearAutoRefreshTrackingForAccount(accountId);
 
 			// Retire catalog evidence and any in-flight discovery for this exact id.
@@ -3321,27 +3319,33 @@ export function createAccountBillingTypeHandler(dbOps: DatabaseOperations) {
 }
 
 /**
- * Create an account auto-refresh toggle handler
+ * Auto-refresh was removed. For one release this endpoint keeps answering so
+ * existing scripts do not break: turning the setting off clears the stored
+ * value (which silences the startup warning), turning it on stores nothing,
+ * and both report autoRefreshEnabled false.
  */
 export function createAccountAutoRefreshHandler(dbOps: DatabaseOperations) {
 	return async (req: Request, accountId: string): Promise<Response> => {
 		try {
-			const body = await req.json();
-
-			// Validate enabled parameter
-			const enabled = validateNumber(body.enabled, "enabled", {
-				required: true,
-				allowedValues: [0, 1] as const,
-			});
-
-			if (enabled === undefined) {
-				return errorResponse(BadRequest("Enabled field is required (0 or 1)"));
+			const body = (await req.json()) as { enabled?: unknown } | null;
+			const raw = body?.enabled;
+			let turnOn: boolean;
+			if (raw === true || raw === 1) {
+				turnOn = true;
+			} else if (raw === false || raw === 0) {
+				turnOn = false;
+			} else {
+				return errorResponse(
+					BadRequest("enabled is required and must be true, false, 0 or 1"),
+				);
 			}
 
-			// Check if account exists
 			const db = dbOps.getAdapter();
-			const account = await db.get<{ name: string; provider: string }>(
-				"SELECT name, provider FROM accounts WHERE id = ?",
+			const account = await db.get<{
+				name: string;
+				auto_refresh_enabled: number;
+			}>(
+				"SELECT name, COALESCE(auto_refresh_enabled, 0) AS auto_refresh_enabled FROM accounts WHERE id = ?",
 				[accountId],
 			);
 
@@ -3349,31 +3353,24 @@ export function createAccountAutoRefreshHandler(dbOps: DatabaseOperations) {
 				return errorResponse(NotFound("Account not found"));
 			}
 
-			// Check if account provider supports auto-refresh (session-window based providers)
-			if (
-				account.provider !== "anthropic" &&
-				account.provider !== "codex" &&
-				account.provider !== "zai"
-			) {
-				return errorResponse(
-					BadRequest(
-						"Auto-refresh is only available for Anthropic, Codex, and Zai accounts",
-					),
+			let message: string;
+			if (turnOn) {
+				message = `Auto-refresh was removed; nothing was stored for account '${account.name}'. Usage windows are no longer opened ahead of use and pauses are no longer lifted after a probe.`;
+			} else {
+				await db.run(
+					"UPDATE accounts SET auto_refresh_enabled = 0 WHERE id = ?",
+					[accountId],
 				);
+				message =
+					account.auto_refresh_enabled === 1
+						? `Auto-refresh was removed; the stored setting was cleared for account '${account.name}'.`
+						: `Auto-refresh was removed; account '${account.name}' had no stored setting to clear.`;
 			}
-
-			// Update auto-refresh setting
-			await db.run(
-				"UPDATE accounts SET auto_refresh_enabled = ? WHERE id = ?",
-				[enabled, accountId],
-			);
-
-			const action = enabled === 1 ? "enabled" : "disabled";
 
 			return jsonResponse({
 				success: true,
-				message: `Auto-refresh ${action} for account '${account.name}'`,
-				autoRefreshEnabled: enabled === 1,
+				message,
+				autoRefreshEnabled: false,
 			});
 		} catch (error) {
 			log.error("Account auto-refresh toggle error:", error);

@@ -160,20 +160,21 @@ describe("selectAccountsForRequest — Codex credit drain", () => {
 		).rejects.toMatchObject({ accountId: account.id });
 	});
 
-	it("keeps an auto-refresh probe off the drain override", async () => {
+	it("gives a request carrying the auto-refresh marker the drain override like any client request", async () => {
 		const account = makeAccount({
 			id: "drain-auto-refresh",
 			codex_credit_drain_enabled: true,
 		});
 		await ownedPoll(account.id, CREDITS);
-		const meta = makeMeta({ "x-better-ccflare-account-id": account.id });
-		meta.trustedInternalAutoRefresh = true;
-		await expect(
-			selectAccountsForRequest(meta, makeCtx([account]), MODEL),
-		).rejects.toMatchObject({
-			accountId: account.id,
-			reason: "account_capacity_exhausted",
-		});
+		const result = await selectAccountsForRequest(
+			makeMeta({
+				"x-better-ccflare-account-id": account.id,
+				"x-better-ccflare-auto-refresh": "true",
+			}),
+			makeCtx([account]),
+			MODEL,
+		);
+		expect(result).toEqual([account]);
 	});
 
 	it("keeps a keepalive probe off the drain override", async () => {

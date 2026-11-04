@@ -2620,7 +2620,8 @@ describe("Claude Code gateway model route profiles", () => {
 		["manual", "manual", "false"],
 		["needs-reauthentication", "oauth_invalid_grant", "false"],
 		["overage", "overage", null],
-		["failure-threshold", "failure_threshold", null],
+		// Waits for an operator since the auto-refresh scheduler was removed (Refs #718).
+		["failure-threshold", "failure_threshold", "false"],
 		["peak-hours", "peak_hours", null],
 	] as const)("tells the client whether a %s pause on an exact route is worth retrying", async (_label, pauseReason, shouldRetry) => {
 		const routed = makeAccount();

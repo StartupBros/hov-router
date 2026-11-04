@@ -858,8 +858,8 @@ export async function forwardToClient(
 	// stale association instead of recording one (KTD-5). Headers.get is
 	// case-insensitive and the header is not stripped from the live request.
 	//
-	// Skip synthetic internal traffic (cache-keepalive replays, auto-refresh
-	// probes) via the shared chokepoint, so a keepalive replay's account never
+	// Skip synthetic internal traffic (cache-keepalive replays) via the shared
+	// chokepoint, so a keepalive replay's account never
 	// overwrites the active session's badge (see sessionIdForObservation).
 	const servedSessionId = sessionIdForObservation(requestHeaders);
 	if (servedSessionId) {
@@ -906,15 +906,6 @@ export async function forwardToClient(
 	// Filter out:
 	//   - count_tokens requests on providers that synthesize or proxy advisory
 	//     token counts; these aren't billable user traffic.
-	//   - synthetic auto-refresh probes (issue #199, bug 2). Logging these
-	//     pollutes the user-visible 503/200 metrics on the dashboard with
-	//     internal scheduler activity. Header set by AutoRefreshScheduler
-	//     mirrors the existing keepalive pattern.
-	const isAutoRefreshProbe = isInternalProbe(
-		requestHeaders,
-		ctx,
-		"auto-refresh",
-	);
 	const isSyntheticCountTokens =
 		path === "/v1/messages/count_tokens" &&
 		(ctx.provider.name === "openai-compatible" ||
@@ -924,7 +915,6 @@ export async function forwardToClient(
 		: null;
 	let shouldProcessRequest =
 		!isSyntheticCountTokens &&
-		!isAutoRefreshProbe &&
 		(!lifecycleCoordinator || lifecycleCoordinator.state === "unclaimed");
 
 	// Send START message immediately if not filtered
@@ -1289,7 +1279,7 @@ export async function forwardToClient(
 					// applied in proxy-operations.ts (3 sites) and
 					// response-processor.ts — closing the gap flagged on merged
 					// upstream PR #196 (greptile-apps).
-					const isKeepalive = isInternalProbe(requestHeaders, ctx, "keepalive");
+					const isKeepalive = isInternalProbe(requestHeaders, ctx);
 					if (isKeepalive) {
 						log.warn(
 							`Keepalive replay for ${account.name} hit mid-stream rate-limit — skipping cooldown (synthetic burst, not a real per-account rate limit)`,

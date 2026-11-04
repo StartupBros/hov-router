@@ -114,7 +114,7 @@ describe("UsagePollingLifecycle", () => {
 		).toBe(true);
 	});
 
-	it("binds account-removal cleanup to the registered scheduler and lifecycle owners", () => {
+	it("binds account-removal cleanup to the registered lifecycle owner", () => {
 		const clock = makeTimers();
 		const activeLifecycle = new UsagePollingLifecycle<Timer>({
 			schedule: (callback) => clock.schedule(callback),
@@ -128,19 +128,7 @@ describe("UsagePollingLifecycle", () => {
 		const replacementLease = replacementLifecycle.replace("account-1", 20);
 		activeLifecycle.scheduleRetry(activeLease, 5_000, () => {});
 		replacementLifecycle.scheduleRetry(replacementLease, 5_000, () => {});
-		const activeCleared: string[] = [];
-		const replacementCleared: string[] = [];
-		const clearer = createUsagePollingTrackingClearer(activeLifecycle, {
-			clearAccountTracking(accountId) {
-				activeCleared.push(accountId);
-			},
-		});
-		const replacementScheduler = {
-			clearAccountTracking(accountId: string) {
-				replacementCleared.push(accountId);
-			},
-		};
-		void replacementScheduler;
+		const clearer = createUsagePollingTrackingClearer(activeLifecycle);
 
 		clearer("account-1");
 
@@ -148,8 +136,6 @@ describe("UsagePollingLifecycle", () => {
 		expect(replacementLifecycle.isCurrent(replacementLease)).toBe(true);
 		expect(clock.timers[0].cancelled).toBe(true);
 		expect(clock.timers[1].cancelled).toBe(false);
-		expect(activeCleared).toEqual(["account-1"]);
-		expect(replacementCleared).toEqual([]);
 	});
 
 	it("unregisters every server-keyed lifecycle callback before owner shutdown", () => {

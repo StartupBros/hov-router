@@ -14,7 +14,6 @@ interface AccountListProps {
 	onRename: (account: Account) => void;
 	onPriorityChange: (account: Account) => void;
 	onAutoFallbackToggle: (account: Account) => void;
-	onAutoRefreshToggle: (account: Account) => void;
 	onBillingTypeToggle: (account: Account) => void;
 	onAutoPauseOnOverageToggle?: (account: Account) => void;
 	onCodexCreditDrainToggle?: (account: Account) => void;
@@ -39,7 +38,6 @@ export function AccountList({
 	onRename,
 	onPriorityChange,
 	onAutoFallbackToggle,
-	onAutoRefreshToggle,
 	onBillingTypeToggle,
 	onAutoPauseOnOverageToggle,
 	onCodexCreditDrainToggle,
@@ -76,7 +74,6 @@ export function AccountList({
 					onRename={onRename}
 					onPriorityChange={onPriorityChange}
 					onAutoFallbackToggle={onAutoFallbackToggle}
-					onAutoRefreshToggle={onAutoRefreshToggle}
 					onBillingTypeToggle={onBillingTypeToggle}
 					onAutoPauseOnOverageToggle={onAutoPauseOnOverageToggle}
 					onCodexCreditDrainToggle={onCodexCreditDrainToggle}

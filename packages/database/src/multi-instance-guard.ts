@@ -12,7 +12,8 @@
  *      (`RECENT_PICK_PENALTY` / `RECENT_PICK_WINDOW_MS`).
  *   3. UsageCache — utilisation view Maps; routing decisions diverge.
  *   4. CacheBodyStore — keepalive replay cache.
- *   5. AutoRefreshScheduler — refresh mutex & failure counters. A second
+ *   5. OAuth token refresh — the request-time single-flight
+ *      (`refreshInFlight`) and pending-rotation registry. A second
  *      instance refreshes the same OAuth token concurrently — a race
  *      against the provider, not just a duplicate request.
  *   6. Rate-limit single-flight recovery probe lease map (`probeLeases`).
@@ -368,7 +369,7 @@ export function formatGuardMessage(peers: HeartbeatRecord[]): string {
 		`  2. LeastUsedStrategy / SessionDrainSoonestStrategy — recency-penalty Map`,
 		`  3. UsageCache — utilisation view Maps (routing decisions diverge)`,
 		`  4. CacheBodyStore — keepalive replay cache`,
-		`  5. AutoRefreshScheduler — refresh mutex & failure counters (token-refresh race)`,
+		`  5. OAuth token refresh — request-time single-flight (refreshInFlight) & pending-rotation registry (token-refresh race)`,
 		`  6. Rate-limit single-flight recovery probe lease map (probeLeases)`,
 		`  7. SessionGovernor — session-volume circuit breaker`,
 		``,

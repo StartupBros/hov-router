@@ -2443,7 +2443,8 @@ export function runMigrations(db: Database, dbPath?: string): void {
 
 		// Add pause_reason column to track why an account is paused (issue #139)
 		// Possible values: null (not paused), 'manual' (user paused via CLI/API),
-		// 'failure_threshold' (auto-refresh failures), 'overage' (billing overage)
+		// 'failure_threshold' (auto-refresh failures; the scheduler that set it was
+		// removed, old rows may still carry it), 'overage' (billing overage)
 		if (!initialAccountsColumnNames.includes("pause_reason")) {
 			db.prepare("ALTER TABLE accounts ADD COLUMN pause_reason TEXT").run();
 			log.info("Added pause_reason column to accounts table");

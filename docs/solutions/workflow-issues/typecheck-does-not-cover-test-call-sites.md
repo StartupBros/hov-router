@@ -232,7 +232,7 @@ All four normalizer call sites in that file now agree with the contract (lines 9
 themselves (`usage-history.repository.ts:89` and the `DatabaseOperations` facade at
 `database-operations.ts:1075`), leaving **12 real call sites across 7 files**, all of which
 pass the canonical shape. Five of those are production code (`server.ts` twice,
-`accounts.ts`, `auto-refresh-scheduler.ts`, and the facade's own inner call) and are
+`accounts.ts`, `auto-refresh-scheduler.ts` (since deleted with the scheduler), and the facade's own inner call) and are
 guaranteed by `tsc`. The other seven live in test files and are guaranteed only by having
 been checked by hand — which is the whole point of this document.
 

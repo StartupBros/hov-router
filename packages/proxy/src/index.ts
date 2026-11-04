@@ -50,7 +50,6 @@ export {
 	createAnthropicDegradedRuntimeHealth,
 	trackDegradedResponseTerminal,
 } from "./anthropic-degraded-runtime";
-export { AutoRefreshScheduler } from "./auto-refresh-scheduler";
 export { CacheAffinityOrderer } from "./cache-affinity-orderer";
 export { handleCacheDiagnosisRequest } from "./cache-diagnosis";
 export {
@@ -283,3 +282,4 @@ export type {
 	StartMessage,
 	WorkerMessage,
 } from "./worker-messages";
+export { startZaiPeakHoursPause } from "./zai-peak-hours-pause";

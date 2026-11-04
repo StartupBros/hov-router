@@ -2024,7 +2024,8 @@ export async function getAccountsList(
 			})(),
 			priority: account.priority || 0,
 			autoFallbackEnabled: account.auto_fallback_enabled,
-			autoRefreshEnabled: account.auto_refresh_enabled,
+			// Auto-refresh was removed; the field stays and always reads false.
+			autoRefreshEnabled: false,
 			customEndpoint: account.custom_endpoint || null,
 			crossRegionMode: account.cross_region_mode || null,
 		};

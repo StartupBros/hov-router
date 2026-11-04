@@ -49,6 +49,18 @@ There is no PostgreSQL-to-SQLite migration tool, so option 2 starts with an empt
 
 **Environment variables no longer read:** `BETTER_CCFLARE_DB_POOL_MAX`, `BETTER_CCFLARE_DB_IDLE_TIMEOUT`, `BETTER_CCFLARE_DB_STATEMENT_TIMEOUT`, `BETTER_CCFLARE_DB_CLIENT_TIMEOUT`, `BETTER_CCFLARE_DB_PG_PREPARE`, `BETTER_CCFLARE_TEST_POSTGRES_URL`, and the `CCFLARE_REQUIRE_LIVE_PG_*` family. `BETTER_CCFLARE_DB_CLEANUP_BATCH_SIZE` and every SQLite setting still work.
 
+## Auto-refresh removed
+
+**What changed.** The per-account auto-refresh setting no longer does anything. Upstream used it to send a short scripted message to an account when its usage window reset, so the next window opened before anyone needed it. That is automated traffic sent on the account's behalf, which this fork does not send, and this fork's own install never had the setting on. Three behaviors stopped with it:
+
+1. **Window-opening messages.** Nothing is sent on an account's behalf. A usage window opens when real traffic first uses it.
+2. **Background OAuth token refresh.** Tokens are still refreshed when a request needs one: an expired or nearly expired token is refreshed before the request is sent, and a `401` on an Anthropic OAuth, Codex or xAI account triggers one refresh and retry. An account left idle until its refresh token lapses needs a re-login (`hov-router --reauthenticate <name>`) when it is next used.
+3. **Resuming paused accounts after a successful message.** An account paused after repeated failures (`failure_threshold`) now stays paused until you resume it from the dashboard or with `POST /api/accounts/<id>/resume`. An overage pause still clears on its own once its usage window resets, but only on Anthropic, Codex and Z.ai accounts with auto-fallback on.
+
+**Who is affected.** Only accounts that had auto-refresh turned on. At startup the server logs one warning naming each of them, what they no longer get, and how to clear the setting. The Z.ai peak-hours pause, which ran on the same timer, is unchanged and now runs as its own job (see [Z.ai Peak-Hours Pause](providers.md#zai-peak-hours-pause)).
+
+**Clearing the setting.** Send `POST /api/accounts/<id>/auto-refresh` with `{"enabled": false}` for each named account; the warning stops once none is left. The endpoint keeps answering for one release so existing scripts do not fail: turning the setting on stores nothing, and both answers say auto-refresh was removed. Account API responses and `--list` keep the `autoRefreshEnabled` field, which is always `false`. The dashboard toggle is gone. The database column is kept, with no migration. A request that still sends the `x-better-ccflare-auto-refresh` header is treated as an ordinary client request; the header is removed at ingress.
+
 ## Manual source updates
 
 Branded builds do not offer an actionable upstream update. Do not install a registry package or a tombii release to update this fork: those are upstream distributions, not HoV Router.

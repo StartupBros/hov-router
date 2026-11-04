@@ -543,7 +543,7 @@ describe("canonical history for caller cancellation before forwarding", () => {
 			terminalCause: "client_cancelled",
 		});
 	});
-	it("keeps authenticated auto-refresh cancellation out of request history", async () => {
+	it("records a caller cancellation in request history even with the auto-refresh marker and the probe secret", async () => {
 		const controller = new AbortController();
 		ctx.internalProbeSecret = "synthetic-internal-secret";
 		const request = makeRequest(controller);
@@ -556,7 +556,9 @@ describe("canonical history for caller cancellation before forwarding", () => {
 		const response = await handleProxy(request, new URL(request.url), ctx);
 		expect(response.status).toBe(499);
 		await collector.drain();
-		expect(await db.getRecentRequests()).toEqual([]);
+		const rows = await db.getRecentRequests();
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({ status_code: 499, success: false });
 	});
 
 	it("keeps telemetry failure fail-open on a caller cancellation", async () => {

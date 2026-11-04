@@ -170,10 +170,6 @@ export const ROUTING_CONFIGURATION_INVALIDATION = {
 	accountOverview: true,
 } as const satisfies ManagedRoutingInvalidationOptions;
 
-export const ACCOUNTS_ONLY_INVALIDATION = {
-	accounts: true,
-} as const satisfies ManagedRoutingInvalidationOptions;
-
 /**
  * Invalidate cached views affected by a managed-routing mutation.
  *
@@ -869,25 +865,6 @@ export const getUpdateAccountPriorityMutationOptions = (
 export const useUpdateAccountPriority = () => {
 	const queryClient = useQueryClient();
 	return useMutation(getUpdateAccountPriorityMutationOptions(queryClient));
-};
-
-export const getUpdateAccountAutoRefreshMutationOptions = (
-	queryClient: QueryClient,
-) => ({
-	mutationFn: ({
-		accountId,
-		enabled,
-	}: {
-		accountId: string;
-		enabled: boolean;
-	}) => api.updateAccountAutoRefresh(accountId, enabled),
-	onSuccess: () =>
-		invalidateManagedRouting(queryClient, ACCOUNTS_ONLY_INVALIDATION),
-});
-
-export const useUpdateAccountAutoRefresh = () => {
-	const queryClient = useQueryClient();
-	return useMutation(getUpdateAccountAutoRefreshMutationOptions(queryClient));
 };
 
 export const getUpdateAccountBillingTypeMutationOptions = (

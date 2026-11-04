@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { CodexProvider } from "@better-ccflare/providers";
 import type { RequestMeta } from "@better-ccflare/types";
 import { ANTHROPIC_DRAIN_DEADLINE_MS } from "../../anthropic-terminal-recovery";
+import * as usageCollectorModule from "../../usage-collector";
 import { proxyUnauthenticated } from "../proxy-operations";
 import type { ProxyContext } from "../proxy-types";
 import {
@@ -268,13 +269,18 @@ describe("proxyUnauthenticated abort lifecycle", () => {
 			},
 		) as unknown as typeof globalThis.fetch;
 
+		const collectorSpy = spyOn(
+			usageCollectorModule,
+			"getUsageCollector",
+		).mockReturnValue({
+			handleStart: mock(() => undefined),
+			handleChunk: mock(() => undefined),
+			handleEnd: mock(() => Promise.resolve()),
+		} as unknown as usageCollectorModule.UsageCollector);
+
 		try {
 			const req = new Request("https://proxy.test/v1/messages", {
 				method: "POST",
-				headers: {
-					"x-better-ccflare-auto-refresh": "true",
-					"x-better-ccflare-internal-probe-secret": "test-secret",
-				},
 			});
 			const requestMeta: RequestMeta = {
 				id: "unauthenticated-drain-abort",
@@ -296,7 +302,6 @@ describe("proxyUnauthenticated abort lifecycle", () => {
 				refreshInFlight: new Map(),
 				asyncWriter: {},
 				config: { getStorePayloads: () => false },
-				internalProbeSecret: "test-secret",
 			} as unknown as ProxyContext;
 
 			const response = await proxyUnauthenticated(
@@ -316,6 +321,7 @@ describe("proxyUnauthenticated abort lifecycle", () => {
 
 			expect(upstreamSignal?.aborted).toBe(true);
 		} finally {
+			collectorSpy.mockRestore();
 			timeoutSpy.mockRestore();
 		}
 	});

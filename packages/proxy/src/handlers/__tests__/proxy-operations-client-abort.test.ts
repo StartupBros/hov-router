@@ -13,6 +13,7 @@ import { ANTHROPIC_DRAIN_DEADLINE_MS } from "../../anthropic-terminal-recovery";
 import type { AnthropicDegradedRequestSendState } from "../proxy-operations";
 import type { ProxyContext } from "../proxy-types";
 
+const usageCollectorModule = await import("../../usage-collector");
 const { proxyWithAccount } = await import("../proxy-operations");
 
 /**
@@ -272,6 +273,15 @@ describe("proxyWithAccount: client abort signal reaches the upstream fetch", () 
 			},
 		) as unknown as typeof globalThis.fetch;
 
+		const collectorSpy = spyOn(
+			usageCollectorModule,
+			"getUsageCollector",
+		).mockReturnValue({
+			handleStart: mock(() => undefined),
+			handleChunk: mock(() => undefined),
+			handleEnd: mock(() => Promise.resolve()),
+		} as unknown as usageCollectorModule.UsageCollector);
+
 		try {
 			const bodyBuffer = makeRequestBody();
 			const req = new Request("https://proxy.local/v1/messages", {
@@ -279,8 +289,6 @@ describe("proxyWithAccount: client abort signal reaches the upstream fetch", () 
 				body: bodyBuffer,
 				headers: {
 					"Content-Type": "application/json",
-					"x-better-ccflare-auto-refresh": "true",
-					"x-better-ccflare-internal-probe-secret": "test-secret",
 				},
 			});
 			const ctx = makeProxyContext();
@@ -310,6 +318,7 @@ describe("proxyWithAccount: client abort signal reaches the upstream fetch", () 
 			// this exact signal's live abort sources, not an unrelated controller.
 			expect(upstreamSignal?.aborted).toBe(true);
 		} finally {
+			collectorSpy.mockRestore();
 			timeoutSpy.mockRestore();
 		}
 	});

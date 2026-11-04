@@ -3,7 +3,6 @@ import type { QueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../lib/query-keys";
 import {
 	ACCOUNT_ROUTING_INVALIDATION,
-	ACCOUNTS_ONLY_INVALIDATION,
 	deviceSetupJobsNeedPolling,
 	FULL_MANAGED_ROUTING_INVALIDATION,
 	getAccountRoutingOverviewQueryOptions,
@@ -18,7 +17,6 @@ import {
 	getRefreshUsageMutationOptions,
 	getRestoreAccountToFamilyMutationOptions,
 	getResumeAccountMutationOptions,
-	getUpdateAccountAutoRefreshMutationOptions,
 	getUpdateAccountBillingTypeMutationOptions,
 	getUpdateAccountCustomEndpointMutationOptions,
 	getUpdateAccountModelMappingsMutationOptions,
@@ -145,14 +143,6 @@ describe("invalidateManagedRouting", () => {
 		]);
 	});
 
-	it("keeps auto-refresh-only mutations accounts-only", async () => {
-		const { queryClient, invalidateQueries } = createQueryClientSpy();
-
-		await invalidateManagedRouting(queryClient, ACCOUNTS_ONLY_INVALIDATION);
-
-		expect(invalidatedKeys(invalidateQueries)).toEqual([queryKeys.accounts()]);
-	});
-
 	it("honors a focused caller-selected invalidation scope", async () => {
 		const { queryClient, invalidateQueries } = createQueryClientSpy();
 
@@ -276,11 +266,6 @@ describe("canonical account mutation invalidation", () => {
 		["pause", getPauseAccountMutationOptions, accountRoutingKeys],
 		["resume", getResumeAccountMutationOptions, accountRoutingKeys],
 		["priority", getUpdateAccountPriorityMutationOptions, fullRoutingKeys],
-		[
-			"auto refresh",
-			getUpdateAccountAutoRefreshMutationOptions,
-			[queryKeys.accounts()],
-		],
 		["billing", getUpdateAccountBillingTypeMutationOptions, fullRoutingKeys],
 		[
 			"custom endpoint",

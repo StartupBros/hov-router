@@ -236,7 +236,7 @@ export interface AccountRow {
 	cross_region_mode?: string | null; // Bedrock cross-region inference mode
 	model_fallbacks?: string | null; // JSON string for model family fallback mappings
 	billing_type?: string | null; // Per-account billing override
-	pause_reason?: string | null; // null=not paused, 'manual'=user paused, 'failure_threshold'=auto-refresh failures, 'overage'=billing overage
+	pause_reason?: string | null; // null=not paused, 'manual'=user paused, 'failure_threshold'=auto-refresh failures (setter removed; legacy rows), 'overage'=billing overage
 	refresh_token_issued_at?: number | null; // Timestamp when the current refresh token was issued (updated on each token refresh)
 	consecutive_rate_limits?: number | null;
 }
@@ -288,7 +288,7 @@ export interface Account {
 	cross_region_mode: string | null; // Bedrock cross-region inference mode
 	model_fallbacks: string | null; // JSON string for model family fallback mappings
 	billing_type: string | null;
-	pause_reason: string | null; // null=not paused, 'manual'=user paused, 'failure_threshold'=auto-refresh failures, 'overage'=billing overage
+	pause_reason: string | null; // null=not paused, 'manual'=user paused, 'failure_threshold'=auto-refresh failures (setter removed; legacy rows), 'overage'=billing overage
 	refresh_token_issued_at: number | null; // Timestamp when the current refresh token was issued (updated on each token refresh)
 	consecutive_rate_limits: number;
 }
@@ -751,7 +751,8 @@ export function toAccountResponse(account: Account): AccountResponse {
 		sessionInfo,
 		priority: account.priority,
 		autoFallbackEnabled: account.auto_fallback_enabled,
-		autoRefreshEnabled: account.auto_refresh_enabled,
+		// Auto-refresh was removed; the field stays and always reads false.
+		autoRefreshEnabled: false,
 		autoPauseOnOverageEnabled: account.auto_pause_on_overage_enabled,
 		peakHoursPauseEnabled: account.peak_hours_pause_enabled,
 		codexCreditDrainEnabled: !!account.codex_credit_drain_enabled,
@@ -805,7 +806,8 @@ export function toAccountDisplay(account: Account): AccountDisplay {
 		access_token: account.access_token,
 		priority: account.priority,
 		autoFallbackEnabled: account.auto_fallback_enabled,
-		autoRefreshEnabled: account.auto_refresh_enabled,
+		// Auto-refresh was removed; the field stays and always reads false.
+		autoRefreshEnabled: false,
 	};
 }
 

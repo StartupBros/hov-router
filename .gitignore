@@ -32,9 +32,6 @@ config.json
 ssl-cert-snakeoil.key
 ssl-cert-snakeoil.pem
 
-# Temporarily ignore auto-refresh scheduler tests due to complex mocking
-packages/proxy/src/auto-refresh-scheduler.test.ts
-
 # Test files
 test_*.sh
 
