@@ -791,4 +791,32 @@ describe("atomic publish write", () => {
 			stub.mockRestore();
 		}
 	});
+
+	// isUniqueViolation (KTD9): the write itself throws a REAL bun:sqlite error
+	// from the published-label unique index, not a hand-built error object.
+	it("maps a real SQLite UNIQUE index violation on the write to the same 400", async () => {
+		await addAccount("rv-1", "n1");
+		await addAccount("rv-2", "n2");
+		expect((await post("rv-1", { enabled: true, label: "Taken" })).status).toBe(
+			200,
+		);
+		const before = await snapshot();
+		const adapter = db.getAdapter();
+		const stub = spyOn(db, "setPublicValue").mockImplementation(async () => {
+			await adapter.run(
+				"UPDATE accounts SET public_value_enabled = 1, public_value_label = 'TAKEN' WHERE id = 'rv-2'",
+			);
+			return true;
+		});
+		try {
+			const response = await post("rv-2", { enabled: true, label: "Other" });
+			expect(response.status).toBe(400);
+			expect(JSON.stringify(await response.json())).toContain(
+				"Another published account already uses this label, or the published-account limit was reached",
+			);
+		} finally {
+			stub.mockRestore();
+		}
+		expect(await snapshot()).toBe(before);
+	});
 });

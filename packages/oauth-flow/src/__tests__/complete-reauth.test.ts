@@ -1,6 +1,9 @@
 import { afterAll, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { Config } from "@better-ccflare/config";
-import type { DatabaseOperations } from "@better-ccflare/database";
+import {
+	type DatabaseOperations,
+	DatabaseOperations as RealDatabaseOperations,
+} from "@better-ccflare/database";
 import type {
 	OAuthProviderConfig,
 	OAuthTokens,
@@ -257,5 +260,52 @@ describe("OAuthFlow.completeReauth", () => {
 
 		expect(runSpy).toHaveBeenCalled();
 		expect(resumeSpy).toHaveBeenCalledTimes(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// isUniqueConstraintError (KTD9): drive complete() against a REAL in-memory
+// SQLite database so the genuine bun:sqlite UNIQUE error reaches the detector.
+// ---------------------------------------------------------------------------
+
+describe("OAuthFlow.complete duplicate account (real SQLite UNIQUE error)", () => {
+	it("maps the SQLite UNIQUE violation to an 'already taken' error", async () => {
+		const realDb = new RealDatabaseOperations(":memory:", { walMode: false });
+		try {
+			const flow = new OAuthFlow(realDb, makeConfig());
+			const first = await flow.complete(
+				{ sessionId: "s1", code: "c1", name: "dup-acct" },
+				testFlowData,
+			);
+			expect(first.name).toBe("dup-acct");
+
+			// complete() has no name pre-check: the second INSERT is rejected by
+			// idx_accounts_unique_name_provider_endpoint with a real bun:sqlite error.
+			let thrown: unknown;
+			try {
+				await flow.complete(
+					{ sessionId: "s2", code: "c2", name: "dup-acct" },
+					testFlowData,
+				);
+			} catch (e) {
+				thrown = e;
+			}
+			expect(thrown).toBeInstanceOf(Error);
+			expect((thrown as Error).message).toBe(
+				"Account name 'dup-acct' is already taken",
+			);
+			expect(((thrown as Error).cause as Error).message).toContain(
+				"UNIQUE constraint failed",
+			);
+
+			const rows = await realDb
+				.getAdapter()
+				.query<{ id: string }>("SELECT id FROM accounts WHERE name = ?", [
+					"dup-acct",
+				]);
+			expect(rows).toHaveLength(1);
+		} finally {
+			await realDb.close();
+		}
 	});
 });

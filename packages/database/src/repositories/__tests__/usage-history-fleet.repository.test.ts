@@ -316,9 +316,9 @@ describe("UsageHistoryRepository.getFleetUsageHistory", () => {
 		const { adapter, observations } = countingAdapter(db);
 		const repo = new UsageHistoryRepository(adapter);
 		// UTF-8 byte order is uppercase ASCII, lowercase ASCII, then non-ASCII.
-		// Locale-backed PostgreSQL collations can order the accented id near "e"
-		// instead, selecting a different strict prefix unless both dialects pin
-		// their bytewise collation explicitly.
+		// A locale-aware collation would order the accented id near "e"
+		// instead, selecting a different strict prefix, so the query pins
+		// COLLATE BINARY explicitly.
 		for (const accountId of ["acct-é", "acct-a", "acct-Z"]) {
 			await seed(repo, accountId, "five_hour", [5000]);
 		}

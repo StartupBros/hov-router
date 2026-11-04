@@ -1,7 +1,5 @@
 import { Database } from "bun:sqlite";
 import { expect, it } from "bun:test";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { BunSqlAdapter } from "./adapters/bun-sql-adapter";
 import { runMigrations } from "./migrations";
 import { RequestRepository } from "./repositories/request.repository";
@@ -22,15 +20,6 @@ it("adds requests.unified_ratelimit_headers on fresh and upgraded SQLite databas
 	} finally {
 		db.close();
 	}
-});
-
-it("declares the same column in the PostgreSQL create table and upgrade list", () => {
-	const source = fs.readFileSync(
-		path.join(__dirname, "migrations-pg.ts"),
-		"utf8",
-	);
-	expect(source).toMatch(/^\s+unified_ratelimit_headers TEXT,$/m);
-	expect(source).toContain('["unified_ratelimit_headers", "TEXT"]');
 });
 
 it("persists the headers JSON and keeps the first value on a re-save", async () => {

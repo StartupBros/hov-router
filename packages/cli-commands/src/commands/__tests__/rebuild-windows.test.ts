@@ -360,14 +360,6 @@ describe("rebuildWindows", () => {
 			});
 			expect(rowsAfter).toHaveLength(0);
 		});
-
-		it("throws a clear error for a non-SQLite (PostgreSQL) source", async () => {
-			dbOps = new DatabaseOperations(":memory:", { walMode: false });
-			const fakePgDbOps = { isSQLite: false } as unknown as DatabaseOperations;
-			await expect(
-				rebuildWindows(fakePgDbOps, { dryRun: true }),
-			).rejects.toThrow(/PostgreSQL/i);
-		});
 	});
 });
 

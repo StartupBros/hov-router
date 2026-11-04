@@ -21,9 +21,9 @@ export type CacheParityConfigStub = Pick<
  * so a missing/renamed accessor throws instead of silently resolving to 0.
  * That guard is only as good as every hand-rolled test config stub staying
  * in sync with it — and twice already, one fixture (SQLite) got a new
- * accessor added while the other (live PostgreSQL) did not, and only one of
- * them ran in CI, so the drift went undetected until the dead fixture was
- * finally exercised. One factory, used by both fixtures, makes that
+ * accessor added while the other (live PostgreSQL, since removed) did not, and
+ * only one of them ran in CI, so the drift went undetected until the dead
+ * fixture was finally exercised. One shared factory makes that
  * impossible: add a key here once and every caller gets it.
  *
  * `overrides` lets an individual test change one accessor's return value

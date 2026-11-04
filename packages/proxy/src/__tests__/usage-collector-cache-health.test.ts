@@ -23,7 +23,8 @@ const { UsageCollector } = usageCollectorModule;
 const { forwardToClient } = await import("../response-handler");
 
 it("persists server-owned accounting even when a successful completion has no usage", async () => {
-	// This fixture must always use its own SQLite database, even in a PG job.
+	// This fixture must always use its own SQLite database, even with an
+	// ambient DATABASE_URL.
 	const ambientUrl = process.env.DATABASE_URL;
 	let db: DatabaseOperations;
 	try {

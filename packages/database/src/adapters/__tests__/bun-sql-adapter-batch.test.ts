@@ -67,43 +67,4 @@ describe("BunSqlAdapter checked DML batches", () => {
 			db.query<{ value: number }, []>("SELECT value FROM revision").get(),
 		).toEqual({ value: 1 });
 	});
-
-	it("throws inside the PostgreSQL transaction callback on a count mismatch", async () => {
-		let transactionRolledBack = false;
-		let statementIndex = 0;
-		const tx = {
-			unsafe: async () => ({ count: statementIndex++ === 0 ? 1 : 0 }),
-		};
-		const fakeSql = {
-			begin: async (
-				callback: (transaction: typeof tx) => Promise<number[]>,
-			) => {
-				try {
-					return await callback(tx);
-				} catch (error) {
-					transactionRolledBack = true;
-					throw error;
-				}
-			},
-			on: () => {},
-		};
-		// biome-ignore lint/suspicious/noExplicitAny: minimal Bun.SQL transaction fake
-		const adapter = new BunSqlAdapter(fakeSql as any, false);
-
-		await expect(
-			adapter.runBatchWithChanges([
-				{
-					sql: "UPDATE records SET value = ?",
-					params: ["after"],
-					expectedChanges: 1,
-				},
-				{
-					sql: "DELETE FROM records WHERE id = ?",
-					params: ["missing"],
-					expectedChanges: 1,
-				},
-			]),
-		).rejects.toThrow("Batch statement 2 expected 1 change(s), got 0");
-		expect(transactionRolledBack).toBe(true);
-	});
 });

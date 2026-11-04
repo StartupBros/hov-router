@@ -409,7 +409,7 @@ describe("runIntegrityCheckOnDemand", () => {
 		);
 	});
 
-	it("quick falls back to direct call when no SQLite path (e.g. PostgreSQL)", async () => {
+	it("quick falls back to direct call when no SQLite path is resolvable (e.g. :memory:)", async () => {
 		const dbOps = makeDbOps({ dbPath: undefined, quickResult: "ok" });
 		const out = await runIntegrityCheckOnDemand(dbOps, "quick");
 		expect(out.ok).toBe(true);

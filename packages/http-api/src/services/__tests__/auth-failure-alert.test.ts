@@ -194,12 +194,10 @@ describe("AlertService auth_failure events", () => {
 });
 
 /**
- * Fake adapter that records the SQL sent to `.runWithChanges()`. Simulates the
- * PostgreSQL dialect (isSQLite === false) so we can assert the dialect-aware
- * conflict clause without a live PG server.
+ * Fake adapter that records the SQL sent to `.runWithChanges()` without a
+ * real database.
  */
 class RecordingPgAdapter implements BunSqlAdapterType {
-	readonly isSQLite = false;
 	readonly runStatements: string[] = [];
 
 	async get<T>(_sql: string, _params?: unknown[]): Promise<T | null> {
@@ -279,26 +277,6 @@ describe("AlertService persistAndEmit (issue #326)", () => {
 		};
 	}
 
-	it("uses PostgreSQL ON CONFLICT syntax instead of INSERT OR IGNORE", async () => {
-		const adapter = new RecordingPgAdapter();
-		const service = new AlertService(
-			adapter as unknown as BunSqlAdapterType,
-			makeConfig({ requestTokens: 1 }),
-		);
-		service.start();
-		try {
-			await service.evaluateRequest(makeHighTokenRequest());
-			const insertStmt = adapter.runStatements.find((s) =>
-				/INTO alerts/.test(s),
-			);
-			expect(insertStmt).toBeDefined();
-			expect(insertStmt).toMatch(/ON CONFLICT\s*\(id\)\s*DO NOTHING/i);
-			expect(insertStmt).not.toMatch(/INSERT OR IGNORE/i);
-		} finally {
-			service.stop();
-		}
-	});
-
 	it("swallows persistence failures instead of crashing the proxy", async () => {
 		const adapter = new FailingPgAdapter();
 		const service = new AlertService(
@@ -357,7 +335,6 @@ describe("AlertService persistAndEmit (issue #326)", () => {
 });
 
 class RecoveringPgAdapter implements BunSqlAdapterType {
-	readonly isSQLite = false;
 	failAggregate = true;
 	failAnomaly = true;
 	getCalls = 0;

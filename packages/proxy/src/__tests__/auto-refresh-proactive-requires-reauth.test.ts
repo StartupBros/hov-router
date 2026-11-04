@@ -240,45 +240,6 @@ describe("AutoRefreshScheduler proactive refresh — CAS loser adoption", () => 
 	});
 });
 
-describe("AutoRefreshScheduler proactive refresh — PostgreSQL generation rows", () => {
-	for (const provider of ["qwen", "xai", "codex"] as const) {
-		it(`persists ${provider} refreshes selected from a BIGINT-string generation`, async () => {
-			const id = `${provider}-bigint-generation`;
-			const { db, dbOps, persistCalls } = makeDb([
-				{
-					id,
-					name: id,
-					provider,
-					refresh_token: "rt-old",
-					access_token: "at-old",
-					expires_at: 1,
-					custom_endpoint: null,
-					created_at: "101",
-				},
-			]);
-			global.fetch = mock(
-				async () =>
-					new Response(
-						JSON.stringify({
-							access_token: "refreshed-access",
-							refresh_token: "refreshed-refresh",
-							expires_in: 3600,
-						}),
-						{ status: 200, headers: { "content-type": "application/json" } },
-					),
-			) as unknown as typeof fetch;
-
-			const scheduler = makeScheduler(db, dbOps);
-			await (provider === "codex"
-				? scheduler.checkAndRefreshCodexTokens()
-				: scheduler.checkAndRefreshOpenAICompatibleOAuthTokens());
-
-			expect(persistCalls).toHaveLength(1);
-			expect(persistCalls[0]?.[5]).toBe(101);
-		});
-	}
-});
-
 describe("AutoRefreshScheduler proactive refresh — generation fence", () => {
 	for (const provider of ["qwen", "xai", "codex"] as const) {
 		it(`does not quarantine replacement generation B when ${provider} fails after A was selected`, async () => {

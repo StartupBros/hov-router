@@ -3,7 +3,6 @@ import { describe, expect, it } from "bun:test";
 import { toComboFamilyAssignment } from "@better-ccflare/types";
 import { BunSqlAdapter } from "../adapters/bun-sql-adapter";
 import { ensureSchema, runMigrations } from "../migrations";
-import { ensureSchemaPg, runMigrationsPg } from "../migrations-pg";
 import { ComboRepository } from "../repositories/combo.repository";
 
 describe("native quota family policy persistence", () => {
@@ -69,31 +68,4 @@ describe("native quota family policy persistence", () => {
 			}
 		});
 	}
-
-	it("generates PostgreSQL fresh and upgrade policy columns with legacy defaults and enum constraints", async () => {
-		for (const upgrade of [false, true]) {
-			const statements: string[] = [];
-			const adapter = {
-				get: async (_sql: string, params: unknown[] = []) => ({
-					exists:
-						params[0] === "combo_family_assignments" &&
-						params[1] === "exhaustion_policy"
-							? 0
-							: 1,
-				}),
-				unsafe: async (sql: string) => {
-					statements.push(sql);
-					return [];
-				},
-				run: async (sql: string) => {
-					statements.push(sql);
-				},
-			} as unknown as BunSqlAdapter;
-			await (upgrade ? runMigrationsPg(adapter) : ensureSchemaPg(adapter));
-			const sql = statements.join("\n").replace(/\s+/g, " ");
-			expect(sql).toContain(
-				`${upgrade ? "ALTER TABLE combo_family_assignments ADD COLUMN " : ""}exhaustion_policy TEXT NOT NULL DEFAULT 'legacy' CHECK (exhaustion_policy IN ('legacy', 'native_quota_wait'))`,
-			);
-		}
-	});
 });

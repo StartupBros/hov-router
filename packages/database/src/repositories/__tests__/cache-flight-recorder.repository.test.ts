@@ -11,7 +11,6 @@ import {
 } from "@better-ccflare/core";
 import { BunSqlAdapter } from "../../adapters/bun-sql-adapter";
 import { ensureSchema, runMigrations } from "../../migrations";
-import { ensureSchemaPg, runMigrationsPg } from "../../migrations-pg";
 import { CacheFlightRecorderRepository } from "../cache-flight-recorder.repository";
 
 function makeDb(): Database {
@@ -172,68 +171,6 @@ describe("cache flight recorder schema", () => {
 			"cache_flight_recorder_turns",
 		]);
 		db.close();
-	});
-
-	it("creates PostgreSQL recorder tables on fresh installs and upgrades", async () => {
-		const statements: string[] = [];
-		const adapter = {
-			unsafe: async (sql: string) => {
-				statements.push(sql);
-				return [];
-			},
-			// Reports both column and index existence checks as satisfied so
-			// runMigrationsPg's unique-index/dedup migration (unrelated to the
-			// recorder tables this test exercises) sees no duplicate groups to
-			// collapse when its helper reads rows via adapter.unsafe().
-			get: async <T>(sql: string): Promise<T | null> =>
-				sql.includes("information_schema.columns") || sql.includes("pg_indexes")
-					? ({ exists: 1 } as T)
-					: null,
-			run: async () => {},
-		};
-
-		await ensureSchemaPg(adapter as never);
-		expect(
-			statements.some((sql) =>
-				sql.includes(
-					"CREATE TABLE IF NOT EXISTS cache_flight_recorder_conversations",
-				),
-			),
-		).toBe(true);
-		expect(
-			statements.some((sql) =>
-				sql.includes("CREATE TABLE IF NOT EXISTS cache_flight_recorder_turns"),
-			),
-		).toBe(true);
-		expect(
-			statements.some((sql) =>
-				sql.includes(
-					"CREATE TABLE IF NOT EXISTS cache_flight_recorder_tombstones",
-				),
-			),
-		).toBe(true);
-
-		statements.length = 0;
-		await runMigrationsPg(adapter as never);
-		expect(
-			statements.some((sql) =>
-				sql.includes(
-					"CREATE TABLE IF NOT EXISTS cache_flight_recorder_conversations",
-				),
-			),
-		).toBe(true);
-		expect(
-			statements.some((sql) =>
-				sql.includes("CREATE TABLE IF NOT EXISTS cache_flight_recorder_turns"),
-			),
-		).toBe(true);
-		expect(
-			statements.some((sql) =>
-				sql.includes(
-					"CREATE TABLE IF NOT EXISTS cache_flight_recorder_tombstones",
-				),
-			),
-		).toBe(true);
 	});
 });
 
@@ -825,9 +762,9 @@ describe("CacheFlightRecorderRepository", () => {
 		// zero-turn orphans (their only referencing turn is gone) while their
 		// created_at (1_000) is still within the current retention window.
 		// A live append reusing this cached partition/epoch id would be in
-		// exactly this state mid-transaction on PostgreSQL, where the
-		// insert-or-verify batch and this cleanup run as separate
-		// transactions (see bun-sql-adapter.ts runBatchWithChanges).
+		// exactly this state between its insert-or-verify batch and this
+		// cleanup, which run as separate transactions (see bun-sql-adapter.ts
+		// runBatchWithChanges).
 		db.query(
 			`DELETE FROM cache_flight_recorder_turns WHERE recorder_conversation_id = ?`,
 		).run("orphan-guard-id");

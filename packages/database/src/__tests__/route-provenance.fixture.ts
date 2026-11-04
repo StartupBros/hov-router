@@ -1,7 +1,6 @@
 import type { RequestRoutingAttemptSummary } from "@better-ccflare/types";
 
-// Shared by the SQLite/PostgreSQL column parity test, the SQLite freeze tests
-// and the live PostgreSQL freeze test, so all three pin the same columns.
+// Shared by the SQLite column test and the SQLite freeze tests, so they pin the same columns.
 export const ROUTE_PROVENANCE_COLUMNS = [
 	"route_profile_id",
 	"requested_route_model",

@@ -12,17 +12,32 @@ function deferred() {
 async function turns() {
 	await new Promise<void>((resolve) => setTimeout(resolve, 5));
 }
+/**
+ * The --serve adapter with its writer thread attached: heartbeat writes and the
+ * retirement DELETE both go through `run`, and the writer executes them one at
+ * a time in posting order. `execute` sees a statement when it starts running,
+ * not when it is posted.
+ */
+function writerAdapter(execute: (sql: string) => Promise<void>): BunSqlAdapter {
+	let queue: Promise<void> = Promise.resolve();
+	return {
+		writerAttached: () => true,
+		run: (sql: string) => {
+			const job = queue.then(() => execute(sql));
+			queue = job.catch(() => {});
+			return job;
+		},
+	} as unknown as BunSqlAdapter;
+}
 
 describe("heartbeat loop retirement", () => {
 	it("holds a pending cleanup and shares the same failed stop without repeating it", async () => {
 		const clearing = deferred();
 		let calls = 0;
-		const adapter = {
-			run: async () => {
-				calls++;
-				await clearing.promise;
-			},
-		} as unknown as BunSqlAdapter;
+		const adapter = writerAdapter(async () => {
+			calls++;
+			await clearing.promise;
+		});
 		const stop = startHeartbeatLoop(adapter, {
 			intervalMs: 100_000,
 			settlementTimeoutMs: 10,
@@ -40,12 +55,10 @@ describe("heartbeat loop retirement", () => {
 	it("serializes ticks and waits for an in-flight write before deleting its row", async () => {
 		const writing = deferred();
 		const calls: string[] = [];
-		const adapter = {
-			run: async (sql: string) => {
-				calls.push(sql.startsWith("DELETE") ? "delete" : "write");
-				if (!sql.startsWith("DELETE")) await writing.promise;
-			},
-		} as unknown as BunSqlAdapter;
+		const adapter = writerAdapter(async (sql: string) => {
+			calls.push(sql.startsWith("DELETE") ? "delete" : "write");
+			if (!sql.startsWith("DELETE")) await writing.promise;
+		});
 		const stop = startHeartbeatLoop(adapter, { intervalMs: 1 });
 		try {
 			await turns();
@@ -67,11 +80,9 @@ describe("heartbeat loop retirement", () => {
 	it("starts no tick while its owner is closing", async () => {
 		let closing = true;
 		const calls: string[] = [];
-		const adapter = {
-			run: async (sql: string) => {
-				calls.push(sql.startsWith("DELETE") ? "delete" : "write");
-			},
-		} as unknown as BunSqlAdapter;
+		const adapter = writerAdapter(async (sql: string) => {
+			calls.push(sql.startsWith("DELETE") ? "delete" : "write");
+		});
 		const stop = startHeartbeatLoop(adapter, {
 			intervalMs: 1,
 			isClosing: () => closing,
@@ -89,12 +100,10 @@ describe("heartbeat loop retirement", () => {
 	it("holds unresolved write ownership after its finite stop budget", async () => {
 		const writing = deferred();
 		const calls: string[] = [];
-		const adapter = {
-			run: async (sql: string) => {
-				calls.push(sql.startsWith("DELETE") ? "delete" : "write");
-				if (!sql.startsWith("DELETE")) await writing.promise;
-			},
-		} as unknown as BunSqlAdapter;
+		const adapter = writerAdapter(async (sql: string) => {
+			calls.push(sql.startsWith("DELETE") ? "delete" : "write");
+			if (!sql.startsWith("DELETE")) await writing.promise;
+		});
 		const stop = startHeartbeatLoop(adapter, {
 			intervalMs: 1,
 			settlementTimeoutMs: 10,
