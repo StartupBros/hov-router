@@ -325,9 +325,7 @@ describe("off-thread reader fault lifecycle", () => {
 		await turns();
 		// The worker holds one read at a time; the second waits on this thread.
 		expect(
-			workers[0].messages
-				.filter((m) => m.kind === "read")
-				.map((m) => m.sql),
+			workers[0].messages.filter((m) => m.kind === "read").map((m) => m.sql),
 		).toEqual(["SELECT 1"]);
 		if (kind === "error")
 			workers[0].onerror?.({
@@ -703,7 +701,8 @@ describe("adapter off-thread fallback", () => {
 		adapter.setOffThreadReader(undefined, "interactive");
 		const shared = adapter.queryOffThread("SELECT 2 AS n", [], "interactive");
 		await turns();
-		const reads = () => bulk.workers[0].messages.filter((m) => m.kind === "read");
+		const reads = () =>
+			bulk.workers[0].messages.filter((m) => m.kind === "read");
 		expect(reads().map((m) => m.sql)).toEqual(["SELECT 'scan'"]);
 		bulk.workers[0].emit({
 			kind: "result",
