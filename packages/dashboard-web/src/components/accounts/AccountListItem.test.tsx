@@ -73,7 +73,6 @@ const requiredHandlers = {
 	onRename: noop,
 	onPriorityChange: noop,
 	onAutoFallbackToggle: noop,
-	onAutoRefreshToggle: noop,
 	onBillingTypeToggle: noop,
 };
 
@@ -158,8 +157,8 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		// variant="default" (primary) styling on the reauth button, not the
 		// muted "ghost" styling it gets for a non-terminal/unknown reason. The
 		// full cva class combination is asserted (rather than the bare
-		// "bg-primary" substring) because the unrelated Auto-fallback/
-		// Auto-refresh <Switch> elements always statically include
+		// "bg-primary" substring) because the unrelated Auto-fallback
+		// <Switch> elements always statically include
 		// "data-[state=checked]:bg-primary" in their class list regardless of
 		// pause reason, which would make a bare "bg-primary" check meaningless.
 		expect(html).toContain("bg-primary text-primary-foreground");
@@ -981,3 +980,35 @@ function findSwitchByTitle(
 	}
 	return findSwitchByTitle(props.children, titlePart);
 }
+
+describe("account settings switches", () => {
+	function render(account: Account) {
+		return renderToStaticMarkup(
+			<AccountListItem
+				account={account}
+				{...requiredHandlers}
+				onAutoPauseOnOverageToggle={noop}
+				onPeakHoursPauseToggle={noop}
+			/>,
+		);
+	}
+
+	it("offers auto-fallback but no auto-refresh switch on an Anthropic row", () => {
+		const html = render(makeAccount({ provider: "anthropic" }));
+		expect(html).toContain("Auto-fallback:");
+		expect(html).not.toContain("Auto-refresh");
+	});
+
+	it("keeps the peak-hours toggle on a zai row", () => {
+		const html = render(makeAccount({ provider: "zai" }));
+		expect(html).toContain("Peak hours pause:");
+		expect(html).not.toContain("Auto-refresh");
+	});
+
+	it("says an overage pause resumes at window reset only with auto-fallback on", () => {
+		const html = render(makeAccount({ provider: "anthropic" }));
+		expect(html).toContain(
+			"Account resumes when the usage window resets only if auto-fallback is on.",
+		);
+	});
+});

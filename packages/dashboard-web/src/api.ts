@@ -1492,34 +1492,6 @@ class API extends HttpClient {
 		}
 	}
 
-	async updateAccountAutoRefresh(
-		accountId: string,
-		enabled: boolean,
-	): Promise<void> {
-		const startTime = Date.now();
-		const url = `/api/accounts/${accountId}/auto-refresh`;
-
-		this.logger.debug(`→ POST ${url}`, { enabled });
-
-		try {
-			await this.post(url, {
-				enabled: enabled ? 1 : 0,
-			});
-			const duration = Date.now() - startTime;
-			this.logger.debug(`← POST ${url} - 200 (${duration}ms)`);
-		} catch (error) {
-			const duration = Date.now() - startTime;
-			this.logger.error(`✗ POST ${url} - ERROR (${duration}ms)`, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			});
-			if (error instanceof HttpError) {
-				throw new Error(error.message, { cause: error });
-			}
-			throw error;
-		}
-	}
-
 	async updateAccountBillingType(
 		accountId: string,
 		billingType: "plan" | "api" | "auto",

@@ -135,7 +135,6 @@ interface AccountListItemProps {
 	onRename: (account: Account) => void;
 	onPriorityChange: (account: Account) => void;
 	onAutoFallbackToggle: (account: Account) => void;
-	onAutoRefreshToggle: (account: Account) => void;
 	onBillingTypeToggle: (account: Account) => void;
 	onAutoPauseOnOverageToggle?: (account: Account) => void;
 	onCodexCreditDrainToggle?: (account: Account) => void;
@@ -242,7 +241,6 @@ export function AccountListItem({
 	onRename,
 	onPriorityChange,
 	onAutoFallbackToggle,
-	onAutoRefreshToggle,
 	onBillingTypeToggle,
 	onAutoPauseOnOverageToggle,
 	onCodexCreditDrainToggle,
@@ -662,30 +660,17 @@ export function AccountListItem({
 			{hasSettings && (
 				<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
 					{showAutoFeatures && (
-						<>
-							<div className={SETTING_CLASS}>
-								<span className="text-xs text-muted-foreground">
-									Auto-fallback:
-								</span>
-								<Switch
-									checked={account.autoFallbackEnabled}
-									aria-label={`Auto-fallback for ${account.name}`}
-									onCheckedChange={() => onAutoFallbackToggle(account)}
-									title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
-								/>
-							</div>
-							<div className={SETTING_CLASS}>
-								<span className="text-xs text-muted-foreground">
-									Auto-refresh:
-								</span>
-								<Switch
-									checked={account.autoRefreshEnabled}
-									aria-label={`Auto-refresh for ${account.name}`}
-									onCheckedChange={() => onAutoRefreshToggle(account)}
-									title="Automatically sends a minimal message when the usage window resets to avoid cold-start latency. Does not affect OAuth token refreshing."
-								/>
-							</div>
-						</>
+						<div className={SETTING_CLASS}>
+							<span className="text-xs text-muted-foreground">
+								Auto-fallback:
+							</span>
+							<Switch
+								checked={account.autoFallbackEnabled}
+								aria-label={`Auto-fallback for ${account.name}`}
+								onCheckedChange={() => onAutoFallbackToggle(account)}
+								title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
+							/>
+						</div>
 					)}
 					{showPlanBilling && (
 						<div className={SETTING_CLASS}>
@@ -709,7 +694,7 @@ export function AccountListItem({
 								checked={account.autoPauseOnOverageEnabled ?? false}
 								aria-label={`Auto-pause on overage for ${account.name}`}
 								onCheckedChange={() => onAutoPauseOnOverageToggle(account)}
-								title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when usage window resets."
+								title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if auto-fallback is on."
 							/>
 						</div>
 					)}

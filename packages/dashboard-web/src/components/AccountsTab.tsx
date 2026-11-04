@@ -16,7 +16,6 @@ import {
 	useRemoveAccount,
 	useRenameAccount,
 	useResumeAccount,
-	useUpdateAccountAutoRefresh,
 	useUpdateAccountBillingType,
 	useUpdateAccountCustomEndpoint,
 	useUpdateAccountModelMappings,
@@ -257,7 +256,6 @@ export function AccountsTab() {
 	const redeemReset = useRedeemReset();
 	const renameAccount = useRenameAccount();
 	const updatePriority = useUpdateAccountPriority();
-	const updateAutoRefresh = useUpdateAccountAutoRefresh();
 	const updateBillingType = useUpdateAccountBillingType();
 	const updateCustomEndpoint = useUpdateAccountCustomEndpoint();
 	const updateModelMappings = useUpdateAccountModelMappings();
@@ -626,17 +624,6 @@ export function AccountsTab() {
 		}
 	};
 
-	const handleAutoRefreshToggle = async (account: Account) => {
-		try {
-			await updateAutoRefresh.mutateAsync({
-				accountId: account.id,
-				enabled: !account.autoRefreshEnabled,
-			});
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
-
 	const handleBillingTypeToggle = async (account: Account) => {
 		try {
 			await updateBillingType.mutateAsync({
@@ -870,7 +857,6 @@ export function AccountsTab() {
 						onRename={handleRename}
 						onPriorityChange={handlePriorityChange}
 						onAutoFallbackToggle={handleAutoFallbackToggle}
-						onAutoRefreshToggle={handleAutoRefreshToggle}
 						onBillingTypeToggle={handleBillingTypeToggle}
 						onAutoPauseOnOverageToggle={handleAutoPauseOnOverageToggle}
 						onCodexCreditDrainToggle={handleCodexCreditDrainToggle}
