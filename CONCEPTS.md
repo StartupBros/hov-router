@@ -446,6 +446,21 @@ and nothing rebuilds a closed window from individual requests. As a result, toke
 for lack of a rate or era become priced once one is added, while tokens left unpriced for lack of
 stored detail stay unpriced.
 
+### Public subscription value
+
+An opt-in feed, readable without authentication, that values each published subscription
+account's multi-day capacity windows (see Window key) at API list prices and shows each account
+under a public label instead of its name.
+
+An account appears only once it is explicitly published with a label, and a label that would
+reveal the account's own name or identifier is refused, including after a rename. The open window
+is valued live from the usage recorded in it so far; closed windows are valued from what they
+stored when they closed (see List-price era). Each window says whether all of its tokens were
+priced (see Unpriced tokens) and whether it was first observed partway through. Only windows that
+began at or after the account's creation are published, so a replaced account never shows its
+predecessor's history. Responses are reused for a short time rather than recomputed for every
+reader.
+
 ## Local authentication and recovery
 
 ### Local-control secret
