@@ -4,7 +4,6 @@ import type {
 	ComboExhaustionPolicy,
 	ComboFamily,
 	ComboMembershipMode,
-	ComboRoutingPreviewSubject,
 	ComboSlotCreateInput,
 	ComboSlotUpdateInput,
 	DeviceSetupJobStatus,
@@ -394,24 +393,6 @@ export const useAccountRoutingOverview = () => {
 	return useQuery(getAccountRoutingOverviewQueryOptions());
 };
 
-export interface RoutingPreviewVariables {
-	subject: ComboRoutingPreviewSubject;
-	family?: ComboFamily;
-	managedModel?: string;
-}
-
-/** Preview is read-only and deliberately has no invalidation side effects. */
-export const getRoutingPreviewMutationOptions = () => {
-	return {
-		mutationFn: ({ subject, family, managedModel }: RoutingPreviewVariables) =>
-			api.previewRouting(subject, family, managedModel),
-	};
-};
-
-export const useRoutingPreview = () => {
-	return useMutation(getRoutingPreviewMutationOptions());
-};
-
 export interface UpdateFamilyPolicyVariables {
 	family: ComboFamily;
 	comboId?: string | null;
@@ -504,25 +485,6 @@ export const useRestoreAccountToFamily = () => {
 	return useMutation(getRestoreAccountToFamilyMutationOptions(queryClient));
 };
 
-export interface ApplyRoutingProposalVariables
-	extends ApplyFamilyRoutingProposalVariables {
-	accountId: string;
-}
-
-export const getApplyRoutingProposalMutationOptions = (
-	queryClient: QueryClient,
-) => ({
-	mutationFn: (params: ApplyRoutingProposalVariables) =>
-		api.applyRoutingProposal(params),
-	onSuccess: () =>
-		invalidateManagedRouting(queryClient, ROUTING_CONFIGURATION_INVALIDATION),
-});
-
-export const useApplyRoutingProposal = () => {
-	const queryClient = useQueryClient();
-	return useMutation(getApplyRoutingProposalMutationOptions(queryClient));
-};
-
 export const useRoutingObservations = () => {
 	return useQuery({
 		queryKey: queryKeys.routingObservations(),
@@ -583,20 +545,6 @@ export const useApiKeys = () => {
 		},
 		staleTime: 60000,
 		gcTime: 5 * 60 * 1000,
-	});
-};
-
-export const useStats = (
-	refetchInterval?: number,
-	errorsSinceHours?: number,
-) => {
-	return useQuery({
-		queryKey: queryKeys.stats(errorsSinceHours),
-		queryFn: () => api.getStats({ errorsSinceHours }),
-		staleTime: 15000, // Consider data fresh for 15 seconds
-		refetchInterval: refetchInterval ?? 30000, // Default to 30 seconds instead of 10
-		refetchIntervalInBackground: false, // Don't refresh when tab is not focused
-		gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
 	});
 };
 
@@ -1015,16 +963,6 @@ export const useUpdateAccountModelMappings = () => {
 	return useMutation(getUpdateAccountModelMappingsMutationOptions(queryClient));
 };
 
-export const useResetStats = () => {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: () => api.resetStats(),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: queryKeys.stats() });
-		},
-	});
-};
-
 /**
  * Sentinel select value for "remove the explicit preference" — routed to
  * DELETE /api/agents/:id/preference instead of the POST update (which
@@ -1281,19 +1219,6 @@ export const useCreateCombo = () => {
 			enabled?: boolean;
 		}) => api.createCombo(params),
 		onSuccess: () => invalidateManagedRouting(queryClient, { combos: true }),
-	});
-};
-
-export const useAssignFamily = () => {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (params: {
-			family: string;
-			comboId: string | null;
-			enabled: boolean;
-		}) => api.assignFamily(params),
-		onSuccess: () =>
-			invalidateManagedRouting(queryClient, ROUTING_CONFIGURATION_INVALIDATION),
 	});
 };
 

@@ -6,12 +6,8 @@ export const queryKeys = {
 	// Nested under accounts so every accounts invalidation refreshes it too.
 	bankedResets: () => [...queryKeys.accounts(), "banked-resets"] as const,
 	agents: () => [...queryKeys.all, "agents"] as const,
-	stats: (errorsSinceHours?: number) =>
-		errorsSinceHours !== undefined
-			? ([...queryKeys.all, "stats", { errorsSinceHours }] as const)
-			: ([...queryKeys.all, "stats"] as const),
 	health: () => [...queryKeys.all, "health"] as const,
-	// Under "stats" so the stats reset's invalidation covers it.
+	// Served by GET /api/stats/recent-errors.
 	recentErrors: (errorsSinceHours: number) =>
 		[...queryKeys.all, "stats", "recent-errors", { errorsSinceHours }] as const,
 	analytics: (
