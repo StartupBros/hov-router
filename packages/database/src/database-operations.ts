@@ -486,6 +486,8 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private compactionOwner: MaintenanceWorkerOwner;
 	private closePromise?: Promise<void>;
 	private offThreadReader?: OffThreadReader;
+	/** Short reads a page waits on, kept out of the bulk reader's queue (#709). */
+	private interactiveReader?: OffThreadReader;
 	private offThreadWriter?: OffThreadWriter;
 	private closing = false;
 
@@ -666,13 +668,19 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 					process.env.BETTER_CCFLARE_DB_READER_WORKER?.toLowerCase() ?? "",
 				)
 			) {
-				this.offThreadReader = new OffThreadReader({
+				const readerOptions = {
 					dbPath: resolvedPath,
 					busyTimeoutMs: this.dbConfig.busyTimeoutMs ?? 10000,
 					embeddedCode: EMBEDDED_READER_WORKER_CODE,
 					sourceUrl: new URL("./reader-worker.ts", import.meta.url).href,
-				});
+				};
+				this.offThreadReader = new OffThreadReader(readerOptions);
 				this.adapter.setOffThreadReader(this.offThreadReader);
+				this.interactiveReader = new OffThreadReader({
+					...readerOptions,
+					label: "interactive reader",
+				});
+				this.adapter.setOffThreadReader(this.interactiveReader, "interactive");
 			}
 		}
 
@@ -2293,6 +2301,7 @@ OAuth tokens will need to be re-authenticated.
 		// until the supervisor reaps the process instead of allowing replacement.
 		await Promise.all([
 			this.offThreadReader?.close(),
+			this.interactiveReader?.close(),
 			this.maintenanceOwner.close(),
 			this.compactionOwner.close(),
 			stopHeartbeat?.(),

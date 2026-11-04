@@ -28,6 +28,8 @@ export interface OffThreadReaderOptions {
 	readTimeoutMs?: number;
 	readyTimeoutMs?: number;
 	maxSpawns?: number;
+	/** Names this worker in log lines when a process runs more than one reader. */
+	label?: string;
 	warn?: (message: string) => void;
 	info?: (message: string) => void;
 }
@@ -56,6 +58,7 @@ export class OffThreadWriteOutcomeUnknownError extends Error {
 type PendingRequest = {
 	mode: string;
 	sql: string;
+	params?: unknown[];
 	resolve: (result: unknown) => void;
 	reject: (error: Error) => void;
 	timer?: ReturnType<typeof setTimeout>;
@@ -123,7 +126,7 @@ export class OffThreadReader {
 	}
 
 	protected get label(): string {
-		return "reader";
+		return this.options.label ?? "reader";
 	}
 	protected get fallbackNoun(): string {
 		return "reads";
@@ -159,21 +162,50 @@ export class OffThreadReader {
 			);
 		return new Promise((resolve, reject) => {
 			const id = ++this.nextId;
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				const error = new Error(
-					`off-thread read timed out after ${this.readTimeoutMs}ms: ${fingerprintSql(sql)}`,
-				);
-				reject(error);
-				this.fault("read timeout", error, lease);
-			}, this.readTimeoutMs);
-			this.pending.set(id, { mode, sql, resolve, reject, timer });
 			try {
 				lease.worker.postMessage({ kind: "read", id, mode, sql, params });
 			} catch (error) {
-				this.fault("read postMessage failed", error, lease);
+				// Not cloneable, so the worker never saw it: fail only this read, and
+				// the caller's main-thread fallback runs it.
+				reject(
+					new OffThreadReaderUnavailableError(
+						`off-thread ${this.label} could not take the read: ${error instanceof Error ? error.message : String(error)}`,
+					),
+				);
+				return;
 			}
+			this.pending.set(id, { mode, sql, params, resolve, reject });
+			this.armHead(lease);
 		});
+	}
+
+	/**
+	 * The worker runs reads one at a time in arrival order, so only the oldest
+	 * pending read is running. Its timer starts now and measures its own run,
+	 * not the wait behind the reads in front of it.
+	 */
+	private armHead(lease: Lease): void {
+		const next = this.pending.entries().next();
+		if (next.done) return;
+		const [id, head] = next.value;
+		if (head.timer) return;
+		head.timer = setTimeout(() => {
+			this.pending.delete(id);
+			const error = new Error(
+				`off-thread read timed out after ${this.readTimeoutMs}ms: ${fingerprintSql(head.sql)}`,
+			);
+			head.reject(error);
+			this.fault("read timeout", error, lease);
+		}, this.readTimeoutMs);
+	}
+
+	/** Run a read that never started on a faulted worker again, on a fresh one. */
+	private repost(request: PendingRequest): void {
+		this.read(
+			request.mode as "all" | "get",
+			request.sql,
+			request.params ?? [],
+		).then(request.resolve, request.reject);
 	}
 
 	protected openPayload(): Record<string, unknown> {
@@ -273,16 +305,17 @@ export class OffThreadReader {
 		clearTimeout(request.timer);
 		if (Number(message.ms) >= SLOW_SQL_STATEMENT_MS)
 			this.warn(
-				`Slow off-thread SQL: ${Math.round(Number(message.ms))}ms ${request.mode} ${fingerprintSql(request.sql)}`,
+				`Slow off-thread SQL: ${Math.round(Number(message.ms))}ms ${request.mode} ${fingerprintSql(request.sql)}${this.options.label ? ` (${this.options.label})` : ""}`,
 			);
 		this.settle(lease, request, message);
 	}
 
 	protected settle(
-		_lease: Lease,
+		lease: Lease,
 		read: PendingRequest,
 		message: Record<string, unknown>,
 	): void {
+		this.armHead(lease);
 		if (message.ok) {
 			this.served++;
 			read.resolve(read.mode === "all" ? message.rows : (message.row ?? null));
@@ -300,12 +333,28 @@ export class OffThreadReader {
 		);
 	}
 
-	/** What a request that already reached the worker is rejected with on a fault. */
-	protected pendingFaultError(
+	/**
+	 * Settle pending requests when the worker faults. A read whose timer is
+	 * armed reached the head of the queue and may have been running, so it is
+	 * rejected as unavailable and the caller's main-thread fallback takes it.
+	 * The reads queued behind it never started; they are returned to run again
+	 * on a fresh worker rather than all landing on the main thread at once.
+	 */
+	protected failPending(
 		_cause: string,
 		unavailable: OffThreadReaderUnavailableError,
-	): Error {
-		return unavailable;
+	): PendingRequest[] {
+		const queued: PendingRequest[] = [];
+		for (const request of this.pending.values()) {
+			if (request.timer) {
+				clearTimeout(request.timer);
+				request.reject(unavailable);
+			} else {
+				queued.push(request);
+			}
+		}
+		this.pending.clear();
+		return queued;
 	}
 
 	protected fault(
@@ -319,15 +368,19 @@ export class OffThreadReader {
 		if (lease && this.lease !== lease) return unavailable;
 		this.warn(unavailable.message);
 		this.faults++;
+		let queued: PendingRequest[] = [];
 		if (lease) {
 			lease.rejectReady(unavailable);
-			this.rejectPending(this.pendingFaultError(cause, unavailable));
+			queued = this.failPending(cause, unavailable);
 			this.destroy(lease);
 		}
 		if (this.faults === this.maxSpawns)
 			this.warn(
 				`falling back to main-thread ${this.fallbackNoun} for the rest of this process`,
 			);
+		// After destroy, so they spawn a fresh worker; past the spawn budget they
+		// reject as unavailable and fall back to the main thread.
+		for (const request of queued) this.repost(request);
 		return unavailable;
 	}
 
@@ -387,7 +440,7 @@ export interface WorkerPragma {
 }
 
 export interface OffThreadWriterOptions
-	extends Omit<OffThreadReaderOptions, "readTimeoutMs"> {
+	extends Omit<OffThreadReaderOptions, "readTimeoutMs" | "label"> {
 	/** Per-connection PRAGMAs, in order; the main connection's own settings. */
 	pragmas: WorkerPragma[];
 	/** How long the worker keeps retrying one SQLITE_BUSY write. Default 10 min. */
@@ -551,8 +604,10 @@ export class OffThreadWriter extends OffThreadReader {
 		this.notifyIdle();
 	}
 
-	protected override pendingFaultError(cause: string): Error {
-		return new OffThreadWriteOutcomeUnknownError(cause);
+	/** A posted write may have committed: every one is outcome-unknown and none re-runs. */
+	protected override failPending(cause: string): PendingRequest[] {
+		this.rejectPending(new OffThreadWriteOutcomeUnknownError(cause));
+		return [];
 	}
 
 	protected override rejectPending(error: Error): void {

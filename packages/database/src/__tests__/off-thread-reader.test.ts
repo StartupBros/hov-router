@@ -318,10 +318,10 @@ describe("off-thread reader fault lifecycle", () => {
 	it.each([
 		"error",
 		"messageerror",
-	])("rejects all in-flight reads on %s and respawns", async (kind) => {
+	])("fails the running read on %s, re-posts queued reads, and respawns", async (kind) => {
 		const { reader, workers } = fakeFixture();
-		const reads = [reader.all("SELECT 1", []), reader.get("SELECT 2", [])];
-		const settled = Promise.allSettled(reads);
+		const running = reader.all("SELECT 1", []).catch((e) => e);
+		const queued = reader.get("SELECT 2", []);
 		await turns();
 		expect(workers[0].messages.filter((m) => m.kind === "read")).toHaveLength(
 			2,
@@ -332,15 +332,25 @@ describe("off-thread reader fault lifecycle", () => {
 				preventDefault() {},
 			} as ErrorEvent);
 		else workers[0].onmessageerror?.({ data: "bad message" } as MessageEvent);
-		for (const result of await settled) {
-			expect(result.status).toBe("rejected");
-			if (result.status === "rejected")
-				expect(result.reason).toBeInstanceOf(OffThreadReaderUnavailableError);
-		}
-		const next = reader.get("SELECT 3", []);
+		// The head may have been running when the worker broke; the caller's
+		// main-thread fallback takes it. The read behind it never started.
+		expect(await running).toBeInstanceOf(OffThreadReaderUnavailableError);
 		await turns();
 		expect(workers).toHaveLength(2);
-		const message = workers[1].messages.find((m) => m.kind === "read");
+		const reposted = workers[1].messages.find((m) => m.kind === "read");
+		expect(reposted).toMatchObject({ mode: "get", sql: "SELECT 2" });
+		workers[1].emit({
+			kind: "result",
+			id: reposted?.id,
+			ok: true,
+			row: { n: 2 },
+			ms: 1,
+		});
+		expect(await queued).toEqual({ n: 2 });
+		const next = reader.get("SELECT 3", []);
+		await turns();
+		const message = workers[1].messages.filter((m) => m.kind === "read").at(-1);
+		expect(message?.sql).toBe("SELECT 3");
 		workers[1].emit({
 			kind: "result",
 			id: message?.id,
@@ -352,18 +362,133 @@ describe("off-thread reader fault lifecycle", () => {
 		expect(workers[0].terminated).toBe(1);
 		expect(workers[1].unref).toHaveBeenCalledTimes(1);
 	});
-	it("times out only the hung read with a plain error and faults its siblings", async () => {
-		const { reader, workers } = fakeFixture({ readTimeoutMs: 20 });
+	it("times out only the hung read with a plain error and re-posts the reads queued behind it", async () => {
+		const { reader, workers, warn } = fakeFixture({ readTimeoutMs: 50 });
 		const first = reader.all("SELECT 'secret'", []).catch((e) => e);
-		const sibling = reader.all("SELECT 2", []).catch((e) => e);
+		const sibling = reader.all("SELECT 2", []);
+		const last = reader.get("SELECT 3", []);
 		const error = await first;
 		expect(error).toBeInstanceOf(Error);
 		expect(error).not.toBeInstanceOf(OffThreadReaderUnavailableError);
 		expect(error.message).toBe(
-			"off-thread read timed out after 20ms: SELECT ?",
+			"off-thread read timed out after 50ms: SELECT ?",
 		);
-		expect(await sibling).toBeInstanceOf(OffThreadReaderUnavailableError);
+		await turns();
 		expect(workers[0].terminated).toBe(1);
+		expect(workers).toHaveLength(2);
+		const reposted = workers[1].messages.filter((m) => m.kind === "read");
+		expect(reposted.map((m) => [m.mode, m.sql])).toEqual([
+			["all", "SELECT 2"],
+			["get", "SELECT 3"],
+		]);
+		workers[1].emit({
+			kind: "result",
+			id: reposted[0].id,
+			ok: true,
+			rows: [{ n: 2 }],
+			ms: 1,
+		});
+		workers[1].emit({
+			kind: "result",
+			id: reposted[1].id,
+			ok: true,
+			row: { n: 3 },
+			ms: 1,
+		});
+		expect(await sibling).toEqual([{ n: 2 }]);
+		expect(await last).toEqual({ n: 3 });
+		expect(warn.mock.calls.map(([line]) => line)).toEqual([
+			"off-thread reader read timeout: off-thread read timed out after 50ms: SELECT ?",
+		]);
+	});
+	it("starts a read's timeout when it reaches the head of the queue, not when it is posted", async () => {
+		const { reader, workers, warn } = fakeFixture({ readTimeoutMs: 300 });
+		const first = reader.all("SELECT 1", []);
+		const queued = reader.all("SELECT 2", []);
+		await turns();
+		const [head, behind] = workers[0].messages.filter((m) => m.kind === "read");
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		workers[0].emit({
+			kind: "result",
+			id: head.id,
+			ok: true,
+			rows: [{ n: 1 }],
+			ms: 1,
+		});
+		expect(await first).toEqual([{ n: 1 }]);
+		// 400 ms after it was posted, 200 ms after it reached the head: a timer
+		// started at post time would have fired at 300 ms.
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		expect(warn).not.toHaveBeenCalled();
+		expect(workers[0].terminated).toBe(0);
+		workers[0].emit({
+			kind: "result",
+			id: behind.id,
+			ok: true,
+			rows: [{ n: 2 }],
+			ms: 1,
+		});
+		expect(await queued).toEqual([{ n: 2 }]);
+	});
+	it("sends queued reads to the main-thread fallback once the spawn budget is spent", async () => {
+		const { reader, workers } = fakeFixture({
+			readTimeoutMs: 50,
+			maxSpawns: 1,
+		});
+		const hung = reader.all("SELECT 'hung'", []).catch((e) => e);
+		const queued = reader.all("SELECT 2", []).catch((e) => e);
+		expect((await hung).message).toBe(
+			"off-thread read timed out after 50ms: SELECT ?",
+		);
+		expect(await queued).toBeInstanceOf(OffThreadReaderUnavailableError);
+		expect(workers).toHaveLength(1);
+	});
+	it("fails only a read the worker could not accept, without faulting the worker", async () => {
+		class PickyWorker extends FakeWorker {
+			override postMessage(message: Record<string, unknown>) {
+				if (message.sql === "SELECT boom") throw new Error("could not clone");
+				super.postMessage(message);
+			}
+		}
+		const worker = new PickyWorker();
+		const { reader, warn } = fakeFixture({ workerFactory: () => worker });
+		const running = reader.all("SELECT 1", []);
+		await turns();
+		const error = await reader.all("SELECT boom", []).catch((e) => e);
+		expect(error).toBeInstanceOf(OffThreadReaderUnavailableError);
+		expect(worker.terminated).toBe(0);
+		expect(warn).not.toHaveBeenCalled();
+		const message = worker.messages.find((m) => m.kind === "read");
+		worker.emit({
+			kind: "result",
+			id: message?.id,
+			ok: true,
+			rows: [{ n: 1 }],
+			ms: 1,
+		});
+		expect(await running).toEqual([{ n: 1 }]);
+	});
+	it("names its lane in readiness and slow-statement lines", async () => {
+		const { reader, workers, warn, info } = fakeFixture({
+			label: "interactive reader",
+		});
+		const read = reader.all("SELECT 'x'", []);
+		await turns();
+		expect(info).toHaveBeenCalledWith(
+			"Off-thread interactive reader ready (embedded worker)",
+		);
+		const message = workers[0].messages.find((m) => m.kind === "read");
+		workers[0].emit({
+			kind: "result",
+			id: message?.id,
+			ok: true,
+			rows: [{ x: 1 }],
+			ms: 300,
+		});
+		expect(await read).toEqual([{ x: 1 }]);
+		expect(warn).toHaveBeenCalledWith(
+			"Slow off-thread SQL: 300ms all SELECT ? (interactive reader)",
+		);
 	});
 	it.each([
 		"open-failed",
@@ -437,10 +562,17 @@ describe("adapter off-thread fallback", () => {
 		const all = mock(async <R>() => [] as R[]);
 		const get = mock(async <R>() => null as R | null);
 		adapter.setOffThreadReader({ all, get });
+		adapter.setOffThreadReader({ all, get }, "interactive");
 		expect(await adapter.queryOffThread("SELECT ? AS n", [1])).toEqual([
 			{ n: 1 },
 		]);
 		expect(await adapter.getOffThread("SELECT ? AS n", [1])).toEqual({ n: 1 });
+		expect(
+			await adapter.queryOffThread("SELECT ? AS n", [1], "interactive"),
+		).toEqual([{ n: 1 }]);
+		expect(
+			await adapter.getOffThread("SELECT ? AS n", [1], "interactive"),
+		).toEqual({ n: 1 });
 		expect(unsafe).toHaveBeenCalledWith("SELECT $1 AS n", [1]);
 		expect(all).not.toHaveBeenCalled();
 		expect(get).not.toHaveBeenCalled();
@@ -457,6 +589,77 @@ describe("adapter off-thread fallback", () => {
 			"off-thread read timed out after 20ms: SELECT ?",
 		);
 		expect(error).not.toBeInstanceOf(OffThreadReaderUnavailableError);
+		expect(query).not.toHaveBeenCalled();
+	});
+	it("runs reads queued behind a timed-out read on a fresh worker, not the main thread", async () => {
+		const { adapter } = realFixture();
+		const { reader, workers } = fakeFixture({ readTimeoutMs: 50 });
+		adapter.setOffThreadReader(reader);
+		const query = spyOn(adapter, "query");
+		const hung = adapter.queryOffThread("SELECT 'hung'").catch((e) => e);
+		const queued = adapter.queryOffThread("SELECT 2 AS n");
+		expect((await hung).message).toBe(
+			"off-thread read timed out after 50ms: SELECT ?",
+		);
+		await turns();
+		const message = workers[1]?.messages.find((m) => m.kind === "read");
+		expect(message?.sql).toBe("SELECT 2 AS n");
+		workers[1].emit({
+			kind: "result",
+			id: message?.id,
+			ok: true,
+			rows: [{ n: 2 }],
+			ms: 1,
+		});
+		expect(await queued).toEqual([{ n: 2 }]);
+		expect(query).not.toHaveBeenCalled();
+	});
+	it("serves interactive reads on their own reader while the bulk reader is busy", async () => {
+		const { adapter } = realFixture();
+		const interactive = fakeFixture();
+		const bulk = fakeFixture();
+		// Interactive first: an adapter that ignored lanes would let the bulk
+		// reader replace it.
+		adapter.setOffThreadReader(interactive.reader, "interactive");
+		adapter.setOffThreadReader(bulk.reader);
+		const query = spyOn(adapter, "query");
+		const scan = adapter.queryOffThread("SELECT 'scan'");
+		const quick = adapter.getOffThread("SELECT 1 AS n", [], "interactive");
+		await turns();
+		const message = interactive.workers[0]?.messages.find(
+			(m) => m.kind === "read",
+		);
+		expect(message).toMatchObject({ mode: "get", sql: "SELECT 1 AS n" });
+		interactive.workers[0].emit({
+			kind: "result",
+			id: message?.id,
+			ok: true,
+			row: { n: 1 },
+			ms: 1,
+		});
+		expect(await quick).toEqual({ n: 1 });
+		// Without an interactive reader, interactive reads share the bulk one.
+		adapter.setOffThreadReader(undefined, "interactive");
+		const shared = adapter.queryOffThread("SELECT 2 AS n", [], "interactive");
+		await turns();
+		const reads = bulk.workers[0].messages.filter((m) => m.kind === "read");
+		expect(reads.map((m) => m.sql)).toEqual(["SELECT 'scan'", "SELECT 2 AS n"]);
+		bulk.workers[0].emit({
+			kind: "result",
+			id: reads[0].id,
+			ok: true,
+			rows: [{ scan: 1 }],
+			ms: 1,
+		});
+		bulk.workers[0].emit({
+			kind: "result",
+			id: reads[1].id,
+			ok: true,
+			rows: [{ n: 2 }],
+			ms: 1,
+		});
+		expect(await scan).toEqual([{ scan: 1 }]);
+		expect(await shared).toEqual([{ n: 2 }]);
 		expect(query).not.toHaveBeenCalled();
 	});
 	it("delegates without a reader and retries only unavailable errors on the main thread", async () => {
