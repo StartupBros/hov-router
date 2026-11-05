@@ -115,26 +115,24 @@ describe("cache capture at final wire boundary", () => {
 
 	test("physical dispatch is independent of the response SSE mode", async () => {
 		const { start, rows } = harness();
-		for (const physical of ["http", "websocket"] as const) {
-			const observer = await start(`physical-${physical}`, true);
-			observer.dispatched?.(physical);
-			const payload = event();
-			expect(
-				await observer
-					.response(
-						new Response(payload, {
-							headers: { "content-type": "text/event-stream" },
-						}),
-					)
-					.text(),
-			).toBe(payload);
-			expect(rows.at(-1)).toMatchObject({
-				physical_transport: physical,
-				response_mode: "sse",
-				transport: "sse",
-				cache_cohort_qualification: "unknown",
-			});
-		}
+		const observer = await start("physical-http", true);
+		observer.dispatched?.("http");
+		const payload = event();
+		expect(
+			await observer
+				.response(
+					new Response(payload, {
+						headers: { "content-type": "text/event-stream" },
+					}),
+				)
+				.text(),
+		).toBe(payload);
+		expect(rows.at(-1)).toMatchObject({
+			physical_transport: "http",
+			response_mode: "sse",
+			transport: "sse",
+			cache_cohort_qualification: "unknown",
+		});
 	});
 
 	test("captures final rewrites and repeated attempts separately, including pre-header errors", async () => {

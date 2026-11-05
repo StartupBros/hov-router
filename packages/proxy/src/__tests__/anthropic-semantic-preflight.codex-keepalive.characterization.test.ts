@@ -76,8 +76,7 @@ function startRun(
 	let settledAt: number | null = null;
 	let elapsed = 0;
 
-	// Options exactly as proxy-operations.ts:7812-7820 derives them from the
-	// provider name (no hasIrreversibleCodexWebSocketWrite here: HTTP/SSE path).
+	// Options exactly as proxy-operations.ts derives them from the provider name.
 	gateAnthropicSsePreCommit(stream, {
 		semanticTimeoutMs: timing.semanticTimeoutMs,
 		...(timing.commitmentMs === undefined

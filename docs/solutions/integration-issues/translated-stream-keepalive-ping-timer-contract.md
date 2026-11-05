@@ -74,9 +74,7 @@ if (
 
 ```ts
 // packages/proxy/src/handlers/proxy-operations.ts (pre-commit gate call)
-disableProtocolIdleTimeout:
-	hasIrreversibleCodexWebSocketWrite ||
-	isProtocolIdleExemptProvider(account.provider),
+disableProtocolIdleTimeout: isProtocolIdleExemptProvider(account.provider),
 keepaliveIsProtocolActivity: !isTranslatedSseProvider(account.provider),
 ```
 

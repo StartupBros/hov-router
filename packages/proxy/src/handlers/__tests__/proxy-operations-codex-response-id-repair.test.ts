@@ -53,9 +53,6 @@ import type { Account, RequestMeta } from "@better-ccflare/types";
 import type { ProxyContext } from "../proxy-types";
 
 const usageCollectorModule = await import("../../usage-collector");
-const { codexWebSocketTransport } = await import(
-	"../../codex-websocket-transport"
-);
 const { RoutingAttemptLedger } = await import("../routing-attempt-ledger");
 const { proxyWithAccount } = await import("../proxy-operations");
 
@@ -322,10 +319,6 @@ describe("proxyWithAccount Codex rejected-id repair -- no buffered replay body",
 		);
 		const originalFetch = globalThis.fetch;
 		const outboundRequests: Request[] = [];
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockResolvedValue(null);
 		const usageCollector = spyOn(
 			usageCollectorModule,
 			"getUsageCollector",
@@ -390,7 +383,6 @@ describe("proxyWithAccount Codex rejected-id repair -- no buffered replay body",
 			// not re-entered a second time, and no extra attempt-budget slot is
 			// consumed.
 			expect(outboundRequests).toHaveLength(1);
-			expect(websocketAttempt).toHaveBeenCalledTimes(1);
 			expect(ledger.physicalAttemptCount).toBe(1);
 			expect(ledger.attemptedCount).toBe(1);
 			// The one physical send that did happen genuinely carried no body --
@@ -423,7 +415,6 @@ describe("proxyWithAccount Codex rejected-id repair -- no buffered replay body",
 			});
 		} finally {
 			globalThis.fetch = originalFetch;
-			websocketAttempt.mockRestore();
 			usageCollector.mockRestore();
 			randomUUIDSpy.mockRestore();
 		}

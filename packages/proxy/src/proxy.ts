@@ -3416,11 +3416,6 @@ async function handleProxyCoreImpl(
 		// Caller cancellation owns the terminal even when an earlier route left a
 		// retained upstream response. Key this to the request signal rather than an
 		// HTTP status: an upstream provider is allowed to return its own 499.
-		if (candidate.disposition === "irreversible_no_replay") {
-			await routingAttemptLedger.discardTerminalResponse();
-			if (candidate.response.ok) commitSuccessfulCandidateHome();
-			return { response: await candidate.commit(), candidateWon: true };
-		}
 		if (candidate.response.ok && candidate.canSupersedeRetainedTerminal()) {
 			await routingAttemptLedger.discardTerminalResponse();
 			// Commit after arbitration but before forwardToClient captures route-home

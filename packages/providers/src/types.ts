@@ -72,7 +72,7 @@ export interface UpstreamObservationContext {
  */
 export interface UpstreamObservation {
 	/** Observation only; called at the authorized physical-send seam. */
-	dispatched?(transport: "http" | "websocket"): void;
+	dispatched?(transport: "http"): void;
 	response(response: Response): Response;
 	error(error: unknown): void;
 }

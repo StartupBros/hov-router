@@ -11,10 +11,7 @@ const context = {
 	signal: new AbortController().signal,
 };
 describe("observational physical dispatch callback", () => {
-	test.each([
-		"http",
-		"websocket",
-	] as const)("marks authorized %s dispatch separately from SSE response", async (transport) => {
+	test("marks authorized http dispatch separately from SSE response", async () => {
 		const events: string[] = [];
 		const provider = {
 			observeUpstream: async () => ({
@@ -32,12 +29,12 @@ describe("observational physical dispatch callback", () => {
 			context,
 			async (mark) => {
 				expect(events).toEqual([]);
-				mark(transport);
+				mark("http");
 				return response;
 			},
 		);
 		expect(result).toBe(response);
-		expect(events).toEqual([transport]);
+		expect(events).toEqual(["http"]);
 	});
 	test("throwing dispatch observation cannot alter inference or mark a vetoed send", async () => {
 		let called = 0;

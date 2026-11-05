@@ -159,12 +159,11 @@ test("wall jumps and additional chunks cannot renew accepted timing", () => {
 	}
 });
 
-test("expired shared clock vetoes helper/HTTP/frame writes before timers run", () => {
+test("expired shared clock vetoes credential, helper and HTTP writes before timers run", () => {
 	for (const lane of [
 		"credential_acquisition",
 		"helper",
 		"http",
-		"websocket",
 	]) {
 		const request = new Request("http://local/v1/messages"),
 			order: string[] = [];

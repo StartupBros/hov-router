@@ -50,7 +50,7 @@ The official client documents the contract in `openai/codex` `core/src/client.rs
 - `session-id` = its prompt cache key, `thread-id` = the thread id (`codex-api/src/requests/headers.rs`)
 - `x-codex-routing-hint: model=<model>[;tier=<tier>]`
 
-ccflare's `prepareHeaders` only set `Version`, `Openai-Beta`, `User-Agent`, and `originator`. `packages/providers/src/providers/codex/affinity-headers.ts` now owns the contract: `applyCodexAffinityHeaders` is called once in `CodexProvider.transformRequestBody` (the same place the per-turn `x-codex-turn-state` header is set), so eligible legacy requests and their WebSocket handshake copies carry `session-id`/`thread-id` = `prompt_cache_key` and the routing hint for the resolved physical model. On the subscription endpoint, a native `/v1/responses` client keeps a valid supplied session identity (its thread identity defaults to that session identity if absent or invalid); otherwise a valid body key supplies both identities. Legacy clients cannot steer affinity: their values are replaced or removed when no valid key exists. The routing hint independently uses the resolved physical model. Header tokens must be visible ASCII, 1-512 characters. Off the subscription endpoint, or with `CCFLARE_CODEX_AFFINITY_HEADERS=0`, the helper leaves headers untouched (pass-through). Schema-21 traces record `affinity_session_identity` and `affinity_routing_hint`.
+ccflare's `prepareHeaders` only set `Version`, `Openai-Beta`, `User-Agent`, and `originator`. `packages/providers/src/providers/codex/affinity-headers.ts` now owns the contract: `applyCodexAffinityHeaders` is called once in `CodexProvider.transformRequestBody` (the same place the per-turn `x-codex-turn-state` header is set), so eligible legacy requests carry `session-id`/`thread-id` = `prompt_cache_key` and the routing hint for the resolved physical model. On the subscription endpoint, a native `/v1/responses` client keeps a valid supplied session identity (its thread identity defaults to that session identity if absent or invalid); otherwise a valid body key supplies both identities. Legacy clients cannot steer affinity: their values are replaced or removed when no valid key exists. The routing hint independently uses the resolved physical model. Header tokens must be visible ASCII, 1-512 characters. Off the subscription endpoint, or with `CCFLARE_CODEX_AFFINITY_HEADERS=0`, the helper leaves headers untouched (pass-through). Schema-21 traces record `affinity_session_identity` and `affinity_routing_hint`.
 
 ### Design note: header granularity
 
@@ -82,7 +82,7 @@ All 431 measured attempts recorded derived affinity identity and a routing hint.
 
 ### Repeatable checks (natural traffic only)
 
-- `packages/providers/src/providers/codex/affinity-headers.test.ts`, `provider.affinity-headers.test.ts`, `packages/proxy/src/codex-websocket-wire.test.ts`.
+- `packages/providers/src/providers/codex/affinity-headers.test.ts`, `provider.affinity-headers.test.ts`.
 - Post-deploy, on naturally initiated traffic only (never scripted traffic against Codex accounts). The following is a broad persisted-usage summary with the additive denominator, not the matched trace/prefix cohort above or the seven-day parity verdict. Its `gpt%` model filter alone does not establish the Codex provider/account, and `success = 1` alone does not establish measured-usage availability; interpret it only after confirming those cohort properties. Replace the epoch with the deploy time in ms:
 
   ```sql
