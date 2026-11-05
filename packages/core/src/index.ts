@@ -181,11 +181,9 @@ export {
 export {
 	CLAUDE_CLI_VERSION,
 	extractClaudeVersion,
-	getClientVersion,
 	getGitSha,
 	getVersion,
 	getVersionSync,
-	trackClientVersion,
 } from "./version";
 export {
 	type LongContextTokenSubset,

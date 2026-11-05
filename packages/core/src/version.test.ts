@@ -9,12 +9,7 @@ import {
 	resolveBuildProvenance,
 } from "./build-provenance";
 import { PRODUCT_NAME } from "./product-identity";
-import {
-	CLAUDE_CLI_VERSION,
-	extractClaudeVersion,
-	getClientVersion,
-	trackClientVersion,
-} from "./version";
+import { CLAUDE_CLI_VERSION, extractClaudeVersion } from "./version";
 
 describe("release lineage", () => {
 	it("keeps all release versions at exact stable SemVer parity", () => {
@@ -140,37 +135,6 @@ describe("extractClaudeVersion", () => {
 	it("should extract first occurrence if multiple versions present", () => {
 		const userAgent = "claude-cli/2.0.55 claude-cli/2.0.60";
 		expect(extractClaudeVersion(userAgent)).toBe("2.0.55");
-	});
-});
-
-describe("trackClientVersion and getClientVersion", () => {
-	it("should track and return client version", () => {
-		trackClientVersion("claude-cli/2.0.60 (external, cli)");
-		expect(getClientVersion()).toBe("2.0.60");
-	});
-
-	it("should update to newer client version", () => {
-		trackClientVersion("claude-cli/2.0.55 (external, cli)");
-		expect(getClientVersion()).toBe("2.0.55");
-
-		trackClientVersion("claude-cli/2.0.65 (external, cli)");
-		expect(getClientVersion()).toBe("2.0.65");
-	});
-
-	it("should ignore non-claude-cli user-agents", () => {
-		trackClientVersion("claude-cli/2.0.55 (external, cli)");
-		const beforeVersion = getClientVersion();
-
-		trackClientVersion("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-		expect(getClientVersion()).toBe(beforeVersion);
-	});
-
-	it("should handle null user-agent gracefully", () => {
-		trackClientVersion("claude-cli/2.0.55 (external, cli)");
-		const beforeVersion = getClientVersion();
-
-		trackClientVersion(null);
-		expect(getClientVersion()).toBe(beforeVersion);
 	});
 });
 

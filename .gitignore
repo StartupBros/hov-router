@@ -24,7 +24,6 @@ packages/database/src/inline-incremental-vacuum-worker.ts
 **/*.sh
 !.github/scripts/*.sh
 !scripts/*.sh
-!scripts/legacy/*.sh
 
 # Build artifacts and test files
 better-ccflare-*

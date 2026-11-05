@@ -12,7 +12,6 @@ import {
 	resolveBuildProvenance,
 	runForceAccountModelExempt,
 	ServiceUnavailableError,
-	trackClientVersion,
 } from "@better-ccflare/core";
 import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import { DatabaseFactory } from "@better-ccflare/database";
@@ -978,10 +977,6 @@ async function handleProxyCoreImpl(
 			},
 		);
 	}
-
-	// 1. Track client version from user-agent (getClientVersion has no
-	// production reader since the auto-refresh scheduler was removed)
-	trackClientVersion(req.headers.get("user-agent"));
 
 	// Claude Code session id (sent since CLI v2.1.86) used to correlate this
 	// chat with its serving account for the status-line badge. Read once here so

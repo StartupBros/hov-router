@@ -214,17 +214,15 @@ The `agent_preferences` table stores user-defined model preferences for specific
 | `model` | TEXT | NOT NULL | Preferred model for this agent |
 | `updated_at` | INTEGER | NOT NULL | Unix timestamp of last update |
 
-### strategies Table (Not Yet Implemented)
+### strategies Table (Unused)
 
-**Note**: The codebase references a `strategies` table through the `StrategyRepository`, but this table is not currently created in the schema. When implemented, it would store:
+The schema still creates an inherited `strategies` table so existing databases keep their shape, but no code reads or writes it. The load-balancing strategy lives in the config file (`lb_strategy`) and the `LB_STRATEGY` environment variable, not in this table.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `name` | TEXT | PRIMARY KEY | Strategy identifier |
 | `config` | TEXT | NOT NULL | JSON configuration for the strategy |
 | `updated_at` | INTEGER | NOT NULL | Unix timestamp of last update |
-
-This table would be used for storing custom load balancing strategies and routing configurations.
 
 ## Migration System
 
@@ -289,7 +287,6 @@ The database uses a clean Repository Pattern with the following repositories:
 - **AccountRepository**: Manages all account-related operations
 - **RequestRepository**: Handles request logging and analytics queries
 - **OAuthRepository**: Manages OAuth session storage and cleanup
-- **StrategyRepository**: Handles strategy configuration storage (pending table implementation)
 - **StatsRepository**: Provides consolidated statistics and analytics
 - **AgentPreferenceRepository**: Manages agent-specific model preferences
 

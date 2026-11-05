@@ -105,7 +105,6 @@ import {
 } from "./repositories/routing-attempt.repository";
 import { ServerToolReplayIssuanceRepository } from "./repositories/server-tool-replay-issuance.repository";
 import { StatsRepository } from "./repositories/stats.repository";
-import { StrategyRepository } from "./repositories/strategy.repository";
 import { UsageHistoryRepository } from "./repositories/usage-history.repository";
 import type {
 	CloseWindowInput,
@@ -463,7 +462,6 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 	private requests: RequestRepository;
 	private routingAttempts: RoutingAttemptRepository;
 	private oauth: OAuthRepository;
-	private strategy: StrategyRepository;
 	private stats: StatsRepository;
 	private agentPreferences: AgentPreferenceRepository;
 	private apiKeys: ApiKeyRepository;
@@ -628,7 +626,6 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 		this.requests = new RequestRepository(this.adapter);
 		this.routingAttempts = new RoutingAttemptRepository(this.adapter);
 		this.oauth = new OAuthRepository(this.adapter);
-		this.strategy = new StrategyRepository(this.adapter);
 		this.stats = new StatsRepository(this.adapter);
 		this.agentPreferences = new AgentPreferenceRepository(this.adapter);
 		this.apiKeys = new ApiKeyRepository(this.adapter);
@@ -998,16 +995,10 @@ export class DatabaseOperations implements StrategyStore, Disposable {
 			orphanPages = result.freelist_count;
 		}
 
-		// Last retention sweep timestamp
-		let lastRetentionSweepAt: number | null = null;
-		try {
-			const strategy = await this.getStrategy("data-retention");
-			if (strategy?.config?.lastSweepAt) {
-				lastRetentionSweepAt = strategy.config.lastSweepAt as number;
-			}
-		} catch {
-			// strategies table may not exist in SQLite mode
-		}
+		// Nothing records a retention sweep: the inherited `strategies` row this
+		// was read from never had a writer. The field stays in the metrics shape
+		// because `/api/storage` and `database doctor` expose it.
+		const lastRetentionSweepAt: number | null = null;
 
 		// Null account rows (requests with account_used IS NULL in last 24h)
 		const cutoff = Date.now() - TIME_CONSTANTS.DAY;
@@ -1907,36 +1898,6 @@ OAuth tokens will need to be re-authenticated.
 
 	async cleanupExpiredOAuthSessions(): Promise<number> {
 		return this.oauth.cleanupExpiredSessions();
-	}
-
-	// Strategy operations delegated to repository
-	async getStrategy(name: string): Promise<{
-		name: string;
-		config: Record<string, unknown>;
-		updatedAt: number;
-	} | null> {
-		return this.strategy.getStrategy(name);
-	}
-
-	async setStrategy(
-		name: string,
-		config: Record<string, unknown>,
-	): Promise<void> {
-		await this.strategy.set(name, config);
-	}
-
-	async listStrategies(): Promise<
-		Array<{
-			name: string;
-			config: Record<string, unknown>;
-			updatedAt: number;
-		}>
-	> {
-		return this.strategy.list();
-	}
-
-	async deleteStrategy(name: string): Promise<boolean> {
-		return this.strategy.delete(name);
 	}
 
 	// Analytics methods delegated to request repository
