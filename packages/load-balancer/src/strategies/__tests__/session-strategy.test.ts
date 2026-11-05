@@ -986,6 +986,85 @@ describe("SessionStrategy", () => {
 		});
 	});
 
+	describe("account priority ordering", () => {
+		// Each case passes accounts in reverse priority order and gives the
+		// better-priority account the worse utilization, so input order or the
+		// utilization tiebreak alone would pick the wrong account.
+		const TEN_MINUTES = 10 * 60 * 1000;
+
+		it("peek ranks available accounts by priority before utilization", () => {
+			const p1 = makeAccount({ id: "p1", priority: 1 });
+			const p0 = makeAccount({ id: "p0", priority: 0 });
+			mockStore.setUtilization("p1", 10);
+			mockStore.setUtilization("p0", 90);
+
+			expect(strategy.peek([p1, p0])).toBe("p0");
+		});
+
+		it("peek lets a better-priority account preempt an active session", () => {
+			const incumbent = makeAccount({
+				id: "p1-active",
+				priority: 1,
+				session_start: Date.now() - TEN_MINUTES,
+			});
+			const better = makeAccount({ id: "p0-idle", priority: 0 });
+			mockStore.setUtilization("p1-active", 10);
+			mockStore.setUtilization("p0-idle", 90);
+
+			expect(strategy.peek([incumbent, better])).toBe("p0-idle");
+		});
+
+		it("peek keeps an active session against an equal-priority account", () => {
+			const idle = makeAccount({ id: "p0-idle", priority: 0 });
+			const incumbent = makeAccount({
+				id: "p0-active",
+				priority: 0,
+				session_start: Date.now() - TEN_MINUTES,
+			});
+			mockStore.setUtilization("p0-idle", 10);
+			mockStore.setUtilization("p0-active", 90);
+
+			expect(strategy.peek([idle, incumbent])).toBe("p0-active");
+		});
+
+		it("peek ranks by priority when an auto-fallback window has reset", () => {
+			const ready = makeAccount({ id: "p1-ready", priority: 1 });
+			const fallback = makeAccount({
+				id: "p0-fallback",
+				priority: 0,
+				auto_fallback_enabled: true,
+				rate_limit_reset: Date.now() - 60_000,
+			});
+
+			expect(strategy.peek([ready, fallback])).toBe("p0-fallback");
+		});
+
+		it("select resumes the better-priority auto-fallback account first", async () => {
+			const past = Date.now() - 60_000;
+			const worse = makeAccount({
+				id: "fb-p1",
+				priority: 1,
+				paused: true,
+				pause_reason: "overage",
+				auto_fallback_enabled: true,
+				rate_limit_reset: past,
+			});
+			const better = makeAccount({
+				id: "fb-p0",
+				priority: 0,
+				paused: true,
+				pause_reason: "overage",
+				auto_fallback_enabled: true,
+				rate_limit_reset: past,
+			});
+
+			const selected = await strategy.select([worse, better], meta);
+
+			expect(mockStore.resumeCalls).toEqual(["fb-p0"]);
+			expect(selected.map((account) => account.id)).toEqual(["fb-p0"]);
+		});
+	});
+
 	// proxy.ts maps a missing commitDescendantAffinityOwner hook to
 	// routeHomeAction "none", so this strategy installs no child homes. Docs
 	// scope child homes to the strategies that implement the hook (#523).

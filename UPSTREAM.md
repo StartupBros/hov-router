@@ -67,6 +67,13 @@ would justify bringing it back.
   release that has it. Upstream PostgreSQL fixes are not ported. A PostgreSQL
   `DATABASE_URL` is refused at startup, see
   [PostgreSQL support removed](docs/hov-router-migration.md#postgresql-support-removed).
+- **Auto-refresh probes and probe backoff** (`auto-refresh-scheduler.ts` and its
+  window-opening probes, `packages/core/src/probe-backoff.ts` and the
+  load-balancer tie-break that read it): the scheduler was removed 2026-11-04
+  (#725), and the backoff, which only the scheduler wrote, on 2026-11-05.
+  Request-time token refresh, the per-account circuit breaker and rate-limit
+  cooldowns cover the accounts the backoff deprioritized. See
+  [Auto-refresh removed](docs/hov-router-migration.md#auto-refresh-removed).
 - **Docker image publishing workflow:** removed earlier; the
   [Docker guide](docs/docker.md) builds from source.
 - **Wholesale-merge tooling** (`scripts/verify-upstream-sync-ledger.ts`,
