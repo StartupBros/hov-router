@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: Upstream teardown</title>
+<style>
+:root {
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --surface-2: #f2f0ec;
+  --text: #1d1c1a;
+  --muted: #5d5a54;
+  --border: #dedad3;
+  --border-strong: #b9b4aa;
+  --accent: #2f5d8a;
+  --accent-soft: #9db7d1;
+  --keep-bg: #e5f1e8;
+  --keep-border: #4f8a5e;
+  --cut-bg: #f6e6e3;
+  --cut-border: #b0574a;
+  --chip-bg: #ebe8e2;
+  --code-bg: #efece6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171716;
+    --surface: #1f1f1d;
+    --surface-2: #2a2a27;
+    --text: #ecebe7;
+    --muted: #aaa69d;
+    --border: #3a3935;
+    --border-strong: #5e5c56;
+    --accent: #7fb0de;
+    --accent-soft: #3f5f7e;
+    --keep-bg: #1f3326;
+    --keep-border: #6fae80;
+    --cut-bg: #3a2420;
+    --cut-border: #d07e70;
+    --chip-bg: #2e2d2a;
+    --code-bg: #2a2926;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #171716;
+  --surface: #1f1f1d;
+  --surface-2: #2a2a27;
+  --text: #ecebe7;
+  --muted: #aaa69d;
+  --border: #3a3935;
+  --border-strong: #5e5c56;
+  --accent: #7fb0de;
+  --accent-soft: #3f5f7e;
+  --keep-bg: #1f3326;
+  --keep-border: #6fae80;
+  --cut-bg: #3a2420;
+  --cut-border: #d07e70;
+  --chip-bg: #2e2d2a;
+  --code-bg: #2a2926;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 16.5px;
+  line-height: 1.6;
+}
+main { max-width: 46rem; margin: 0 auto; padding: 2.5rem 16px 3rem; }
+header h1 { font-size: 1.85rem; line-height: 1.25; margin: 0 0 0.6rem; letter-spacing: -0.01em; }
+header .meta-line { color: var(--muted); margin: 0.2rem 0; font-size: 0.95rem; }
+header .focus { margin: 0.8rem 0 0; padding: 0.75rem 1rem; background: var(--surface-2); border-radius: 8px; font-size: 0.95rem; }
+header .focus b { display: block; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.2rem; }
+details.doc-meta { margin: 1rem 0 0; font-size: 0.9rem; color: var(--muted); }
+details.doc-meta summary { cursor: pointer; }
+details.doc-meta dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 1rem; margin: 0.5rem 0 0; }
+details.doc-meta dt { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+details.doc-meta dd { margin: 0; }
+.lede { margin: 1.4rem 0 0; font-size: 1.02rem; }
+section { margin-top: 2.6rem; }
+h2 { font-size: 1.4rem; margin: 0 0 0.3rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); }
+.eyebrow { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: 0 0 0.8rem; }
+h3 { font-size: 1.15rem; margin: 0 0 0.6rem; line-height: 1.35; }
+p { margin: 0.6rem 0; }
+ul, ol { padding-left: 1.3rem; margin: 0.5rem 0; }
+li { margin: 0.25rem 0; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.86em; background: var(--code-bg); padding: 0.08em 0.3em; border-radius: 4px; overflow-wrap: anywhere; }
+nav.jump { background: var(--surface-2); border-radius: 8px; padding: 0.7rem 1rem; margin: 0.8rem 0 1.4rem; font-size: 0.95rem; }
+nav.jump ol { margin: 0.2rem 0 0; }
+nav.jump a { color: var(--accent); text-decoration: none; }
+nav.jump a:hover { text-decoration: underline; }
+article.idea { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem 1.25rem; margin: 1.2rem 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0.8rem; padding: 0; list-style: none; }
+.chips li { margin: 0; font-size: 0.8rem; padding: 0.15rem 0.6rem; border-radius: 999px; background: var(--chip-bg); color: var(--text); }
+.chips li b { color: var(--muted); font-weight: 600; margin-right: 0.3rem; }
+dl.fields { margin: 0; }
+dl.fields > dt { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-top: 0.9rem; }
+dl.fields > dd { margin: 0.25rem 0 0; }
+dl.fields ul.basis li { margin: 0.35rem 0; }
+.tag { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82em; font-weight: 700; color: var(--accent); }
+figure { margin: 1rem 0 0.4rem; padding: 0.8rem; background: var(--surface-2); border-radius: 8px; overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 520px; max-width: 640px; height: auto; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+.svg-text { fill: var(--text); font-size: 13px; }
+.svg-head { fill: var(--text); font-size: 13px; font-weight: 700; }
+.svg-small { fill: var(--muted); font-size: 11.5px; }
+.svg-box { fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.2; }
+.svg-keep { fill: var(--keep-bg); stroke: var(--keep-border); stroke-width: 1.2; }
+.svg-cut { fill: var(--cut-bg); stroke: var(--cut-border); stroke-width: 1.2; stroke-dasharray: 5 3; }
+.svg-line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.svg-arrowhead { fill: var(--muted); }
+.svg-bar1 { fill: var(--accent); }
+.svg-bar2 { fill: var(--accent-soft); }
+.table-wrap { overflow-x: auto; margin: 0.8rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { text-align: left; vertical-align: top; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border); }
+th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+td:first-child { white-space: nowrap; color: var(--muted); }
+tr.gap td { background: var(--surface-2); }
+ol.axes li { margin: 0.4rem 0; }
+footer.composition-signal { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Ideation: What to tear out of HoV Router's upstream inheritance</h1>
+  <p class="meta-line">Date: <time datetime="2026-11-03">2026-11-03</time> · Repository at <code>origin/main</code> 26a62b89</p>
+  <div class="focus"><b>Focus</b>we adopted this project hov-router from upstream better-ccflare and ccflare. some parts of it should probably be totally torn out for our version. let's find obvious candidates</div>
+  <div class="focus" style="border-left: 4px solid var(--keep-border);"><b>Status, 2026-11-05: closed</b>
+    <ul style="margin: 0.3rem 0 0; padding-left: 1.2rem;">
+      <li><b>1. Shipped</b> in #725 (e784510d), live 2026-11-04. Departure from the title: the scheduler's proactive token refresh went too, because request-time refresh and the 401 retry already cover it.</li>
+      <li><b>2. Held.</b> Not now; find out what customers use first.</li>
+      <li><b>3. Shipped</b> in #723 (b6f4c8b4), live 2026-11-04.</li>
+      <li><b>4. Shipped</b> in #713 (b58eb525): wholesale merges ended, cherry-pick only, publishers deleted. Follow-on: deploy from any checkout (#727).</li>
+      <li><b>5. Dropped.</b></li>
+    </ul>
+    Docs close-out: #728. Upstream releases are checked ad hoc, with no schedule. The first check ran on 2026-11-05 over tombii main from v3.5.109 to 4d76f79c: 57 commits, none worth porting under the four checks in <code>UPSTREAM.md</code>.</div>
+  <details class="doc-meta">
+    <summary>Document metadata</summary>
+    <dl>
+      <dt>topic</dt><dd>upstream-teardown</dd>
+      <dt>mode</dt><dd>repo-grounded</dd>
+    </dl>
+  </details>
+</header>
+
+<p class="lede">Five candidates survived critique, out of 38 raw ideas from five framings. The strongest is the auto-refresh probe code: it is the one inherited feature whose job is to send scripted prompts through subscription accounts. The biggest is the unused provider set. The most consequential decision is whether HoV Router still takes whole upstream releases, because that sets how much every other deletion costs later.</p>
+
+<section id="grounding-context">
+  <h2>Grounding Context</h2>
+  <p class="eyebrow">Codebase Context</p>
+  <p>HoV Router is a product fork of tombii/better-ccflare (MIT), which derives from snipeship/ccflare. It is a Bun and TypeScript monorepo of about 600k TypeScript lines across <code>apps/cli</code>, <code>apps/server</code> and 21 packages. Only 219 of 708 non-test source files carry no fork commit, so "the fork never touched it" is a weak deletion signal. Production usage is the strong one.</p>
+  <p>Production is one systemd service, <code>ccflare-stack.service</code>, on SQLite, deployed only from <code>main</code> by <code>scripts/deploy-ccflare.sh</code>. It does not use Docker, npm or PostgreSQL. Read-only queries against the production database on 2026-11-03 showed:</p>
+  <ul>
+    <li><b>Accounts:</b> 14, all with auto-refresh off:
+      <ul>
+        <li>anthropic 5</li>
+        <li>codex 3</li>
+        <li>openrouter 2 (paused)</li>
+        <li>openai-compatible 2 (1 paused)</li>
+        <li>xai 1</li>
+        <li>anthropic-compatible 1 (paused)</li>
+      </ul>
+    </li>
+    <li><b>Requests in 30 days:</b> anthropic 480,349; codex 242,394; openai-compatible 20,985; xai 5,578; anthropic-compatible 3. Six of the 18 registered providers have accounts, and five of those six carry traffic.</li>
+    <li><b>Empty tables:</b> agent_preferences, strategies, request_payloads, oauth_sessions, device_setup_jobs, codex_reset_redemptions, combo_membership_exclusions, and the cache flight recorder tables. The cache flight recorder is a fork feature, so it is out of scope here.</li>
+    <li><b>Agent attribution, last 7 days:</b> 22,765 requests were attributed by system-prompt agent detection, which feeds anomaly insights. The agents feature is live even though its preference table is empty.</li>
+  </ul>
+  <p>This usage evidence covers the operator's install only. StartupBros and House of Vibe customers install the router too, and their usage is unmeasured.</p>
+  <p>Constraints every idea respects or flags:</p>
+  <ul>
+    <li>Protected operational names stay. AGENTS.md lists the commands, config paths, environment variables, headers, ports, package names and provenance tokens.</li>
+    <li>UPSTREAM.md protects "fork providers and defaults, canonical provider identities" and "SQLite/PostgreSQL migration, repository, retention, and active-window parity".</li>
+    <li>AGENTS.md fences off the upstream publishers and forbids raw scripted Anthropic inference.</li>
+    <li>The generated <code>inline-*-worker.ts</code> files are never touched.</li>
+  </ul>
+  <p>Prior lessons in <code>docs/solutions/</code> point the same way:</p>
+  <ul>
+    <li>Judge inherited code by four checks: call path, production config, client behaviour and kind of harm.</li>
+    <li>The root typecheck skips test files, so a deletion can look green while tests still call the deleted code.</li>
+  </ul>
+</section>
+
+<section id="topic-axes">
+  <h2>Topic Axes</h2>
+  <ol class="axes">
+    <li><b>Inert surface:</b> code nothing in production reaches.</li>
+    <li><b>Per-change taxes:</b> inherited code that multiplies the cost of every future change.</li>
+    <li><b>Public-distribution machinery:</b> built for upstream's npm, multi-platform and container audience rather than one private deployment.</li>
+    <li><b>Active liability:</b> inherited code whose presence alone is a risk.</li>
+    <li><b>The upstream relationship itself:</b> the sync protocol and ledgers, plus the compatibility surfaces kept only to make syncs merge cleanly.</li>
+  </ol>
+</section>
+
+<section id="ranked-ideas">
+  <h2>Ranked Ideas</h2>
+  <nav class="jump" aria-label="Ranked ideas">
+    <ol>
+      <li><a href="#idea-1">Remove auto-refresh's window-opening probes; keep the token refresh</a></li>
+      <li><a href="#idea-2">Cut the 11 unused providers and fail loudly on unknown ones</a></li>
+      <li><a href="#idea-3">Drop PostgreSQL and make SQLite the only database</a></li>
+      <li><a href="#idea-4">Settle the sync policy, then delete the fenced upstream publishers</a></li>
+      <li><a href="#idea-5">Remove the per-agent model-preference rewrite; keep detection and the file editor</a></li>
+    </ol>
+  </nav>
+
+  <article class="idea" id="idea-1">
+    <h3>1. Remove auto-refresh's window-opening probes; keep the token refresh</h3>
+    <ul class="chips">
+      <li><b>Axis</b>Active liability</li>
+      <li><b>Confidence</b>85%</li>
+      <li><b>Complexity</b>Medium</li>
+    </ul>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>
+        <p>Delete the code that sends a scripted prompt to an Anthropic, Codex or zai account when its usage window resets, so the next window starts early. That means:</p>
+        <ul>
+          <li>the probe method <code>sendDummyMessage</code>;</li>
+          <li>the 500-prompt pool, with its cooldown and backoff;</li>
+          <li><code>docs/auto-refresh.md</code>;</li>
+          <li>the per-account dashboard toggle.</li>
+        </ul>
+        <p>The same class also hosts two things that are not probes. Keep both:</p>
+        <ul>
+          <li>The zai peak-hours pause (<code>checkPeakHoursPause</code>, called at <code>:238</code>). It is a separate opt-in feature, gated on <code>peak_hours_pause_enabled</code> rather than on auto-refresh.</li>
+          <li>OAuth token refresh for Codex and openai-compatible accounts (<code>:340-341</code>).</li>
+        </ul>
+        <p>The token refresh does not run in production today. The scheduler returns at <code>:305-307</code> when no account has <code>auto_refresh_enabled = 1</code>, and that return comes before the refresh calls. Commit <code>fec5ce18</code> (2026-07-16) meant the refresh to run on every tick: it removed a later early return but missed this one. Choose explicitly between two options. One is to drop proactive refresh and rely on request-time refresh. The other is to ship the poller as a new, canaried behaviour on the 3 Codex accounts and 1 xAI account. Either way, do not call it a move. Leave the <code>auto_refresh_enabled</code> column in place, unused, so the change needs no migration.</p>
+      </dd>
+      <dt>Axis</dt>
+      <dd>Active liability</dd>
+      <dt>Basis</dt>
+      <dd>
+        <ul class="basis">
+          <li><span class="tag">direct:</span> <code>apps/server/src/server.ts:2476-2478</code> constructs and starts the scheduler on every boot, whatever the account settings.</li>
+          <li><span class="tag">direct:</span> <code>packages/proxy/src/auto-refresh-scheduler.ts:331</code> calls <code>await this.sendDummyMessage(accountRow)</code>. The probe is defined at <code>:391</code>. Token refresh is separate: <code>checkAndRefreshOpenAICompatibleOAuthTokens</code> (<code>:1025</code>) and <code>checkAndRefreshCodexTokens</code> (<code>:1240</code>), both called at <code>:340-341</code>.</li>
+          <li><span class="tag">direct:</span> <code>packages/database/src/migrations.ts:2328</code> adds <code>auto_refresh_enabled INTEGER DEFAULT 0</code>. Production has it at 0 on all 14 accounts.</li>
+          <li><span class="tag">direct:</span> AGENTS.md: "Raw scripted Anthropic inference remains prohibited".</li>
+          <li><span class="tag">direct:</span> Sizes: the prompt pool is 684 lines, the scheduler 1,887 and the docs 568.</li>
+          <li><span class="tag">external:</span> Anthropic's compliance page, reported by The Register on 2026-02-20, bars using Free, Pro or Max OAuth tokens in other products. There are reports of server-side bans on automated clients. These sources are secondary.</li>
+        </ul>
+      </dd>
+      <dt>Rationale</dt>
+      <dd>This is the one inherited feature whose job is to send scripted prompts through subscription accounts. That is the pattern AGENTS.md forbids and the one most likely to get an account banned. It is off in production, but one dashboard toggle turns it on, and customer installs get the same toggle. Removing it costs no feature anyone here uses, and it shrinks a 1,887-line class whose token refresh is live.</dd>
+      <dt>Downsides</dt>
+      <dd>
+        <ul>
+          <li>Keeping the token refresh means switching on background refresh-token rotation that production has never run. Treat it as a new feature, or drop it (above).</li>
+          <li>If a customer turned auto-refresh on, their account would silently lose two things: window-opening, and the auto-resume of <code>failure_threshold</code> and overage pauses (<code>:288-294</code>). Add a startup warning or a release note for rows with the flag set.</li>
+          <li>The auto-refresh endpoint, the <code>autoRefreshEnabled</code> response field and the CLI list field form an external contract. Keep the endpoint as a no-op for one release.</li>
+          <li>About 15 test files drive the class. A few of them cover the rotation-race logic that is kept, so port those before deleting the rest.</li>
+          <li>Cache keepalive also uses the internal-probe auth header, so it stays.</li>
+          <li>The unused column stays until a later schema cleanup, which idea 3 makes cheap.</li>
+        </ul>
+      </dd>
+      <dt>Confidence</dt>
+      <dd>85%</dd>
+      <dt>Complexity</dt>
+      <dd>Medium</dd>
+    </dl>
+    <figure>
+      <svg viewBox="0 0 640 220" role="img" aria-labelledby="fig1-title">
+        <title id="fig1-title">The auto-refresh scheduler today has three parts: the probes are deleted, and the zai pause and token refresh go to a new small poller.</title>
+        <defs>
+          <marker id="arrow-1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="svg-arrowhead"/></marker>
+        </defs>
+        <text x="24" y="20" class="svg-head">Today: AutoRefreshScheduler, 1,887 lines</text>
+        <rect x="24" y="34" width="302" height="50" rx="6" class="svg-cut"/>
+        <text x="36" y="54" class="svg-text">Window-opening probes</text>
+        <text x="36" y="73" class="svg-small">sendDummyMessage, 500-prompt pool, backoff</text>
+        <rect x="24" y="94" width="302" height="50" rx="6" class="svg-keep"/>
+        <text x="36" y="114" class="svg-text">zai peak-hours pause</text>
+        <text x="36" y="133" class="svg-small">separate opt-in, gated on its own flag</text>
+        <rect x="24" y="154" width="302" height="50" rx="6" class="svg-keep"/>
+        <text x="36" y="174" class="svg-text">OAuth token refresh</text>
+        <text x="36" y="193" class="svg-small">Codex and openai-compatible accounts</text>
+        <text x="420" y="20" class="svg-head">After</text>
+        <text x="420" y="50" class="svg-text">Deleted:</text>
+        <text x="420" y="70" class="svg-small">probe path and prompt pool</text>
+        <text x="420" y="88" class="svg-small">docs/auto-refresh.md</text>
+        <text x="420" y="106" class="svg-small">auto-refresh dashboard toggle</text>
+        <rect x="420" y="154" width="206" height="50" rx="6" class="svg-keep"/>
+        <text x="432" y="174" class="svg-text">Small poller</text>
+        <text x="432" y="193" class="svg-small">zai pause + token refresh</text>
+        <line x1="328" y1="119" x2="416" y2="172" class="svg-line" marker-end="url(#arrow-1)"/>
+        <line x1="328" y1="179" x2="416" y2="179" class="svg-line" marker-end="url(#arrow-1)"/>
+      </svg>
+      <figcaption>The dashed box is deleted. The zai pause and the token refresh move on, and the token refresh is new behaviour in production.</figcaption>
+    </figure>
+  </article>
+
+  <article class="idea" id="idea-2">
+    <h3>2. Cut the 11 unused providers and fail loudly on unknown ones</h3>
+    <ul class="chips">
+      <li><b>Axis</b>Inert surface</li>
+      <li><b>Confidence</b>70%</li>
+      <li><b>Complexity</b>High</li>
+    </ul>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>
+        <p>Delete the provider modules no production account uses, in two slices:</p>
+        <ul>
+          <li><b>Slice 1:</b> bedrock, meta, qwen, ollama (with OllamaCloud) and vertex-ai. This is 6,998 of the 7,234 provider-directory lines.</li>
+          <li><b>Slice 2:</b> zai and the five thin anthropic-compatible wrappers: minimax, deepseek, kilo, nanogpt and alibaba-coding-plan.</li>
+        </ul>
+        <p>Each slice also removes the provider's add-account flow, usage fetcher, type constants and dashboard branches.</p>
+        <p>Replace the unconditional registration list with an allowlist of the six providers that have accounts: anthropic, codex, openai-compatible, xai, openrouter and anthropic-compatible. Make startup report an error naming any account row whose provider is no longer registered, instead of leaving that account silently unroutable.</p>
+      </dd>
+      <dt>Axis</dt>
+      <dd>Inert surface</dd>
+      <dt>Basis</dt>
+      <dd>
+        <ul class="basis">
+          <li><span class="tag">direct:</span> <code>packages/providers/src/index.ts:85-102</code> registers all 18 providers unconditionally.</li>
+          <li><span class="tag">direct:</span> Provider-directory source lines, measured this run: bedrock 4,551; meta 828; qwen 692; ollama 562; vertex-ai 365; zai 114; nanogpt 30; alibaba-coding-plan 30; kilo 26; minimax 18; deepseek 18. Per the scanner's counts, usage fetchers add about 940 lines and tests about 9k more.</li>
+          <li><span class="tag">direct:</span> Production has no account on any of the 11 and no request to them in 30 days.</li>
+          <li><span class="tag">direct:</span> <code>UPSTREAM.md:21-22</code> protects "fork providers and defaults, canonical provider identities" in general terms. It names none of the 11.</li>
+          <li><span class="tag">external:</span> LiteLLM keeps first-class providers in its tree and reaches the long tail through a generic OpenAI-compatible route, which is the shape the allowlist leaves here.</li>
+        </ul>
+      </dd>
+      <dt>Rationale</dt>
+      <dd>Each provider name is spread across 13 to 56 files: types, both migration files, the dashboard and the CLI's add-account flows. Every routing or schema change therefore pays for providers nobody here runs. Bedrock alone is 4,551 lines of AWS signing and translation code. The allowlist stops the set from growing back, and it turns a stale account row into a visible error.</dd>
+      <dt>Downsides</dt>
+      <dd>
+        <ul>
+          <li>The usage evidence covers only the operator's install. Customers may run ollama or deepseek, so ask them first, especially before slice 2.</li>
+          <li>AGENTS.md names ollama as an example account for scripted testing; change that to litellm or omniroute through openai-compatible. AGENTS.md also has a Qwen provider section, which goes with qwen.</li>
+          <li>The root typecheck skips test files, so caller sweeps (with <code>grep -a</code>; some files contain NUL bytes) and per-file test runs have to carry the proof.</li>
+          <li>An account whose provider is no longer registered is not rejected today. <code>packages/providers/src/registry.ts:90-94</code> falls back to the request's provider, and so do <code>token-manager.ts:824</code> and <code>model-catalog.ts:540</code>, so a leftover account could send its credentials through the wrong adapter. The startup check must pause such accounts and the fallbacks must fail closed. A fatal error would be a new way for a customer install to fail to boot.</li>
+          <li>Customers would lose real capabilities with no replacement:
+            <ul>
+              <li>Qwen OAuth add and re-auth;</li>
+              <li>Bedrock and Vertex cloud-credential accounts, including the Bedrock cache prewarm;</li>
+              <li>the Ollama translation;</li>
+              <li>the <code>local</code> and <code>cloud-credential</code> combo route classes, whose only producers are ollama, bedrock and vertex-ai.</li>
+            </ul>
+            An openai-compatible account substitutes only for key-based endpoints. Ship a log-only release first to see whether anyone has these accounts.</li>
+          <li>Leave <code>BUNDLED_PRICING</code>, the historical migrations, the routing-revision trigger lists and the <code>oauth_sessions</code> CHECK untouched. Pruning them risks GLM and DeepSeek pricing and changes the deploy schema digest.</li>
+        </ul>
+      </dd>
+      <dt>Confidence</dt>
+      <dd>70%</dd>
+      <dt>Complexity</dt>
+      <dd>High</dd>
+    </dl>
+    <figure>
+      <svg viewBox="0 0 640 296" role="img" aria-labelledby="fig2-title">
+        <title id="fig2-title">Source lines per unused provider directory: bedrock 4,551 dwarfs the rest; slice 1 holds 6,998 lines, slice 2 holds 236.</title>
+        <text x="150" y="22" text-anchor="end" class="svg-text">bedrock</text>
+        <rect x="160" y="10" width="420" height="16" rx="2" class="svg-bar1"/>
+        <text x="586" y="22" class="svg-small">4,551</text>
+        <text x="150" y="46" text-anchor="end" class="svg-text">meta</text>
+        <rect x="160" y="34" width="76" height="16" rx="2" class="svg-bar1"/>
+        <text x="242" y="46" class="svg-small">828</text>
+        <text x="150" y="70" text-anchor="end" class="svg-text">qwen</text>
+        <rect x="160" y="58" width="64" height="16" rx="2" class="svg-bar1"/>
+        <text x="230" y="70" class="svg-small">692</text>
+        <text x="150" y="94" text-anchor="end" class="svg-text">ollama</text>
+        <rect x="160" y="82" width="52" height="16" rx="2" class="svg-bar1"/>
+        <text x="218" y="94" class="svg-small">562</text>
+        <text x="150" y="118" text-anchor="end" class="svg-text">vertex-ai</text>
+        <rect x="160" y="106" width="34" height="16" rx="2" class="svg-bar1"/>
+        <text x="200" y="118" class="svg-small">365</text>
+        <text x="150" y="142" text-anchor="end" class="svg-text">zai</text>
+        <rect x="160" y="130" width="11" height="16" rx="2" class="svg-bar2"/>
+        <text x="177" y="142" class="svg-small">114</text>
+        <text x="150" y="166" text-anchor="end" class="svg-text">nanogpt</text>
+        <rect x="160" y="154" width="3" height="16" class="svg-bar2"/>
+        <text x="169" y="166" class="svg-small">30</text>
+        <text x="150" y="190" text-anchor="end" class="svg-text">alibaba-coding-plan</text>
+        <rect x="160" y="178" width="3" height="16" class="svg-bar2"/>
+        <text x="169" y="190" class="svg-small">30</text>
+        <text x="150" y="214" text-anchor="end" class="svg-text">kilo</text>
+        <rect x="160" y="202" width="2" height="16" class="svg-bar2"/>
+        <text x="168" y="214" class="svg-small">26</text>
+        <text x="150" y="238" text-anchor="end" class="svg-text">minimax</text>
+        <rect x="160" y="226" width="2" height="16" class="svg-bar2"/>
+        <text x="168" y="238" class="svg-small">18</text>
+        <text x="150" y="262" text-anchor="end" class="svg-text">deepseek</text>
+        <rect x="160" y="250" width="2" height="16" class="svg-bar2"/>
+        <text x="168" y="262" class="svg-small">18</text>
+        <rect x="160" y="278" width="10" height="10" class="svg-bar1"/>
+        <text x="176" y="287" class="svg-small">Slice 1: 6,998 lines</text>
+        <rect x="340" y="278" width="10" height="10" class="svg-bar2"/>
+        <text x="356" y="287" class="svg-small">Slice 2: 236 lines</text>
+      </svg>
+      <figcaption>Non-test source lines in each provider's directory, measured this run. Usage fetchers and tests are not included.</figcaption>
+    </figure>
+  </article>
+
+  <article class="idea" id="idea-3">
+    <h3>3. Drop PostgreSQL and make SQLite the only database</h3>
+    <ul class="chips">
+      <li><b>Axis</b>Per-change taxes</li>
+      <li><b>Confidence</b>60%</li>
+      <li><b>Complexity</b>High</li>
+    </ul>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>
+        <p>Delete:</p>
+        <ul>
+          <li><code>packages/database/src/migrations-pg.ts</code>;</li>
+          <li>the PostgreSQL branches in the database package;</li>
+          <li>the PG-only tests;</li>
+          <li>the PG steps and the postgres:16 service container in <code>.github/workflows/managed-routing-postgres.yml</code>.</li>
+        </ul>
+        <p>Keep that workflow's required job id, <code>managed-routing-foundation</code>, and its SQLite steps. Amend the parity clause in UPSTREAM.md and the dual-migration rule in AGENTS.md.</p>
+        <p>Do this before the other schema deletions. After it, dropping a table or column is one migration instead of five touch points.</p>
+      </dd>
+      <dt>Axis</dt>
+      <dd>Per-change taxes</dd>
+      <dt>Basis</dt>
+      <dd>
+        <ul class="basis">
+          <li><span class="tag">direct:</span> <code>migrations-pg.ts</code> is 2,941 lines.</li>
+          <li><span class="tag">direct:</span> AGENTS.md: "Every migration added to <code>packages/database/src/migrations.ts</code> MUST also be ported to <code>packages/database/src/migrations-pg.ts</code>", followed by a five-step checklist for each schema change.</li>
+          <li><span class="tag">direct:</span> <code>UPSTREAM.md:24</code> protects "SQLite/PostgreSQL migration, repository, retention, and active-window parity". Step 4 of the release-sync protocol requires "SQLite/PG parity and restore rehearsal".</li>
+          <li><span class="tag">direct:</span> <code>managed-routing-postgres.yml</code> runs the SQLite managed-routing tests (lines 58-64) before its PostgreSQL steps. Its job is one of the two required checks on <code>main</code>.</li>
+          <li><span class="tag">direct:</span> Production runs SQLite. Git history shows tombii added PostgreSQL on 2026-03-03 "for Kubernetes deployments".</li>
+        </ul>
+      </dd>
+      <dt>Rationale</dt>
+      <dd>PostgreSQL is the largest standing tax in the tree. It doubles every schema change, adds a live-database service to CI, and adds a parity duty to every upstream sync, and nothing here runs it. Removing it first also makes the other deletions here cheaper: auto-refresh's column, <code>agent_preferences</code> and the dead <code>strategies</code> table each become a single SQLite migration.</dd>
+      <dt>Downsides</dt>
+      <dd>
+        <ul>
+          <li>It reverses two written protected contracts, so it is the operator's call.</li>
+          <li>It closes the door on multi-pod hosting until someone rebuilds that.</li>
+          <li>The 397 PostgreSQL references across 69 database files include the adapter both backends share, so the PG-only cut is smaller than that count. It has not been measured.</li>
+          <li>The database package moves further from upstream. That matters only if wholesale syncs continue (idea 4).</li>
+          <li>Deleting <code>migrations-pg.ts</code> alone breaks every production deploy. <code>scripts/deploy-ccflare.sh:473</code> reads it with <code>readFileSync</code> to build the schema digest, under <code>set -Eeuo pipefail</code>. Drop it from that list in the same PR, and expect one full-stack restart the first time, because a changed digest makes the backend-only handoff ineligible.</li>
+          <li>The release tooling pins the workflow file name <code>managed-routing-postgres.yml</code> and its display name (<code>scripts/router-release.ts:427,438-439</code>). Strip only the services block and the PostgreSQL steps.</li>
+          <li>About 20 test files import <code>migrations-pg</code>, including the kept SQLite test <code>managed-routing-migrations.test.ts</code>. <code>upstream-review-workflow-security.test.ts:84-95</code> asserts the postgres service. Split these tests rather than deleting them.</li>
+          <li>Without a guard, a machine with a <code>postgres://</code> <code>DATABASE_URL</code> would silently fall through to an empty SQLite file (<code>database-operations.ts:540-547</code>, <code>:601-603</code>). Fail fast instead, and pin a final PostgreSQL release.</li>
+          <li>Keep <code>BunSqlAdapter</code>: it is the live SQLite adapter, and only its PostgreSQL branches go.</li>
+        </ul>
+      </dd>
+      <dt>Confidence</dt>
+      <dd>60%</dd>
+      <dt>Complexity</dt>
+      <dd>High</dd>
+    </dl>
+    <figure>
+      <svg viewBox="0 0 640 196" role="img" aria-labelledby="fig3-title">
+        <title id="fig3-title">Adding one column touches five places today, two after PostgreSQL is dropped.</title>
+        <text x="20" y="18" class="svg-head">Adding one column today</text>
+        <rect x="20" y="30" width="276" height="26" rx="5" class="svg-keep"/>
+        <text x="32" y="47" class="svg-text">migrations.ts: ensureSchema()</text>
+        <rect x="20" y="62" width="276" height="26" rx="5" class="svg-keep"/>
+        <text x="32" y="79" class="svg-text">migrations.ts: runMigrations()</text>
+        <rect x="20" y="94" width="276" height="26" rx="5" class="svg-cut"/>
+        <text x="32" y="111" class="svg-text">migrations-pg.ts: ensureSchemaPg()</text>
+        <rect x="20" y="126" width="276" height="26" rx="5" class="svg-cut"/>
+        <text x="32" y="143" class="svg-text">migrations-pg.ts: runMigrationsPg()</text>
+        <rect x="20" y="158" width="276" height="26" rx="5" class="svg-cut"/>
+        <text x="32" y="175" class="svg-text">PG backfill, when there is one</text>
+        <text x="360" y="18" class="svg-head">After dropping PostgreSQL</text>
+        <rect x="360" y="30" width="270" height="26" rx="5" class="svg-keep"/>
+        <text x="372" y="47" class="svg-text">migrations.ts: ensureSchema()</text>
+        <rect x="360" y="62" width="270" height="26" rx="5" class="svg-keep"/>
+        <text x="372" y="79" class="svg-text">migrations.ts: runMigrations()</text>
+        <text x="360" y="122" class="svg-small">PG steps leave CI;</text>
+        <text x="360" y="140" class="svg-small">the required SQLite job stays.</text>
+      </svg>
+      <figcaption>AGENTS.md's checklist for one schema change, before and after. Dashed steps disappear.</figcaption>
+    </figure>
+  </article>
+
+  <article class="idea" id="idea-4">
+    <h3>4. Settle the sync policy, then delete the fenced upstream publishers</h3>
+    <ul class="chips">
+      <li><b>Axis</b>The upstream relationship itself</li>
+      <li><b>Confidence</b>55%</li>
+      <li><b>Complexity</b>Medium</li>
+    </ul>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>
+        <p>Decide whether HoV Router still takes whole upstream releases as two-parent merges. The alternative is cherry-picks only, each judged by the fork-network survey's four checks: call path, production config, client behaviour and kind of harm.</p>
+        <p>If the answer is cherry-picks, delete what exists only to make wholesale merges clean:</p>
+        <ul>
+          <li>upstream's <code>release.yml</code>, <code>release-dispatch.yml</code>, <code>signpath-release.yml</code>, <code>signpath-test.yml</code> and <code>.signpath/</code>;</li>
+          <li>the <code>prepublishOnly</code> and <code>postpublish</code> npm hooks, and the macOS, Windows and arm64 build aliases. Keep <code>apps/cli/build-multi-arch.ts</code>, <code>build:multi</code> and <code>build:linux-amd64</code>: the router's own release build runs them (<code>apps/cli/router-artifacts.ts:154-167</code>, reached by the required <code>prepare</code> check);</li>
+          <li>the fence test and AGENTS.md's fence rule.</li>
+        </ul>
+        <p>Archive <code>scripts/verify-upstream-sync-ledger.ts</code>, and record each removed subsystem as one line in UPSTREAM.md. Keep the v3.5.78 ledger, LICENSE, the acknowledgements and the tombii build classification.</p>
+      </dd>
+      <dt>Axis</dt>
+      <dd>The upstream relationship itself</dd>
+      <dt>Basis</dt>
+      <dd>
+        <ul class="basis">
+          <li><span class="tag">direct:</span> <code>UPSTREAM.md:5</code>: "Manual, pinned source integration when an upstream release is worth adopting; targeted cherry-picks otherwise". UPSTREAM.md also lays out a five-step release-sync protocol built around "one real two-parent merge commit".</li>
+          <li><span class="tag">direct:</span> <code>scripts/__tests__/router-release-workflow.test.ts:728-771</code> requires the four upstream publisher workflows to exist, and each job's condition to evaluate to false for this repository.</li>
+          <li><span class="tag">direct:</span> <code>scripts/verify-upstream-sync-ledger.ts</code> is 2,124 lines. The last wholesale sync was v3.5.78 (PR #339, 2026-09).</li>
+          <li><span class="tag">direct:</span> The fork-network survey of 2026-10-31 reviewed 1,539 commits across 146 forks to land 3 PRs (<code>docs/solutions/workflow-issues/survey-the-fork-network-then-check-each-port-applies-here.md</code>).</li>
+          <li><span class="tag">reasoned:</span> Under wholesale merges, every file that ideas 1-3 delete becomes a modify/delete conflict whenever upstream edits it. The fenced publishers stay so that their upstream edits merge cleanly. Under cherry-picks, deletions cost nothing later and the fences protect nothing.</li>
+        </ul>
+      </dd>
+      <dt>Rationale</dt>
+      <dd>This decision sets how hard the rest of the teardown can go. The publisher files are already fenced and tested, so deleting them alone gains little; the rejection table says why. What they cost is upkeep tied to a sync model the fork may no longer need.</dd>
+      <dt>Downsides</dt>
+      <dd>
+        <ul>
+          <li>It is a strategic call, not an obvious tear-out.</li>
+          <li>Upstream security fixes would then arrive only through surveys and cherry-picks.</li>
+          <li>It amends the written protocol but does not break it: UPSTREAM.md promises no automatic upstream tracking.</li>
+          <li><code>tool-drop-announce.yml</code> stays. It is the fork's own Discord announce lane, not upstream code.</li>
+          <li>Upstream provider and proxy fixes would arrive only by survey, among them Codex stream hardening (Codex carries about 240k requests a month). Give the survey a schedule and an owner before ending wholesale syncs.</li>
+          <li>Edit these files in the same PR:
+            <ul>
+              <li><code>tests/bun-toolchain-pin.test.ts:10-18</code> and <code>auto-rerun-failed.yml:37</code>;</li>
+              <li><code>build-multi-arch.test.ts:581-601</code>, splitting the test so its provenance cases stay;</li>
+              <li>the fence test.</li>
+            </ul>
+            Replace the fence with a small test that fails if the four workflow files reappear, because <code>release.yml</code> fires on any <code>v*</code> tag.</li>
+          <li>Archive the sync verifier, its test and the closeout doc at a git tag rather than deleting them. Keep AGENTS.md's no-npm-publish rule when the fence sentence is rewritten.</li>
+        </ul>
+      </dd>
+      <dt>Confidence</dt>
+      <dd>55%</dd>
+      <dt>Complexity</dt>
+      <dd>Medium: the decision itself is low effort, and the deletion that follows is medium.</dd>
+    </dl>
+    <figure>
+      <svg viewBox="0 0 640 220" role="img" aria-labelledby="fig4-title">
+        <title id="fig4-title">If wholesale upstream merges continue, each tear-out becomes a sync conflict and the fences stay; if syncs become cherry-picks only, deletions are free and the fences go.</title>
+        <defs>
+          <marker id="arrow-4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="svg-arrowhead"/></marker>
+        </defs>
+        <polygon points="110,55 200,110 110,165 20,110" class="svg-box"/>
+        <text x="110" y="106" text-anchor="middle" class="svg-text">Keep wholesale</text>
+        <text x="110" y="122" text-anchor="middle" class="svg-text">upstream merges?</text>
+        <line x1="200" y1="110" x2="296" y2="58" class="svg-line" marker-end="url(#arrow-4)"/>
+        <line x1="200" y1="110" x2="296" y2="162" class="svg-line" marker-end="url(#arrow-4)"/>
+        <rect x="300" y="20" width="320" height="72" rx="6" class="svg-box"/>
+        <text x="314" y="42" class="svg-text">Yes: each tear-out becomes a</text>
+        <text x="314" y="60" class="svg-text">modify/delete conflict at every sync;</text>
+        <text x="314" y="78" class="svg-text">fences and the ledger verifier stay.</text>
+        <rect x="300" y="128" width="320" height="72" rx="6" class="svg-keep"/>
+        <text x="314" y="150" class="svg-text">No, cherry-picks only: deletions</text>
+        <text x="314" y="168" class="svg-text">cost nothing later; delete the</text>
+        <text x="314" y="186" class="svg-text">fences, fence test and verifier.</text>
+      </svg>
+      <figcaption>The sync policy decides what ideas 1-3 cost later.</figcaption>
+    </figure>
+  </article>
+
+  <article class="idea" id="idea-5">
+    <h3>5. Remove the per-agent model-preference rewrite; keep detection and the file editor</h3>
+    <ul class="chips">
+      <li><b>Axis</b>Inert surface</li>
+      <li><b>Confidence</b>65%</li>
+      <li><b>Complexity</b>Low</li>
+    </ul>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>
+        <p>Delete the per-agent model preference stored in the database:</p>
+        <ul>
+          <li><code>agent-preference.repository.ts</code>. Leave the <code>agent_preferences</code> table and the migration files alone: dropping the table would destroy any customer's rows and would change the deploy schema digest;</li>
+          <li>the two preference lookups in <code>agent-interceptor.ts</code>;</li>
+          <li>the preference API routes;</li>
+          <li>the dashboard's model-preference selector.</li>
+        </ul>
+        <p>Keep agent detection and attribution, and keep the dashboard's agent-file editor.</p>
+      </dd>
+      <dt>Axis</dt>
+      <dd>Inert surface</dd>
+      <dt>Basis</dt>
+      <dd>
+        <ul class="basis">
+          <li><span class="tag">direct:</span> <code>packages/proxy/src/handlers/agent-interceptor.ts:166</code> and <code>:334</code> await <code>dbOps.getAgentPreference(...)</code> on requests with a detected agent.</li>
+          <li><span class="tag">direct:</span> The routes are at <code>packages/http-api/src/router.ts:600</code> (<code>POST /api/agents/bulk-preference</code>) and <code>:996-1010</code> (per-agent <code>POST</code> and <code>DELETE .../preference</code>). The dashboard control is <code>components/agents/AgentModelPreferenceSelect.tsx</code>.</li>
+          <li><span class="tag">direct:</span> <code>agent_preferences</code> has 0 rows in production.</li>
+          <li><span class="tag">direct:</span> In the last 7 days, agent detection attributed 22,765 production requests (lean-collector 17,492, lean-reader 5,271), and anomaly insights key on that attribution (#367).</li>
+          <li><span class="tag">direct:</span> Commits #705 and #706, on 2026-11-02 and 11-03, fixed the agent-file editor. The editor writes the frontmatter <code>model</code> that Claude Code itself reads.</li>
+        </ul>
+      </dd>
+      <dt>Rationale</dt>
+      <dd>The rewrite is a branch in the request path that can swap a model, and nobody has configured it. Cutting it removes a surprise from the hot path and drops a table, while the parts of the agents feature that production uses stay.</dd>
+      <dt>Downsides</dt>
+      <dd>
+        <ul>
+          <li>The win is small. The rewrite guards and the <code>original_model</code>/<code>applied_model</code> columns stay, because the opt-in frontmatter fallback needs them.</li>
+          <li>It removes the only per-agent model override that works without editing the agent's file. Agents declared by header (<code>x-better-ccflare-agent-id</code>, <code>agent-interceptor.ts:161-195</code>) could then be attributed but never rerouted.</li>
+          <li>A customer who already set preferences would silently lose them, because the fallback is off by default. Log a warning when rows exist.</li>
+          <li><code>GET /api/agents</code> calls <code>getAllAgentPreferences</code> without a guard, and the dashboard selector is imported by the agent editor, so all of these must go in one change.</li>
+          <li>Production behaviour is unchanged: with 0 rows, both lookups already return nothing.</li>
+          <li>The frontmatter-model fallback is a separate switch: leave it until production config confirms it is off.</li>
+        </ul>
+      </dd>
+      <dt>Confidence</dt>
+      <dd>65%</dd>
+      <dt>Complexity</dt>
+      <dd>Low</dd>
+    </dl>
+  </article>
+</section>
+
+<section id="rejection-summary">
+  <h2>Rejection Summary</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Idea</th><th>Reason Rejected</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Delete the fenced upstream publishers on their own</td><td>They are already fenced, and <code>router-release-workflow.test.ts:728-771</code> tests the fence. Deleting them alone is tidying that pays off only once wholesale syncs end, so it moved into idea 4. <code>tool-drop-announce.yml</code>, which was listed with them, is the fork's own Discord lane (<code>docs/hov-router-releases.md:302</code>).</td></tr>
+        <tr><td>2</td><td>Collapse the updater to a provenance-only stub</td><td>Below the bar:
+          <ul>
+            <li>The dashboard polls it hourly and renders an update prompt (<code>navigation.tsx:58-159</code>).</li>
+            <li><code>UPSTREAM.md:48-51</code> and AGENTS.md protect provenance-aware update status and the tombii build classification.</li>
+            <li>The saving is small.</li>
+          </ul></td></tr>
+        <tr><td>3</td><td>A ledger of removed paths, enforced at sync time</td><td>It is a process artifact. Its only code consumer would be the sync verifier that idea 4 retires, so it shrinks to one line per removal in UPSTREAM.md inside idea 4.</td></tr>
+        <tr><td>4</td><td>Sweep dormant surfaces: payload storage, the strategies table, stray files</td><td>Refuted for payload storage, which is live code:
+          <ul>
+            <li>The request-detail view reads it (<code>requests.ts:166</code>, <code>:235</code>).</li>
+            <li>The Codex usage fallback queries <code>request_payloads</code> (<code>accounts.ts:232</code>).</li>
+          </ul>
+          The <code>strategies</code> table is dead (its one reader, <code>database-operations.ts:1069</code>, always gets null), and <code>debug_usage.ts</code> is unreferenced. Both are tidy-ups to do in passing, not a team discussion.</td></tr>
+        <tr><td>5</td><td>Long-tail providers as presets of the generic providers</td><td>Duplicates idea 2, and no preset mechanism exists to build on.</td></tr>
+        <tr><td>6</td><td>An AGENTS.md rule: an empty table plus an off flag earns a deletion date</td><td>No code acts on the rule, so it fails the anti-ceremony test.</td></tr>
+        <tr><td>7</td><td>Remove the whole agents feature (five raw ideas)</td><td>Refuted by production data: agent detection attributed 22,765 requests in 7 days, feeding anomaly insights. Narrowed into idea 5.</td></tr>
+        <tr><td>8</td><td>Remove the dashboard agent-file editor</td><td>It was fixed in #705 and #706 on 2026-11-02 and 11-03, and it writes the frontmatter that Claude Code reads.</td></tr>
+        <tr><td>9</td><td>Combination: drop PostgreSQL first, then do single-file table drops</td><td>Folded into idea 3 as its sequencing note.</td></tr>
+        <tr><td>10</td><td>Combination: end wholesale syncs and keep a removal ledger</td><td>Folded into idea 4.</td></tr>
+        <tr class="gap"><td>-</td><td>axis: Public-distribution machinery</td><td>No standalone survivor. Its two candidates (rows 1 and 2) each fall below the bar alone; deleting the publishers lives inside idea 4.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer class="composition-signal">Composed <time datetime="2026-11-03T23:47Z">2026-11-03T23:47Z</time> by ce-ideate from the user's request ("we adopted this project hov-router from upstream better-ccflare and ccflare. some parts of it should probably be totally torn out for our version. let's find obvious candidates") against StartupBros-com/better-ccflare at 26a62b89. Revised <time datetime="2026-11-04T00:40Z">2026-11-04T00:40Z</time> after a read-only consequence audit (42 agents; every finding was challenged by two verifiers), which corrected ideas 1, 4 and 5 and added consequences to all five.</footer>
+
+</main>
+</body>
+</html>
