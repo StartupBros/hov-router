@@ -418,7 +418,7 @@ describe("DatabaseOperations.getStorageMetrics", () => {
 		expect(Number.isInteger(m.orphanPages)).toBe(true);
 	});
 
-	it("lastRetentionSweepAt is null when no data-retention strategy exists", async () => {
+	it("lastRetentionSweepAt is null because no retention sweep is recorded", async () => {
 		const m = await dbOps.getStorageMetrics();
 		expect(m.lastRetentionSweepAt).toBeNull();
 	});
