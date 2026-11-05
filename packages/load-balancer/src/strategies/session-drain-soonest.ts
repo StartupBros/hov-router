@@ -1,4 +1,4 @@
-import { compareAccountPreference, TIME_CONSTANTS } from "@better-ccflare/core";
+import { TIME_CONSTANTS } from "@better-ccflare/core";
 import {
 	type Account,
 	PROVIDER_NAMES,
@@ -272,11 +272,7 @@ export class SessionDrainSoonestStrategy extends SessionAffinityStrategy {
 				if (activeA !== activeB) return activeA ? -1 : 1;
 			}
 
-			const preferenceOrder = compareAccountPreference(
-				a.account,
-				b.account,
-				now,
-			);
+			const preferenceOrder = a.account.priority - b.account.priority;
 			if (preferenceOrder !== 0) return preferenceOrder;
 
 			const scoreOrder =

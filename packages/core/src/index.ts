@@ -138,7 +138,6 @@ export {
 	setPricingLogger,
 	type TokenBreakdown,
 } from "./pricing";
-export * from "./probe-backoff";
 export { PROCESS_STARTED_AT_MS } from "./process-start";
 export * from "./quality-routing-policy";
 export * from "./request-events";

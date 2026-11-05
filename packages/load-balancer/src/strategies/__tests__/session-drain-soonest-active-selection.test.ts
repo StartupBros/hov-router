@@ -1,9 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import {
-	clearAllProbeBackoff,
-	PROBE_BACKOFF_PENALTY_THRESHOLD_MS,
-	setProbeBackoff,
-} from "@better-ccflare/core";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { SessionDrainSoonestStrategy } from "@better-ccflare/load-balancer";
 import type {
 	Account,
@@ -104,14 +99,9 @@ describe("SessionDrainSoonestStrategy strict mode", () => {
 	let store: MockStrategyStore;
 
 	beforeEach(() => {
-		clearAllProbeBackoff();
 		strategy = new SessionDrainSoonestStrategy(undefined, "strict");
 		store = new MockStrategyStore();
 		strategy.initialize(store);
-	});
-
-	afterEach(() => {
-		clearAllProbeBackoff();
 	});
 
 	it("ranks every request by the earliest weekly reset instead of retaining ordinary client affinity", async () => {
@@ -357,18 +347,5 @@ describe("SessionDrainSoonestStrategy strict mode", () => {
 				(account) => account.id,
 			),
 		).toEqual(["fallback", "early", "late"]);
-	});
-
-	it("penalizes a probe-backed-off account after structural policy ties", async () => {
-		const now = Date.now();
-		const backedOff = makeAccount({ id: "acc-a", name: "acc-a" });
-		const healthy = makeAccount({ id: "acc-z", name: "acc-z" });
-		store.setWeeklyReset("acc-a", now + DAY);
-		store.setWeeklyReset("acc-z", now + DAY);
-		setProbeBackoff(backedOff.id, now + PROBE_BACKOFF_PENALTY_THRESHOLD_MS);
-
-		expect(
-			(await strategy.select([backedOff, healthy], makeMeta()))[0]?.id,
-		).toBe("acc-z");
 	});
 });
