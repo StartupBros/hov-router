@@ -254,8 +254,7 @@
         "@better-ccflare/providers": "workspace:*",
         "@better-ccflare/security": "workspace:*",
         "@better-ccflare/types": "workspace:*",
-        "@better-ccflare/ui-common": "workspace:*",
-        "@dqbd/tiktoken": "^1.0.22"
+        "@better-ccflare/ui-common": "workspace:*"
       }
     },
     "packages/security": {
@@ -1235,12 +1234,6 @@
         }
       },
       "sha512-+MKAJEOfaBe5SmV6t34p80MMKhjvUz0vRrvVJbPT0WElzaOJ/1xs+D+KDv+tD/NE5ujfrChEcshd4fLn0wpiqg=="
-    ],
-    "@dqbd/tiktoken": [
-      "@dqbd/tiktoken@1.0.22",
-      "",
-      {},
-      "sha512-RYhO8xeHkMNX5Ixqf4M1Ve3siCYJY/dI0yLnlX4M4oIEDOvjMIQ+E+3OUpAaZcWTaMtQJzGcDAghYfllpx3i/w=="
     ],
     "@floating-ui/core": [
       "@floating-ui/core@1.7.2",

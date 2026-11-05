@@ -359,7 +359,6 @@ sequenceDiagram
 sequenceDiagram
     participant ResponseHandler
     participant Worker as Post-Processor Worker
-    participant TokenEncoder as Tiktoken Encoder
     participant AsyncWriter
     participant DB
 
@@ -392,9 +391,7 @@ sequenceDiagram
         else content_block_start
             Worker->>Worker: Record firstTokenTimestamp
         else content_block_delta
-            Worker->>TokenEncoder: encode(delta text)
-            TokenEncoder-->>Worker: Token count
-            Worker->>Worker: Update outputTokensComputed
+            Note over Worker: No per-delta token count; output tokens come from the usage payloads
         else message_delta with usage
             Worker->>Worker: Update providerFinalOutputTokens
             Worker->>Worker: Record lastTokenTimestamp
