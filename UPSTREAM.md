@@ -41,9 +41,9 @@ A port must preserve, at minimum, these protected fork contracts:
 - fork build/update provenance, runtime Git-SHA identity, deployment source gates,
   observability, and operator controls.
 
-Deployment stays a separate operator-authorized action from clean canonical
-`refs/heads/main`. A merge, package version, or ported fix does not prove the
-installed binary or running service identity.
+Deployment stays a separate operator-authorized action. `scripts/deploy-ccflare.sh`
+ships only the freshly fetched `origin/main` tip, from any checkout. A merge, package
+version, or ported fix does not prove the installed binary or running service identity.
 
 Ordinary dashboard, npm, binary, or Docker update paths may resolve mutable
 upstream-controlled artifacts. They must not replace this fork unless provenance
