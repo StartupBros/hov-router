@@ -29,11 +29,16 @@ Display text uses the constants instead of hard-coded names: `PRODUCT_NAME` / `C
 - `packages/database/src/inline-integrity-check-worker.ts`
 - `packages/database/src/inline-incremental-vacuum-worker.ts`
 - `packages/database/src/inline-reader-worker.ts`
+- `packages/proxy/src/inline-worker.ts` (retired — see below)
 
-All four are gitignored build output of `bun run build:cli`.
+All four `packages/database` files are gitignored build output of `bun run build:cli`.
 If one is accidentally modified, do not stage or commit it; re-run that build to
 restore it. A fresh worktree will not have them at all, and `bun test` crashes on
 import until you build once.
+
+`packages/proxy/src/inline-worker.ts` has no generator: its source worker was retired
+(`3ad4b5bce8`, `417520840d`) and `1ebdded1` untracked it. Its `.gitignore` entry stays
+as a guard. If an old checkout still holds a copy, never stage it.
 
 **`apps/cli/README.md`** is a short pointer to the root README. This fork publishes no npm package, and the upstream publish hooks that overwrote it with the root README are deleted. Keep product documentation in `./README.md` and `docs/`.
 
