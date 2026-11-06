@@ -1,7 +1,6 @@
 /**
  * Declared cache-parity policy — the expected default for every lever
- * CacheParityPolicySnapshot reports, plus the parity floor the system is
- * expected to hold.
+ * CacheParityPolicySnapshot reports.
  *
  * This exists so a nonzero lever in the live snapshot never has to be
  * re-investigated from scratch: either it matches this file, or it shows up
@@ -13,11 +12,9 @@
 
 import type {
 	CacheParityDeclaredAcknowledgement,
-	CacheParityDeclaredFloor,
 	CacheParityDriftEntry,
 	CacheParityDriftReport,
 	CacheParityLeverKey,
-	CacheParityMetrics,
 	CacheParityPolicySnapshot,
 } from "@better-ccflare/types";
 
@@ -61,34 +58,6 @@ export const CACHE_PARITY_DECLARED_DEFAULTS: CacheParityPolicySnapshot = {
 };
 
 /**
- * The parity floor the system is expected to hold — deliberately based on
- * the currently achieved and measured level, not on Anthropic's cache-read
- * number (that remains the longer-range #174 target, tracked separately by
- * the `at_parity` verdict thresholds in cache-parity.ts).
- *
- * Retuned in #233/#238 follow-up: the original 79 / 10 floor (set from the
- * same measurement it was meant to police) left only ~0.1pp of headroom
- * against the authoritative seven-day reading, so it was one bad week away
- * from firing on ordinary drift rather than a real regression. Values below
- * are chosen for margin against three reference points:
- *
- * - Pre-campaign baseline (issue #174): 43.6% weighted cache-read, 32.7%
- *   zero-hit — what "the gain was actually lost" looks like.
- * - Currently achieved and measured: 79.1% weighted / 9.1% zero-hit on the
- *   authoritative seven-day Codex follow-up window, and 81.2% weighted /
- *   7.2% zero-hit on the 24-hour window.
- * - Declared floor: 75% weighted / 12% zero-hit — about 4 points below the
- *   achieved weighted level and about 3 points above the achieved zero-hit
- *   level, giving real week-to-week variance room to breathe, while still
- *   enormously far from the 43.6% / 32.7% pre-campaign state. A breach here
- *   means the gain was actually lost, not that the metric wiggled.
- */
-export const CACHE_PARITY_DECLARED_FLOOR: CacheParityDeclaredFloor = {
-	weightedCacheReadPercent: 75,
-	zeroHitRatePercent: 12,
-};
-
-/**
  * Known, owned deviations from CACHE_PARITY_DECLARED_DEFAULTS. A lever
  * listed here reports as an acknowledged deviation in the drift report
  * rather than an unacknowledged anomaly.
@@ -114,30 +83,9 @@ const DECLARED_LEVER_KEYS: CacheParityLeverKey[] = [
 	"xaiCacheKeepaliveTtlMinutes",
 ];
 
-function floorHeldBy(
-	metrics: CacheParityMetrics | undefined,
-	floor: CacheParityDeclaredFloor,
-): boolean {
-	if (!metrics) return false;
-	const weighted = metrics.weightedCacheReadPercent;
-	const zeroHit = metrics.zeroHitRatePercent;
-	if (weighted === null || zeroHit === null) return false;
-	return (
-		weighted >= floor.weightedCacheReadPercent &&
-		zeroHit <= floor.zeroHitRatePercent
-	);
-}
-
-/**
- * Diff a live cache-parity policy snapshot against the declared defaults and
- * report whether the declared floor is currently held.
- *
- * @param codexFollowUpMetrics The authoritative (seven-day) Codex follow-up
- *   metrics, when available — used only to compute `floorHeld`.
- */
+/** Diff a live cache-parity policy snapshot against the declared defaults. */
 export function buildCacheParityDriftReport(
 	policy: CacheParityPolicySnapshot,
-	codexFollowUpMetrics: CacheParityMetrics | undefined,
 ): CacheParityDriftReport {
 	const deviations: CacheParityDriftEntry[] = [];
 	for (const lever of DECLARED_LEVER_KEYS) {
@@ -157,7 +105,5 @@ export function buildCacheParityDriftReport(
 	return {
 		declaredDefaults: CACHE_PARITY_DECLARED_DEFAULTS,
 		deviations,
-		floor: CACHE_PARITY_DECLARED_FLOOR,
-		floorHeld: floorHeldBy(codexFollowUpMetrics, CACHE_PARITY_DECLARED_FLOOR),
 	};
 }
