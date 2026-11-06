@@ -1251,14 +1251,14 @@ better-ccflare/
 
 ```bash
 # Main commands
-bun run cli            # Start CLI (builds dashboard first)
+bun run cli            # Run the CLI from source
+bun run hov-router     # Build dashboard and CLI, then run the CLI
 bun run server         # Start server only
 bun run start          # Alias for bun run server
 
 # Development
-bun run dev            # Start CLI in development mode
+bun run dev            # Alias for bun run cli
 bun run dev:server     # Server with hot reload
-bun run dev:dashboard  # Dashboard development
 
 # Build & Quality
 bun run build          # Build dashboard and CLI
@@ -1338,11 +1338,9 @@ NODE_ENV=production            # Environment mode
 
 We welcome contributions! See [CONTRIBUTING.md](contributing.md) for guidelines.
 
-### Code Review Process
+### Pull Request Checks
 
-This repository includes an automated Claude code review system:
-- **Automatic Review**: Runs automatically when a new pull request is opened
-- **Manual Review**: Can be manually triggered by contributors by commenting `/claude-review` on the PR
+Every pull request runs two required checks, `managed-routing-foundation` and `prepare`, and `main` only accepts branches that are up to date with it. See [Review Process](contributing.md#review-process).
 
 
 ## License

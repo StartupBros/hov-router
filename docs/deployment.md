@@ -945,19 +945,20 @@ healthcheck:
 | `/api/stats/reset` | POST | Reset usage statistics |
 | `/api/requests` | GET | Request history with pagination |
 | `/api/accounts` | GET | List all accounts |
-| `/api/accounts/:name` | GET | Get specific account details |
-| `/api/accounts/:name` | PATCH | Update account (pause/unpause) |
-| `/api/accounts/:name` | DELETE | Remove account |
+| `/api/accounts/:id/pause` | POST | Pause an account |
+| `/api/accounts/:id/resume` | POST | Resume a paused account |
+| `/api/accounts/:id` | DELETE | Remove an account |
 | `/api/config` | GET | Get current configuration |
-| `/api/config` | PATCH | Update configuration |
+| `/api/config/<setting>` | POST | Update one setting, for example `/api/config/strategy` |
 
 ### Analytics API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/analytics/usage` | GET | Usage analytics with filtering |
-| `/api/analytics/costs` | GET | Cost breakdown by model/account |
-| `/api/analytics/requests/:id` | GET | Request details with payload |
+| `/api/analytics` | GET | Analytics data, filterable by time range, account, model and status |
+| `/api/requests/detail` | GET | Recent requests with their payloads |
+
+[api-http.md](api-http.md) is the full endpoint reference.
 
 ### Real-time API
 
