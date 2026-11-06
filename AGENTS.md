@@ -153,7 +153,7 @@ Run affected suites one file at a time (`bun test <file>`). A full `bun test` ba
 
 ### Account Management
 - Add: `bun run cli --add-account <name> --mode <mode> --priority <number>`
-- Accepted modes: `ACCOUNT_MODES` in `apps/cli/src/main.ts` is authoritative, and `--help` prints the same list. Read it rather than trusting a list in docs. `vertex-ai`, `openrouter` and `ollama-cloud` accounts are not in it; add those from the dashboard or the HTTP API (`POST /api/accounts/<type>`).
+- Accepted modes: `ACCOUNT_MODES` in `apps/cli/src/main.ts` is authoritative, and `--help` prints the same list. Read it rather than trusting a list in docs. `vertex-ai`, `openrouter`, `ollama-cloud` and `qwen` accounts are not in it; add those from the dashboard, or through the HTTP API (`POST /api/accounts/<type>`; for `qwen`, the device flow at `POST /api/oauth/qwen/init`).
 - List: `bun run cli --list`
 - Remove: `bun run cli --remove <name>`
 - Reauth: `bun run cli --reauthenticate <name>` (preserves metadata, auto-notifies servers)
