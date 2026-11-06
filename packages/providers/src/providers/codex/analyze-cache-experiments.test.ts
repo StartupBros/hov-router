@@ -157,8 +157,10 @@ describe("analyzeCodexCacheExperiments", () => {
 		// medianCachedReadPct/p25CachedReadPct/p75CachedReadPct alongside the
 		// pre-existing weighted figure, so consumers keyed on the row shape
 		// need to know the shape changed. Bumped again (4 -> 5) when the
-		// `websocket` report left with the Codex WebSocket transport.
-		expect(report.schemaVersion).toBe(5);
+		// `websocket` report left with the Codex WebSocket transport, and
+		// (5 -> 6) when the pacing-bypass and explicit-breakpoint canaries
+		// were retired.
+		expect(report.schemaVersion).toBe(6);
 		expect(report.turnState.assignmentCounts).toEqual({
 			observe: 0,
 			control: 1,
@@ -276,7 +278,10 @@ describe("analyzeCodexCacheExperiments", () => {
 		);
 	});
 
-	test("groups the pacing canary by arm, model, turn, and gap band", () => {
+	test("groups every observed Codex attempt by model, turn, and gap band", () => {
+		// No record carries the retired pacing_canary field: every observed
+		// Codex attempt is a pacing sample, and the pacing cohort supplies its
+		// turn and gap.
 		const report = analyzeCodexCacheExperiments([
 			{
 				trace_schema_version: 9,
@@ -287,9 +292,7 @@ describe("analyzeCodexCacheExperiments", () => {
 				attempt_ordinal: 1,
 				attempt_cause: "initial",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "bypass",
 				pacing_cohort_id: "0123456789abcdef",
-				pacing_action: "bypassed",
 			},
 			{
 				trace_schema_version: 9,
@@ -311,9 +314,7 @@ describe("analyzeCodexCacheExperiments", () => {
 				attempt_ordinal: 1,
 				attempt_cause: "initial",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "bypass",
 				pacing_cohort_id: "0123456789abcdef",
-				pacing_action: "bypassed",
 			},
 			{
 				trace_schema_version: 9,
@@ -331,21 +332,19 @@ describe("analyzeCodexCacheExperiments", () => {
 				trace_schema_version: 9,
 				phase: "request",
 				ts: "2026-07-21T00:00:10.000Z",
-				request_id: "private-control-first",
-				attempt_id: "private-control-attempt",
+				request_id: "private-fallback-first",
+				attempt_id: "private-fallback-attempt",
 				attempt_ordinal: 2,
 				attempt_cause: "model_fallback",
 				model_out: "gpt-5.5",
-				pacing_canary: "control",
 				pacing_cohort_id: "fedcba9876543210",
-				pacing_action: "paced",
 			},
 			{
 				trace_schema_version: 9,
 				phase: "response",
 				ts: "2026-07-21T00:00:12.000Z",
-				request_id: "private-control-first",
-				attempt_id: "private-control-attempt",
+				request_id: "private-fallback-first",
+				attempt_id: "private-fallback-attempt",
 				stop_reason: "end_turn",
 				input_tokens: 200,
 				cache_read_input_tokens: 100,
@@ -353,18 +352,11 @@ describe("analyzeCodexCacheExperiments", () => {
 			},
 		]);
 
-		expect(report.schemaVersion).toBe(5);
+		expect(report.schemaVersion).toBe(6);
 		expect(report.attribution.unit).toBe("final_observed_codex_attempt");
 		expect(report.attribution.pacingWaitMs).toBe("schema20_request_receipt");
-		expect(report.pacing.assignmentCounts).toEqual({
-			treatment: 2,
-			control: 1,
-			ineligible: 0,
-			unassigned: 0,
-		});
 		expect(report.pacing.rows).toMatchObject([
 			{
-				arm: "control",
 				model: "gpt-5.5",
 				turn: "first_observed",
 				gapBand: "unknown",
@@ -394,17 +386,11 @@ describe("analyzeCodexCacheExperiments", () => {
 					observedCodexFallbackAttempts: 1,
 				},
 				pacing: {
-					pacedRequests: 1,
-					bypassedRequests: 0,
-					crossoverPacedRequests: 0,
-					unknownRequests: 0,
 					waitMsAvailableRequests: 0,
-					waitMsUnavailableRequests: 1,
+					waitMsUnavailableRequests: 0,
 				},
-				actions: { paced: 1 },
 			},
 			{
-				arm: "treatment",
 				model: "gpt-5.6-sol",
 				turn: "first_observed",
 				gapBand: "unknown",
@@ -433,18 +419,8 @@ describe("analyzeCodexCacheExperiments", () => {
 					finalObservedCodexAttemptFallbacks: 0,
 					observedCodexFallbackAttempts: 0,
 				},
-				pacing: {
-					pacedRequests: 0,
-					bypassedRequests: 1,
-					crossoverPacedRequests: 0,
-					unknownRequests: 0,
-					waitMsAvailableRequests: 0,
-					waitMsUnavailableRequests: 0,
-				},
-				actions: { bypassed: 1 },
 			},
 			{
-				arm: "treatment",
 				model: "gpt-5.6-sol",
 				turn: "follow_up_observed",
 				gapBand: "from_1m_to_5m",
@@ -473,46 +449,38 @@ describe("analyzeCodexCacheExperiments", () => {
 					finalObservedCodexAttemptFallbacks: 0,
 					observedCodexFallbackAttempts: 0,
 				},
-				pacing: {
-					pacedRequests: 0,
-					bypassedRequests: 1,
-					crossoverPacedRequests: 0,
-					unknownRequests: 0,
-					waitMsAvailableRequests: 0,
-					waitMsUnavailableRequests: 0,
-				},
-				actions: { bypassed: 1 },
 			},
 		]);
 	});
 
-	test("accepts future explicit-breakpoint fields and buckets unknown values", () => {
+	test("ignores the retired pacing and breakpoint canary fields on old records", () => {
 		const report = analyzeCodexCacheExperiments([
 			{
-				trace_schema_version: 9,
+				trace_schema_version: 22,
 				phase: "request",
 				ts: "2026-07-21T01:00:00Z",
-				request_id: "request-treatment",
-				attempt_id: "attempt-treatment",
+				request_id: "request-legacy",
+				attempt_id: "attempt-legacy",
 				model_out: "gpt-5.6-sol",
+				pacing_canary: "bypass",
+				pacing_action: "crossover-paced",
 				explicit_breakpoint_canary: "treatment",
 				explicit_breakpoint_cohort_id: "aaaaaaaaaaaaaaaa",
 				explicit_breakpoint_action: "placed_source_marker",
-				pacing_action: "crossover-paced",
 			},
 			{
-				trace_schema_version: 9,
+				trace_schema_version: 22,
 				phase: "response",
 				ts: "2026-07-21T01:00:05Z",
-				request_id: "request-treatment",
-				attempt_id: "attempt-treatment",
+				request_id: "request-legacy",
+				attempt_id: "attempt-legacy",
 				stop_reason: "end_turn",
 				input_tokens: 500,
 				cache_read_input_tokens: 250,
 				cache_creation_input_tokens: 10,
 			},
 			{
-				trace_schema_version: 9,
+				trace_schema_version: 22,
 				phase: "request",
 				ts: "2026-07-21T01:01:00Z",
 				request_id: "request-unknown",
@@ -524,7 +492,7 @@ describe("analyzeCodexCacheExperiments", () => {
 				pacing_action: "future-pacing-private",
 			},
 			{
-				trace_schema_version: 9,
+				trace_schema_version: 22,
 				phase: "response",
 				ts: "not-a-timestamp",
 				request_id: "request-unknown",
@@ -532,33 +500,60 @@ describe("analyzeCodexCacheExperiments", () => {
 				stop_reason: "error",
 				error_status: "500",
 			},
-		]);
+		] as Parameters<typeof analyzeCodexCacheExperiments>[0]);
 
-		expect(report.explicitBreakpoint.assignmentCounts).toEqual({
-			treatment: 1,
-			control: 0,
-			ineligible: 0,
-			unassigned: 1,
-		});
-		expect(report.explicitBreakpoint.rows[0]).toMatchObject({
-			arm: "treatment",
+		expect("explicitBreakpoint" in report).toBe(false);
+		expect(Object.keys(report.pacing)).toEqual(["rows"]);
+		expect(report.pacing.rows).toHaveLength(2);
+		const [legacy, unknown] = report.pacing.rows;
+		expect(Object.keys(legacy ?? {}).sort()).toEqual([
+			"cache",
+			"elapsed",
+			"gapBand",
+			"joinedObservedCodexResponses",
+			"model",
+			"observedCodexAttempts",
+			"outcomes",
+			"pacing",
+			"turn",
+			"unjoinedObservedCodexAttempts",
+		]);
+		expect(Object.keys(legacy?.pacing ?? {}).sort()).toEqual([
+			"p50WaitMs",
+			"p95WaitMs",
+			"receiptCounts",
+			"waitMsAvailableRequests",
+			"waitMsUnavailableRequests",
+		]);
+		expect(legacy).toMatchObject({
 			model: "gpt-5.6-sol",
-			turn: "first_observed",
+			turn: "unknown",
 			gapBand: "unknown",
-			actions: { placed_source_marker: 1 },
-			pacing: {
-				crossoverPacedRequests: 1,
-				waitMsUnavailableRequests: 1,
-			},
+			observedCodexAttempts: 1,
+			joinedObservedCodexResponses: 1,
+			// The retired pacing_action no longer implies an expected wait; only a
+			// pacing role does.
+			pacing: { waitMsUnavailableRequests: 0 },
 		});
-		expect(report.explicitBreakpoint.rows[1]).toMatchObject({
-			arm: "unassigned",
+		expect(unknown).toMatchObject({
 			model: "other_or_custom",
 			turn: "unknown",
 			gapBand: "unknown",
-			actions: { unknown: 1 },
 			elapsed: { availableResponses: 0, unavailableResponses: 1 },
 		});
+		const text = formatCacheExperimentReport(report);
+		expect(text).toContain("CACHE PACING (all observed Codex attempts):");
+		for (const retired of [
+			"PACING BYPASS CANARY",
+			"EXPLICIT BREAKPOINT CANARY",
+			"placed_source_marker",
+			"crossover",
+			"future-action-private",
+			"future-pacing-private",
+			"raw-private-cohort",
+		]) {
+			expect(text).not.toContain(retired);
+		}
 	});
 
 	test("computes weighted cache and elapsed percentiles across matching rows", () => {
@@ -576,9 +571,7 @@ describe("analyzeCodexCacheExperiments", () => {
 						request_id: requestId,
 						attempt_id: attemptId,
 						model_out: "gpt-5.6-sol",
-						pacing_canary: "bypass",
 						pacing_cohort_id: cohort,
-						pacing_action: "bypassed",
 					},
 					{
 						trace_schema_version: 10,
@@ -619,55 +612,13 @@ describe("analyzeCodexCacheExperiments", () => {
 		});
 	});
 
-	test("recognizes explicit-breakpoint control and ineligible actions", () => {
-		const report = analyzeCodexCacheExperiments([
-			{
-				trace_schema_version: 10,
-				phase: "request",
-				ts: "2026-07-21T03:00:00Z",
-				request_id: "control-request",
-				attempt_id: "control-attempt",
-				model_out: "gpt-5.6-sol",
-				explicit_breakpoint_canary: "control",
-				explicit_breakpoint_cohort_id: "cccccccccccccccc",
-				explicit_breakpoint_action: "skip_rotated_cache_key_attempt",
-			},
-			{
-				trace_schema_version: 10,
-				phase: "request",
-				ts: "2026-07-21T03:00:00Z",
-				request_id: "ineligible-request",
-				attempt_id: "ineligible-attempt",
-				model_out: "gpt-5.6-sol",
-				explicit_breakpoint_canary: "ineligible",
-				explicit_breakpoint_cohort_id: "dddddddddddddddd",
-				explicit_breakpoint_action: "skip_non_gpt56",
-			},
-		]);
-
-		expect(report.explicitBreakpoint.assignmentCounts).toEqual({
-			treatment: 0,
-			control: 1,
-			ineligible: 1,
-			unassigned: 0,
-		});
-		expect(report.explicitBreakpoint.rows[0]?.actions).toEqual({
-			skip_rotated_cache_key_attempt: 1,
-		});
-		expect(report.explicitBreakpoint.rows[1]?.actions).toEqual({
-			skip_non_gpt56: 1,
-		});
-	});
-
 	test("formats only aggregate, privacy-safe experiment data", () => {
 		const sensitive = {
 			phase: "request" as const,
 			request_id: "raw-request-id",
 			attempt_id: "raw-attempt-id",
 			model_out: "gpt-5.6-sol",
-			pacing_canary: "bypass",
 			pacing_cohort_id: "0123456789abcdef",
-			pacing_action: "bypassed",
 			prompt_cache_key_id: "raw-cache-key",
 			history_tool_calls: [
 				{ name: "private-tool", arg_preview: "private-tool-arguments" },
@@ -700,9 +651,7 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "cap-request",
 				attempt_id: "cap-attempt",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "control",
 				pacing_cohort_id: "aaaaaaaaaaaaaaaa",
-				pacing_action: "paced",
 				pacing_role: "follower",
 				pacing_wait_ms: 60_000,
 				pacing_release_reason: "cap",
@@ -734,7 +683,7 @@ describe("analyzeCodexCacheExperiments", () => {
 		});
 	});
 
-	test("classifies pre-schema-20 pacing receipts as unknown", () => {
+	test("classifies pre-schema-20 pacing receipts as unknown without expecting a wait", () => {
 		const report = analyzeCodexCacheExperiments([
 			{
 				trace_schema_version: 19,
@@ -743,21 +692,20 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "legacy-request",
 				attempt_id: "legacy-attempt",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "control",
 				pacing_cohort_id: "bbbbbbbbbbbbbbbb",
-				pacing_action: "paced",
 			},
 		]);
 
 		expect(report.pacing.rows[0]?.pacing.receiptCounts.unknown).toBe(1);
-		expect(report.pacing.rows[0]?.pacing.waitMsUnavailableRequests).toBe(1);
+		// A pre-schema-20 record cannot carry a pacing role, so no wait receipt
+		// is expected from it.
+		expect(report.pacing.rows[0]?.pacing.waitMsUnavailableRequests).toBe(0);
 	});
 
 	test("keeps the legacy analyzer output unchanged unless explicitly selected", () => {
 		const records = [
 			{
 				phase: "request" as const,
-				pacing_canary: "bypass",
 				pacing_cohort_id: "0123456789abcdef",
 			},
 		];
@@ -779,9 +727,7 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "after-midnight",
 				attempt_id: "after-midnight-attempt",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "control",
 				pacing_cohort_id: "eeeeeeeeeeeeeeee",
-				pacing_action: "paced",
 			},
 			{
 				trace_schema_version: 10,
@@ -798,9 +744,7 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "observed-follow-up",
 				attempt_id: "observed-follow-up-attempt",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "control",
 				pacing_cohort_id: "eeeeeeeeeeeeeeee",
-				pacing_action: "paced",
 			},
 		]);
 
@@ -836,7 +780,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "http-400-request",
 				attempt_id: "http-400-attempt",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "bypass",
 				pacing_cohort_id: "ffffffffffffffff",
 			},
 			{
@@ -865,7 +808,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "logical-a",
 				attempt_id: "shared-attempt",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "control",
 				pacing_cohort_id: "1111111111111111",
 			},
 			{
@@ -893,7 +835,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "official-sol",
 				attempt_id: "official-sol-attempt",
 				model_out: "gpt-5.6-sol-2026-05-13",
-				pacing_canary: "control",
 				pacing_cohort_id: "2222222222222222",
 			},
 			{
@@ -902,7 +843,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "official-terra",
 				attempt_id: "official-terra-attempt",
 				model_out: "gpt-5.6-terra",
-				pacing_canary: "control",
 				pacing_cohort_id: "3333333333333333",
 			},
 			{
@@ -911,7 +851,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "official-luna",
 				attempt_id: "official-luna-attempt",
 				model_out: "gpt-5.6-luna-2026-05-13",
-				pacing_canary: "control",
 				pacing_cohort_id: "4444444444444444",
 			},
 			{
@@ -920,7 +859,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "custom",
 				attempt_id: "custom-attempt",
 				model_out: secretModel,
-				pacing_canary: "control",
 				pacing_cohort_id: "5555555555555555",
 			},
 		]);
@@ -949,7 +887,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: requestId,
 				attempt_id: `${requestId}-attempt`,
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "control",
 				pacing_cohort_id: cohort,
 			},
 			{
@@ -1001,25 +938,6 @@ describe("analyzeCodexCacheExperiments", () => {
 		expect(text).not.toContain("Infinity");
 	});
 
-	test("accepts the schema-v10 non-eligible-endpoint action", () => {
-		const report = analyzeCodexCacheExperiments([
-			{
-				trace_schema_version: 10,
-				phase: "request",
-				request_id: "endpoint-skip",
-				attempt_id: "endpoint-skip-attempt",
-				model_out: "gpt-5.6-sol",
-				explicit_breakpoint_canary: "ineligible",
-				explicit_breakpoint_cohort_id: "7777777777777777",
-				explicit_breakpoint_action: "skip_non_eligible_endpoint",
-			},
-		]);
-
-		expect(report.explicitBreakpoint.rows[0]?.actions).toEqual({
-			skip_non_eligible_endpoint: 1,
-		});
-	});
-
 	test("does not count an ambiguous legacy zero cache write as a measurement", () => {
 		const report = analyzeCodexCacheExperiments([
 			{
@@ -1029,7 +947,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "legacy-zero",
 				attempt_id: "legacy-zero-attempt",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "control",
 			},
 			{
 				trace_schema_version: 10,
@@ -1049,7 +966,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				request_id: "measured-zero",
 				attempt_id: "measured-zero-attempt",
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "control",
 			},
 			{
 				trace_schema_version: 11,
@@ -1080,8 +996,8 @@ describe("analyzeCodexCacheExperiments", () => {
 // directions. Quoting one alone is exactly how the #174 readout got
 // retracted. These tests pin the per-response distribution stats
 // (medianCachedReadPct / p25CachedReadPct / p75CachedReadPct) that must ship
-// alongside weightedCachedReadPct on both CacheExperimentRow.cache (pacing +
-// explicitBreakpoint) and TurnStateExperimentRow.cache.
+// alongside weightedCachedReadPct on both CacheExperimentRow.cache (pacing)
+// and TurnStateExperimentRow.cache.
 describe("cache-read distribution stats (median alongside weighted)", () => {
 	function pacingPair(
 		requestId: string,
@@ -1100,8 +1016,6 @@ describe("cache-read distribution stats (median alongside weighted)", () => {
 				attempt_ordinal: 1,
 				attempt_cause: "initial" as const,
 				model_out: "gpt-5.6-sol",
-				pacing_canary: "bypass",
-				pacing_action: "bypassed",
 			},
 			{
 				trace_schema_version: 19 as const,
@@ -1136,13 +1050,10 @@ describe("cache-read distribution stats (median alongside weighted)", () => {
 		const records = [
 			...small,
 			...huge,
-			// Same underlying attempts, tagged for the explicit-breakpoint and
-			// turn-state dimensions too, so all three row shapes are exercised
-			// against one dataset.
+			// Same underlying attempts, tagged for the turn-state dimension too,
+			// so both row shapes are exercised against one dataset.
 		].map((record) => ({
 			...record,
-			explicit_breakpoint_canary: "treatment",
-			explicit_breakpoint_action: "placed_source_marker",
 			...(record.phase === "request"
 				? {
 						codex_turn_state_arm: "treatment" as const,
@@ -1155,12 +1066,6 @@ describe("cache-read distribution stats (median alongside weighted)", () => {
 
 		expect(report.pacing.rows).toHaveLength(1);
 		expect(report.pacing.rows[0]?.cache).toMatchObject({
-			measuredResponses: 5,
-			weightedCachedReadPct: 0.4,
-			medianCachedReadPct: 90,
-		});
-		expect(report.explicitBreakpoint.rows).toHaveLength(1);
-		expect(report.explicitBreakpoint.rows[0]?.cache).toMatchObject({
 			measuredResponses: 5,
 			weightedCachedReadPct: 0.4,
 			medianCachedReadPct: 90,
