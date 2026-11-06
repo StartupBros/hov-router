@@ -230,7 +230,7 @@ rollback_on_failure() {
 	fi
 
 	if [[ "$status" -ne 0 && "$BACKEND_DEPLOYMENT" == "1" ]]; then
-		echo "HARD FAILURE: backend transaction did not verify; retained guard remains fenced. Inspect $HANDOFF_DIR/intent.json before recovery." >&2
+		echo "HARD FAILURE: backend deployment failed; the runner owns any handoff already started. Check the transactionId and phase in $HANDOFF_DIR/intent.json and the health git_sha before recovery: rolled_back means the runner restored the previous build, held means the guard stays fenced for operator recovery, and a phase before committed rolls back once the runner's commit wait expires." >&2
 		PIN_ROLLBACK_ARMED=0
 	fi
 	if [[ "$status" -ne 0 && "$PIN_ROLLBACK_ARMED" == "1" ]]; then

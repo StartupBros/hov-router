@@ -4158,3 +4158,137 @@ describe("request_backend_handoff temporary command ownership", () => {
 		);
 	}
 });
+
+describe("request_backend_handoff when the transaction client gets no reply", () => {
+	// The client gives up after 3 s (exit 70) while the server can still be
+	// hashing the candidate. On 2026-11-06 a loaded host took longer than that;
+	// the server accepted and started the handoff with no deploy left to commit it.
+	function handoff(clientBody: string[], waitSeconds: number) {
+		const dir = tempDir();
+		const binDir = join(dir, "bin");
+		mkdirSync(binDir);
+		const sudo = join(binDir, "sudo");
+		writeFileSync(
+			sudo,
+			[
+				"#!/usr/bin/env bash",
+				'case "$1" in',
+				'mktemp|node|rm) exec "$@" ;;',
+				"*) exit 99 ;;",
+				"esac",
+				"",
+			].join("\n"),
+		);
+		chmodSync(sudo, 0o755);
+		const binary = join(dir, "candidate");
+		const pin = join(dir, "candidate.conf");
+		writeFileSync(binary, "candidate fixture\n");
+		writeFileSync(pin, "pin fixture\n");
+		writeFileSync(
+			join(dir, "runtime.json"),
+			JSON.stringify({
+				generation: 7,
+				oldPid: 12345,
+				oldStartTime: "45678",
+				pinHash: "a".repeat(64),
+				ingress: { runner: "fixture" },
+			}),
+		);
+		const commandLog = join(dir, "command-path");
+		const client = join(dir, "client.cjs");
+		writeFileSync(
+			client,
+			[
+				'const fs = require("node:fs"), path = require("node:path");',
+				"const [, , , dir, commandPath] = process.argv;",
+				`fs.writeFileSync(${JSON.stringify(commandLog)}, commandPath);`,
+				'const ours = JSON.parse(fs.readFileSync(commandPath, "utf8")).manifest.transactionId;',
+				'const intentFile = path.join(dir, "intent.json");',
+				"const intent = (transactionId, phase) => JSON.stringify({ version: 1, phase, manifest: { transactionId } });",
+				...clientBody,
+			].join("\n"),
+		);
+		const started = performance.now();
+		const result = bash(
+			[
+				"set -euo pipefail",
+				"export TMPDIR=/tmp",
+				`export PATH=${shellQuote(shellPath(binDir))}:$PATH`,
+				`source ${shellQuote(helperScriptForShell)}`,
+				`request_backend_handoff ${[dir, client, binary, "b".repeat(40), pin, "c".repeat(64)].map((value) => shellQuote(shellPath(value))).join(" ")} ${waitSeconds}`,
+			].join("\n"),
+		);
+		const elapsedMs = performance.now() - started;
+		expect(existsSync(readFileSync(commandLog, "utf8"))).toBe(false);
+		return {
+			result,
+			elapsedMs,
+			stderr: capturedOutput(result.stderr, "stderr"),
+		};
+	}
+
+	test("continues when the server already recorded this transaction", () => {
+		const { result, stderr } = handoff(
+			[
+				'fs.writeFileSync(intentFile, intent(ours, "prepared"));',
+				"process.exit(70);",
+			],
+			5,
+		);
+		expect(result.exitCode, stderr).toBe(0);
+		expect(stderr).toContain("accepted although the client got no reply");
+	}, 60_000);
+
+	test("waits for a server that records this transaction after the client gave up", () => {
+		const { result, stderr } = handoff(
+			[
+				'const late = "setTimeout(() => require(\\"node:fs\\").writeFileSync(" + JSON.stringify(intentFile) + ", " + JSON.stringify(intent(ours, "prepared")) + "), 1500)";',
+				'require("node:child_process").spawn(process.execPath, ["-e", late], { detached: true, stdio: "ignore" }).unref();',
+				"process.exit(70);",
+			],
+			30,
+		);
+		expect(result.exitCode, stderr).toBe(0);
+		expect(stderr).toContain("accepted although the client got no reply");
+	}, 60_000);
+
+	test("fails after the wait when the server never records this transaction", () => {
+		const { result, stderr } = handoff(["process.exit(70);"], 2);
+		expect(result.exitCode, stderr).toBe(70);
+	}, 60_000);
+
+	test("fails when intent.json names a different transaction", () => {
+		const { result, stderr } = handoff(
+			[
+				'fs.writeFileSync(intentFile, intent("11111111-1111-4111-8111-111111111111", "prepared"));',
+				"process.exit(70);",
+			],
+			2,
+		);
+		expect(result.exitCode, stderr).toBe(70);
+	}, 60_000);
+
+	test("fails without waiting out the budget when this transaction rolled back", () => {
+		const { result, elapsedMs, stderr } = handoff(
+			[
+				'fs.writeFileSync(intentFile, intent(ours, "rolled_back"));',
+				"process.exit(70);",
+			],
+			60,
+		);
+		expect(result.exitCode, stderr).toBe(70);
+		expect(elapsedMs).toBeLessThan(30_000);
+	}, 60_000);
+
+	test("does not consult intent.json after a definitive refusal", () => {
+		const { result, elapsedMs, stderr } = handoff(
+			[
+				'fs.writeFileSync(intentFile, intent(ours, "prepared"));',
+				"process.exit(1);",
+			],
+			60,
+		);
+		expect(result.exitCode, stderr).toBe(1);
+		expect(elapsedMs).toBeLessThan(30_000);
+	}, 60_000);
+});
