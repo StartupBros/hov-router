@@ -29,12 +29,19 @@ import { resolveNodeExecutable } from "./node-runtime";
 // keeps streaming while its replacement serves new work. The drain handoff is
 // covered by ccflare-deployment-rehearsal.test.ts.
 const root = join(import.meta.dir, "..", "..");
-async function port() {
-	const s = net.createServer();
-	await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
-	const p = (s.address() as net.AddressInfo).port;
-	await new Promise<void>((r) => s.close(() => r()));
-	return p;
+// Hold every socket open until all ports are read: closing one before binding
+// the next lets the kernel hand the same port out twice (PR #746's CI run got
+// guard and upstream both on 37065).
+async function ports(count: number) {
+	const servers = Array.from({ length: count }, () => net.createServer());
+	await Promise.all(
+		servers.map((s) => new Promise<void>((r) => s.listen(0, "127.0.0.1", r))),
+	);
+	const found = servers.map((s) => (s.address() as net.AddressInfo).port);
+	await Promise.all(
+		servers.map((s) => new Promise<void>((r) => s.close(() => r()))),
+	);
+	return found;
 }
 async function until<T>(f: () => T | Promise<T>) {
 	for (let i = 0; i < 400; i++) {
@@ -70,8 +77,7 @@ test.each([
 		control = join(dir, "transaction"),
 		pin = join(dir, "pin"),
 		node = resolveNodeExecutable(),
-		guardPort = await port(),
-		upstreamPort = await port(),
+		[guardPort, upstreamPort] = await ports(2),
 		streamRelease = join(dir, "release-stream"),
 		events = join(dir, "events");
 	const oldSource = "a".repeat(40),

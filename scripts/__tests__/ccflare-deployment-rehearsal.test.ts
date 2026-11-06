@@ -25,12 +25,19 @@ import {
 } from "../ccflare-deployment-transaction.mjs";
 import { resolveNodeExecutable } from "./node-runtime";
 const root = join(import.meta.dir, "..", "..");
-async function port() {
-	const s = net.createServer();
-	await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
-	const p = (s.address() as net.AddressInfo).port;
-	await new Promise<void>((r) => s.close(() => r()));
-	return p;
+// Hold every socket open until all ports are read: closing one before binding
+// the next lets the kernel hand the same port out twice (PR #746's CI run got
+// guard and upstream both on 37065).
+async function ports(count: number) {
+	const servers = Array.from({ length: count }, () => net.createServer());
+	await Promise.all(
+		servers.map((s) => new Promise<void>((r) => s.listen(0, "127.0.0.1", r))),
+	);
+	const found = servers.map((s) => (s.address() as net.AddressInfo).port);
+	await Promise.all(
+		servers.map((s) => new Promise<void>((r) => s.close(() => r()))),
+	);
+	return found;
 }
 async function until<T>(f: () => T | Promise<T>) {
 	for (let i = 0; i < 300; i++) {
@@ -55,8 +62,7 @@ test.each([
 		control = join(dir, "transaction"),
 		pin = join(dir, "pin"),
 		node = resolveNodeExecutable(),
-		guardPort = await port(),
-		upstreamPort = await port();
+		[guardPort, upstreamPort] = await ports(2);
 	const oldSource = "a".repeat(40),
 		newSource = "b".repeat(40),
 		schema = "c".repeat(64);
