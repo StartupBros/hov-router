@@ -20,7 +20,6 @@ import type {
 	EffectiveComboMemberView,
 	EffectiveComboRoutingView,
 } from "@better-ccflare/types";
-import { useModelOptions } from "../../hooks/queries";
 import {
 	routingAvailabilityLabel,
 	routingReasonLabel,
@@ -189,13 +188,6 @@ export function familyModelOptions(
 		seen.add(id);
 		return true;
 	});
-}
-
-/** Family-filtered choices backed by the shared live-catalog hook. */
-export function useFamilyModelOptions(
-	family: ComboFamily,
-): FamilyRoutingModelOption[] {
-	return familyModelOptions(family, useModelOptions());
 }
 
 /** Result of resolving whether a stored policy model value is a bare family alias. */

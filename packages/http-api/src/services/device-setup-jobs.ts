@@ -34,12 +34,6 @@ const TERMINAL_ACCOUNT_STATUSES = new Set<DeviceSetupJobStatus>([
 	"complete",
 	"complete_with_actions",
 ]);
-const TERMINAL_JOB_STATUSES = new Set<DeviceSetupJobStatus>([
-	"complete",
-	"complete_with_actions",
-	"authorization_error",
-	"expired",
-]);
 const OUTCOME_REASONS = new Set<DeviceSetupRoutingOutcomeReason>([
 	"applied",
 	"already-effective",
@@ -1058,10 +1052,4 @@ export function createDeviceSetupCoordinator(
 	dependencies: DeviceSetupCoordinatorDependencies,
 ): DeviceSetupCoordinator {
 	return new DurableDeviceSetupCoordinator(dependencies);
-}
-
-export function isTerminalDeviceSetupJob(
-	status: DeviceSetupJobStatus,
-): boolean {
-	return TERMINAL_JOB_STATUSES.has(status);
 }

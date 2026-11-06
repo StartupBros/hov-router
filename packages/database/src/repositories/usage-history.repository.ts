@@ -1,6 +1,5 @@
 import type {
 	CanonicalUsageWindow,
-	PredictionPoint,
 	UsageSnapshotRow,
 } from "@better-ccflare/types";
 import { getCleanupBatchSize } from "../adapters/bun-sql-adapter";
@@ -497,15 +496,4 @@ export class UsageHistoryRepository extends BaseRepository<UsageSnapshotRow> {
 			pacer,
 		);
 	}
-}
-
-/** Convenience: map snapshot rows to prediction/chart points. */
-export function toPredictionPoints(
-	rows: UsageSnapshotRow[],
-): PredictionPoint[] {
-	return rows.map((r) => ({
-		t: r.timestamp,
-		utilization: r.utilization,
-		resetsAt: r.resetsAt,
-	}));
 }

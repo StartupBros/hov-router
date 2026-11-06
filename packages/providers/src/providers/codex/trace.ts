@@ -203,10 +203,6 @@ export function summarizeCodexTransform(
 	};
 }
 
-export function codexTraceEnabled(): boolean {
-	return Boolean(process.env[CODEX_TRACE_DIR_ENV]);
-}
-
 interface TraceInputs {
 	/** Logical client request identity, shared by all physical transports. */
 	requestId?: string;

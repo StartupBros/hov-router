@@ -49,21 +49,3 @@ export async function checkReauthNeeded(
 	console.log("\n💡 Or run the health check for detailed information:");
 	console.log("  bun run cli --token-health");
 }
-
-/**
- * Quick status check for scripts
- */
-export async function getTokenHealthStatus(dbOps: DatabaseOperations): Promise<{
-	healthy: boolean;
-	needsReauth: number;
-	expired: number;
-}> {
-	const accounts = await dbOps.getAllAccounts();
-	const healthReport = checkAllAccountsHealth(accounts);
-
-	return {
-		healthy: healthReport.summary.requiresReauth === 0,
-		needsReauth: healthReport.summary.requiresReauth,
-		expired: healthReport.summary.expired,
-	};
-}

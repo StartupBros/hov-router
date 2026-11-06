@@ -82,20 +82,6 @@ export async function listApiKeys(
 }
 
 /**
- * Get details about a specific API key
- */
-export async function getApiKey(
-	dbOps: DatabaseOperations,
-	name: string,
-): Promise<ApiKeyResponse | null> {
-	const apiKey = await dbOps.getApiKeyByName(name);
-	if (!apiKey) {
-		return null;
-	}
-	return toApiKeyResponse(apiKey);
-}
-
-/**
  * Disable an API key (soft delete)
  */
 export async function disableApiKey(

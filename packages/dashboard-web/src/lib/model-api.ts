@@ -124,8 +124,3 @@ export function parseModelList(value: string): string[] {
 export function formatModelList(models: string[]): string {
 	return models.join(", ");
 }
-
-/** First model in the list — the one the proxy tries before the others. */
-export function firstModelInList(value: string): string {
-	return parseModelList(value)[0] ?? "";
-}

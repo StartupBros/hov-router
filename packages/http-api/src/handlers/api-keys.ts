@@ -3,12 +3,11 @@ import {
 	disableApiKey,
 	enableApiKey,
 	generateApiKey,
-	getApiKey,
 	listApiKeys,
 	updateApiKeyRole,
 } from "@better-ccflare/cli-commands";
 import type { DatabaseOperations } from "@better-ccflare/database";
-import { BadRequest, NotFound } from "@better-ccflare/errors";
+import { BadRequest } from "@better-ccflare/errors";
 import type { ApiKeyGenerationResult } from "@better-ccflare/types";
 import { errorResponse } from "../utils/http-error";
 
@@ -63,29 +62,6 @@ export function createApiKeysGenerateHandler(dbOps: DatabaseOperations) {
 
 			return new Response(JSON.stringify({ success: true, data: response }), {
 				status: 201,
-				headers: { "Content-Type": "application/json" },
-			});
-		} catch (error) {
-			return errorResponse(error);
-		}
-	};
-}
-
-export function createApiKeyGetHandler(dbOps: DatabaseOperations) {
-	return (name: string): Response => {
-		try {
-			const apiKey = getApiKey(dbOps, name);
-			if (!apiKey) {
-				return errorResponse(NotFound(`API key '${name}' not found`));
-			}
-
-			const response = {
-				success: true,
-				data: apiKey,
-			};
-
-			return new Response(JSON.stringify(response), {
-				status: 200,
 				headers: { "Content-Type": "application/json" },
 			});
 		} catch (error) {
