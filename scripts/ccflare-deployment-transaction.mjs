@@ -157,6 +157,30 @@ export function prepareTransaction(dir, m, r) {
 	durableWrite(join(dir, "intent.json"), intent);
 	return intent;
 }
+// A prepared transaction no deploy acknowledged goes back to the intent it
+// replaced (none, attached or rolled_back), so the runner never hands off
+// with no deploy to commit. Refuses unless intent.json still holds exactly
+// that prepared transaction.
+export function abandonPreparedTransaction(dir, transactionId, replaced) {
+	const current = readIntent(dir);
+	if (
+		current.phase !== "prepared" ||
+		current.manifest?.transactionId !== transactionId
+	)
+		throw new Error("prepared transaction changed; not rewinding");
+	const path = join(dir, "intent.json");
+	if (replaced) {
+		durableWrite(path, replaced);
+		return;
+	}
+	unlinkSync(path);
+	const fd = openSync(dir, "r");
+	try {
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+}
 // Legacy handoff: draining -> old_reaped. Overlap handoff: quiescing ->
 // old_quiesced, where the old backend keeps finishing its streams after it
 // releases the port; quiescing -> old_reaped is its fallback.
@@ -356,29 +380,64 @@ export function recoverTransaction(dir, exists = processExists, configured) {
 		return { action: "hold", reason: "identity_unavailable" };
 	}
 }
+// Deploy control is three newline-delimited messages: the prepare command,
+// the listener's prepared reply, and the client's acknowledgement, which the
+// listener answers with a handoff confirmation before it exits 67. Preparing
+// hashes the whole candidate and fsyncs the intent, which took longer than
+// the client's old 3 s timeout on a loaded host on 2026-11-06.
+const CLIENT_IDLE_TIMEOUT_MS = 60_000;
+const COMMAND_TIMEOUT_MS = 2_000;
+const ACK_TIMEOUT_MS = 30_000;
+// Resolves with the listener's refusal or its handoff confirmation. Anything
+// else rejects: the deploy then cannot tell whether a handoff started.
 async function client(dir, command) {
 	const runtime = JSON.parse(readFileSync(join(dir, "runtime.json"), "utf8"));
 	const control = runtime.controlDir;
 	const secret = readFileSync(join(control, "deploy-credential"), "utf8");
 	return await new Promise((resolve, reject) => {
 		const socket = net.createConnection(join(control, "deploy.sock"));
-		let input = "";
-		socket.setTimeout(3000, () =>
-			socket.destroy(new Error("transaction command timeout")),
+		let input = "",
+			reply = null,
+			settled = false;
+		const finish = (error, value) => {
+			if (settled) return;
+			settled = true;
+			socket.destroy();
+			if (error) reject(error);
+			else resolve(value);
+		};
+		socket.setTimeout(CLIENT_IDLE_TIMEOUT_MS, () =>
+			finish(new Error("transaction command timeout")),
 		);
-		socket.on("error", reject);
+		socket.on("error", (error) => finish(error));
+		socket.on("close", () =>
+			finish(
+				new Error(reply ? "handoff not confirmed" : "transaction reply missing"),
+			),
+		);
 		socket.on("connect", () =>
 			socket.write(JSON.stringify({ ...command, secret }) + "\n"),
 		);
 		socket.on("data", (c) => {
 			input += c;
-			if (input.length > 4096) socket.destroy(new Error("response too large"));
-		});
-		socket.on("end", () => {
-			try {
-				resolve(JSON.parse(input));
-			} catch (e) {
-				reject(e);
+			if (input.length > 4096) return finish(new Error("response too large"));
+			for (let end = input.indexOf("\n"); end >= 0; end = input.indexOf("\n")) {
+				let message;
+				try {
+					message = JSON.parse(input.slice(0, end));
+				} catch (error) {
+					return finish(error);
+				}
+				input = input.slice(end + 1);
+				if (reply)
+					return message.ok && message.phase === "handoff"
+						? finish(null, message)
+						: finish(new Error("handoff not confirmed"));
+				reply = message;
+				if (!message.ok) return finish(null, message);
+				socket.write(
+					JSON.stringify({ ack: command.manifest?.transactionId }) + "\n",
+				);
 			}
 		});
 	});
@@ -398,7 +457,8 @@ async function serve(dir, runtime) {
 	try {
 		unlinkSync(socketPath);
 	} catch {}
-	let accepted = false;
+	// The prepared transaction awaiting its acknowledgement or handed off.
+	let pending = null;
 	const sockets = new Set();
 	const server = net.createServer((socket) => {
 		if (sockets.size >= 4) {
@@ -407,46 +467,93 @@ async function serve(dir, runtime) {
 		}
 		sockets.add(socket);
 		let input = "",
-			handled = false;
-		const timer = setTimeout(() => socket.destroy(), 2000);
+			stage = "command",
+			ours = null,
+			timer;
+		const bound = (ms) => {
+			clearTimeout(timer);
+			timer = setTimeout(() => socket.destroy(), ms);
+		};
+		bound(COMMAND_TIMEOUT_MS);
 		socket.on("error", () => {});
 		socket.on("close", () => {
 			clearTimeout(timer);
 			sockets.delete(socket);
+			if (stage === "committed") {
+				server.close(() => process.exit(67));
+				for (const other of sockets) other.destroy();
+			} else if (stage === "awaiting_ack") {
+				try {
+					abandonPreparedTransaction(
+						dir,
+						ours.manifest.transactionId,
+						ours.replaced,
+					);
+					pending = null;
+				} catch (error) {
+					// Something else wrote intent.json: keep refusing prepares.
+					console.error(`backend transaction held: ${error.message}`);
+				}
+			}
 		});
 		socket.on("data", (chunk) => {
-			if (handled) return;
+			if (stage !== "command" && stage !== "awaiting_ack") return;
 			input += chunk;
 			if (input.length > 8192) {
 				socket.destroy();
 				return;
 			}
-			if (!input.includes("\n")) return;
-			handled = true;
+			const end = input.indexOf("\n");
+			if (end < 0) return;
+			const line = input.slice(0, end);
+			input = input.slice(end + 1);
+			if (stage === "awaiting_ack") {
+				let ack;
+				try {
+					ack = JSON.parse(line).ack;
+				} catch {}
+				if (ack !== ours.manifest.transactionId) {
+					socket.destroy();
+					return;
+				}
+				stage = "committed";
+				socket.end(JSON.stringify({ ok: true, phase: "handoff" }) + "\n");
+				bound(COMMAND_TIMEOUT_MS);
+				return;
+			}
 			let result;
 			try {
-				const command = JSON.parse(input);
+				const command = JSON.parse(line);
 				const a = Buffer.from(String(command.secret || "")),
 					b = Buffer.from(credential);
 				if (a.length !== b.length || !timingSafeEqual(a, b))
 					throw new Error("unauthorized");
-				if (command.command !== "prepare" || accepted)
+				if (command.command !== "prepare" || pending)
 					throw new Error("invalid control phase");
+				const replaced = existsSync(join(dir, "intent.json"))
+					? readIntent(dir)
+					: null;
 				prepareTransaction(dir, command.manifest, runtime);
-				accepted = true;
+				ours = pending = { manifest: command.manifest, replaced };
+				stage = "awaiting_ack";
 				result = { ok: true, phase: "prepared" };
 			} catch {
+				stage = "rejected";
 				result = { ok: false, reason: "manifest_or_control_rejected" };
 			}
-			socket.end(JSON.stringify(result));
-			if (accepted)
-				socket.on("close", () => {
-					server.close(() => process.exit(67));
-					for (const other of sockets) if (other !== socket) other.destroy();
-				});
+			if (stage === "awaiting_ack") {
+				socket.write(JSON.stringify(result) + "\n");
+				bound(ACK_TIMEOUT_MS);
+			} else {
+				socket.end(JSON.stringify(result) + "\n");
+				bound(COMMAND_TIMEOUT_MS);
+			}
 		});
 	});
 	server.listen(socketPath, () => chmodSync(socketPath, 0o600));
+	// A signal leaves an unacknowledged prepare on disk on purpose: the RSS
+	// recycle path retires this listener and adopts a prepared intent whose
+	// reply was lost, and boot recovery restarts the previous build.
 	for (const sig of ["SIGTERM", "SIGINT"])
 		process.on(sig, () => {
 			server.close();

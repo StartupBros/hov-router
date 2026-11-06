@@ -1,9 +1,18 @@
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	writeFileSync,
+	readFileSync,
+	rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
+	abandonPreparedTransaction,
 	prepareTransaction,
 	advanceTransaction,
 	recoverTransaction,
@@ -581,3 +590,391 @@ test.each([
 		rmSync(f.dir, { recursive: true, force: true });
 	}
 });
+
+// A handoff starts only for a deploy that got the prepared reply: the client
+// acknowledges it, the listener confirms, and only then exits 67. On
+// 2026-11-06 a client timed out during a slow prepare and the listener started
+// a handoff no deploy was left to commit.
+const transactionModule = fileURLToPath(
+	new URL("../ccflare-deployment-transaction.mjs", import.meta.url),
+);
+let nodeBinary: string | undefined;
+function node() {
+	nodeBinary ??= resolveNodeExecutable();
+	return nodeBinary;
+}
+async function until(check: () => boolean, ms = 5000) {
+	const deadline = performance.now() + ms;
+	while (!check()) {
+		if (performance.now() > deadline) throw new Error("condition timed out");
+		await Bun.sleep(20);
+	}
+}
+function priorIntent(f: ReturnType<typeof fixture>) {
+	return {
+		version: 1,
+		phase: "attached",
+		manifest: {
+			...f.manifest,
+			transactionId: "0f0e0d0c-0b0a-4908-8706-050403020100",
+		},
+		previous: f.runtime,
+		updatedAt: "2026-11-06T00:00:00.000Z",
+	};
+}
+function intentAt(dir: string) {
+	const path = join(dir, "intent.json");
+	return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
+}
+function runClient(handoff: string, command: string) {
+	return new Promise<{ code: number | null; stdout: string; stderr: string }>(
+		(resolve) => {
+			const child = spawn(node(), [
+				transactionModule,
+				"client",
+				handoff,
+				command,
+			]);
+			let stdout = "",
+				stderr = "";
+			child.stdout.on("data", (c) => {
+				stdout += c;
+			});
+			child.stderr.on("data", (c) => {
+				stderr += c;
+			});
+			child.on("close", (code) => resolve({ code, stdout, stderr }));
+		},
+	);
+}
+async function startListener(prior?: object) {
+	const f = fixture();
+	const control = mkdtempSync(join(tmpdir(), "ccflare-control-"));
+	const handoff = join(f.dir, "handoff");
+	mkdirSync(handoff, { mode: 0o700 });
+	if (prior) durableWrite(join(handoff, "intent.json"), prior);
+	const input = join(f.dir, "runtime-input.json");
+	writeFileSync(input, JSON.stringify({ ...f.runtime, controlDir: control }));
+	const child = spawn(node(), [transactionModule, "serve", handoff, input], {
+		stdio: ["ignore", "ignore", "pipe"],
+	});
+	let stderr = "";
+	child.stderr.on("data", (c) => {
+		stderr += c;
+	});
+	const exited = new Promise<number | null>((resolve) =>
+		child.on("exit", (code) => resolve(code)),
+	);
+	await until(
+		() =>
+			existsSync(join(control, "deploy.sock")) &&
+			existsSync(join(handoff, "runtime.json")),
+	);
+	const command = join(f.dir, "command.json");
+	writeFileSync(
+		command,
+		JSON.stringify({ command: "prepare", manifest: f.manifest }),
+	);
+	const commandLine = () =>
+		JSON.stringify({
+			command: "prepare",
+			manifest: f.manifest,
+			secret: readFileSync(join(control, "deploy-credential"), "utf8"),
+		}) + "\n";
+	return {
+		f,
+		control,
+		handoff,
+		child,
+		exited,
+		command,
+		commandLine,
+		stderr: () => stderr,
+		cleanup() {
+			child.kill("SIGKILL");
+			rmSync(f.dir, { recursive: true, force: true });
+			rmSync(control, { recursive: true, force: true });
+		},
+	};
+}
+function connect(control: string) {
+	const socket = net.createConnection(join(control, "deploy.sock"));
+	const lines: string[] = [];
+	let buffer = "",
+		closed = false;
+	socket.on("data", (c) => {
+		buffer += c;
+		for (let end = buffer.indexOf("\n"); end >= 0; end = buffer.indexOf("\n")) {
+			lines.push(buffer.slice(0, end));
+			buffer = buffer.slice(end + 1);
+		}
+	});
+	socket.on("error", () => {});
+	socket.on("close", () => {
+		closed = true;
+	});
+	const connected = new Promise<void>((resolve) =>
+		socket.on("connect", () => resolve()),
+	);
+	return {
+		socket,
+		connected,
+		isClosed: () => closed,
+		async nextLine(ms = 5000) {
+			await until(() => lines.length > 0 || closed, ms);
+			return lines.shift();
+		},
+	};
+}
+async function exitWithin(exited: Promise<number | null>, ms: number) {
+	return await Promise.race([
+		exited,
+		Bun.sleep(ms).then(() => "running" as const),
+	]);
+}
+
+test("an unacknowledged prepare rewinds to the intent it replaced", () => {
+	const f = fixture();
+	try {
+		const prior = priorIntent(f);
+		durableWrite(join(f.dir, "intent.json"), prior);
+		prepareTransaction(f.dir, f.manifest, f.runtime);
+		abandonPreparedTransaction(f.dir, f.manifest.transactionId, prior);
+		expect(intentAt(f.dir)).toEqual(prior);
+		expect(prepareTransaction(f.dir, f.manifest, f.runtime).phase).toBe(
+			"prepared",
+		);
+	} finally {
+		rmSync(f.dir, { recursive: true, force: true });
+	}
+});
+
+test("an unacknowledged first prepare leaves no intent behind", () => {
+	const f = fixture();
+	try {
+		prepareTransaction(f.dir, f.manifest, f.runtime);
+		abandonPreparedTransaction(f.dir, f.manifest.transactionId, null);
+		expect(existsSync(join(f.dir, "intent.json"))).toBe(false);
+	} finally {
+		rmSync(f.dir, { recursive: true, force: true });
+	}
+});
+
+test("a rewind refuses an intent that is no longer this prepared transaction", () => {
+	const f = fixture();
+	try {
+		prepareTransaction(f.dir, f.manifest, f.runtime);
+		expect(() =>
+			abandonPreparedTransaction(
+				f.dir,
+				"11111111-1111-4111-8111-111111111111",
+				null,
+			),
+		).toThrow("prepared transaction changed");
+		expect(intentAt(f.dir).phase).toBe("prepared");
+		advanceTransaction(f.dir, "prepared", "draining");
+		expect(() =>
+			abandonPreparedTransaction(f.dir, f.manifest.transactionId, null),
+		).toThrow("prepared transaction changed");
+		expect(intentAt(f.dir).phase).toBe("draining");
+	} finally {
+		rmSync(f.dir, { recursive: true, force: true });
+	}
+});
+
+test("the listener starts the handoff only after the client acknowledges the prepared reply", async () => {
+	const l = await startListener();
+	try {
+		const client = await runClient(l.handoff, l.command);
+		expect(client.code, client.stderr).toBe(0);
+		expect(JSON.parse(client.stdout)).toEqual({ ok: true, phase: "handoff" });
+		expect(await exitWithin(l.exited, 5000)).toBe(67);
+		expect(intentAt(l.handoff)).toMatchObject({
+			phase: "prepared",
+			manifest: { transactionId: l.f.manifest.transactionId },
+		});
+	} finally {
+		l.cleanup();
+	}
+}, 20_000);
+
+test("a client that leaves after the prepared reply without acknowledging starts no handoff", async () => {
+	const l = await startListener(priorIntent(fixture()));
+	try {
+		const prior = intentAt(l.handoff);
+		const c = connect(l.control);
+		await c.connected;
+		c.socket.write(l.commandLine());
+		expect(JSON.parse(String(await c.nextLine()))).toEqual({
+			ok: true,
+			phase: "prepared",
+		});
+		c.socket.destroy();
+		await until(
+			() => JSON.stringify(intentAt(l.handoff)) === JSON.stringify(prior),
+		);
+		expect(await exitWithin(l.exited, 500)).toBe("running");
+		// The rewound listener takes the next deploy.
+		const client = await runClient(l.handoff, l.command);
+		expect(client.code, client.stderr + l.stderr()).toBe(0);
+		expect(await exitWithin(l.exited, 5000)).toBe(67);
+	} finally {
+		l.cleanup();
+	}
+}, 20_000);
+
+test("a client that disconnects before the reply arrives starts no handoff", async () => {
+	const l = await startListener();
+	try {
+		const c = connect(l.control);
+		await c.connected;
+		c.socket.write(l.commandLine());
+		c.socket.destroy();
+		expect(await exitWithin(l.exited, 1000)).toBe("running");
+		expect(intentAt(l.handoff)).toBeNull();
+		const client = await runClient(l.handoff, l.command);
+		expect(client.code, client.stderr + l.stderr()).toBe(0);
+		expect(await exitWithin(l.exited, 5000)).toBe(67);
+	} finally {
+		l.cleanup();
+	}
+}, 20_000);
+
+test("an acknowledgement for another transaction starts no handoff", async () => {
+	const l = await startListener();
+	try {
+		const c = connect(l.control);
+		await c.connected;
+		c.socket.write(l.commandLine());
+		expect(JSON.parse(String(await c.nextLine()))).toMatchObject({ ok: true });
+		c.socket.write(
+			JSON.stringify({ ack: "11111111-1111-4111-8111-111111111111" }) + "\n",
+		);
+		expect(await c.nextLine()).toBeUndefined();
+		await until(() => intentAt(l.handoff) === null);
+		expect(await exitWithin(l.exited, 500)).toBe("running");
+	} finally {
+		l.cleanup();
+	}
+}, 20_000);
+
+test("the command timer does not cut off an acknowledgement sent after 2 s", async () => {
+	const l = await startListener();
+	try {
+		const c = connect(l.control);
+		await c.connected;
+		await Bun.sleep(1500);
+		c.socket.write(l.commandLine());
+		expect(JSON.parse(String(await c.nextLine()))).toMatchObject({ ok: true });
+		await Bun.sleep(1000);
+		c.socket.write(JSON.stringify({ ack: l.f.manifest.transactionId }) + "\n");
+		expect(JSON.parse(String(await c.nextLine()))).toEqual({
+			ok: true,
+			phase: "handoff",
+		});
+		expect(await exitWithin(l.exited, 5000)).toBe(67);
+	} finally {
+		l.cleanup();
+	}
+}, 20_000);
+
+test("a rejected prepare exits 1 and leaves the listener waiting", async () => {
+	const l = await startListener();
+	try {
+		writeFileSync(
+			l.command,
+			JSON.stringify({
+				command: "prepare",
+				manifest: { ...l.f.manifest, expectedGeneration: 2 },
+			}),
+		);
+		const client = await runClient(l.handoff, l.command);
+		expect(client.code, client.stderr).toBe(1);
+		expect(JSON.parse(client.stdout)).toMatchObject({ ok: false });
+		expect(intentAt(l.handoff)).toBeNull();
+		expect(await exitWithin(l.exited, 500)).toBe("running");
+	} finally {
+		l.cleanup();
+	}
+}, 20_000);
+
+// The real client against a scripted server, to control timing.
+async function fakeListener(
+	onCommand: (socket: net.Socket) => void,
+	onAck: (socket: net.Socket, ack: unknown) => void,
+) {
+	const dir = mkdtempSync(join(tmpdir(), "ccflare-client-"));
+	const control = join(dir, "control");
+	mkdirSync(control);
+	writeFileSync(join(dir, "runtime.json"), JSON.stringify({ controlDir: control }));
+	writeFileSync(join(control, "deploy-credential"), "fixture-secret");
+	const transactionId = "af4c1b62-5a6c-4c2f-8d3a-2f5e7c8d9a01";
+	const command = join(dir, "command.json");
+	writeFileSync(
+		command,
+		JSON.stringify({ command: "prepare", manifest: { transactionId } }),
+	);
+	const server = net.createServer((socket) => {
+		let buffer = "",
+			seen = 0;
+		socket.on("error", () => {});
+		socket.on("data", (c) => {
+			buffer += c;
+			for (let end = buffer.indexOf("\n"); end >= 0; end = buffer.indexOf("\n")) {
+				const line = buffer.slice(0, end);
+				buffer = buffer.slice(end + 1);
+				if (seen++ === 0) onCommand(socket);
+				else onAck(socket, JSON.parse(line));
+			}
+		});
+	});
+	await new Promise<void>((resolve) =>
+		server.listen(join(control, "deploy.sock"), resolve),
+	);
+	return {
+		dir,
+		command,
+		transactionId,
+		async close() {
+			await new Promise((resolve) => server.close(resolve));
+			rmSync(dir, { recursive: true, force: true });
+		},
+	};
+}
+
+test("the client waits out a prepare slower than the old 3 s timeout", async () => {
+	let ack: unknown;
+	const fake = await fakeListener(
+		(socket) =>
+			setTimeout(
+				() => socket.write(JSON.stringify({ ok: true, phase: "prepared" }) + "\n"),
+				3500,
+			),
+		(socket, message) => {
+			ack = message;
+			socket.end(JSON.stringify({ ok: true, phase: "handoff" }) + "\n");
+		},
+	);
+	try {
+		const client = await runClient(fake.dir, fake.command);
+		expect(client.code, client.stderr).toBe(0);
+		expect(ack).toEqual({ ack: fake.transactionId });
+	} finally {
+		await fake.close();
+	}
+}, 20_000);
+
+test("the client exits 70 when the listener never confirms the handoff", async () => {
+	const fake = await fakeListener(
+		(socket) =>
+			socket.write(JSON.stringify({ ok: true, phase: "prepared" }) + "\n"),
+		(socket) => socket.end(),
+	);
+	try {
+		const client = await runClient(fake.dir, fake.command);
+		expect(client.code, client.stderr).toBe(70);
+		expect(client.stderr).toContain("handoff not confirmed");
+	} finally {
+		await fake.close();
+	}
+}, 20_000);

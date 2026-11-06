@@ -4160,9 +4160,10 @@ describe("request_backend_handoff temporary command ownership", () => {
 });
 
 describe("request_backend_handoff when the transaction client gets no reply", () => {
-	// The client gives up after 3 s (exit 70) while the server can still be
-	// hashing the candidate. On 2026-11-06 a loaded host took longer than that;
-	// the server accepted and started the handoff with no deploy left to commit it.
+	// Exit 70 means the client never got the server's handoff confirmation. The
+	// server starts a handoff only after it reads the client's acknowledgement,
+	// and rewinds a prepared transaction nobody acknowledged, so only a phase
+	// past prepared proves the runner is handing off to this deploy.
 	function handoff(clientBody: string[], waitSeconds: number) {
 		const dir = tempDir();
 		const binDir = join(dir, "bin");
@@ -4227,29 +4228,45 @@ describe("request_backend_handoff when the transaction client gets no reply", ()
 		};
 	}
 
-	test("continues when the server already recorded this transaction", () => {
+	test("continues when the runner already started this transaction's handoff", () => {
 		const { result, stderr } = handoff(
 			[
-				'fs.writeFileSync(intentFile, intent(ours, "prepared"));',
+				'fs.writeFileSync(intentFile, intent(ours, "quiescing"));',
 				"process.exit(70);",
 			],
 			5,
 		);
 		expect(result.exitCode, stderr).toBe(0);
-		expect(stderr).toContain("accepted although the client got no reply");
+		expect(stderr).toContain(
+			"handoff started although the client got no confirmation",
+		);
 	}, 60_000);
 
-	test("waits for a server that records this transaction after the client gave up", () => {
+	test("does not continue while this transaction is only prepared", () => {
 		const { result, stderr } = handoff(
 			[
-				'const late = "setTimeout(() => require(\\"node:fs\\").writeFileSync(" + JSON.stringify(intentFile) + ", " + JSON.stringify(intent(ours, "prepared")) + "), 1500)";',
+				'fs.writeFileSync(intentFile, intent(ours, "prepared"));',
+				"process.exit(70);",
+			],
+			2,
+		);
+		expect(result.exitCode, stderr).toBe(70);
+		expect(stderr).not.toContain("got no confirmation");
+	}, 60_000);
+
+	test("waits for a runner that starts this transaction's handoff after the client gave up", () => {
+		const { result, stderr } = handoff(
+			[
+				'const late = "setTimeout(() => require(\\"node:fs\\").writeFileSync(" + JSON.stringify(intentFile) + ", " + JSON.stringify(intent(ours, "quiescing")) + "), 1500)";',
 				'require("node:child_process").spawn(process.execPath, ["-e", late], { detached: true, stdio: "ignore" }).unref();',
 				"process.exit(70);",
 			],
 			30,
 		);
 		expect(result.exitCode, stderr).toBe(0);
-		expect(stderr).toContain("accepted although the client got no reply");
+		expect(stderr).toContain(
+			"handoff started although the client got no confirmation",
+		);
 	}, 60_000);
 
 	test("fails after the wait when the server never records this transaction", () => {
@@ -4260,7 +4277,7 @@ describe("request_backend_handoff when the transaction client gets no reply", ()
 	test("fails when intent.json names a different transaction", () => {
 		const { result, stderr } = handoff(
 			[
-				'fs.writeFileSync(intentFile, intent("11111111-1111-4111-8111-111111111111", "prepared"));',
+				'fs.writeFileSync(intentFile, intent("11111111-1111-4111-8111-111111111111", "quiescing"));',
 				"process.exit(70);",
 			],
 			2,
@@ -4283,7 +4300,7 @@ describe("request_backend_handoff when the transaction client gets no reply", ()
 	test("does not consult intent.json after a definitive refusal", () => {
 		const { result, elapsedMs, stderr } = handoff(
 			[
-				'fs.writeFileSync(intentFile, intent(ours, "prepared"));',
+				'fs.writeFileSync(intentFile, intent(ours, "quiescing"));',
 				"process.exit(1);",
 			],
 			60,
