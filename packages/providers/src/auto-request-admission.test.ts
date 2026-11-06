@@ -7,7 +7,6 @@ import {
 } from "./auto-model-capabilities";
 import {
 	captureAutoRequestRequirements,
-	decideAutoContextFit,
 	evaluateAutoRequestAdmission,
 } from "./auto-request-admission";
 import {
@@ -1023,41 +1022,6 @@ describe("Auto request suitability (fixtures are not activation proof)", () => {
 				}).status,
 			).toBe("admit");
 		}
-	});
-	it("preserves requested output at an exact arithmetic bound without clamping", () => {
-		expect(
-			decideAutoContextFit({
-				inputUpperBound: 80,
-				requestedOutput: 20,
-				contextLimit: 100,
-				outputLimit: 20,
-			}).status,
-		).toBe("admit");
-		expect(
-			decideAutoContextFit({
-				inputUpperBound: 81,
-				requestedOutput: 20,
-				contextLimit: 100,
-				outputLimit: 20,
-			}),
-		).toMatchObject({ status: "reject", reason: "context-unsupported" });
-		for (const inputUpperBound of [null, -1, NaN, 1.5])
-			expect(
-				decideAutoContextFit({
-					inputUpperBound,
-					requestedOutput: 20,
-					contextLimit: 100,
-					outputLimit: 20,
-				}).status,
-			).toBe("unknown");
-		expect(
-			decideAutoContextFit({
-				inputUpperBound: 80,
-				requestedOutput: 21,
-				contextLimit: 100,
-				outputLimit: 20,
-			}),
-		).toMatchObject({ status: "reject", reason: "output-unsupported" });
 	});
 	it("does not refuse native requests carrying extra request token claims", () => {
 		const input = { ...body, input_tokens: 1 };

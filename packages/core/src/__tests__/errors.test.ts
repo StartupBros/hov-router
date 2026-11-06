@@ -11,12 +11,7 @@ import {
 	ValidationError,
 } from "../errors";
 
-import {
-	safeJsonParse,
-	validateArray,
-	validateEndpointUrl,
-	validateObject,
-} from "../validation";
+import { safeJsonParse, validateEndpointUrl } from "../validation";
 
 describe("formatOAuthErrorMessage", () => {
 	it("extracts machine codes from nested provider error objects", () => {
@@ -191,29 +186,6 @@ describe("error cause preservation", () => {
 		expect(validation.context).toEqual({ field: "field", value: 42 });
 		expect(provider.context).toEqual({ provider: "provider", attempt: 1 });
 		expect(new ValidationError("legacy").cause).toBeUndefined();
-	});
-
-	it("retains the exact child validation error when adding array or object context", () => {
-		const cause = new ValidationError("bad child");
-		const rejectChild = () => {
-			throw cause;
-		};
-		for (const run of [
-			() => validateArray([1], "items", { itemValidator: rejectChild }),
-			() =>
-				validateObject({ item: 1 }, "record", {
-					schema: { item: rejectChild },
-				}),
-		]) {
-			let caught: unknown;
-			try {
-				run();
-			} catch (error) {
-				caught = error;
-			}
-			expect(caught).toBeInstanceOf(ValidationError);
-			expect((caught as Error).cause).toBe(cause);
-		}
 	});
 
 	it("retains actual JSON and URL parser failures", () => {

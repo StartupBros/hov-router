@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-	CodexCacheDiagnostics,
-	reconcileCacheUsage,
-} from "./cache-diagnostics";
+import { CodexCacheDiagnostics } from "./cache-diagnostics";
 import { sanitizeCacheFacts } from "./cache-telemetry";
 
 const body = {
@@ -142,35 +139,6 @@ describe("strict cache cohort qualification", () => {
 			upstream_cache_residency: "unknown",
 			usage_input_semantics: "physical_inclusive",
 		});
-	});
-	test("usage reconciles only exact one-attempt populations with additive logical fields", () => {
-		const physical = {
-			gateway_request_digest: "a".repeat(64),
-			gateway_attempt_digest: "b".repeat(64),
-			input_tokens: 1000,
-			cached_tokens: 900,
-		};
-		const logical = {
-			gateway_request_digest: "a".repeat(64),
-			gateway_attempt_digest: "b".repeat(64),
-			physical_attempt_count: 1,
-			input_tokens: 100,
-			cache_read_input_tokens: 900,
-			cache_creation_input_tokens: 0,
-		};
-		expect(reconcileCacheUsage(physical, logical)).toBe("matched");
-		expect(
-			reconcileCacheUsage(physical, { ...logical, physical_attempt_count: 2 }),
-		).toBe("unknown");
-		expect(
-			reconcileCacheUsage(physical, {
-				...logical,
-				gateway_attempt_digest: "c".repeat(64),
-			}),
-		).toBe("unknown");
-		expect(
-			reconcileCacheUsage(physical, { ...logical, input_tokens: 1000 }),
-		).toBe("mismatch");
 	});
 	test("incomplete, missing-dispatch and native-continuation predecessors cannot qualify", () => {
 		const h = harness();

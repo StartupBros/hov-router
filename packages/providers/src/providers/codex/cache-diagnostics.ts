@@ -688,38 +688,3 @@ export class CodexCacheDiagnostics {
 		this.abort(requestId, "coverage_gap", { gap_reason: "missing_terminal" });
 	}
 }
-
-/** Physical counters are inclusive; logical persisted Anthropic counters are additive.
- * A logical retry aggregate must never be compared with one physical terminal. */
-export function reconcileCacheUsage(
-	physical: Facts,
-	logical: Facts,
-): "matched" | "mismatch" | "unknown" {
-	if (
-		logical.physical_attempt_count !== 1 ||
-		!["gateway_request_digest", "gateway_attempt_digest"].every(
-			(name) =>
-				typeof physical[name] === "string" &&
-				/^[0-9a-f]{64}$/.test(physical[name] as string) &&
-				physical[name] === logical[name],
-		)
-	)
-		return "unknown";
-	const total = count(physical.input_tokens),
-		read = count(physical.cached_tokens),
-		input = count(logical.input_tokens),
-		logicalRead = count(logical.cache_read_input_tokens),
-		write = count(logical.cache_creation_input_tokens);
-	if (
-		total === null ||
-		read === null ||
-		input === null ||
-		logicalRead === null ||
-		write === null ||
-		read > total
-	)
-		return "unknown";
-	return input + logicalRead + write === total && logicalRead === read
-		? "matched"
-		: "mismatch";
-}

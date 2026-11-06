@@ -62,14 +62,6 @@ export const HOSTED_SEARCH_LIFECYCLE_LIMITS = Object.freeze({
 	liveSemanticBytes: 1024 * 1024,
 });
 
-export const HOSTED_SEARCH_SOURCE_RECONCILIATION_POLICY = Object.freeze({
-	scope: "call",
-	identity: "source_ref",
-	duplicate: "exact_visible_evidence_only",
-	conflict: "reject",
-	ordinal: "first_finalized_result_order",
-} as const);
-
 export type HostedSearchResultErrorCode =
 	| "too_many_requests"
 	| "invalid_tool_input"
@@ -126,11 +118,6 @@ export interface HostedSearchSourceInput {
 
 export interface HostedSearchSource extends HostedSearchSourceInput {
 	readonly ordinal: number;
-}
-
-export interface HostedSearchSourceIdentity {
-	readonly callId: string;
-	readonly sourceRef: string;
 }
 
 export interface HostedSearchCitationInput {
@@ -760,20 +747,6 @@ function citationIdentityBytes(
 
 function freezeEvent<T extends HostedSearchLifecycleEvent>(event: T): T {
 	return Object.freeze(event);
-}
-
-export function canonicalHostedSearchSourceIdentity(
-	value: HostedSearchSourceIdentity,
-): HostedSearchSourceIdentity {
-	try {
-		const record = asRecord(value);
-		return Object.freeze({
-			callId: normalizeCallId(ownValue(record, "callId")),
-			sourceRef: normalizeSourceRef(ownValue(record, "sourceRef")),
-		});
-	} catch (error) {
-		sanitizeCaught(error, "invalid_event");
-	}
 }
 
 export class HostedSearchLifecycleReducer {
