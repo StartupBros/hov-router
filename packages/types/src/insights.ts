@@ -163,28 +163,10 @@ export interface CacheParityDriftEntry {
 	acknowledgement: CacheParityDeclaredAcknowledgement | null;
 }
 
-/**
- * The parity floor the system is expected to hold, based on the currently
- * achieved and measured level (see cache-parity-expectations.ts for the
- * measured source figures) — deliberately NOT Anthropic's cache-read level,
- * which remains the longer-range #174 target.
- */
-export interface CacheParityDeclaredFloor {
-	weightedCacheReadPercent: number;
-	zeroHitRatePercent: number;
-}
-
 export interface CacheParityDriftReport {
 	declaredDefaults: CacheParityPolicySnapshot;
 	/** Levers whose live value differs from its declared default. */
 	deviations: CacheParityDriftEntry[];
-	floor: CacheParityDeclaredFloor;
-	/**
-	 * True when the authoritative seven-day Codex follow-up metrics meet
-	 * `floor`. False (not null) when evidence is missing, so a regression
-	 * cannot silently read as "held".
-	 */
-	floorHeld: boolean;
 }
 
 export interface CacheParityResponse {

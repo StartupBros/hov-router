@@ -167,6 +167,9 @@ describe("buildCacheParityResponse", () => {
 				(deviation) => deviation.lever === "turnStatePercent",
 			),
 		).toBeUndefined();
-		expect(data.driftReport.floorHeld).toBe(true);
+		expect(Object.keys(data.driftReport).sort()).toEqual([
+			"declaredDefaults",
+			"deviations",
+		]);
 	});
 });

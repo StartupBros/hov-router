@@ -252,9 +252,6 @@ export function buildCacheParityResponse(
 ): CacheParityResponse {
 	const advisory24h = buildWindow(input.rows24h, input.policy);
 	const authoritative7d = buildWindow(input.rows7d, input.policy);
-	const codexFollowUpMetrics = authoritative7d.providers.find(
-		(provider) => provider.key === "codex",
-	)?.followUps;
 	return {
 		generatedAt: input.generatedAt,
 		verdict: authoritative7d.verdict,
@@ -268,10 +265,7 @@ export function buildCacheParityResponse(
 			explicitBreakpoint: "not_requested",
 		},
 		policy: input.policy,
-		driftReport: buildCacheParityDriftReport(
-			input.policy,
-			codexFollowUpMetrics,
-		),
+		driftReport: buildCacheParityDriftReport(input.policy),
 		windows: { advisory24h, authoritative7d },
 	};
 }
