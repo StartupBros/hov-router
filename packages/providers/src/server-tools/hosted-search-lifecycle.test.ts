@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-	canonicalHostedSearchSourceIdentity,
 	createHostedSearchLifecycleReducer,
 	HOSTED_SEARCH_LIFECYCLE_LIMITS,
-	HOSTED_SEARCH_SOURCE_RECONCILIATION_POLICY,
 	HostedSearchLifecycleError,
 	type HostedSearchLifecycleErrorCode,
 	type HostedSearchResultErrorCode,
@@ -173,25 +171,6 @@ describe("hosted-search lifecycle semantics", () => {
 		expect(Object.isFrozen(event)).toBe(true);
 		expect(Object.isFrozen(event.sources)).toBe(true);
 		expect(Object.isFrozen(event.sources[0])).toBe(true);
-	});
-
-	test("exports one call-scoped exact source reconciliation policy", () => {
-		const identity = canonicalHostedSearchSourceIdentity({
-			callId: callId("identity"),
-			sourceRef: "src-7",
-		});
-		expect(identity).toEqual({
-			callId: callId("identity"),
-			sourceRef: "src-7",
-		});
-		expect(Object.isFrozen(identity)).toBe(true);
-		expect(HOSTED_SEARCH_SOURCE_RECONCILIATION_POLICY).toEqual({
-			scope: "call",
-			identity: "source_ref",
-			duplicate: "exact_visible_evidence_only",
-			conflict: "reject",
-			ordinal: "first_finalized_result_order",
-		});
 	});
 
 	test("deduplicates an exact sourceRef observation and rejects conflicting reuse", () => {

@@ -30,44 +30,6 @@ import type {
 	ProviderServerToolCapabilityMaterializationContext,
 } from "./types";
 
-/** Arithmetic only, NOT an evidence issuer or an admission override. The caller
- * supplies an accounted input budget (which may be an explicitly labelled estimate).
- * requestedOutput is an accounting reserve, not a wire-enforced generation cap.
- * A catalog outputLimit checks that reserve, but does not replace it in the budget.
- * Estimated fit does not guarantee actual generation stays within the reserve.
- */
-export function decideAutoContextFit(input: {
-	inputUpperBound: unknown;
-	requestedOutput: unknown;
-	contextLimit: unknown;
-	outputLimit: unknown;
-	/** Explicitly delegates acceptance/length control for a null ceiling; keeps the full reserve. */
-	outputLimitMode?: "provider-managed";
-}): QualityAdmissionDecision {
-	const output = positiveSafeCapacity(input.requestedOutput);
-	const ceiling = positiveSafeCapacity(input.outputLimit);
-	if (output !== null && ceiling !== null && output > ceiling)
-		return { status: "reject", reason: "output-unsupported" };
-	const context = positiveSafeCapacity(input.contextLimit);
-	const tokens = input.inputUpperBound;
-	if (
-		context === null ||
-		output === null ||
-		(ceiling === null &&
-			!(
-				input.outputLimitMode === "provider-managed" &&
-				input.outputLimit === null
-			)) ||
-		typeof tokens !== "number" ||
-		!Number.isSafeInteger(tokens) ||
-		tokens < 0
-	)
-		return { status: "unknown", reason: "input-accounting-unknown" };
-	return tokens > context - output
-		? { status: "reject", reason: "context-unsupported" }
-		: { status: "admit" };
-}
-
 const requirementsBrand: unique symbol = Symbol("AutoRequestRequirements");
 export interface AutoRequestRequirements {
 	readonly [requirementsBrand]: true;

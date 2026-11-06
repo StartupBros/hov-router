@@ -69,14 +69,6 @@ class ValidationCache {
 		}
 		this.cache.set(key, value);
 	}
-
-	clear(): void {
-		this.cache.clear();
-	}
-
-	size(): number {
-		return this.cache.size;
-	}
 }
 
 // Global validation cache instance
@@ -611,20 +603,4 @@ export function validatePathOrThrow(
 		throw new Error(result.reason || "Path validation failed");
 	}
 	return result.resolvedPath;
-}
-
-/**
- * Clear the validation cache
- * Useful for testing or when path configurations change
- */
-export function clearValidationCache(): void {
-	validationCache.clear();
-}
-
-/**
- * Get current cache size for monitoring
- * @returns Number of cached validation results
- */
-export function getValidationCacheSize(): number {
-	return validationCache.size();
 }
