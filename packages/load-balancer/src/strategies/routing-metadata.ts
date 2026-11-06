@@ -132,16 +132,6 @@ export function commitStrategyCandidateOrder(
 	return candidates.map((candidate) => candidate.account);
 }
 
-/** Remove accounts that the request planner has found hard-ineligible. */
-export function filterHardExcludedAccounts(
-	accounts: Account[],
-	meta?: RequestMeta,
-): Account[] {
-	const excluded = meta?.hardExcludedAccountIds;
-	if (!excluded || excluded.size === 0) return accounts;
-	return accounts.filter((account) => !excluded.has(account.id));
-}
-
 /**
  * Compare the immutable outer routing class shared by all strategies.
  *
@@ -220,33 +210,6 @@ export function compareStrategyCandidates(
 	return pressureA && pressureB
 		? PRESSURE_RANK[pressureB.band] - PRESSURE_RANK[pressureA.band]
 		: 0;
-}
-
-/**
- * Whether a sticky owner remains in the best account's priority/pressure
- * class. Incomparable or missing pressure deliberately falls back to legacy
- * same-priority stickiness rather than manufacturing an ordering.
- */
-export function isSameRoutingClass(
-	account: Account,
-	best: Account,
-	meta?: RequestMeta,
-): boolean {
-	if (account.priority !== best.priority) return false;
-
-	const accountPressure = meta?.quotaPressureByAccountId?.get(account.id);
-	const bestPressure = meta?.quotaPressureByAccountId?.get(best.id);
-	if (
-		!accountPressure ||
-		!bestPressure ||
-		accountPressure.comparisonKey === null ||
-		bestPressure.comparisonKey === null ||
-		accountPressure.comparisonKey !== bestPressure.comparisonKey
-	) {
-		return true;
-	}
-
-	return accountPressure.band === bestPressure.band;
 }
 
 /** Route tier and fallback rung, independent of account quota pressure. */

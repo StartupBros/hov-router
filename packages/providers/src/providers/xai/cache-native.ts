@@ -74,12 +74,6 @@ export function isCacheFlightRecorderEnabled(
 export type { XaiCacheCanaryFields, XaiCacheOutcome };
 export { cacheOutcomeFromTokens, formatXaiCacheCanary, isOfficialXaiEndpoint };
 
-export function isValidSessionId(
-	sessionId: string | null | undefined,
-): sessionId is string {
-	return typeof sessionId === "string" && SESSION_UUID_RE.test(sessionId);
-}
-
 export function extractClaudeSessionId(
 	body: Record<string, unknown>,
 ): string | undefined {
