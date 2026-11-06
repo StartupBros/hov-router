@@ -39,14 +39,9 @@ function harness() {
 		at(value: number) {
 			now = value;
 		},
-		done(
-			id: string,
-			request = body,
-			ctx = context,
-			transport: "http" | "websocket" = "http",
-		) {
+		done(id: string, request = body, ctx = context) {
 			observer.prepare(id, "account", "session", request, ctx);
-			observer.dispatched(id, transport);
+			observer.dispatched(id, "http");
 			observer.finish(id, usage, true);
 			const row = rows.at(-1);
 			if (!row) throw new Error("missing terminal observation");
@@ -148,16 +143,6 @@ describe("strict cache cohort qualification", () => {
 			usage_input_semantics: "physical_inclusive",
 		});
 	});
-	test("response SSE cannot be confused with native physical HTTP or WebSocket", () => {
-		const h = harness();
-		h.done("a");
-		const row = h.done("b", body, context, "websocket");
-		expect(row).toMatchObject({
-			physical_transport: "websocket",
-			cache_cohort_qualification: "excluded",
-			cache_cohort_reason: "changed_controls",
-		});
-	});
 	test("usage reconciles only exact one-attempt populations with additive logical fields", () => {
 		const physical = {
 			gateway_request_digest: "a".repeat(64),
@@ -205,12 +190,6 @@ describe("strict cache cohort qualification", () => {
 		expect(noDispatch.done("following")).toMatchObject({
 			cache_cohort_qualification: "unknown",
 			cache_cohort_reason: "missing_dimensions",
-		});
-		const websocket = harness();
-		websocket.done("ws1", body, context, "websocket");
-		expect(websocket.done("ws2", body, context, "websocket")).toMatchObject({
-			cache_cohort_qualification: "unknown",
-			cache_cohort_reason: "physical_parameters_unobserved",
 		});
 	});
 

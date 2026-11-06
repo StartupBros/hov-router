@@ -117,7 +117,6 @@ export {
 	recordCodexUsageSnapshot,
 	resetCodexUsageHistoryThrottle,
 } from "./codex-usage-history";
-export { readCodexWebSocketPercent } from "./codex-websocket-contract";
 export {
 	type DegradedOwnerDirectiveInput,
 	type DegradedOwnerEvidenceInput,

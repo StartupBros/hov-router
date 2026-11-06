@@ -97,7 +97,7 @@ curl http://localhost:8080/health
 
 **Upstream reachability**
 
-`runtime.upstreamTransport` says, per account provider, whether this machine is getting answers from upstream. It covers HTTP fetches only, not Codex WebSocket transports. Any HTTP response counts as an answer, a 429 or 529 included. A failure is a fetch that rejected before any answer: DNS, connect, TLS, reset or header timeout. Fetches the client or router aborted count as neither. A provider is `unreachable` when its last `unreachableAfter` or more fetches all failed and the latest failure falls inside the window (about `windowMs`). It is `reachable` when an answer arrived inside the window. Otherwise it is `unknown`, usually because there was no recent traffic. Counters reset on restart.
+`runtime.upstreamTransport` says, per account provider, whether this machine is getting answers from upstream. Any HTTP response counts as an answer, a 429 or 529 included. A failure is a fetch that rejected before any answer: DNS, connect, TLS, reset or header timeout. Fetches the client or router aborted count as neither. A provider is `unreachable` when its last `unreachableAfter` or more fetches all failed and the latest failure falls inside the window (about `windowMs`). It is `reachable` when an answer arrived inside the window. Otherwise it is `unknown`, usually because there was no recent traffic. Counters reset on restart.
 
 ```bash
 curl -s http://localhost:8080/health | jq .runtime.upstreamTransport

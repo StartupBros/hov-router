@@ -20,7 +20,7 @@ type Fingerprint = {
 	parameters: string;
 	at: number;
 	dispatchedAt: number | null;
-	physicalTransport: "http" | "websocket" | null;
+	physicalTransport: "http" | null;
 	cachedReadTokens: number | null;
 };
 type Facts = Record<string, number | boolean | string | null>;
@@ -625,7 +625,7 @@ export class CodexCacheDiagnostics {
 			});
 	}
 
-	dispatched(requestId: string, transport: "http" | "websocket"): void {
+	dispatched(requestId: string, transport: "http"): void {
 		const pending = this.pending.get(requestId);
 		if (!pending || pending.fingerprint.dispatchedAt !== null) return;
 		const now = this.now();
@@ -658,9 +658,7 @@ export class CodexCacheDiagnostics {
 					? "missing_dimensions"
 					: facts.prior_physical_transport !== transport
 						? "changed_controls"
-						: transport === "websocket"
-							? "physical_parameters_unobserved"
-							: "exact_prefix";
+						: "exact_prefix";
 			facts.cache_cohort_qualification =
 				facts.cache_cohort_reason === "exact_prefix"
 					? "qualified"

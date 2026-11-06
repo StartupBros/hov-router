@@ -20,7 +20,6 @@ import {
 	readCachePacingMs,
 	readCodexCachePacingSettleMs,
 	readCodexPacingBypassPercent,
-	readCodexWebSocketPercent,
 } from "@better-ccflare/proxy";
 import {
 	type AnomalyRequestRow,
@@ -338,7 +337,9 @@ function readCacheParityPolicy(context: APIContext): CacheParityPolicy {
 			getCodexExplicitCacheBreakpointSuppressionCount(),
 		turnStatePercent: turnState.percent,
 		turnStateObserveOnly: turnState.observeOnly,
-		webSocketPercent: readCodexWebSocketPercent(),
+		// The Codex WebSocket transport was removed; the lever stays in the
+		// declared levers for one release and always reads as off.
+		webSocketPercent: 0,
 		// Read directly: this feeds the R18 fail-closed guard, so a missing or
 		// renamed accessor must break loudly rather than resolve to 0, which
 		// would read as "no synthetic traffic" and let parity pass.

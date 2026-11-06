@@ -156,8 +156,9 @@ describe("analyzeCodexCacheExperiments", () => {
 		// schemaVersion bumped for #204: cache rows now also carry
 		// medianCachedReadPct/p25CachedReadPct/p75CachedReadPct alongside the
 		// pre-existing weighted figure, so consumers keyed on the row shape
-		// need to know the shape changed.
-		expect(report.schemaVersion).toBe(4);
+		// need to know the shape changed. Bumped again (4 -> 5) when the
+		// `websocket` report left with the Codex WebSocket transport.
+		expect(report.schemaVersion).toBe(5);
 		expect(report.turnState.assignmentCounts).toEqual({
 			observe: 0,
 			control: 1,
@@ -352,7 +353,7 @@ describe("analyzeCodexCacheExperiments", () => {
 			},
 		]);
 
-		expect(report.schemaVersion).toBe(4);
+		expect(report.schemaVersion).toBe(5);
 		expect(report.attribution.unit).toBe("final_observed_codex_attempt");
 		expect(report.attribution.pacingWaitMs).toBe("schema20_request_receipt");
 		expect(report.pacing.assignmentCounts).toEqual({

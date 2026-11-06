@@ -39,9 +39,6 @@ const { handleProxy, isHelperShapedServerToolPreview } = await import(
 	"../proxy"
 );
 const { RequestBodyContext } = await import("../request-body-context");
-const { codexWebSocketTransport } = await import(
-	"../codex-websocket-transport"
-);
 const {
 	createDurableServerToolReplayWriterAdmission,
 	createServerToolReplayRuntime,
@@ -717,10 +714,6 @@ describe("server-tool routing integration", () => {
 			},
 			{ writerAdmission: admission.writerAdmission },
 		);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async () => null);
 		globalThis.fetch = mock(async () => new Response(null, { status: 500 }));
 		const request = makeServerToolRequest();
 
@@ -743,9 +736,7 @@ describe("server-tool routing integration", () => {
 		expect(providerIo.processResponse).toHaveBeenCalledTimes(0);
 		expect(providerIo.transformRequestBody).toHaveBeenCalledTimes(0);
 		expect(mutations.asyncWrite).toHaveBeenCalledTimes(0);
-		expect(websocketAttempt).toHaveBeenCalledTimes(0);
 		expect(globalThis.fetch).toHaveBeenCalledTimes(0);
-		websocketAttempt.mockRestore();
 	});
 
 	it("stops an incapable pool before refresh, transport, mutation, or unauthenticated passthrough", async () => {

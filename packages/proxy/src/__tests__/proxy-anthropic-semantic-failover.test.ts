@@ -48,8 +48,6 @@ import {
 import { AnthropicStreamOutcomeTracker } from "../anthropic-stream-outcome";
 import { CacheAffinityOrderer } from "../cache-affinity-orderer";
 import { getCachePacingRouteStats, resetCachePacing } from "../cache-pacing";
-import type { CodexWebSocketReceipt } from "../codex-websocket-transport";
-import { codexWebSocketTransport } from "../codex-websocket-transport";
 import { DegradedOwnerOverlay } from "../degraded-owner-overlay";
 import type { ProxyContext } from "../handlers";
 import {
@@ -154,7 +152,6 @@ const originalEnv = new Map(
 );
 let restoreUsageCollector = (): void => {};
 let restoreCodexRefreshToken = (): void => {};
-let restoreCodexWebSocket = (): void => {};
 let usageHandleStart = mock((_message: unknown) => undefined);
 let usageHandleChunk = mock(
 	(_requestId: string, _data: Uint8Array) => undefined,
@@ -1039,8 +1036,6 @@ afterEach(() => {
 	restoreUsageCollector = (): void => {};
 	restoreCodexRefreshToken();
 	restoreCodexRefreshToken = (): void => {};
-	restoreCodexWebSocket();
-	restoreCodexWebSocket = (): void => {};
 	clearCodexModelCacheForTests();
 	clearDerivedProviderModelDefaults();
 	globalThis.fetch = originalFetch;
@@ -2747,77 +2742,6 @@ describe("downstream Anthropic Messages SSE routing", () => {
 		expect(response.status).toBe(400);
 		expect(payload.error?.code).toBe("context_length_exceeded");
 		expect(response.headers.get("x-upstream-proof")).toBe(`before-${tailKind}`);
-	});
-
-	it("keeps an irreversible Codex WebSocket terminal ahead of retained overflow", async () => {
-		process.env[CONTEXT_ADMISSION_ENV] = "1";
-		discardedResponses.length = 0;
-		const codex = makeCodexAccount("codex-retained-before-ws-terminal");
-		codex.model_mappings = JSON.stringify({
-			opus: ["gpt-5.3-codex-spark", "gpt-5.6-sol"],
-		});
-		const { ctx } = makeContext([codex], makeCombo([codex]));
-		const routeOrder: string[] = [];
-		let websocketCalls = 0;
-		const receipt: CodexWebSocketReceipt = {
-			connectionId: "conn-post-write-terminal",
-			cohortId: "cohort-post-write-terminal",
-			reused: false,
-			frameWritten: true,
-			stickyHttp: false,
-			markPostWriteFailure: () => {
-				receipt.stickyHttp = true;
-			},
-		};
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			websocketCalls++;
-			if (websocketCalls === 1) return null;
-			input.onFrameWritten?.(receipt);
-			return {
-				receipt,
-				response: sseResponse(byteStream(codexFailureStream("api_error"))),
-			};
-		});
-		restoreCodexWebSocket = () => websocketAttempt.mockRestore();
-		globalThis.fetch = mock(async (input: RequestInfo | URL) => {
-			const upstreamRequest =
-				input instanceof Request ? input : new Request(input);
-			const body = (await upstreamRequest.clone().json()) as { model: string };
-			routeOrder.push(body.model);
-			return sseResponse(byteStream(codexContextOverflowStream()));
-		}) as unknown as typeof fetch;
-
-		const request = new Request("https://proxy.local/v1/messages", {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				"anthropic-version": "2023-06-01",
-			},
-			body: JSON.stringify({
-				model: MODEL,
-				messages: [{ role: "user", content: "x".repeat(440_000) }],
-				metadata: {
-					user_id: JSON.stringify({ session_id: CODEX_SESSION }),
-				},
-				max_tokens: 50_000,
-				stream: true,
-			}),
-		});
-		const response = await handleProxy(request, new URL(request.url), ctx);
-		const payload = (await response.json()) as { error?: { code?: string } };
-		await new Promise((resolve) => setTimeout(resolve, 0));
-
-		expect(routeOrder).toEqual(["gpt-5.3-codex-spark"]);
-		expect(websocketCalls).toBe(2);
-		expect(response.status).toBe(502);
-		expect(payload.error?.code).toBe("codex_websocket_post_write_error");
-		expect(receipt.stickyHttp).toBe(true);
-		expect(
-			discardedResponses.filter((discarded) => discarded.status === 400),
-		).toHaveLength(1);
 	});
 
 	it.each([

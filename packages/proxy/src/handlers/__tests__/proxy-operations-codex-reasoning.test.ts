@@ -7,9 +7,6 @@ import type { Account, RequestMeta } from "@better-ccflare/types";
 import type { ProxyContext } from "../proxy-types";
 
 const usageCollectorModule = await import("../../usage-collector");
-const { codexWebSocketTransport } = await import(
-	"../../codex-websocket-transport"
-);
 const { RoutingAttemptLedger } = await import("../routing-attempt-ledger");
 const {
 	filterCodexReasoningBlocks,
@@ -171,10 +168,6 @@ async function runCodexRecoveryScenario(
 }> {
 	const originalFetch = globalThis.fetch;
 	const outboundBodies: Array<Record<string, unknown>> = [];
-	const websocketAttempt = spyOn(
-		codexWebSocketTransport,
-		"tryRequest",
-	).mockResolvedValue(null);
 	const usageCollector = spyOn(
 		usageCollectorModule,
 		"getUsageCollector",
@@ -220,7 +213,6 @@ async function runCodexRecoveryScenario(
 		};
 	} finally {
 		globalThis.fetch = originalFetch;
-		websocketAttempt.mockRestore();
 		usageCollector.mockRestore();
 	}
 }
@@ -504,10 +496,6 @@ describe("proxyWithAccount Codex reasoning recovery", () => {
 		);
 		const requestId = "codex-reasoning-retry";
 		const outboundBodies: Array<Record<string, unknown>> = [];
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockResolvedValue(null);
 		const usageCollector = spyOn(
 			usageCollectorModule,
 			"getUsageCollector",
@@ -589,7 +577,6 @@ describe("proxyWithAccount Codex reasoning recovery", () => {
 			expect(outboundBodies).toHaveLength(2);
 			expect(response).toBeInstanceOf(Response);
 			expect((response as Response).status).toBe(200);
-			expect(websocketAttempt).toHaveBeenCalledTimes(2);
 			expect(ledger.attemptedCount).toBe(1);
 			expect(ledger.physicalAttemptCount).toBe(2);
 			expect(outboundBodies.map((body) => body.model)).toEqual([
@@ -635,7 +622,6 @@ describe("proxyWithAccount Codex reasoning recovery", () => {
 				process.env.CCFLARE_CODEX_TRACE_DIR = previousTraceDirectory;
 			}
 			rmSync(traceDirectory, { recursive: true, force: true });
-			websocketAttempt.mockRestore();
 			usageCollector.mockRestore();
 		}
 	});
@@ -768,10 +754,6 @@ describe("proxyWithAccount Codex reasoning recovery", () => {
 		);
 		const requestId = "codex-reasoning-fallback";
 		const outboundBodies: Array<Record<string, unknown>> = [];
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockResolvedValue(null);
 		const usageCollector = spyOn(
 			usageCollectorModule,
 			"getUsageCollector",
@@ -878,7 +860,6 @@ describe("proxyWithAccount Codex reasoning recovery", () => {
 				process.env.CCFLARE_CODEX_TRACE_DIR = previousTraceDirectory;
 			}
 			rmSync(traceDirectory, { recursive: true, force: true });
-			websocketAttempt.mockRestore();
 			usageCollector.mockRestore();
 		}
 	});

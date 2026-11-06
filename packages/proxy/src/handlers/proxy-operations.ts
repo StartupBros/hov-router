@@ -31,9 +31,7 @@ import {
 	assertSynchronousProviderResult,
 	buildServerToolCapabilityProofKey,
 	CODEX_AUTHENTICATED_CALLER_HEADER,
-	CODEX_CONVERSATION_ID_HEADER,
 	CODEX_NATIVE_RESPONSES_HEADER,
-	CODEX_TURN_STATE_HEADER,
 	captureCodexModelContextSnapshot,
 	captureSynchronousAttemptIdentity,
 	decideContextAdmission,
@@ -103,7 +101,6 @@ import {
 import {
 	AnthropicPreCommitAbortedError,
 	AnthropicPreCommitStallError,
-	classifyAnthropicPreCommitWebSocketFailure,
 	gateAnthropicSsePreCommit,
 	getAnthropicStreamRuntimeConfig,
 	isDownstreamAnthropicMessagesSse,
@@ -122,11 +119,6 @@ import {
 	isClaudeCodeSubagent,
 } from "../claude-code-request";
 import { ensureCodexModelDefaults } from "../codex-model-catalog";
-import {
-	type CodexWebSocketReceipt,
-	codexWebSocketTransport,
-	createCodexWebSocketNoReplayResponse,
-} from "../codex-websocket-transport";
 
 export type {
 	CacheBodyStagingAction,
@@ -441,14 +433,9 @@ export interface AnthropicDegradedRequestSendState {
 	readonly tracker?: DegradedModeRequestTracker | null;
 }
 
-export type ProxyAccountResponseDisposition =
-	| "ordinary"
-	| "irreversible_no_replay";
-
 export interface PreparedProxyAccountResponse {
 	readonly kind: "prepared_proxy_account_response";
 	readonly response: Response;
-	readonly disposition: ProxyAccountResponseDisposition;
 	readonly account: Account;
 	readonly candidateId: string;
 	/** Snapshot after this attempt has completed all implicit route discovery. */
@@ -2270,7 +2257,7 @@ interface AnthropicAttemptCommitmentTiming {
  * semantic gate share the same absolute boundary.
  */
 class AnthropicPreCommitAttemptScope {
-	deadlineError: AnthropicPreCommitAttemptDeadlineError;
+	readonly deadlineError: AnthropicPreCommitAttemptDeadlineError;
 	readonly signal: AbortSignal;
 	readonly abortPromise: Promise<never>;
 	private readonly deadlineController = new AbortController();
@@ -2279,7 +2266,7 @@ class AnthropicPreCommitAttemptScope {
 
 	constructor(
 		private readonly routingSignal: AbortSignal,
-		public timing: AnthropicAttemptCommitmentTiming,
+		public readonly timing: AnthropicAttemptCommitmentTiming,
 	) {
 		this.deadlineError = new AnthropicPreCommitAttemptDeadlineError(
 			timing.deadlineAt,
@@ -2326,58 +2313,6 @@ class AnthropicPreCommitAttemptScope {
 	isPrivateDeadline(): boolean {
 		return (
 			!this.routingSignal.aborted && this.deadlineController.signal.aborted
-		);
-	}
-
-	/**
-	 * Synchronize a semantic-gate timeout with this transport's live signal.
-	 * The gate and this scope intentionally share an absolute deadline, but two
-	 * same-tick timers can otherwise let the gate reject first and disposal clear
-	 * this scope's timer before it aborts the already-written WebSocket frame.
-	 */
-	abortIfDeadlineElapsed(): void {
-		if (
-			this.deadlineController.signal.aborted ||
-			Date.now() < this.timing.deadlineAt
-		) {
-			return;
-		}
-		if (this.deadlineTimer !== undefined) {
-			clearTimeout(this.deadlineTimer);
-			this.deadlineTimer = undefined;
-		}
-		this.deadlineController.abort(this.deadlineError);
-	}
-
-	/** Promote an irreversible transport write onto the request-wide boundary. */
-	promoteDeadlineTo(deadlineAt: number): void {
-		if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= 0) {
-			throw new RangeError("deadlineAt must be a positive safe integer");
-		}
-		if (this.deadlineController.signal.aborted) return;
-		if (deadlineAt <= this.timing.deadlineAt) return;
-
-		if (this.deadlineTimer !== undefined) {
-			clearTimeout(this.deadlineTimer);
-			this.deadlineTimer = undefined;
-		}
-		this.timing = {
-			deadlineAt,
-			startedAt: this.timing.startedAt,
-			budgetMs: Math.max(0, deadlineAt - this.timing.startedAt),
-		};
-		this.deadlineError = new AnthropicPreCommitAttemptDeadlineError(
-			this.timing.deadlineAt,
-			this.timing.budgetMs,
-		);
-		const remainingMs = deadlineAt - Date.now();
-		if (remainingMs <= 0) {
-			this.deadlineController.abort(this.deadlineError);
-			return;
-		}
-		this.deadlineTimer = setTimeout(
-			() => this.deadlineController.abort(this.deadlineError),
-			remainingMs,
 		);
 	}
 
@@ -2808,8 +2743,6 @@ export async function proxyWithAccount(
 		| ReturnType<typeof resolveAttemptCommitmentDeadline>
 		| undefined;
 	let activeAttemptCommitment: AnthropicPreCommitAttemptScope | undefined;
-	let currentCodexWebSocketReceipt: CodexWebSocketReceipt | null = null;
-	const getCurrentCodexWebSocketReceipt = () => currentCodexWebSocketReceipt;
 	const readAttemptBoundJson: ResponseJsonReader = (response) =>
 		activeAttemptCommitment?.readJson(response) ??
 		readResponseCloneJson(response);
@@ -2828,13 +2761,12 @@ export async function proxyWithAccount(
 	/**
 	 * Single transport boundary for one physical attempt.
 	 *
-	 * `onDispatchStarted` reports the irreversible point — the WebSocket frame
-	 * write, or the final HTTP dispatch hook that immediately precedes fetch —
-	 * so the caller can tell an attempt that reached the wire from one abandoned
-	 * before it. Both transports report it themselves rather than the wrapper
-	 * inferring it from an error type, because the hooks that run just before
-	 * each send can still refuse it: they assert the request-local physical
-	 * budget and throw instead of returning.
+	 * `onDispatchStarted` reports the irreversible point — the final HTTP
+	 * dispatch hook that immediately precedes fetch — so the caller can tell an
+	 * attempt that reached the wire from one abandoned before it. The transport
+	 * reports it itself rather than the wrapper inferring it from an error type,
+	 * because the hooks that run just before each send can still refuse it: they
+	 * assert the request-local physical budget and throw instead of returning.
 	 */
 	const makeAttemptRequest = async (
 		provider: Provider,
@@ -2846,11 +2778,6 @@ export async function proxyWithAccount(
 		// over either -- the caller threads the right value in per call instead.
 		// Diagnostic correlation only (KTD8): never re-sent, never routing input.
 		sourceBody: ArrayBuffer | null,
-		optionalOutboundTransport?: (
-			signal: AbortSignal,
-			markDispatched: () => void,
-			markObservedDispatch: (transport: "http" | "websocket") => void,
-		) => Promise<Response | null>,
 		onHttpDispatch?: () => void,
 		onDispatchStarted?: () => void,
 		qualityPrepare?: () => Promise<void>,
@@ -2869,8 +2796,8 @@ export async function proxyWithAccount(
 			activeAttemptCommitment?.dispose();
 			activeAttemptCommitment = undefined;
 			const dispatch = async (signal: AbortSignal): Promise<Response> => {
-				// HTTP and optional transports must share the exact same live abort
-				// source. Terminal recovery cannot attach a controller after either
+				// The HTTP transport must use the exact same live abort source as
+				// terminal recovery, which cannot attach a controller after the
 				// transport has already created its connection.
 				const attemptSignal = AbortSignal.any([
 					signal,
@@ -2888,14 +2815,6 @@ export async function proxyWithAccount(
 						signal: attemptSignal,
 					},
 					async (markObservedDispatch) => {
-						const optionalResponse =
-							!helperScope &&
-							(await optionalOutboundTransport?.(
-								attemptSignal,
-								markDispatched,
-								markObservedDispatch,
-							));
-						if (optionalResponse) return optionalResponse;
 						if (qualityPrepare) await qualityPrepare();
 						let helperAccount: Account | null = null;
 						let helperBody: Record<string, unknown> | null = null;
@@ -2990,11 +2909,6 @@ export async function proxyWithAccount(
 				return await dispatch(attemptCommitment.signal);
 			} catch (error) {
 				if (attemptCommitment.isPrivateDeadline()) {
-					const websocketReceipt = getCurrentCodexWebSocketReceipt();
-					if (websocketReceipt?.frameWritten) {
-						websocketReceipt.markPostWriteFailure("semantic_stall");
-						return createCodexWebSocketNoReplayResponse(504, "semantic_stall");
-					}
 					throw attemptCommitment.deadlineError;
 				}
 				throw error;
@@ -4498,13 +4412,6 @@ export async function proxyWithAccount(
 			}
 
 			async function runCacheAwareProviderAttempt(): Promise<Response> {
-				// Codex replaces any client copy with its trusted, derived conversation
-				// identity during transformation. Capture that local transport hint before
-				// the broad private-header sanitizer removes it from the wire request.
-				const webSocketConversationIdentity =
-					attemptPlan.providerName === "codex"
-						? transportRequest.headers.get(CODEX_CONVERSATION_ID_HEADER)
-						: null;
 				// Every transport attempt, including retries, passes this final boundary.
 				// Preserve only trusted local synthetic-response markers; no
 				// x-better-ccflare-* metadata may reach a real upstream transport.
@@ -4575,7 +4482,6 @@ export async function proxyWithAccount(
 							: null,
 				});
 				if (isSynthetic) {
-					currentCodexWebSocketReceipt = null;
 					return materializeSyntheticResponse(transportRequest);
 				}
 				const ensureNativeQuotaDispatch = (): void => {
@@ -4638,19 +4544,6 @@ export async function proxyWithAccount(
 					}
 				};
 				const hostedAttempt = attemptPlan.capabilityProofKey !== null;
-				// A provider-issued turn-state token is scoped to this HTTP turn. Never
-				// offer the same transformed request to the persistent WebSocket lane.
-				const hasCodexTurnStateReplay =
-					attemptPlan.providerName === "codex" &&
-					transportRequest.headers.has(CODEX_TURN_STATE_HEADER);
-				const claimHostedDispatchAfterBudgetAssertion = (): void => {
-					// onBeforeFrameSend asserted the budget immediately before this callback.
-					// Reassert defensively before crossing the irreversible hosted boundary.
-					routingAttemptLedger?.assertPhysicalAttemptAvailable(
-						physicalAttemptVetoContext(),
-					);
-					claimCurrentHostedDispatch();
-				};
 				const claimHostedAndRecordHttpDispatch = (): void => {
 					assertManagedWorkAvailable(req);
 					ensureNativeQuotaDispatch();
@@ -4667,58 +4560,6 @@ export async function proxyWithAccount(
 					provider,
 					httpTransportRequest,
 					replayBody,
-					attemptPlan.providerName === "codex" &&
-						!hasCodexTurnStateReplay &&
-						!modelFallbackPolicy?.qualityAttempt
-						? async (signal, markDispatched, markObservedDispatch) => {
-								currentCodexWebSocketReceipt = null;
-								// Capture the concrete stamped attempt before any later retry mutates the
-								// surrounding attempt variable. These are the same join keys written to
-								// Codex usage/cache traces during response finalization.
-								const websocketAttemptId = currentTransportAttemptId;
-								if (!websocketAttemptId) return null;
-								const websocketAttempt =
-									await codexWebSocketTransport.tryRequest({
-										requestId: requestMeta.id,
-										attemptId: websocketAttemptId,
-										accountId: account.id,
-										providerName: attemptPlan.providerName,
-										conversationIdentity: webSocketConversationIdentity,
-										request: transportRequest,
-										signal,
-										onBeforeFrameSend: () => {
-											assertManagedWorkAvailable(req);
-											routingAttemptLedger?.assertPhysicalAttemptAvailable(
-												physicalAttemptVetoContext(),
-											);
-										},
-										onBeforeFrameWrite: () => {
-											assertManagedWorkAvailable(req);
-											if (hostedAttempt) {
-												claimHostedDispatchAfterBudgetAssertion();
-												markDispatched();
-											}
-										},
-										onFrameWritten: (receipt) => {
-											markObservedDispatch("websocket");
-											markDispatched();
-											recordPhysicalDispatch();
-											currentCodexWebSocketReceipt = receipt;
-											// response.create is now irreversible, so neither the non-final
-											// fallback reserve nor the cache-lane retry reserve can be used.
-											// Promote the existing composite signal to the request-wide deadline.
-											if (preCommitRescue) {
-												activeAttemptCommitment?.promoteDeadlineTo(
-													preCommitRescue.commitmentDeadlineAt,
-												);
-											}
-										},
-									});
-								if (!websocketAttempt) return null;
-								currentCodexWebSocketReceipt = websocketAttempt.receipt;
-								return websocketAttempt.response;
-							}
-						: undefined,
 					hostedAttempt
 						? claimHostedAndRecordHttpDispatch
 						: () => {
@@ -5201,8 +5042,7 @@ export async function proxyWithAccount(
 				// Quality attempts own terminal completion and never replay this rejection.
 				modelFallbackPolicy?.qualityAttempt !== undefined ||
 				attemptPlan.providerName !== "codex" ||
-				account.provider !== "codex" ||
-				getCurrentCodexWebSocketReceipt()?.frameWritten === true
+				account.provider !== "codex"
 			) {
 				return false;
 			}
@@ -5666,9 +5506,9 @@ export async function proxyWithAccount(
 		// GPT-5.6 explicit breakpoints are a dark canary on the private Codex
 		// subscription route as well as the documented public Responses route. If
 		// that exact field is rejected, always learn the account/model/endpoint
-		// capability. Only a pre-content attempt may transparently retry the
-		// unchanged normalized source once; a post-frame rejection must flow through
-		// without replay while future turns skip the known-unsupported marker.
+		// capability. An attempt with a replayable source transparently retries the
+		// unchanged normalized source once; without one the rejection flows through
+		// while future turns skip the known-unsupported marker.
 		const transformedRequestHadExplicitBreakpoint =
 			hasCodexExplicitCacheBreakpoint(transformedBodyJson);
 		const explicitBreakpointRejection =
@@ -5685,10 +5525,7 @@ export async function proxyWithAccount(
 				transformedRequest.url,
 			);
 			const replayBody = currentReplayBody;
-			if (
-				replayBody !== null &&
-				!getCurrentCodexWebSocketReceipt()?.frameWritten
-			) {
+			if (replayBody !== null) {
 				log.info(
 					`Codex rejected prompt_cache_breakpoint for account=${account.name} model=${transformedModel}; retrying once without it`,
 				);
@@ -6942,7 +6779,6 @@ export async function proxyWithAccount(
 							return {
 								kind: "prepared_proxy_account_response",
 								response: rawResponse,
-								disposition: "ordinary",
 								account,
 								candidateId: routeCandidateId,
 								isFinalAttempt: true,
@@ -7744,23 +7580,17 @@ export async function proxyWithAccount(
 							0,
 							attemptCommitmentDeadlineAt - attemptCommitmentStartedAt,
 						);
-			const websocketReceipt = getCurrentCodexWebSocketReceipt();
-			const hasIrreversibleCodexWebSocketWrite =
-				preCommitRescue !== undefined &&
-				websocketReceipt?.frameWritten === true;
 			// Split only this already-allocated candidate slice. The request-wide
 			// deadline and any global fallback reserve remain unchanged, while the
 			// first cache lane cannot consume the retry's bounded share.
 			const cacheLaneRescueReserveMs =
-				!hasIrreversibleCodexWebSocketWrite &&
 				officialCodexCacheLaneRescueEligible &&
 				!codexPrecommitRetryAttempted &&
 				attemptCommitmentDeadlineAt !== undefined
 					? getCodexCacheLaneRescueReserveMs(attemptCommitmentBudgetMs)
 					: 0;
-			const semanticCommitmentDeadlineAt = hasIrreversibleCodexWebSocketWrite
-				? preCommitRescue.commitmentDeadlineAt
-				: attemptCommitmentDeadlineAt === undefined
+			const semanticCommitmentDeadlineAt =
+				attemptCommitmentDeadlineAt === undefined
 					? undefined
 					: attemptCommitmentDeadlineAt - cacheLaneRescueReserveMs;
 			const codexAuthoritativeContextOverflowCanBeHandled =
@@ -7774,9 +7604,9 @@ export async function proxyWithAccount(
 						observe: (evidence) =>
 							routingAttemptLedger?.observePhysicalStream(evidence),
 						semanticTimeoutMs: streamConfig.semanticTimeoutMs,
-						disableProtocolIdleTimeout:
-							hasIrreversibleCodexWebSocketWrite ||
-							isProtocolIdleExemptProvider(account.provider),
+						disableProtocolIdleTimeout: isProtocolIdleExemptProvider(
+							account.provider,
+						),
 						keepaliveIsProtocolActivity: !isTranslatedSseProvider(
 							account.provider,
 						),
@@ -7809,19 +7639,7 @@ export async function proxyWithAccount(
 						error,
 					);
 				}
-				const websocketReceipt = getCurrentCodexWebSocketReceipt();
-				if (websocketReceipt?.frameWritten) {
-					activeAttemptCommitment?.abortIfDeadlineElapsed();
-				}
 				if (activeAttemptCommitment?.isPrivateDeadline()) {
-					if (websocketReceipt?.frameWritten) {
-						websocketReceipt.markPostWriteFailure("semantic_stall");
-						response = createCodexWebSocketNoReplayResponse(
-							504,
-							"semantic_stall",
-						);
-						break;
-					}
 					// The fetch and semantic gate share this candidate's private
 					// commitment signal. Preserve that control-flow identity even when
 					// aborting the transport makes reader.read() reject first; otherwise
@@ -7839,10 +7657,8 @@ export async function proxyWithAccount(
 					error instanceof AnthropicPreCommitStallError &&
 					error.reason === "context_length_exceeded" &&
 					error.contextOverflowAuthoritative === true;
-				// Consult the request-level replay policy before applying the stronger
-				// WebSocket no-replay boundary. A written response.create vetoes even a
-				// safe cross-provider candidate, but the authoritative capability evidence
-				// must still be retained for every later request-local routing decision.
+				// Retain the authoritative capability evidence for every later
+				// request-local routing decision.
 				const authoritativeContextOverflowCanReplay =
 					authoritativeContextOverflow && canReplayContextOverflow();
 				if (authoritativeContextOverflow) {
@@ -7851,21 +7667,6 @@ export async function proxyWithAccount(
 							currentContextOverflowCapability,
 						);
 					}
-				}
-				// A Responses WebSocket request cannot be replayed once response.create
-				// has been written: the server may have accepted the turn even when no
-				// meaningful downstream event arrived. Surface one final error and pin
-				// this conversation to HTTP before considering any HTTP/cache-lane retry.
-				if (websocketReceipt?.frameWritten) {
-					const failureCategory =
-						classifyAnthropicPreCommitWebSocketFailure(error) ??
-						"post_write_error";
-					websocketReceipt.markPostWriteFailure(failureCategory);
-					response = createCodexWebSocketNoReplayResponse(
-						failureCategory === "semantic_stall" ? 504 : 502,
-						failureCategory,
-					);
-					break;
 				}
 				if (!(error instanceof AnthropicPreCommitStallError)) throw error;
 				if (
@@ -8380,7 +8181,6 @@ export async function proxyWithAccount(
 					return {
 						kind: "prepared_proxy_account_response",
 						response: retainedResponse,
-						disposition: "ordinary",
 						account,
 						candidateId: routeCandidateId,
 						isFinalAttempt: isFinalSemanticAttempt(),
@@ -8524,10 +8324,6 @@ export async function proxyWithAccount(
 		return {
 			kind: "prepared_proxy_account_response",
 			response,
-			disposition:
-				getCurrentCodexWebSocketReceipt()?.frameWritten === true && !response.ok
-					? "irreversible_no_replay"
-					: "ordinary",
 			account,
 			candidateId: routeCandidateId,
 			isFinalAttempt: isFinalSemanticAttempt(),

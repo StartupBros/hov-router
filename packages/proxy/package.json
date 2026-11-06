@@ -19,7 +19,6 @@
 		"@better-ccflare/providers": "workspace:*",
 		"@better-ccflare/security": "workspace:*",
 		"@better-ccflare/types": "workspace:*",
-		"@better-ccflare/ui-common": "workspace:*",
-		"@dqbd/tiktoken": "^1.0.22"
+		"@better-ccflare/ui-common": "workspace:*"
 	}
 }

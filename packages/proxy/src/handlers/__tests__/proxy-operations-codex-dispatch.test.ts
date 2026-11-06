@@ -23,12 +23,7 @@ import {
 	monotonicNowNs,
 	registerManagedTerminal,
 } from "../../../../../scripts/ccflare-managed-timing.mjs";
-import { ANTHROPIC_DRAIN_DEADLINE_MS } from "../../anthropic-terminal-recovery";
 import { CACHE_REPLAY_MODEL_HEADER } from "../../cache-transport-staging";
-import {
-	type CodexWebSocketReceipt,
-	codexWebSocketTransport,
-} from "../../codex-websocket-transport";
 import type { ModelFallbackExecutionPolicy } from "../proxy-operations";
 import type { ProxyContext } from "../proxy-types";
 
@@ -36,7 +31,6 @@ import type { ProxyContext } from "../proxy-types";
 // This harness injects dbOps and never constructs these classes.
 const usageCollectorModule = await import("../../usage-collector");
 const {
-	deriveServerToolRequirement,
 	getProvider,
 	isCodexExplicitCacheBreakpointSuppressed,
 	resetCodexExplicitBreakpointSuppressionsForTest,
@@ -46,26 +40,11 @@ const { ForceRouteUnavailableError, selectAccountsForRequest } = await import(
 );
 const { proxyWithAccount } = await import("../proxy-operations");
 const { createRoutingTerminalResponse } = await import("../routing-terminal");
-const {
-	MAX_REQUEST_PHYSICAL_ATTEMPTS,
-	PhysicalAttemptBudgetExceededError,
-	RoutingAttemptLedger,
-} = await import("../routing-attempt-ledger");
-const { bindRequestPrivateServerToolReplay } = await import(
-	"../../server-tool-replay-runtime"
-);
-const { createReadyServerToolReplayRuntimeForTest } = await import(
-	"../../__tests__/helpers/server-tool-replay-runtime"
-);
-const { opaqueRuntimeId } = await import("../../opaque-runtime-id");
-
-const HOSTED_REPLAY_CREDENTIAL = "Bearer codex-websocket-hosted-test";
-const HOSTED_REPLAY_LINEAGE = "codex-websocket-hosted-session";
-const HOSTED_REPLAY_RUNTIME = await createReadyServerToolReplayRuntimeForTest();
+const { RoutingAttemptLedger } = await import("../routing-attempt-ledger");
 
 function makeCodexAccount(overrides: Partial<Account> = {}): Account {
 	return {
-		id: "codex-ws-account",
+		id: "codex-account",
 		name: "codex-ws-test",
 		provider: "codex",
 		api_key: null,
@@ -234,39 +213,6 @@ function makePolicy(
 	};
 }
 
-function makeReceipt(
-	onMark: (
-		category: Parameters<CodexWebSocketReceipt["markPostWriteFailure"]>[0],
-	) => void,
-): CodexWebSocketReceipt {
-	const receipt: CodexWebSocketReceipt = {
-		connectionId: "conn_test",
-		cohortId: "cohort_test",
-		reused: false,
-		frameWritten: true,
-		stickyHttp: false,
-		markPostWriteFailure: (category) => {
-			onMark(category);
-			receipt.stickyHttp = true;
-		},
-	};
-	return receipt;
-}
-
-async function waitForCondition(
-	condition: () => boolean,
-	timeoutMs = 1_000,
-): Promise<void> {
-	const deadlineAt = Date.now() + timeoutMs;
-	while (!condition()) {
-		const remainingMs = deadlineAt - Date.now();
-		if (remainingMs <= 0) {
-			throw new Error(`condition did not become true within ${timeoutMs}ms`);
-		}
-		await Bun.sleep(Math.min(10, remainingMs));
-	}
-}
-
 function installUsageCollector(): void {
 	spyOn(usageCollectorModule, "getUsageCollector").mockReturnValue({
 		handleStart: mock(() => undefined),
@@ -377,18 +323,6 @@ async function runProxy(
 	);
 }
 
-function makeHostedRequestBody(): ArrayBuffer {
-	return new TextEncoder().encode(
-		JSON.stringify({
-			model: "claude-sonnet-4-5",
-			messages: [{ role: "user", content: "find the source" }],
-			tools: [{ type: "web_search_20250305", name: "web_search" }],
-			max_tokens: 16,
-			stream: true,
-		}),
-	).buffer;
-}
-
 function makeGpt56RequestBody(): ArrayBuffer {
 	return new TextEncoder().encode(
 		JSON.stringify({
@@ -444,7 +378,7 @@ function readRequestTrace(
 	throw new Error(`missing request trace for ${requestId}`);
 }
 
-describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () => {
+describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 	let originalFetch: typeof globalThis.fetch;
 	let originalPromptCacheKey: string | undefined;
 	let originalCacheKeyMode: string | undefined;
@@ -490,7 +424,7 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 		mock.restore();
 	});
 
-	it("keeps ordinary Codex WebSocket success and HTTP fallback behavior on one coherent plan per request", async () => {
+	it("keeps ordinary Codex requests on one coherent plan and observes each HTTP dispatch", async () => {
 		installUsageCollector();
 		const codex = getProvider("codex");
 		const anthropic = getProvider("anthropic");
@@ -524,33 +458,9 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 				},
 			);
 		});
-		let websocketCalls = 0;
-		spyOn(codexWebSocketTransport, "tryRequest").mockImplementation(
-			async (input) => {
-				websocketCalls++;
-				if (websocketCalls > 1) return null;
-				const receipt = makeReceipt(() => undefined);
-				input.onFrameWritten(receipt);
-				return {
-					receipt,
-					response: new Response(
-						[
-							'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_ws","model":"gpt-5.4"}}\n\n',
-							'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"ws"}\n\n',
-							'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_ws","model":"gpt-5.4","status":"completed","usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}\n\n',
-							"data: [DONE]\n\n",
-						].join(""),
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream" },
-						},
-					),
-				};
-			},
-		);
 
 		try {
-			for (const [index, expectedText] of ["ws", "http"].entries()) {
+			for (const index of [0, 1]) {
 				const body = makeRequestBody();
 				const response = await runProxy(
 					makeRequest(body),
@@ -564,24 +474,23 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 					proxyContext,
 				);
 				expect(response?.status).toBe(200);
-				expect(await response?.text()).toContain(expectedText);
+				expect(await response?.text()).toContain("http");
 			}
 		} finally {
 			restorePlanner();
 		}
 
 		// The Codex custom planner is proof-only. Ordinary proof-null requests keep
-		// the legacy plan while retaining the same WS/HTTP transport behavior.
+		// the legacy plan.
 		expect(plannedModels).toEqual([]);
-		expect(websocketCalls).toBe(2);
-		expect(httpCalls).toBe(1);
-		// Both physical transports share the bounded observation, with independent
-		// physical-send callbacks instead of inferring transport from response SSE.
+		expect(httpCalls).toBe(2);
+		// Every physical send shares the bounded observation and reports its
+		// dispatch through the physical-send callback, not the response SSE.
 		expect(observeUpstream).toHaveBeenCalledTimes(2);
 		expect(observeResponse).toHaveBeenCalledTimes(2);
 		expect(
 			observeDispatched.mock.calls.map(([transport]) => transport),
-		).toEqual(["websocket", "http"]);
+		).toEqual(["http", "http"]);
 		expect(observeError).not.toHaveBeenCalled();
 		const [wireRequest, observationContext] = observeUpstream.mock.calls[1];
 		expect(await wireRequest.clone().json()).toMatchObject({
@@ -589,7 +498,7 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 		});
 		expect(observationContext).toMatchObject({
 			requestId: "codex-plan-transport-1",
-			account: { id: "codex-ws-account", provider: "codex" },
+			account: { id: "codex-account", provider: "codex" },
 			nativeResponses: false,
 		});
 	});
@@ -647,10 +556,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 			abortedAttemptIds.push(attemptId);
 			originalAbortAttempt.call(provider, attemptId);
 		};
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockResolvedValue(null);
 		const httpAttempt = mock(async () =>
 			Promise.resolve(new Response("must not dispatch", { status: 500 })),
 		);
@@ -669,7 +574,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 			provider.abortTurnStateAttempt = originalAbortAttempt;
 		}
 
-		expect(websocketAttempt).not.toHaveBeenCalled();
 		expect(httpAttempt).not.toHaveBeenCalled();
 		expect(abortedAttemptIds).toHaveLength(1);
 		expect(abortedAttemptIds[0]).toMatch(
@@ -679,10 +583,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 
 	it("restores the previous Codex route stamp when an attempt is abandoned pre-dispatch", async () => {
 		installUsageCollector();
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockResolvedValue(null);
 		const httpAttempt = mock(async () =>
 			Promise.resolve(new Response("must not dispatch", { status: 500 })),
 		);
@@ -716,7 +616,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 		);
 
 		expect(response).toBeNull();
-		expect(websocketAttempt).not.toHaveBeenCalled();
 		expect(httpAttempt).not.toHaveBeenCalled();
 		// The attempt stamped itself as the request's last route before its body was
 		// transformed, then died before dispatch. Left stamped, the first attempt
@@ -749,7 +648,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 			released.push(attemptId);
 			originalRelease?.call(provider, attemptId);
 		};
-		spyOn(codexWebSocketTransport, "tryRequest").mockResolvedValue(null);
 		globalThis.fetch = mock(async () => {
 			throw new Error("socket hang up");
 		}) as never;
@@ -780,7 +678,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 
 	it("treats the first dispatched Codex send as initial after a pre-dispatch abort", async () => {
 		installUsageCollector();
-		spyOn(codexWebSocketTransport, "tryRequest").mockResolvedValue(null);
 		const provider = getProvider("codex");
 		if (!provider?.transformRequestBody) {
 			throw new Error("Codex provider transformation is unavailable");
@@ -858,7 +755,7 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 		expect(causes.at(-1)).toBe("initial");
 	});
 
-	it("keeps a provider-owned Codex turn-state replay on HTTP", async () => {
+	it("replays only the provider-owned Codex turn state upstream", async () => {
 		installUsageCollector();
 		const provider = getProvider("codex");
 		if (!provider?.transformRequestBody) {
@@ -892,10 +789,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 				},
 			);
 		});
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockResolvedValue(null);
 
 		try {
 			const body = makeRequestBody();
@@ -913,7 +806,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 			provider.transformRequestBody = originalTransformRequestBody;
 		}
 
-		expect(websocketAttempt).not.toHaveBeenCalled();
 		expect(upstreamTurnStates).toEqual(["trusted-provider-turn-state"]);
 	});
 
@@ -964,7 +856,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 				{ status: 200, headers: { "content-type": "text/event-stream" } },
 			);
 		});
-		spyOn(codexWebSocketTransport, "tryRequest").mockResolvedValue(null);
 
 		try {
 			const body = makeRequestBody();
@@ -1025,7 +916,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 					{ status: 200, headers: { "content-type": "text/event-stream" } },
 				),
 		);
-		spyOn(codexWebSocketTransport, "tryRequest").mockResolvedValue(null);
 
 		const account = makeCodexAccount();
 		try {
@@ -1085,11 +975,10 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 		]);
 	});
 
-	it.each([
-		"websocket",
-		"http",
-	])("absolute accepted clock vetoes the real %s boundary before any frame or HTTP replay", async (lane) => {
+	it("absolute accepted clock vetoes the real HTTP boundary before dispatch", async () => {
 		installUsageCollector();
+		const codex = getProvider("codex");
+		if (!codex) throw new Error("Codex provider is not registered");
 		const body = makeRequestBody(),
 			controller = new AbortController();
 		const req = new Request("https://proxy.local/v1/messages", {
@@ -1108,256 +997,44 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 		);
 		const fetchMock = mock(async () => new Response("unexpected HTTP send"));
 		globalThis.fetch = fetchMock as unknown as typeof fetch;
-		let frameWrites = 0;
 		const causes: string[] = [];
-		spyOn(codexWebSocketTransport, "tryRequest").mockImplementation(
-			async (input) => {
-				// The absolute contract expires after preparation without an idle/header
-				// timer firing. The transport callback itself must fence this write.
-				// Expire relative to this host's boot-time clock. Acceptance at boot
-				// with the default cap is still live on a CI VM younger than 24 minutes.
-				bindManagedRequest(
-					req,
-					createAcceptedTiming(monotonicNowNs() - 2_000_000_000n, "1000"),
-					(error) => controller.abort(error),
-				);
-				registerManagedTerminal(req, (cause) => causes.push(cause));
-				if (lane === "http") return null;
-				input.onBeforeFrameSend?.();
-				input.onBeforeFrameWrite?.();
-				frameWrites++;
-				throw new Error("expired frame reached wire");
-			},
-		);
+		spyOn(codex, "observeUpstream").mockImplementation(async () => {
+			// Observation runs after attempt preparation and before the final HTTP
+			// gate. The absolute contract expires here without an idle/header timer
+			// firing, so only that gate can fence the send. Expire relative to this
+			// host's boot-time clock. Acceptance at boot with the default cap is
+			// still live on a CI VM younger than 24 minutes.
+			bindManagedRequest(
+				req,
+				createAcceptedTiming(monotonicNowNs() - 2_000_000_000n, "1000"),
+				(error) => controller.abort(error),
+			);
+			registerManagedTerminal(req, (cause) => causes.push(cause));
+			return undefined;
+		});
 		await runProxy(
 			req,
 			body,
 			makePolicy(1000),
-			"managed-expired-frame",
+			"managed-expired-http",
 			undefined,
 			{ originalModel: "claude-sonnet-4-5" },
 		).catch(() => null);
-		expect(frameWrites).toBe(0);
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(causes).toEqual(["accepted_request_deadline"]);
 		expect(controller.signal.aborted).toBe(true);
 	});
-	it("counts a non-hosted WebSocket frame at its pre-write transport boundary", async () => {
+
+	it("keeps Fable effort through an Opus-overridden request without leaking the carrier", async () => {
 		installUsageCollector();
-		const ledger = new RoutingAttemptLedger();
-		const fetchMock = mock(
-			async () => new Response("unexpected HTTP fallback"),
-		);
-		globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
-		spyOn(codexWebSocketTransport, "tryRequest").mockImplementation(
-			async (input) => {
-				input.onBeforeFrameSend?.();
-				input.onBeforeFrameWrite?.();
-				const receipt = makeReceipt(() => undefined);
-				input.onFrameWritten?.(receipt);
-				return {
-					receipt,
-					response: new Response(
-						[
-							'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_ws_budget","model":"gpt-5.4"}}\n\n',
-							'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_ws_budget","model":"gpt-5.4","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}\n\n',
-							"data: [DONE]\n\n",
-						].join(""),
-						{
-							status: 200,
-							headers: { "content-type": "text/event-stream" },
-						},
-					),
-				};
-			},
-		);
-
-		const body = makeRequestBody();
-		const response = await runProxy(
-			makeRequest(body),
-			body,
-			makePolicy(1_000),
-			"codex-ws-physical-boundary",
-			undefined,
-			undefined,
-			undefined,
-			ledger,
-		);
-
-		expect(response?.status).toBe(200);
-		expect(ledger.physicalAttemptCount).toBe(1);
-		expect(fetchMock).not.toHaveBeenCalled();
-	});
-
-	it("keeps a hosted WebSocket undispatched when the physical budget vetoes pre-write", async () => {
-		installUsageCollector();
-		const ledger = new RoutingAttemptLedger();
-		for (let attempt = 0; attempt < MAX_REQUEST_PHYSICAL_ATTEMPTS; attempt++) {
-			ledger.recordPhysicalAttempt();
-		}
-		const proxyContext = makeProxyContext();
-		proxyContext.serverToolReplay = HOSTED_REPLAY_RUNTIME as never;
-		const fetchMock = mock(async () => new Response("unexpected HTTP rescue"));
-		globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
-		let frameWrites = 0;
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			input.onBeforeFrameSend?.();
-			input.onBeforeFrameWrite?.();
-			frameWrites++;
-			return null;
-		});
-
-		const body = makeHostedRequestBody();
-		const request = makeRequest(body, {
-			authorization: HOSTED_REPLAY_CREDENTIAL,
-			"x-claude-code-session-id": HOSTED_REPLAY_LINEAGE,
-		});
-		const requirements = deriveServerToolRequirement(
-			JSON.parse(new TextDecoder().decode(body)),
-		);
-		if (!requirements) throw new Error("expected hosted-search requirements");
-		const meta = makeRequestMeta("codex-ws-hosted-physical-budget", {
-			serverToolRequirements: requirements,
-		});
-		expect(
-			await bindRequestPrivateServerToolReplay(meta, HOSTED_REPLAY_RUNTIME, {
-				request,
-				apiKeyId: null,
-				audience: opaqueRuntimeId(
-					"model-route-caller",
-					HOSTED_REPLAY_CREDENTIAL,
-				),
-				lineage: HOSTED_REPLAY_LINEAGE,
-			}),
-		).toBe(true);
-
-		await expect(
-			proxyWithAccount(
-				request,
-				new URL(request.url),
-				makeCodexAccount({
-					model_mappings: JSON.stringify({ sonnet: "gpt-5.6-sol" }),
-				}),
-				meta,
-				body,
-				() => undefined,
-				0,
-				proxyContext,
-				undefined,
-				undefined,
-				undefined,
-				undefined,
-				false,
-				undefined,
-				ledger,
-				{
-					...makePolicy(500),
-					recomputeServerToolCapability: true,
-				},
-			),
-		).rejects.toBeInstanceOf(PhysicalAttemptBudgetExceededError);
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(frameWrites).toBe(0);
-		expect(fetchMock).not.toHaveBeenCalled();
-		expect(ledger.hostedDispatchState).toBe("undispatched");
-		expect(ledger.physicalAttemptCount).toBe(MAX_REQUEST_PHYSICAL_ATTEMPTS);
-	});
-
-	it("claims before response.create and never rescues an ambiguous hosted write to HTTP", async () => {
-		installUsageCollector();
-		const ledger = new RoutingAttemptLedger();
-		const proxyContext = makeProxyContext();
-		proxyContext.serverToolReplay = HOSTED_REPLAY_RUNTIME as never;
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP rescue", { status: 500 });
-		});
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			input.onBeforeFrameSend?.();
-			input.onBeforeFrameWrite?.();
-			throw new Error("ambiguous response.create write");
-		});
-
-		const body = makeHostedRequestBody();
-		const request = makeRequest(body, {
-			authorization: HOSTED_REPLAY_CREDENTIAL,
-			"x-claude-code-session-id": HOSTED_REPLAY_LINEAGE,
-		});
-		const requirements = deriveServerToolRequirement(
-			JSON.parse(new TextDecoder().decode(body)),
-		);
-		if (!requirements) throw new Error("expected hosted-search requirements");
-		const meta = makeRequestMeta("codex-ws-hosted-ambiguous-write", {
-			serverToolRequirements: requirements,
-		});
-		expect(
-			await bindRequestPrivateServerToolReplay(meta, HOSTED_REPLAY_RUNTIME, {
-				request,
-				apiKeyId: null,
-				audience: opaqueRuntimeId(
-					"model-route-caller",
-					HOSTED_REPLAY_CREDENTIAL,
-				),
-				lineage: HOSTED_REPLAY_LINEAGE,
-			}),
-		).toBe(true);
-		const policy: ModelFallbackExecutionPolicy = {
-			...makePolicy(500),
-			recomputeServerToolCapability: true,
-		};
-		const response = await proxyWithAccount(
-			request,
-			new URL(request.url),
-			makeCodexAccount({
-				model_mappings: JSON.stringify({ sonnet: "gpt-5.6-sol" }),
-			}),
-			meta,
-			body,
-			() => undefined,
-			0,
-			proxyContext,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			false,
-			undefined,
-			ledger,
-			policy,
-		);
-
-		expect(response?.status).toBe(502);
-		expect(await response?.json()).toMatchObject({
-			error: { code: "server_tool_dispatch_terminal" },
-		});
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(ledger.hostedDispatchState).toBe("hosted_dispatched");
-		expect(ledger.physicalAttemptCount).toBe(0);
-	});
-
-	it("keeps WebSocket function-call lineages distinct when sibling conversations share a prefix shard", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT = "100";
-		const upstreamConversationHeaders: Array<string | null> = [];
+		let observedHttpRequest: Request | null = null;
 		globalThis.fetch = mock(async (request: Request) => {
-			upstreamConversationHeaders.push(
-				request.headers.get("x-better-ccflare-codex-conversation-id"),
-			);
+			observedHttpRequest = request.clone();
 			return new Response(
 				[
-					'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_ok","model":"gpt-5.4"}}\n\n',
+					'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_ok","model":"gpt-5.6-sol"}}\n\n',
 					'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"ok"}\n\n',
-					'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_ok","model":"gpt-5.4","status":"completed","usage":{"input_tokens":10,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}\n\n',
+					'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_ok","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":10,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}\n\n',
 					"data: [DONE]\n\n",
 				].join(""),
 				{
@@ -1366,106 +1043,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 				},
 			);
 		});
-
-		const attempts: Array<{
-			conversationIdentity: string | null | undefined;
-			logicalModelFamily: string | null;
-			promptCacheKey: string | undefined;
-		}> = [];
-		spyOn(codexWebSocketTransport, "tryRequest").mockImplementation(
-			async (input) => {
-				const payload = (await input.request.clone().json()) as {
-					prompt_cache_key?: string;
-				};
-				attempts.push({
-					conversationIdentity: (
-						input as typeof input & { conversationIdentity?: string | null }
-					).conversationIdentity,
-					logicalModelFamily: input.request.headers.get(
-						CODEX_LOGICAL_MODEL_FAMILY_HEADER,
-					),
-					promptCacheKey: payload.prompt_cache_key,
-				});
-				return null;
-			},
-		);
-
-		for (let index = 0; index < 96; index++) {
-			const messages = [
-				{ role: "user", content: `sibling task ${index}` },
-				{
-					role: "assistant",
-					content: [
-						{
-							type: "tool_use",
-							id: `tool-lineage-sibling-${index}`,
-							name: "Lookup",
-							input: { value: `sibling-${index}` },
-						},
-					],
-				},
-			];
-			const body = makeConversationRequestBody(messages);
-			const response = await runProxy(
-				makeRequest(body),
-				body,
-				makePolicy(1_000),
-				`codex-ws-conversation-${index}`,
-			);
-			expect(response?.status).toBe(200);
-			await response?.text();
-		}
-
-		expect(attempts).toHaveLength(96);
-		expect(attempts.map((attempt) => attempt.logicalModelFamily)).toEqual(
-			Array(96).fill(null),
-		);
-		expect(upstreamConversationHeaders).toEqual(Array(96).fill(null));
-		const attemptsByKey = new Map<string, typeof attempts>();
-		for (const attempt of attempts) {
-			const key = attempt.promptCacheKey;
-			expect(key).toMatch(/^[0-9a-f]{64}$/);
-			attemptsByKey.set(key ?? "", [
-				...(attemptsByKey.get(key ?? "") ?? []),
-				attempt,
-			]);
-		}
-		expect(attemptsByKey.size).toBe(8);
-		const siblings = [...attemptsByKey.values()].find(
-			(group) => group.length > 1,
-		);
-		expect(siblings).toBeDefined();
-		expect(siblings?.[0]?.conversationIdentity).toMatch(/^[0-9a-f]{64}$/);
-		expect(siblings?.[1]?.conversationIdentity).toMatch(/^[0-9a-f]{64}$/);
-		expect(siblings?.[1]?.conversationIdentity).not.toBe(
-			siblings?.[0]?.conversationIdentity,
-		);
-	});
-
-	it("keeps Fable effort through an Opus-overridden WebSocket request without leaking the carrier", async () => {
-		installUsageCollector();
-		let observedWebSocketRequest: Request | null = null;
-		spyOn(codexWebSocketTransport, "tryRequest").mockImplementation(
-			async (input) => {
-				observedWebSocketRequest = input.request.clone();
-				return null;
-			},
-		);
-		globalThis.fetch = mock(
-			async () =>
-				new Response(
-					[
-						'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_ok","model":"gpt-5.6-sol"}}\n\n',
-						'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"ok"}\n\n',
-						'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_ok","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":10,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}\n\n',
-						"data: [DONE]\n\n",
-					].join(""),
-					{
-						status: 200,
-						headers: { "content-type": "text/event-stream" },
-					},
-				),
-		);
 
 		const body = new TextEncoder().encode(
 			JSON.stringify({
@@ -1479,7 +1056,7 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 			makeRequest(body),
 			body,
 			makePolicy(1_000),
-			"codex-ws-fable-opus-override",
+			"codex-fable-opus-override",
 			makeCodexAccount({
 				model_mappings: JSON.stringify({
 					fable: "gpt-5.6-sol",
@@ -1495,91 +1072,20 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 		expect(response?.status).toBe(200);
 		await response?.text();
 
-		expect(observedWebSocketRequest).not.toBeNull();
-		const webSocketRequest = observedWebSocketRequest as unknown as Request;
-		const payload = (await webSocketRequest.clone().json()) as {
+		expect(observedHttpRequest).not.toBeNull();
+		const httpRequest = observedHttpRequest as unknown as Request;
+		const payload = (await httpRequest.clone().json()) as {
 			model?: string;
 			reasoning?: { effort?: string };
 		};
 		expect(payload.model).toBe("gpt-5.6-sol");
 		expect(payload.reasoning).toEqual({ effort: "xhigh" });
 		expect(
-			webSocketRequest.headers.get(CODEX_LOGICAL_MODEL_FAMILY_HEADER),
+			httpRequest.headers.get(CODEX_LOGICAL_MODEL_FAMILY_HEADER),
 		).toBeNull();
 	});
 
-	it("aborts the WebSocket transport signal when terminal draining reaches its deadline", async () => {
-		installUsageCollector();
-		const originalSetTimeout = globalThis.setTimeout;
-		const timeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((
-			...args: Parameters<typeof setTimeout>
-		) => {
-			const [callback, delay, ...rest] = args;
-			return originalSetTimeout(
-				callback,
-				delay === ANTHROPIC_DRAIN_DEADLINE_MS ? 10 : delay,
-				...rest,
-			);
-		}) as typeof setTimeout);
-		let webSocketSignal: AbortSignal | undefined;
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP fallback", { status: 500 });
-		});
-		const receipt = makeReceipt(() => undefined);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			webSocketSignal = input.signal;
-			input.onFrameWritten?.(receipt);
-			return {
-				receipt,
-				response: new Response(
-					new ReadableStream<Uint8Array>({
-						start(controller) {
-							controller.enqueue(
-								new TextEncoder().encode(
-									'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"partial"}\n\n',
-								),
-							);
-							// Stay open until terminal recovery's drain deadline.
-						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "text/event-stream" },
-					},
-				),
-			};
-		});
-
-		try {
-			const body = makeRequestBody();
-			const response = await runProxy(
-				makeRequest(body),
-				body,
-				makePolicy(1_000),
-				"codex-ws-drain-abort",
-			);
-			expect(response).not.toBeNull();
-			expect(websocketAttempt).toHaveBeenCalledTimes(1);
-			expect(httpCalls).toBe(0);
-			expect(webSocketSignal).toBeDefined();
-			expect(webSocketSignal?.aborted).toBe(false);
-			const reader = response?.body?.getReader();
-			expect(reader).toBeDefined();
-			await expect(reader?.read()).resolves.toMatchObject({ done: false });
-			await reader?.cancel("client disconnect");
-
-			expect(webSocketSignal?.aborted).toBe(true);
-		} finally {
-			timeoutSpy.mockRestore();
-		}
-	});
-
-	it("keeps the private attempt deadline for pre-write WebSocket fallback and HTTP", async () => {
+	it("aborts a non-final HTTP attempt at its private attempt deadline", async () => {
 		installUsageCollector();
 		let httpCalls = 0;
 		globalThis.fetch = mock(async (input) => {
@@ -1592,11 +1098,6 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 			});
 		});
 
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockResolvedValue(null);
-
 		const body = makeRequestBody();
 		const request = makeRequest(body);
 		const startedAt = Date.now();
@@ -1604,749 +1105,14 @@ describe("proxyWithAccount: Codex Responses WebSocket no-replay boundary", () =>
 			request,
 			body,
 			makePolicy(350, { attemptDeadlineMs: 90, isFinalAttempt: false }),
-			"codex-ws-prewrite-http-deadline",
+			"codex-http-attempt-deadline",
 		);
 		const elapsedMs = Date.now() - startedAt;
 
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
 		expect(httpCalls).toBe(1);
 		expect(elapsedMs).toBeGreaterThanOrEqual(60);
 		expect(elapsedMs).toBeLessThan(250);
 		expect(response).toBeNull();
-	});
-
-	it("does not replay over HTTP when a structurally-started WebSocket stream reaches its semantic deadline", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS = "40";
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		const postWriteCategories: string[] = [];
-		let upstreamCancels = 0;
-		const receipt = makeReceipt((category) =>
-			postWriteCategories.push(category),
-		);
-		const encoder = new TextEncoder();
-		const structurallyStarted = new Response(
-			new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(
-						encoder.encode(
-							'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_structural","model":"gpt-5.4"}}\n\n',
-						),
-					);
-					// Deliberately no meaningful event and no terminal event.
-				},
-				cancel() {
-					upstreamCancels++;
-				},
-			}),
-			{
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			},
-		);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			input.onFrameWritten?.(receipt);
-			return { response: structurallyStarted, receipt };
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const startedAt = Date.now();
-		const response = await runProxy(
-			request,
-			body,
-			makePolicy(180),
-			"codex-ws-structural-stall",
-		);
-		const elapsedMs = Date.now() - startedAt;
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteCategories).toEqual(["semantic_stall"]);
-		expect(upstreamCancels).toBe(0);
-		expect(elapsedMs).toBeGreaterThanOrEqual(140);
-		expect(receipt.stickyHttp).toBe(true);
-		expect(response?.status).toBe(504);
-		expect(await response?.json()).toMatchObject({
-			error: { code: "codex_websocket_semantic_stall" },
-		});
-	});
-
-	it("allows event-silent WebSocket reasoning past protocol idle to commit before the request-wide deadline", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS = "40";
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		const postWriteCategories: string[] = [];
-		let upstreamCancels = 0;
-		const receipt = makeReceipt((category) =>
-			postWriteCategories.push(category),
-		);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			input.onFrameWritten?.(receipt);
-			const encoder = new TextEncoder();
-			let successTimer: ReturnType<typeof setTimeout> | undefined;
-			const eventSilentReasoning = new Response(
-				new ReadableStream<Uint8Array>({
-					start(controller) {
-						controller.enqueue(
-							encoder.encode(
-								'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_silent_reasoning","model":"gpt-5.4"}}\n\n',
-							),
-						);
-						successTimer = setTimeout(() => {
-							controller.enqueue(
-								encoder.encode(
-									[
-										'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"eventual output"}\n\n',
-										'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_silent_reasoning","model":"gpt-5.4","status":"completed","usage":{"input_tokens":10,"output_tokens":2}}}\n\n',
-										"data: [DONE]\n\n",
-									].join(""),
-								),
-							);
-							controller.close();
-						}, 120);
-					},
-					cancel() {
-						if (successTimer !== undefined) clearTimeout(successTimer);
-						upstreamCancels++;
-					},
-				}),
-				{
-					status: 200,
-					headers: { "content-type": "text/event-stream" },
-				},
-			);
-			return { response: eventSilentReasoning, receipt };
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const response = await runProxy(
-			request,
-			body,
-			makePolicy(350),
-			"codex-ws-event-silent-reasoning",
-		);
-		const responseBody = await response?.text();
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteCategories).toEqual([]);
-		expect(upstreamCancels).toBe(0);
-		expect(receipt.stickyHttp).toBe(false);
-		expect(response?.status).toBe(200);
-		expect(responseBody).toContain('"text":"eventual output"');
-	});
-
-	it("promotes a written non-final WebSocket attempt to the request-wide commitment deadline", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS = "40";
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		const postWriteCategories: string[] = [];
-		let upstreamCancels = 0;
-		const receipt = makeReceipt((category) =>
-			postWriteCategories.push(category),
-		);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			input.onFrameWritten?.(receipt);
-			const encoder = new TextEncoder();
-			let successTimer: ReturnType<typeof setTimeout> | undefined;
-			const delayedWinner = new Response(
-				new ReadableStream<Uint8Array>({
-					start(controller) {
-						controller.enqueue(
-							encoder.encode(
-								'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_promoted","model":"gpt-5.4"}}\n\n',
-							),
-						);
-						successTimer = setTimeout(() => {
-							controller.enqueue(
-								encoder.encode(
-									[
-										'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"promoted winner"}\n\n',
-										'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_promoted","model":"gpt-5.4","status":"completed","usage":{"input_tokens":10,"output_tokens":2}}}\n\n',
-										"data: [DONE]\n\n",
-									].join(""),
-								),
-							);
-							controller.close();
-						}, 160);
-					},
-					cancel() {
-						if (successTimer !== undefined) clearTimeout(successTimer);
-						upstreamCancels++;
-					},
-				}),
-				{
-					status: 200,
-					headers: { "content-type": "text/event-stream" },
-				},
-			);
-			return { response: delayedWinner, receipt };
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const response = await runProxy(
-			request,
-			body,
-			makePolicy(350, { attemptDeadlineMs: 90, isFinalAttempt: false }),
-			"codex-ws-promote-non-final-attempt",
-		);
-		const responseBody = await response?.text();
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteCategories).toEqual([]);
-		expect(upstreamCancels).toBe(0);
-		expect(receipt.stickyHttp).toBe(false);
-		expect(response?.status).toBe(200);
-		expect(responseBody).toContain('"text":"promoted winner"');
-	});
-
-	it("preserves downstream cancellation after promoting the written WebSocket deadline", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS = "40";
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		const routeAbort = new AbortController();
-		const postWriteCategories: string[] = [];
-		let upstreamCancels = 0;
-		let webSocketSignal: AbortSignal | undefined;
-		const receipt = makeReceipt((category) =>
-			postWriteCategories.push(category),
-		);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			webSocketSignal = input.signal;
-			input.onFrameWritten?.(receipt);
-			const encoder = new TextEncoder();
-			return {
-				receipt,
-				response: new Response(
-					new ReadableStream<Uint8Array>({
-						start(controller) {
-							controller.enqueue(
-								encoder.encode(
-									'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_cancelled","model":"gpt-5.4"}}\n\n',
-								),
-							);
-						},
-						cancel() {
-							upstreamCancels++;
-						},
-					}),
-					{
-						status: 200,
-						headers: { "content-type": "text/event-stream" },
-					},
-				),
-			};
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const proxyPromise = runProxy(
-			request,
-			body,
-			makePolicy(350, {
-				attemptDeadlineMs: 90,
-				isFinalAttempt: false,
-				routeAbort,
-			}),
-			"codex-ws-promoted-downstream-cancel",
-		);
-		const abortTimer = setTimeout(
-			() =>
-				routeAbort.abort(
-					new DOMException("downstream cancelled", "AbortError"),
-				),
-			130,
-		);
-		let thrown: unknown;
-		try {
-			await proxyPromise;
-		} catch (error) {
-			thrown = error;
-		} finally {
-			clearTimeout(abortTimer);
-		}
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteCategories).toEqual([]);
-		expect(webSocketSignal?.aborted).toBe(true);
-		expect(upstreamCancels).toBe(0);
-		expect(receipt.stickyHttp).toBe(false);
-		expect(thrown).toBeInstanceOf(Error);
-		expect((thrown as Error).name).toBe("AnthropicPreCommitAbortedError");
-	});
-
-	it("terminates once when the request-wide deadline expires during frame-write promotion", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS = "40";
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		const postWriteCategories: string[] = [];
-		let upstreamCancels = 0;
-		const receipt = makeReceipt((category) =>
-			postWriteCategories.push(category),
-		);
-		const encoder = new TextEncoder();
-		const structurallyStarted = new Response(
-			new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(
-						encoder.encode(
-							'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_expired_promotion","model":"gpt-5.4"}}\n\n',
-						),
-					);
-				},
-				cancel() {
-					upstreamCancels++;
-				},
-			}),
-			{
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			},
-		);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			// Advance wall time without advancing the still-pending private timer.
-			// Promotion must synchronously abort the same controller at the expired
-			// request-wide boundary, then the normal gate owns one final 504.
-			setSystemTime(Date.now() + 5_000);
-			try {
-				input.onFrameWritten?.(receipt);
-				expect(input.signal.aborted).toBe(true);
-			} finally {
-				setSystemTime();
-			}
-			return { response: structurallyStarted, receipt };
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const response = await runProxy(
-			request,
-			body,
-			makePolicy(1_000, {
-				attemptDeadlineMs: 500,
-				isFinalAttempt: false,
-			}),
-			"codex-ws-expired-frame-promotion",
-		);
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteCategories).toEqual(["semantic_stall"]);
-		expect(upstreamCancels).toBe(0);
-		expect(receipt.stickyHttp).toBe(true);
-		expect(response?.status).toBe(504);
-		expect(await response?.json()).toMatchObject({
-			error: { code: "codex_websocket_semantic_stall" },
-		});
-	});
-
-	it("does not treat a transport-first structural output item as semantic progress", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS = "40";
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		const postWriteCategories: string[] = [];
-		let upstreamCancels = 0;
-		let webSocketSignal: AbortSignal | undefined;
-		const receipt = makeReceipt((category) =>
-			postWriteCategories.push(category),
-		);
-		const encoder = new TextEncoder();
-		const structurallyStarted = new Response(
-			new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(
-						encoder.encode(
-							[
-								'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_structural_item","model":"gpt-5.4"}}\n\n',
-								'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_structural","type":"message","role":"assistant","content":[]}}\n\n',
-							].join(""),
-						),
-					);
-				},
-				cancel() {
-					upstreamCancels++;
-				},
-			}),
-			{
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			},
-		);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			webSocketSignal = input.signal;
-			input.onFrameWritten?.(receipt);
-			return { response: structurallyStarted, receipt };
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const startedAt = Date.now();
-		const response = await runProxy(
-			request,
-			body,
-			makePolicy(180, { attemptDeadlineMs: 90, isFinalAttempt: false }),
-			"codex-ws-structural-output-item",
-		);
-		const elapsedMs = Date.now() - startedAt;
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteCategories).toEqual(["semantic_stall"]);
-		expect(webSocketSignal?.aborted).toBe(true);
-		expect(upstreamCancels).toBe(0);
-		expect(elapsedMs).toBeGreaterThanOrEqual(140);
-		expect(receipt.stickyHttp).toBe(true);
-		expect(response?.status).toBe(504);
-		expect(await response?.json()).toMatchObject({
-			error: { code: "codex_websocket_semantic_stall" },
-		});
-	});
-
-	it("keeps a progressing WebSocket response alive across the protocol-idle window without HTTP replay", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS = "200";
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		let postWriteMarks = 0;
-		const receipt = makeReceipt(() => postWriteMarks++);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			input.onFrameWritten?.(receipt);
-			const encoder = new TextEncoder();
-			let progressTimer: ReturnType<typeof setTimeout> | undefined;
-			let successTimer: ReturnType<typeof setTimeout> | undefined;
-			const stopTimers = () => {
-				if (progressTimer !== undefined) clearTimeout(progressTimer);
-				if (successTimer !== undefined) clearTimeout(successTimer);
-			};
-			const progressing = new Response(
-				new ReadableStream<Uint8Array>({
-					start(controller) {
-						controller.enqueue(
-							encoder.encode(
-								'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_progress","model":"gpt-5.4"}}\n\n',
-							),
-						);
-						progressTimer = setTimeout(() => {
-							controller.enqueue(
-								encoder.encode(
-									'event: response.in_progress\ndata: {"type":"response.in_progress","response":{"id":"resp_progress","model":"gpt-5.4"}}\n\n',
-								),
-							);
-						}, 140);
-						successTimer = setTimeout(() => {
-							stopTimers();
-							controller.enqueue(
-								encoder.encode(
-									[
-										'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"still alive"}\n\n',
-										'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_progress","model":"gpt-5.4","status":"completed","usage":{"input_tokens":10,"output_tokens":2}}}\n\n',
-										"data: [DONE]\n\n",
-									].join(""),
-								),
-							);
-							controller.close();
-						}, 280);
-					},
-					cancel() {
-						stopTimers();
-					},
-				}),
-				{
-					status: 200,
-					headers: { "content-type": "text/event-stream" },
-				},
-			);
-			return { response: progressing, receipt };
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const response = await runProxy(
-			request,
-			body,
-			makePolicy(500),
-			"codex-ws-progress-liveness",
-		);
-		const responseBody = await response?.text();
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteMarks).toBe(0);
-		expect(receipt.stickyHttp).toBe(false);
-		expect(response?.status).toBe(200);
-		expect(responseBody).toContain('event: ping\ndata: {"type":"ping"}\n\n');
-		expect(responseBody).not.toContain("event: response.in_progress");
-		expect(responseBody).toContain('"text":"still alive"');
-	});
-
-	it("keeps progress pings noncommitting at the absolute deadline without HTTP replay", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS = "1300";
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		let postWriteMarks = 0;
-		let upstreamCancels = 0;
-		let progressEventsSent = 0;
-		let webSocketSignal: AbortSignal | undefined;
-		const receipt = makeReceipt(() => postWriteMarks++);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			webSocketSignal = input.signal;
-			input.onFrameWritten?.(receipt);
-			const encoder = new TextEncoder();
-			let progressTimer: ReturnType<typeof setInterval> | undefined;
-			const progressingWithoutContent = new Response(
-				new ReadableStream<Uint8Array>({
-					start(controller) {
-						progressEventsSent++;
-						controller.enqueue(
-							encoder.encode(
-								[
-									'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_progress_deadline","model":"gpt-5.4"}}\n\n',
-									'event: response.in_progress\ndata: {"type":"response.in_progress","response":{"id":"resp_progress_deadline","model":"gpt-5.4"}}\n\n',
-								].join(""),
-							),
-						);
-						progressTimer = setInterval(() => {
-							progressEventsSent++;
-							controller.enqueue(
-								encoder.encode(
-									'event: response.in_progress\ndata: {"type":"response.in_progress","response":{"id":"resp_progress_deadline","model":"gpt-5.4"}}\n\n',
-								),
-							);
-						}, 1_100);
-					},
-					cancel() {
-						if (progressTimer !== undefined) clearInterval(progressTimer);
-						upstreamCancels++;
-					},
-				}),
-				{
-					status: 200,
-					headers: { "content-type": "text/event-stream" },
-				},
-			);
-			return { response: progressingWithoutContent, receipt };
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const startedAt = Date.now();
-		const response = await runProxy(
-			request,
-			body,
-			makePolicy(1_600),
-			"codex-ws-progress-absolute-deadline",
-		);
-		const elapsedMs = Date.now() - startedAt;
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteMarks).toBe(1);
-		expect(receipt.stickyHttp).toBe(true);
-		await waitForCondition(() => webSocketSignal?.aborted === true);
-		expect(webSocketSignal?.aborted).toBe(true);
-		expect(upstreamCancels).toBe(0);
-		expect(progressEventsSent).toBeGreaterThanOrEqual(2);
-		expect(elapsedMs).toBeGreaterThanOrEqual(1_450);
-		expect(response?.status).toBe(504);
-		expect(await response?.json()).toMatchObject({
-			error: { code: "codex_websocket_semantic_stall" },
-		});
-	});
-
-	it("vetoes the official Codex api_error retry after response.create was written", async () => {
-		installUsageCollector();
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-
-		let postWriteMarks = 0;
-		const receipt = makeReceipt(() => postWriteMarks++);
-		const encoder = new TextEncoder();
-		const websocketFailure = new Response(
-			new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(
-						encoder.encode(
-							[
-								'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_failed","model":"gpt-5.4"}}\n\n',
-								'event: response.failed\ndata: {"type":"response.failed","response":{"id":"resp_failed","model":"gpt-5.4","status":"failed","error":{"type":"api_error","message":"bounded test failure"}}}\n\n',
-								"data: [DONE]\n\n",
-							].join(""),
-						),
-					);
-					controller.close();
-				},
-			}),
-			{
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			},
-		);
-		let websocketCalls = 0;
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			websocketCalls++;
-			if (websocketCalls > 1) return null;
-			input.onFrameWritten?.(receipt);
-			return { response: websocketFailure, receipt };
-		});
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const response = await runProxy(
-			request,
-			body,
-			makePolicy(500),
-			"codex-ws-api-error",
-		);
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(postWriteMarks).toBe(1);
-		expect(receipt.stickyHttp).toBe(true);
-		expect(response?.status).toBe(502);
-		expect(await response?.json()).toMatchObject({
-			error: { code: "codex_websocket_post_write_error" },
-		});
-	});
-
-	it("vetoes authoritative context-overflow replay to a safe xAI candidate after response.create was written", async () => {
-		installUsageCollector();
-		let httpOrXaiCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpOrXaiCalls++;
-			return new Response("unexpected HTTP or xAI replay", { status: 500 });
-		});
-
-		const postWriteCategories: string[] = [];
-		const receipt = makeReceipt((category) =>
-			postWriteCategories.push(category),
-		);
-		const encoder = new TextEncoder();
-		const authoritativeOverflow = new Response(
-			new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(
-						encoder.encode(
-							[
-								'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_context_overflow","model":"gpt-5.4"}}\n\n',
-								'event: response.failed\ndata: {"type":"response.failed","response":{"id":"resp_context_overflow","model":"gpt-5.4","status":"failed","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Input is too large"}}}\n\n',
-								"data: [DONE]\n\n",
-							].join(""),
-						),
-					);
-					controller.close();
-				},
-			}),
-			{
-				status: 200,
-				headers: { "content-type": "text/event-stream" },
-			},
-		);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			input.onFrameWritten?.(receipt);
-			return { response: authoritativeOverflow, receipt };
-		});
-		const canReplayToXai = mock(() => true);
-		const xaiCandidatePolicy: ModelFallbackExecutionPolicy = {
-			...makePolicy(500, { isFinalAttempt: false }),
-			canReplayContextOverflow: canReplayToXai,
-		};
-
-		const body = makeRequestBody();
-		const request = makeRequest(body);
-		const response = await runProxy(
-			request,
-			body,
-			xaiCandidatePolicy,
-			"codex-ws-context-overflow-xai-candidate",
-		);
-
-		expect(canReplayToXai).toHaveBeenCalled();
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpOrXaiCalls).toBe(0);
-		expect(postWriteCategories).toEqual(["post_write_error"]);
-		expect(receipt.stickyHttp).toBe(true);
-		expect(response).not.toBeNull();
-		expect(response?.status).toBe(502);
-		expect(await response?.json()).toMatchObject({
-			error: { code: "codex_websocket_post_write_error" },
-		});
 	});
 });
 
@@ -2484,25 +1250,6 @@ describe("proxyWithAccount: GPT-5.6 explicit breakpoint compatibility retry", ()
 			},
 		);
 		process.env.CCFLARE_CODEX_CACHE_KEY_MODE = "session";
-		const websocketAttempts: Array<{
-			conversationIdentity: string | null | undefined;
-			reservedHeaderNames: string[];
-		}> = [];
-		spyOn(codexWebSocketTransport, "tryRequest").mockImplementation(
-			async (input) => {
-				websocketAttempts.push({
-					conversationIdentity: (
-						input as typeof input & {
-							conversationIdentity?: string | null;
-						}
-					).conversationIdentity,
-					reservedHeaderNames: [...input.request.headers.keys()].filter(
-						(name) => name.startsWith("x-better-ccflare-"),
-					),
-				});
-				return null;
-			},
-		);
 		const outbound: Array<Record<string, unknown>> = [];
 		const httpReservedHeaderNames: string[][] = [];
 		globalThis.fetch = mock(async (request: Request) => {
@@ -2591,16 +1338,6 @@ describe("proxyWithAccount: GPT-5.6 explicit breakpoint compatibility retry", ()
 		expect(observeUpstream).toHaveBeenCalledTimes(2);
 		expect(observedBodies).toEqual(outbound);
 		expect(observedStatuses).toEqual([400, 200]);
-		expect(websocketAttempts).toHaveLength(2);
-		expect(websocketAttempts[0]?.conversationIdentity).toMatch(
-			/^[0-9a-f]{64}$/,
-		);
-		expect(websocketAttempts[1]?.conversationIdentity).toBe(
-			websocketAttempts[0]?.conversationIdentity,
-		);
-		expect(
-			websocketAttempts.map((attempt) => attempt.reservedHeaderNames),
-		).toEqual([[], []]);
 		expect(httpReservedHeaderNames).toEqual([[], []]);
 		expect(response?.status).toBe(200);
 		expect(JSON.stringify(outbound[0])).toContain("prompt_cache_breakpoint");
@@ -2622,69 +1359,23 @@ describe("proxyWithAccount: GPT-5.6 explicit breakpoint compatibility retry", ()
 		expect(
 			isCodexExplicitCacheBreakpointSuppressed(account.id, "gpt-5.6-sol"),
 		).toBeTrue();
-	});
 
-	it("learns a post-frame breakpoint rejection without replaying it", async () => {
-		installUsageCollector();
-		let httpCalls = 0;
-		globalThis.fetch = mock(async () => {
-			httpCalls++;
-			return new Response("unexpected HTTP replay", { status: 500 });
-		});
-		const receipt = makeReceipt(() => undefined);
-		const websocketAttempt = spyOn(
-			codexWebSocketTransport,
-			"tryRequest",
-		).mockImplementation(async (input) => {
-			input.onFrameWritten?.(receipt);
-			return {
-				receipt,
-				response: new Response(
-					JSON.stringify({
-						error: { message: "unknown field prompt_cache_breakpoint" },
-					}),
-					{
-						status: 400,
-						headers: { "content-type": "application/json" },
-					},
-				),
-			};
-		});
-
-		const account = makeCodexAccount({
-			model_mappings: JSON.stringify({ sonnet: "gpt-5.6-sol" }),
-		});
-		const body = makeGpt56RequestBody();
-		const response = await runProxy(
+		// The learned suppression keeps the marker off the next turn on this
+		// account/model without another rejection.
+		const followUp = await runProxy(
 			makeRequest(body),
 			body,
 			makePolicy(1_000),
-			"codex-breakpoint-ws-400",
+			"codex-breakpoint-400-follow-up",
 			account,
+			undefined,
+			undefined,
+			undefined,
+			proxyContext,
 		);
-
-		expect(websocketAttempt).toHaveBeenCalledTimes(1);
-		expect(httpCalls).toBe(0);
-		expect(response?.status).toBe(400);
-		expect(
-			isCodexExplicitCacheBreakpointSuppressed(account.id, "gpt-5.6-sol"),
-		).toBeTrue();
-
-		const followUpBody = makeGpt56RequestBody();
-		const followUp = await runProxy(
-			makeRequest(followUpBody),
-			followUpBody,
-			makePolicy(1_000),
-			"codex-breakpoint-ws-400-follow-up",
-			account,
-		);
-		expect(websocketAttempt).toHaveBeenCalledTimes(2);
-		expect(httpCalls).toBe(0);
-		expect(followUp?.status).toBe(400);
-		const followUpWireBody = await websocketAttempt.mock.calls[1]?.[0].request
-			.clone()
-			.json();
-		expect(JSON.stringify(followUpWireBody)).not.toContain(
+		expect(followUp?.status).toBe(200);
+		expect(outbound).toHaveLength(3);
+		expect(JSON.stringify(outbound[2])).not.toContain(
 			"prompt_cache_breakpoint",
 		);
 	});
