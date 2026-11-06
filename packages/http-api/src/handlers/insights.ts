@@ -9,18 +9,9 @@ import {
 	CODEX_CACHE_KEY_MODE_ENV,
 	CODEX_PROMPT_CACHE_KEY_ENV,
 	classifyCodexModelFamily,
-	getCodexExplicitCacheBreakpointSuppressionCount,
-	readCodexCacheKeyContinuityPercent,
-	readCodexCacheKeyPrefixShardPercent,
-	readCodexCacheKeySessionPercent,
-	readCodexExplicitCacheBreakpointPercent,
 	readCodexTurnStateConfig,
 } from "@better-ccflare/providers";
-import {
-	readCachePacingMs,
-	readCodexCachePacingSettleMs,
-	readCodexPacingBypassPercent,
-} from "@better-ccflare/proxy";
+import { readCachePacingMs } from "@better-ccflare/proxy";
 import {
 	type AnomalyRequestRow,
 	buildAnomalyInsightsResponse,
@@ -326,15 +317,19 @@ function readCacheParityPolicy(context: APIContext): CacheParityPolicy {
 			process.env[CODEX_CACHE_KEY_MODE_ENV] === "session"
 				? "session"
 				: "conversation",
-		cacheKeySessionPercent: readCodexCacheKeySessionPercent(),
-		cacheKeyContinuityPercent: readCodexCacheKeyContinuityPercent(),
-		cacheKeyPrefixShardPercent: readCodexCacheKeyPrefixShardPercent(),
+		// The cache-key canaries were removed: session keys and prefix sharding
+		// are always off and continuity is always on. The levers stay in the
+		// declared policy for one release at their fixed values.
+		cacheKeySessionPercent: 0,
+		cacheKeyContinuityPercent: 100,
+		cacheKeyPrefixShardPercent: 0,
 		pacingMs: readCachePacingMs(),
-		codexSettleMs: readCodexCachePacingSettleMs(),
-		pacingBypassPercent: readCodexPacingBypassPercent(),
-		explicitBreakpointPercent: readCodexExplicitCacheBreakpointPercent(),
-		explicitBreakpointSuppressedScopes:
-			getCodexExplicitCacheBreakpointSuppressionCount(),
+		// The Codex settle window and pacing bypass were removed; always 0.
+		codexSettleMs: 0,
+		pacingBypassPercent: 0,
+		// GPT-5.6 explicit breakpoints were removed; always off.
+		explicitBreakpointPercent: 0,
+		explicitBreakpointSuppressedScopes: 0,
 		turnStatePercent: turnState.percent,
 		turnStateObserveOnly: turnState.observeOnly,
 		// The Codex WebSocket transport was removed; the lever stays in the

@@ -264,12 +264,8 @@ export function buildCacheParityResponse(
 		},
 		backendCapability: {
 			endpoint: "chatgpt_subscription",
-			explicitBreakpoint:
-				input.policy.explicitBreakpointSuppressedScopes > 0
-					? "unsupported_observed"
-					: input.policy.explicitBreakpointPercent > 0
-						? "treatment_requested"
-						: "not_requested",
+			// GPT-5.6 explicit breakpoints were removed, so none is ever requested.
+			explicitBreakpoint: "not_requested",
 		},
 		policy: input.policy,
 		driftReport: buildCacheParityDriftReport(

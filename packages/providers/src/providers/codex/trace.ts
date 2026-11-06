@@ -54,7 +54,10 @@ export const CODEX_FANOUT_WARN_ENV = "CCFLARE_CODEX_FANOUT_WARN";
 // affinity header receipts (session-id source, routing hint) so a cache-read
 // regression can be split by whether the wire carried them.
 // Schema 22 adds content-free per-attempt stream diagnostics.
-const TRACE_SCHEMA_VERSION = 22;
+// Schema 23 drops the retired canary fields (cache_key_assignment,
+// cache_key_cohort_id, cache_key_assignment_source, explicit_breakpoint_*,
+// pacing_canary, pacing_action); no remaining field changed meaning.
+const TRACE_SCHEMA_VERSION = 23;
 const DEFAULT_FANOUT_WARN = 8;
 const TURN_STATE_COHORT_PATTERN = /^[0-9a-f]{16}$/;
 // Derived from the canonical vocabularies so a new category cannot be emitted
@@ -275,18 +278,8 @@ interface TraceInputs {
 	affinityRoutingHint?: boolean;
 	/** Key derivation mode: "conversation" | "session" (see provider). */
 	cacheKeyMode?: "conversation" | "session" | null;
-	/** Intended experiment arm for eligible cache-key canary traffic. */
-	cacheKeyAssignment?: "conversation" | "session" | null;
-	/** Bounded, domain-separated session cohort digest. */
-	cacheKeyCohortId?: string | null;
 	/** Bounded digest of the logical conversation identity. */
 	conversationId?: string | null;
-	/** Why the effective cache-key mode was selected. */
-	cacheKeyAssignmentSource?:
-		| "canary"
-		| "explicit_session_override"
-		| "prefix_shard"
-		| null;
 	/** Low-cardinality continuity provenance for the outbound cache key. */
 	cacheKeyContinuityBasis?:
 		| "derived"
@@ -301,18 +294,8 @@ interface TraceInputs {
 	continuityEvidenceId?: string | null;
 	/** Bounded prefix of the canonical identity used for the cache key. */
 	canonicalConversationId?: string | null;
-	/** Explicit GPT-5.6 breakpoint experiment arm; contains no prompt/key data. */
-	explicitBreakpointCanary?: "treatment" | "control" | "ineligible";
-	/** Domain-separated conversation cohort digest. */
-	explicitBreakpointCohortId?: string | null;
-	/** Placement or skip reason; contains no prompt/key data. */
-	explicitBreakpointAction?: string;
-	/** Pacing canary arm: "control" | "bypass". */
-	pacingCanary?: string | null;
 	/** Privacy-preserving conversation cohort digest for stability checks. */
 	pacingCohortId?: string | null;
-	/** Effective request action: paced | bypassed | crossover-paced. */
-	pacingAction?: string | null;
 	/** Actual pacing coordination role; validated before persistence. */
 	pacingRole?: string | null;
 	/** Observed wait carried as a trusted internal decimal header. */
@@ -577,20 +560,12 @@ export function writeCodexTrace(inputs: TraceInputs): void {
 		affinity_session_identity: inputs.affinitySessionIdentity ?? null,
 		affinity_routing_hint: inputs.affinityRoutingHint ?? false,
 		cache_key_mode: inputs.cacheKeyMode ?? null,
-		cache_key_assignment: inputs.cacheKeyAssignment ?? null,
-		cache_key_cohort_id: inputs.cacheKeyCohortId ?? null,
 		conversation_id: inputs.conversationId ?? null,
-		cache_key_assignment_source: inputs.cacheKeyAssignmentSource ?? null,
 		cache_key_continuity_basis: inputs.cacheKeyContinuityBasis ?? null,
 		cache_key_continuity_applied: inputs.cacheKeyContinuityApplied ?? null,
 		continuity_evidence_id: inputs.continuityEvidenceId ?? null,
 		canonical_conversation_id: inputs.canonicalConversationId ?? null,
-		explicit_breakpoint_canary: inputs.explicitBreakpointCanary ?? null,
-		explicit_breakpoint_cohort_id: inputs.explicitBreakpointCohortId ?? null,
-		explicit_breakpoint_action: inputs.explicitBreakpointAction ?? null,
-		pacing_canary: inputs.pacingCanary ?? null,
 		pacing_cohort_id: inputs.pacingCohortId ?? null,
-		pacing_action: inputs.pacingAction ?? null,
 		pacing_role: normalizePacingRole(inputs.pacingRole),
 		pacing_wait_ms: normalizePacingWaitMs(inputs.pacingWaitMs),
 		pacing_release_reason: normalizePacingReleaseReason(

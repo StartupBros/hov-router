@@ -17,11 +17,6 @@ import { opaqueRuntimeId } from "./opaque-runtime-id";
 
 const log = new Logger("CachePacing");
 export const CACHE_PACING_MS_ENV = "CCFLARE_CACHE_PACING_MS";
-export const CODEX_CACHE_PACING_SETTLE_MS_ENV =
-	"CCFLARE_CODEX_CACHE_PACING_SETTLE_MS";
-export const CODEX_PACING_BYPASS_PERCENT_ENV =
-	"CCFLARE_CODEX_PACING_BYPASS_PERCENT";
-const MAX_CODEX_CACHE_PACING_SETTLE_MS = 10_000;
 const MAX_ROUTE_STATS = 256;
 
 interface LeaderEntry {
@@ -52,8 +47,6 @@ export interface CachePacingTarget {
 export interface CachePacingFamilyStats {
 	leaders: number;
 	leadersAbandoned: number;
-	leadersReachedTerminal: number;
-	leadersReleasedAfterSettle: number;
 	leadersReleasedOnCancelOrError: number;
 	staleLeadersReplaced: number;
 	followersHeld: number;
@@ -68,9 +61,6 @@ export interface CachePacingRouteStats extends CachePacingFamilyStats {
 	accountName: string;
 	provider: string;
 	requestsServed: number;
-	canaryBypassServed: number;
-	canaryControlServed: number;
-	canaryCrossovers: number;
 }
 
 const statsByFamily = new Map<string, CachePacingFamilyStats>();
@@ -86,8 +76,6 @@ function newStats(): CachePacingFamilyStats {
 	return {
 		leaders: 0,
 		leadersAbandoned: 0,
-		leadersReachedTerminal: 0,
-		leadersReleasedAfterSettle: 0,
 		leadersReleasedOnCancelOrError: 0,
 		staleLeadersReplaced: 0,
 		followersHeld: 0,
@@ -137,14 +125,9 @@ export function getCachePacingRouteStats(): Record<
 export function recordCachePacingRoute(
 	observation: CachePacingObservation | null,
 	target: CachePacingTarget,
-	canary?: {
-		candidate: boolean;
-		/** Immutable treatment assignment, independent of effective pacing action. */
-		assignedBypass: boolean;
-	},
 ): void {
-	// Route volume and cohort counts apply even when pacing was disabled or
-	// ineligible (observation=null). Only wait/leader mechanics need a receipt.
+	// Route volume applies even when pacing was disabled or ineligible
+	// (observation=null). Only wait/leader mechanics need a receipt.
 	let entry = statsByRoute.get(target.accountId);
 	if (!entry) {
 		if (statsByRoute.size >= MAX_ROUTE_STATS) {
@@ -157,29 +140,15 @@ export function recordCachePacingRoute(
 			accountName: target.accountName,
 			provider: target.provider,
 			requestsServed: 0,
-			canaryBypassServed: 0,
-			canaryControlServed: 0,
-			canaryCrossovers: 0,
 		};
 		statsByRoute.set(target.accountId, entry);
 	}
 	entry.accountName = target.accountName;
 	entry.provider = target.provider;
 	entry.requestsServed++;
-	if (canary?.candidate) {
-		if (canary.assignedBypass && target.provider === "codex") {
-			entry.canaryBypassServed++;
-		} else if (canary.assignedBypass) {
-			// Treatment assignment is immutable even when Anthropic crossover
-			// restores pacing. Count the serving route as crossover, not control.
-			entry.canaryCrossovers++;
-		} else if (target.provider === "codex") {
-			entry.canaryControlServed++;
-		}
-	}
 	if (!observation) return;
 	if (observation.role === "leader") {
-		observation.slot?.bindServingProvider(target.provider, entry);
+		observation.slot?.bindServingRoute(entry);
 		entry.leaders++;
 		return;
 	}
@@ -198,10 +167,7 @@ export interface CachePacingSlot {
 	wrap(response: Response): Response;
 	abandon(): void;
 	/** Internal route-accounting seam; only recordCachePacingRoute() calls this. */
-	bindServingProvider(
-		provider: string,
-		routeStats: CachePacingRouteStats,
-	): void;
+	bindServingRoute(routeStats: CachePacingRouteStats): void;
 }
 
 export function readCachePacingMs(): number {
@@ -211,27 +177,10 @@ export function readCachePacingMs(): number {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
-/** Default-off Codex terminal settle window, bounded to retain pacing liveness. */
-export function readCodexCachePacingSettleMs(): number {
-	const raw = process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV];
-	if (raw === undefined || raw === "" || !/^\d+$/.test(raw)) return 0;
-	const parsed = Number.parseInt(raw, 10);
-	if (!Number.isSafeInteger(parsed)) return 0;
-	return Math.min(parsed, MAX_CODEX_CACHE_PACING_SETTLE_MS);
-}
-
-export function readCodexPacingBypassPercent(): number {
-	const raw = process.env[CODEX_PACING_BYPASS_PERCENT_ENV];
-	if (raw === undefined || raw === "") return 0;
-	if (!/^\d+$/.test(raw)) return 0;
-	const parsed = Number.parseInt(raw, 10);
-	return Number.isSafeInteger(parsed) ? Math.min(parsed, 100) : 0;
-}
-
 /**
- * Privacy-preserving conversation identity for canary assignment. The first
- * message and system prompt are stable across a conversation's turns but
- * distinct across sibling subagents. Only the digest is returned.
+ * Privacy-preserving conversation identity carried as the pacing cohort id.
+ * The first message and system prompt are stable across a conversation's
+ * turns but distinct across sibling subagents. Only the digest is returned.
  */
 export function derivePacingCohortKey(
 	sessionKey: string | null | undefined,
@@ -251,20 +200,6 @@ export function derivePacingCohortKey(
 	} catch {
 		return null;
 	}
-}
-
-/** Stable per-conversation cohort assignment; missing identity is control. */
-export function isCodexPacingBypassCandidate(
-	cohortKey: string | null | undefined,
-	percent: number = readCodexPacingBypassPercent(),
-): boolean {
-	if (!cohortKey || readCachePacingMs() <= 0 || percent <= 0) return false;
-	if (percent >= 100) return true;
-	const bucket = createHash("sha256")
-		.update(cohortKey)
-		.digest()
-		.readUInt16BE(0);
-	return bucket % 100 < percent;
 }
 
 /** Full two-phase API used by the proxy. */
@@ -317,14 +252,9 @@ export async function observeCachePacing(opts: {
 	});
 	let released = false;
 	let wrapped = false;
-	let servingProvider: string | null = null;
 	let servingRouteStats: CachePacingRouteStats | null = null;
 	const increment = (
-		field:
-			| "leadersAbandoned"
-			| "leadersReachedTerminal"
-			| "leadersReleasedAfterSettle"
-			| "leadersReleasedOnCancelOrError",
+		field: "leadersAbandoned" | "leadersReleasedOnCancelOrError",
 	) => {
 		stats[field]++;
 		if (servingRouteStats) servingRouteStats[field]++;
@@ -349,8 +279,7 @@ export async function observeCachePacing(opts: {
 
 	const slot: CachePacingSlot = {
 		key,
-		bindServingProvider(provider, routeStats): void {
-			servingProvider = provider;
+		bindServingRoute(routeStats): void {
 			servingRouteStats = routeStats;
 		},
 		wrap(response: Response): Response {
@@ -360,8 +289,6 @@ export async function observeCachePacing(opts: {
 				finish();
 				return response;
 			}
-			const settleMs =
-				servingProvider === "codex" ? readCodexCachePacingSettleMs() : 0;
 			const reader = response.body.getReader();
 			const releaseOnCancelOrError = () => {
 				if (released) return;
@@ -372,27 +299,13 @@ export async function observeCachePacing(opts: {
 				async pull(controller) {
 					try {
 						const { done, value } = await reader.read();
+						// The first body chunk (or an empty body's end) means the
+						// cache entry is readable, so followers can go.
+						finish();
 						if (done) {
-							if (settleMs > 0) {
-								increment("leadersReachedTerminal");
-								const remainingLivenessMs = Math.max(
-									0,
-									maxHoldMs * 2 - (nowFn() - entry.startedAt),
-								);
-								setTimeout(
-									() => {
-										if (!released) increment("leadersReleasedAfterSettle");
-										finish();
-									},
-									Math.min(settleMs, remainingLivenessMs),
-								);
-							} else {
-								finish();
-							}
 							controller.close();
 							return;
 						}
-						if (settleMs <= 0) finish();
 						controller.enqueue(value);
 					} catch (error) {
 						releaseOnCancelOrError();

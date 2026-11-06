@@ -215,161 +215,9 @@ export const CODEX_CACHE_KEY_MODE_ENV = "CCFLARE_CODEX_CACHE_KEY_MODE";
  */
 export const CODEX_SYNTHETIC_COUNT_TOKENS_ENV =
 	"CCFLARE_CODEX_SYNTHETIC_COUNT_TOKENS";
-export const CODEX_CACHE_KEY_SESSION_PERCENT_ENV =
-	"CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT";
-export const CODEX_CACHE_KEY_CONTINUITY_PERCENT_ENV =
-	"CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT";
-export const CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV =
-	"CCFLARE_CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT";
-export const CODEX_EXPLICIT_CACHE_BREAKPOINT_PERCENT_ENV =
-	"CCFLARE_CODEX_GPT56_EXPLICIT_CACHE_BREAKPOINT_PERCENT";
-const CODEX_CACHE_KEY_SESSION_BUCKET_DOMAIN =
-	"better-ccflare:codex-cache-key-session-canary:v1\0";
-const CODEX_CACHE_KEY_CONTINUITY_BUCKET_DOMAIN =
-	"better-ccflare:codex-cache-key-continuity-canary:v1\0";
-const CODEX_CACHE_KEY_PREFIX_SHARD_BUCKET_DOMAIN =
-	"better-ccflare:codex-prefix-shard-canary:v1\0";
-const CODEX_CACHE_KEY_PREFIX_SHARD_DOMAIN =
-	"better-ccflare:codex-prefix-shard:v1\0";
-const CODEX_CACHE_KEY_COHORT_DOMAIN =
-	"better-ccflare:codex-cache-key-cohort:v1\0";
 const CODEX_CACHE_LANE_RESCUE_DOMAIN =
 	"better-ccflare:codex-cache-lane-rescue:v1\0";
 const CODEX_CACHE_LANE_RESCUE_SALT_MAX_CHARS = 128;
-const CODEX_EXPLICIT_BREAKPOINT_BUCKET_DOMAIN =
-	"better-ccflare:codex-gpt56-explicit-breakpoint-canary:v1\0";
-const CODEX_EXPLICIT_BREAKPOINT_COHORT_DOMAIN =
-	"better-ccflare:codex-gpt56-explicit-breakpoint-cohort:v1\0";
-const MAX_CODEX_EXPLICIT_BREAKPOINT_SUPPRESSIONS = 2_048;
-const codexExplicitBreakpointSuppressions = new Map<string, true>();
-
-function codexExplicitBreakpointSuppressionKey(
-	accountId: string,
-	model: string,
-	endpoint: string,
-): string {
-	return `${accountId}:${model.toLowerCase()}:${endpoint}`;
-}
-
-/** Remember an upstream 400 capability rejection for this process lifetime. */
-export function suppressCodexExplicitCacheBreakpoint(
-	accountId: string,
-	model: string,
-	endpoint = CODEX_DEFAULT_ENDPOINT,
-): void {
-	const normalizedEndpoint =
-		normalizeCodexExplicitBreakpointEligibleEndpoint(endpoint);
-	if (!accountId || !model || !normalizedEndpoint) return;
-	const key = codexExplicitBreakpointSuppressionKey(
-		accountId,
-		model,
-		normalizedEndpoint,
-	);
-	// Refresh insertion order so the bounded map behaves as a small LRU.
-	codexExplicitBreakpointSuppressions.delete(key);
-	codexExplicitBreakpointSuppressions.set(key, true);
-	while (
-		codexExplicitBreakpointSuppressions.size >
-		MAX_CODEX_EXPLICIT_BREAKPOINT_SUPPRESSIONS
-	) {
-		const oldest = codexExplicitBreakpointSuppressions.keys().next().value;
-		if (typeof oldest !== "string") break;
-		codexExplicitBreakpointSuppressions.delete(oldest);
-	}
-}
-
-export function isCodexExplicitCacheBreakpointSuppressed(
-	accountId: string,
-	model: string,
-	endpoint = CODEX_DEFAULT_ENDPOINT,
-): boolean {
-	const normalizedEndpoint =
-		normalizeCodexExplicitBreakpointEligibleEndpoint(endpoint);
-	if (!normalizedEndpoint) return false;
-	return codexExplicitBreakpointSuppressions.has(
-		codexExplicitBreakpointSuppressionKey(accountId, model, normalizedEndpoint),
-	);
-}
-
-export function getCodexExplicitCacheBreakpointSuppressionCount(): number {
-	return codexExplicitBreakpointSuppressions.size;
-}
-
-export function resetCodexExplicitBreakpointSuppressionsForTest(): void {
-	codexExplicitBreakpointSuppressions.clear();
-}
-
-export function readCodexCacheKeySessionPercent(
-	raw = process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV],
-): number {
-	if (raw === undefined || !/^\d+$/.test(raw)) return 0;
-	return Math.min(Number.parseInt(raw, 10), 100);
-}
-
-export function deriveCodexCacheKeySessionBucket(sessionId: string): number {
-	const digest = createHash("sha256")
-		.update(CODEX_CACHE_KEY_SESSION_BUCKET_DOMAIN)
-		.update(sessionId.toLowerCase())
-		.digest();
-	return digest.readUInt32BE(0) % 100;
-}
-
-export function readCodexCacheKeyPrefixShardPercent(
-	raw = process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV],
-): number {
-	if (raw === undefined || !/^\d+$/.test(raw)) return 0;
-	return Math.min(Number.parseInt(raw, 10), 100);
-}
-
-function deriveCodexCacheKeyPrefixShardBucket(
-	conversationIdentity: string,
-): number {
-	const digest = createHash("sha256")
-		.update(CODEX_CACHE_KEY_PREFIX_SHARD_BUCKET_DOMAIN)
-		.update(conversationIdentity)
-		.digest();
-	return digest.readUInt32BE(0) % 100;
-}
-
-function deriveCodexCacheKeyPrefixShard(conversationIdentity: string): number {
-	const digest = createHash("sha256")
-		.update(CODEX_CACHE_KEY_PREFIX_SHARD_DOMAIN)
-		.update(conversationIdentity)
-		.digest();
-	return digest.readUInt32BE(0) % 8;
-}
-
-export function readCodexCacheKeyContinuityPercent(
-	raw = process.env[CODEX_CACHE_KEY_CONTINUITY_PERCENT_ENV],
-): number {
-	if (raw === undefined || !/^\d+$/.test(raw)) return 0;
-	return Math.min(Number.parseInt(raw, 10), 100);
-}
-
-export function deriveCodexCacheKeyContinuityBucket(sessionId: string): number {
-	const digest = createHash("sha256")
-		.update(CODEX_CACHE_KEY_CONTINUITY_BUCKET_DOMAIN)
-		.update(sessionId.toLowerCase())
-		.digest();
-	return digest.readUInt32BE(0) % 100;
-}
-
-export function readCodexExplicitCacheBreakpointPercent(
-	raw = process.env[CODEX_EXPLICIT_CACHE_BREAKPOINT_PERCENT_ENV],
-): number {
-	if (raw === undefined || !/^\d+$/.test(raw)) return 0;
-	return Math.min(Number.parseInt(raw, 10), 100);
-}
-
-export function deriveCodexExplicitBreakpointBucket(
-	conversationIdentity: string,
-): number {
-	const digest = createHash("sha256")
-		.update(CODEX_EXPLICIT_BREAKPOINT_BUCKET_DOMAIN)
-		.update(conversationIdentity)
-		.digest();
-	return digest.readUInt32BE(0) % 100;
-}
 // Structured (non-text) tool_result blocks larger than this are replaced with
 // a size marker: replaying megabyte payloads (e.g. base64 documents) into
 // every subsequent turn bloats context and destroys prompt-cache reuse.
@@ -424,37 +272,6 @@ function isOpenAiPromptCacheEndpoint(account?: Account): boolean {
 		return OPENAI_PROMPT_CACHE_HOSTS.has(new URL(endpoint).hostname);
 	} catch {
 		return false;
-	}
-}
-
-/**
- * Exact canary endpoints. The public OpenAI Responses path documents the
- * field; the private ChatGPT Codex path is inferred and protected by the dark
- * default plus a capability-rejection fallback.
- */
-function normalizeCodexExplicitBreakpointEligibleEndpoint(
-	endpoint: string,
-): string | null {
-	try {
-		const url = new URL(endpoint);
-		if (
-			url.protocol !== "https:" ||
-			url.username !== "" ||
-			url.password !== "" ||
-			url.port !== "" ||
-			url.search !== "" ||
-			url.hash !== ""
-		) {
-			return null;
-		}
-		const pathname = url.pathname.replace(/\/+$/, "") || "/";
-		const official =
-			(url.hostname === "chatgpt.com" &&
-				pathname === "/backend-api/codex/responses") ||
-			(url.hostname === "api.openai.com" && pathname === "/v1/responses");
-		return official ? `${url.origin}${pathname}` : null;
-	} catch {
-		return null;
 	}
 }
 
@@ -640,15 +457,9 @@ export { MODEL_CONTEXT_WINDOWS } from "../../request-capabilities";
 
 // ── Codex Responses API types ─────────────────────────────────────────────────
 
-const SOURCE_CACHE_MARKED = Symbol("codex-source-cache-marked");
-const SOURCE_MESSAGE_INDEX = Symbol("codex-source-message-index");
-
 interface CodexInputTextItem {
 	type: "input_text";
 	text: string;
-	prompt_cache_breakpoint?: { mode: "explicit" };
-	[SOURCE_CACHE_MARKED]?: boolean;
-	[SOURCE_MESSAGE_INDEX]?: number;
 }
 
 interface CodexOutputTextItem {
@@ -713,18 +524,6 @@ interface CodexAdditionalToolsItem {
 	[key: string]: unknown;
 }
 
-function isCodexMessage(
-	item: CodexRequest["input"][number],
-): item is CodexMessage {
-	if (!("role" in item) || !("content" in item)) return false;
-	return (
-		(item.role === "user" ||
-			item.role === "assistant" ||
-			item.role === "system") &&
-		Array.isArray(item.content)
-	);
-}
-
 interface CodexRequest {
 	model: string;
 	input: (
@@ -758,14 +557,7 @@ interface CodexRequest {
 
 export interface CodexPromptCacheKeyDecision {
 	key: string | null;
-	assignment: "conversation" | "session" | null;
-	assignmentSource:
-		| "canary"
-		| "explicit_session_override"
-		| "prefix_shard"
-		| null;
 	effectiveMode: "conversation" | "session" | null;
-	cohortId: string | null;
 	conversationIdentity: string | null;
 	/** Canonical identity authorized by orchestration admission, if any. */
 	canonicalConversationIdentity: string | null;
@@ -782,30 +574,11 @@ export interface CodexPromptCacheKeyDecision {
 		| "ineligible";
 }
 
-export type CodexExplicitBreakpointAction =
-	| "placed_source_marker"
-	| "placed_first_user_text"
-	| "skip_percent_control"
-	| "skip_non_gpt56"
-	| "skip_non_eligible_endpoint"
-	| "skip_no_prompt_cache_key"
-	| "skip_no_conversation"
-	| "skip_known_unsupported"
-	| "skip_rotated_cache_key_attempt"
-	| "skip_no_eligible_block";
-
-export interface CodexExplicitBreakpointDecision {
-	canary: "treatment" | "control" | "ineligible";
-	cohortId: string | null;
-	action: CodexExplicitBreakpointAction;
-}
-
 interface CodexConversionResult {
 	codexBody: CodexRequest;
 	reasoningEffortRequested: ReasoningEffort | undefined;
 	reasoningEffortSource: AnthropicReasoningEffortSource;
 	cacheKeyDecision: CodexPromptCacheKeyDecision;
-	explicitBreakpointDecision: CodexExplicitBreakpointDecision;
 	orchestrationAdmission: OrchestrationAdmission;
 	/**
 	 * Diagnostic-only reasoning basis behind orchestrationAdmission, when an
@@ -1540,8 +1313,8 @@ function normalizeReplayItemForDigest(
 		// Retained server-side by the response id; excluded from the digest.
 		return { type: "reasoning" };
 	}
-	// Message items in this fork's `codexBody.input` (see `CodexMessage` /
-	// `isCodexMessage`) are recognized structurally -- role + a content
+	// Message items in this fork's `codexBody.input` (see `CodexMessage`)
+	// are recognized structurally -- role + a content
 	// array -- and never carry an explicit `type: "message"` discriminant
 	// (the field is optional on the wire and this fork's own converter never
 	// sets it). Requiring a literal `type === "message"` here would fail
@@ -3061,7 +2834,6 @@ export class CodexProvider extends BaseProvider {
 				reasoningEffortRequested,
 				reasoningEffortSource,
 				cacheKeyDecision,
-				explicitBreakpointDecision,
 				orchestrationAdmission,
 				orchestrationBasis,
 				filteredToolNames,
@@ -3078,7 +2850,6 @@ export class CodexProvider extends BaseProvider {
 					requestId
 					? requestId.slice(0, CODEX_CACHE_LANE_RESCUE_SALT_MAX_CHARS)
 					: undefined,
-				request.url,
 				finalModel ?? undefined,
 				logicalModelFamily,
 				passthrough,
@@ -3211,11 +2982,8 @@ export class CodexProvider extends BaseProvider {
 				affinitySessionIdentity: affinityDecision.sessionIdentity,
 				affinityRoutingHint: affinityDecision.routingHint,
 				cacheKeyMode: cacheKeyDecision.effectiveMode,
-				cacheKeyAssignment: cacheKeyDecision.assignment,
-				cacheKeyCohortId: cacheKeyDecision.cohortId,
 				conversationId:
 					cacheKeyDecision.conversationIdentity?.slice(0, 16) ?? null,
-				cacheKeyAssignmentSource: cacheKeyDecision.assignmentSource,
 				cacheKeyContinuityBasis: cacheKeyDecision.continuityBasis,
 				cacheKeyContinuityApplied: cacheKeyDecision.continuityApplied,
 				continuityEvidenceId:
@@ -3227,14 +2995,9 @@ export class CodexProvider extends BaseProvider {
 					? (cacheKeyDecision.selectedConversationIdentity?.slice(0, 16) ??
 						null)
 					: null,
-				explicitBreakpointCanary: explicitBreakpointDecision.canary,
-				explicitBreakpointCohortId: explicitBreakpointDecision.cohortId,
-				explicitBreakpointAction: explicitBreakpointDecision.action,
-				pacingCanary: request.headers.get("x-better-ccflare-pacing-canary"),
 				pacingCohortId: request.headers.get(
 					"x-better-ccflare-pacing-cohort-id",
 				),
-				pacingAction: request.headers.get("x-better-ccflare-pacing-action"),
 				pacingRole: request.headers.get("x-better-ccflare-pacing-role"),
 				pacingWaitMs: request.headers.get("x-better-ccflare-pacing-wait-ms"),
 				pacingReleaseReason: request.headers.get(
@@ -3804,14 +3567,17 @@ export class CodexProvider extends BaseProvider {
 	 * subagents. Each conversation is sequential, so per-key traffic stays far
 	 * below the documented rate bound. CCFLARE_CODEX_CACHE_KEY_MODE=session
 	 * restores the coarse per-session key.
+	 *
+	 * Continuity: when orchestration admission matched this request to an
+	 * earlier root (same identity, or a compacted continuation of it), the key
+	 * uses that root's canonical identity, so compaction does not move a
+	 * conversation onto a cold cache key. Without a match the derived identity
+	 * is used unchanged.
 	 */
 	private derivePromptCacheKey(
 		body: AnthropicRequest,
 		instructions: string,
 		input: readonly unknown[],
-		tools: readonly CodexTool[] | undefined,
-		physicalModel: string,
-		endpoint: string,
 		account?: Account,
 		cacheLaneRescueSalt?: string,
 		orchestrationResult?: {
@@ -3821,10 +3587,7 @@ export class CodexProvider extends BaseProvider {
 	): CodexPromptCacheKeyDecision {
 		const ineligible: CodexPromptCacheKeyDecision = {
 			key: null,
-			assignment: null,
-			assignmentSource: null,
 			effectiveMode: null,
-			cohortId: null,
 			conversationIdentity: null,
 			canonicalConversationIdentity: null,
 			selectedConversationIdentity: null,
@@ -3838,24 +3601,10 @@ export class CodexProvider extends BaseProvider {
 
 		const conversationIdentity =
 			deriveConversationIdentity(sessionId, instructions, input) ?? null;
-		const sessionPercent = readCodexCacheKeySessionPercent();
-		const assignment: "conversation" | "session" =
-			sessionPercent === 100 ||
-			(sessionPercent > 0 &&
-				deriveCodexCacheKeySessionBucket(sessionId) < sessionPercent)
-				? "session"
-				: "conversation";
-		const explicitSessionOverride =
-			process.env[CODEX_CACHE_KEY_MODE_ENV] === "session";
 		const effectiveMode =
-			explicitSessionOverride || assignment === "session" || input.length === 0
+			process.env[CODEX_CACHE_KEY_MODE_ENV] === "session" || input.length === 0
 				? "session"
 				: "conversation";
-		const continuityPercent = readCodexCacheKeyContinuityPercent();
-		const continuityTreatment =
-			continuityPercent === 100 ||
-			(continuityPercent > 0 &&
-				deriveCodexCacheKeyContinuityBucket(sessionId) < continuityPercent);
 		const canonicalConversationIdentity =
 			orchestrationResult?.canonicalConversationIdentity ?? null;
 		const continuityBasis =
@@ -3870,51 +3619,21 @@ export class CodexProvider extends BaseProvider {
 							: "derived";
 		const continuityApplied =
 			effectiveMode === "conversation"
-				? Boolean(continuityTreatment && canonicalConversationIdentity)
+				? Boolean(canonicalConversationIdentity)
 				: null;
 		const selectedConversationIdentity =
-			effectiveMode === "conversation" &&
-			continuityTreatment &&
-			canonicalConversationIdentity
+			effectiveMode === "conversation" && canonicalConversationIdentity
 				? canonicalConversationIdentity
 				: conversationIdentity;
-		const prefixShardPercent = readCodexCacheKeyPrefixShardPercent();
-		const prefixShardTreatment =
-			effectiveMode === "conversation" &&
-			isCodexSubscriptionEndpoint(endpoint) &&
-			(prefixShardPercent === 100 ||
-				(prefixShardPercent > 0 &&
-					conversationIdentity !== null &&
-					deriveCodexCacheKeyPrefixShardBucket(conversationIdentity) <
-						prefixShardPercent));
-		const prefixShardSeed =
-			canonicalConversationIdentity ?? conversationIdentity;
-		const prefixShard = prefixShardSeed
-			? deriveCodexCacheKeyPrefixShard(prefixShardSeed)
-			: null;
-		const prefixShardKey =
-			prefixShardTreatment && prefixShard !== null
-				? createHash("sha256")
-						.update(CODEX_CACHE_KEY_PREFIX_SHARD_DOMAIN)
-						.update(physicalModel)
-						.update("\0")
-						.update(instructions)
-						.update("\0")
-						.update(tools === undefined ? "<absent>" : JSON.stringify(tools))
-						.update("\0")
-						.update(String(prefixShard))
-						.digest("hex")
-				: null;
 		let key =
 			effectiveMode === "session"
 				? `ccflare-session-${createHash("sha256")
 						.update(sessionId)
 						.digest("hex")
 						.slice(0, 48)}`
-				: (prefixShardKey ??
-					(selectedConversationIdentity
-						? `ccflare-convo-${selectedConversationIdentity.slice(0, 48)}`
-						: null));
+				: selectedConversationIdentity
+					? `ccflare-convo-${selectedConversationIdentity.slice(0, 48)}`
+					: null;
 		if (key && cacheLaneRescueSalt) {
 			key = `ccflare-rescue-${createHash("sha256")
 				.update(CODEX_CACHE_LANE_RESCUE_DOMAIN)
@@ -3927,157 +3646,12 @@ export class CodexProvider extends BaseProvider {
 
 		return {
 			key,
-			assignment,
-			assignmentSource: prefixShardKey
-				? "prefix_shard"
-				: explicitSessionOverride
-					? "explicit_session_override"
-					: "canary",
 			effectiveMode: key ? effectiveMode : null,
-			cohortId: createHash("sha256")
-				.update(CODEX_CACHE_KEY_COHORT_DOMAIN)
-				.update(sessionId)
-				.digest("hex")
-				.slice(0, 16),
 			conversationIdentity,
 			canonicalConversationIdentity,
 			selectedConversationIdentity,
 			continuityApplied,
 			continuityBasis,
-		};
-	}
-
-	private applyExplicitCacheBreakpoint(
-		request: CodexRequest,
-		cacheKeyDecision: CodexPromptCacheKeyDecision,
-		account: Account | undefined,
-		endpoint: string,
-		sourceMessageCount: number,
-		hasSourceSystemCacheMarker: boolean,
-		rotatedCacheKeyAttempt: boolean,
-	): CodexExplicitBreakpointDecision {
-		const ineligible = (
-			action: Extract<
-				CodexExplicitBreakpointAction,
-				| "skip_non_gpt56"
-				| "skip_non_eligible_endpoint"
-				| "skip_no_prompt_cache_key"
-				| "skip_no_conversation"
-			>,
-		): CodexExplicitBreakpointDecision => ({
-			canary: "ineligible",
-			cohortId: null,
-			action,
-		});
-
-		if (!/^gpt-5\.6(?:$|-)/i.test(request.model)) {
-			return ineligible("skip_non_gpt56");
-		}
-		if (!normalizeCodexExplicitBreakpointEligibleEndpoint(endpoint)) {
-			return ineligible("skip_non_eligible_endpoint");
-		}
-		if (!request.prompt_cache_key) {
-			return ineligible("skip_no_prompt_cache_key");
-		}
-		const conversationIdentity = cacheKeyDecision.conversationIdentity;
-		if (!conversationIdentity) {
-			return ineligible("skip_no_conversation");
-		}
-		// cacheKeyDecision.cohortId is a bounded session-derived digest. Assigning
-		// over it keeps one Claude chat (including its compacted history) in one arm;
-		// conversationIdentity is still required for cache-key eligibility but can
-		// change when compaction drops the earliest input item.
-		const stableAssignmentIdentity = cacheKeyDecision.cohortId;
-		if (!stableAssignmentIdentity) {
-			return ineligible("skip_no_conversation");
-		}
-
-		const cohortId = createHash("sha256")
-			.update(CODEX_EXPLICIT_BREAKPOINT_COHORT_DOMAIN)
-			.update(stableAssignmentIdentity)
-			.digest("hex")
-			.slice(0, 16);
-		const percent = readCodexExplicitCacheBreakpointPercent();
-		const treatment =
-			percent === 100 ||
-			(percent > 0 &&
-				deriveCodexExplicitBreakpointBucket(stableAssignmentIdentity) <
-					percent);
-		if (!treatment) {
-			return {
-				canary: "control",
-				cohortId,
-				action: "skip_percent_control",
-			};
-		}
-		if (rotatedCacheKeyAttempt) {
-			return {
-				canary: "treatment",
-				cohortId,
-				action: "skip_rotated_cache_key_attempt",
-			};
-		}
-
-		if (
-			account?.id &&
-			isCodexExplicitCacheBreakpointSuppressed(
-				account.id,
-				request.model,
-				endpoint,
-			)
-		) {
-			return {
-				canary: "treatment",
-				cohortId,
-				action: "skip_known_unsupported",
-			};
-		}
-
-		let firstUserText: CodexInputTextItem | undefined;
-		let firstSourceMarkedText: CodexInputTextItem | undefined;
-		for (const item of request.input) {
-			if (!isCodexMessage(item) || item.role !== "user") continue;
-			for (const content of item.content) {
-				if (
-					content.type !== "input_text" ||
-					typeof content.text !== "string" ||
-					content.text.trim().length === 0
-				) {
-					continue;
-				}
-				const sourceMessageIndex = content[SOURCE_MESSAGE_INDEX];
-				// The default implicit policy already marks the latest message. Only
-				// historical source text is stable enough to justify an extra billable
-				// GPT-5.6 cache write.
-				if (
-					typeof sourceMessageIndex !== "number" ||
-					sourceMessageIndex >= sourceMessageCount - 1
-				) {
-					continue;
-				}
-				firstUserText ??= content;
-				if (content[SOURCE_CACHE_MARKED] === true) {
-					firstSourceMarkedText ??= content;
-				}
-			}
-		}
-
-		const selected = firstSourceMarkedText ?? firstUserText;
-		if (!selected) {
-			return {
-				canary: "treatment",
-				cohortId,
-				action: "skip_no_eligible_block",
-			};
-		}
-		selected.prompt_cache_breakpoint = { mode: "explicit" };
-		return {
-			canary: "treatment",
-			cohortId,
-			action:
-				firstSourceMarkedText || hasSourceSystemCacheMarker
-					? "placed_source_marker"
-					: "placed_first_user_text",
 		};
 	}
 
@@ -4194,7 +3768,6 @@ export class CodexProvider extends BaseProvider {
 
 	private convertMessage(
 		msg: AnthropicMessage,
-		sourceMessageIndex: number,
 	): (
 		| CodexMessage
 		| CodexFunctionCallItem
@@ -4218,12 +3791,6 @@ export class CodexProvider extends BaseProvider {
 				type: contentType,
 				text: msg.content,
 			} as CodexContentItem;
-			if (role === "user" && contentType === "input_text") {
-				Object.defineProperty(contentItem, SOURCE_MESSAGE_INDEX, {
-					value: sourceMessageIndex,
-					enumerable: false,
-				});
-			}
 			const textItem = {
 				role,
 				content: [contentItem],
@@ -4252,22 +3819,6 @@ export class CodexProvider extends BaseProvider {
 					type: contentType,
 					text: block.text,
 				} as CodexContentItem;
-				if (role === "user" && contentType === "input_text") {
-					Object.defineProperty(textItem, SOURCE_MESSAGE_INDEX, {
-						value: sourceMessageIndex,
-						enumerable: false,
-					});
-				}
-				if (
-					role === "user" &&
-					contentType === "input_text" &&
-					block.cache_control?.type === "ephemeral"
-				) {
-					Object.defineProperty(textItem, SOURCE_CACHE_MARKED, {
-						value: true,
-						enumerable: false,
-					});
-				}
 				pendingText.push(textItem);
 			} else if (block.type === "image") {
 				// Responses has no assistant-side image; Anthropic never sends one.
@@ -4595,7 +4146,6 @@ export class CodexProvider extends BaseProvider {
 		requestId?: string,
 		isAttributedAgent = false,
 		cacheLaneRescueSalt?: string,
-		endpoint = CODEX_DEFAULT_ENDPOINT,
 		finalModel?: string,
 		logicalModelFamily?: string | null,
 		passthrough?: Record<string, unknown>,
@@ -4628,7 +4178,7 @@ export class CodexProvider extends BaseProvider {
 		const skillCallIds = new Set<string>();
 		let skillCompletedInFinalMessage = false;
 		for (const [msgIndex, msg] of body.messages.entries()) {
-			for (const item of this.convertMessage(msg, msgIndex)) {
+			for (const item of this.convertMessage(msg)) {
 				input.push(item);
 				if ("type" in item && item.type === "function_call") {
 					if (item.name === "Skill") {
@@ -4829,9 +4379,6 @@ export class CodexProvider extends BaseProvider {
 			body,
 			codexRequest.instructions,
 			input,
-			tools,
-			codexRequest.model,
-			endpoint,
 			account,
 			cacheLaneRescueSalt,
 			orchestrationCacheKeyResult ?? undefined,
@@ -4846,16 +4393,6 @@ export class CodexProvider extends BaseProvider {
 		if (cacheKeyDecision.key) {
 			codexRequest.prompt_cache_key = cacheKeyDecision.key;
 		}
-		const explicitBreakpointDecision = this.applyExplicitCacheBreakpoint(
-			codexRequest,
-			cacheKeyDecision,
-			account,
-			endpoint,
-			body.messages.length,
-			Array.isArray(body.system) &&
-				body.system.some((block) => block.cache_control?.type === "ephemeral"),
-			Boolean(cacheLaneRescueSalt),
-		);
 		const explicitToolChoice = this.convertToolChoice(
 			body.tool_choice,
 			tools ?? [],
@@ -4908,7 +4445,6 @@ export class CodexProvider extends BaseProvider {
 			reasoningEffortRequested: reasoningResolution.requestedEffort,
 			reasoningEffortSource: reasoningResolution.source,
 			cacheKeyDecision,
-			explicitBreakpointDecision,
 			orchestrationAdmission,
 			orchestrationBasis,
 			filteredToolNames,

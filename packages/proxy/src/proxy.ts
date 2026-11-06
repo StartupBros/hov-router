@@ -62,7 +62,6 @@ import {
 	type CachePacingObservation,
 	derivePacingCohortKey,
 	finishPacing,
-	isCodexPacingBypassCandidate,
 	observeCachePacing,
 	recordCachePacingRoute,
 } from "./cache-pacing";
@@ -2093,17 +2092,13 @@ async function handleProxyCoreImpl(
 		}
 	}
 
-	// 5c. Cache pacing and the Codex-only bypass canary. Non-candidate controls
-	// retain the original wait-before-selection ordering. Candidates select
-	// early; after usage throttling, only a first usable Codex route bypasses.
-	// A candidate resolving elsewhere is paced before any upstream call and
-	// reselected afterward so Anthropic never receives stale or unpaced traffic.
+	// 5c. Cache pacing waits before account selection, so routing sees the
+	// availability and cooldowns that hold after the wait.
 	const pacingEligible =
 		url.pathname === "/v1/messages" && !trustedInternalKeepalive;
 	const pacingCohortKey = pacingEligible
 		? derivePacingCohortKey(requestMeta.clientSessionId, parsedBody)
 		: null;
-	const canaryCandidate = isCodexPacingBypassCandidate(pacingCohortKey);
 	requestMeta.codexPacingCohortId = pacingCohortKey?.slice(0, 16) ?? null;
 	const effectiveModel = resolveEffectiveModel(appliedModel, requestModel);
 	const syntheticProbe = trustedInternalKeepalive;
@@ -2197,13 +2192,9 @@ async function handleProxyCoreImpl(
 			requestMeta.codexPacingReleaseReason = observation?.releaseReason ?? null;
 			return observation;
 		};
-	let pacingBypassed = false;
-	// Immutable assignment. Effective action may become crossover-paced, but
-	// route cohort attribution must remain treatment, not control.
-	const assignedCodexPacingBypass = canaryCandidate;
 	let selectedAccounts: Account[] | null = null;
 
-	if (!canaryCandidate && pacingEligible) {
+	if (pacingEligible) {
 		pacingObservation = await observeAndRecordPacing();
 	}
 	if (pacingEligible) {
@@ -2215,8 +2206,7 @@ async function handleProxyCoreImpl(
 		);
 	}
 
-	// 6. Controls select after pacing. Candidates select here so the bypass
-	// decision can use the first actually available, usage-throttled account.
+	// 6. Select after pacing.
 	try {
 		selectedAccounts = await selectAccountsWithDeadline();
 	} catch (error) {
@@ -2485,83 +2475,15 @@ async function handleProxyCoreImpl(
 		return disabledFallbackResponse;
 	};
 
-	let {
+	const {
 		available: accounts,
 		predictivelyThrottled: throttledAccounts,
 		reactivelyDepletedAccounts,
 	} = applyUsageThrottlingAndRecord(selectedAccounts);
 
-	if (canaryCandidate && accounts[0]?.provider === "codex") {
-		pacingBypassed = true;
-	} else if (canaryCandidate && pacingEligible) {
-		// This candidate did not resolve to a usable Codex route. Pace before any
-		// upstream call, then discard the pre-wait selection and route again so
-		// Anthropic availability/cooldowns are fresh after the wait.
-		pacingObservation = await observeAndRecordPacing();
-		try {
-			selectedAccounts = await selectAccountsWithDeadline();
-		} catch (error) {
-			if (error instanceof PreTransportPhaseTimeoutError) {
-				return accountSelectionTimeoutResponse(pacingObservation?.slot ?? null);
-			}
-			if (error instanceof CountTokensUnsupportedError) {
-				return finishPacing(
-					pacingObservation?.slot ?? null,
-					recordLocalRoutingTerminal(
-						createCountTokensUnsupportedResponse(error.providers),
-						"count_tokens_unsupported",
-					),
-				);
-			}
-			if (error instanceof ServerToolRoutingError) {
-				return finishPacing(
-					pacingObservation?.slot ?? null,
-					createUnservedServerToolRoutingErrorResponse(error),
-				);
-			}
-			if (error instanceof ForceRouteUnavailableError) {
-				log.warn(
-					`Grok cache canary ${formatXaiCacheCanary({
-						requestId: requestMeta.id,
-						accountId: error.accountId,
-						officialEndpoint: true,
-						keyPresent: false,
-						identityFingerprint:
-							requestMeta.xaiCacheIdentityFingerprint ?? undefined,
-						prefixFingerprint:
-							requestMeta.xaiCachePrefixFingerprint ?? undefined,
-						cacheOutcome: "fail_closed",
-						failClosedReason: error.reason,
-					})}`,
-				);
-				return finishPacing(
-					pacingObservation?.slot ?? null,
-					createRecordedForceRouteResponse(error),
-				);
-			}
-			if (serverToolRequirements) {
-				return finishPacing(
-					pacingObservation?.slot ?? null,
-					createUnservedServerToolRoutingErrorResponse(
-						new ServerToolRoutingError({
-							reason: "temporary_unavailable",
-							capabilitySummary: requestMeta.serverToolCapabilitySummary,
-						}),
-					),
-				);
-			}
-			pacingObservation?.slot?.abandon();
-			throw error;
-		}
-		({
-			available: accounts,
-			predictivelyThrottled: throttledAccounts,
-			reactivelyDepletedAccounts,
-		} = applyUsageThrottlingAndRecord(selectedAccounts));
-	}
 	const selectedCapacityDeferredRoutes =
 		getCapacityDeferredModelRoutes(requestMeta);
-	let pacingSlot = pacingObservation?.slot ?? null;
+	const pacingSlot = pacingObservation?.slot ?? null;
 	// A route-profile constraint violation discovered while materializing a
 	// candidate's attempt plan (pre-transport, before any upstream send) is
 	// that candidate's failure alone — it says nothing about a sibling
@@ -2607,17 +2529,6 @@ async function handleProxyCoreImpl(
 			return finishPacing(pacingSlot, terminalResponse);
 		},
 	});
-	let crossoverPacingRestored = false;
-	requestMeta.codexPacingCanary = pacingEligible
-		? canaryCandidate
-			? "bypass"
-			: "control"
-		: null;
-	requestMeta.codexPacingAction = pacingEligible
-		? pacingBypassed
-			? "bypassed"
-			: "paced"
-		: null;
 	const requestedForcedAccountId =
 		requestMeta.forcedAccountId?.trim() ||
 		readForcedAccountHeader(req.headers) ||
@@ -3715,18 +3626,11 @@ async function handleProxyCoreImpl(
 				route.account,
 				route.candidateId,
 			);
-			recordCachePacingRoute(
-				pacingObservation,
-				{
-					accountId: route.account.id,
-					accountName: route.account.name,
-					provider: route.account.provider,
-				},
-				{
-					candidate: pacingEligible,
-					assignedBypass: assignedCodexPacingBypass,
-				},
-			);
+			recordCachePacingRoute(pacingObservation, {
+				accountId: route.account.id,
+				accountName: route.account.name,
+				provider: route.account.provider,
+			});
 		}
 		return finishPacing(pacingSlot, settled.response);
 	};
@@ -3803,17 +3707,6 @@ async function handleProxyCoreImpl(
 			}
 			return null;
 		}
-		if (
-			pacingBypassed &&
-			!crossoverPacingRestored &&
-			route.account.provider !== "codex"
-		) {
-			pacingObservation = await observeAndRecordPacing();
-			pacingSlot = pacingObservation?.slot ?? null;
-			crossoverPacingRestored = true;
-			pacingBypassed = false;
-			requestMeta.codexPacingAction = "crossover-paced";
-		}
 
 		const probeAdmission = getRateLimitProbeAdmission(route.account);
 		if (probeAdmission === "suppressed") {
@@ -3842,20 +3735,6 @@ async function handleProxyCoreImpl(
 	};
 
 	for (let i = 0; i < accounts.length; i++) {
-		// A Codex treatment may fail over to Anthropic. Before the first
-		// non-Codex attempt, restore pacing so no crossover sends Anthropic
-		// traffic unpaced. The route is still marked as a crossover, not treatment.
-		if (
-			pacingBypassed &&
-			!crossoverPacingRestored &&
-			accounts[i].provider !== "codex"
-		) {
-			pacingObservation = await observeAndRecordPacing();
-			pacingSlot = pacingObservation?.slot ?? null;
-			crossoverPacingRestored = true;
-			pacingBypassed = false;
-			requestMeta.codexPacingAction = "crossover-paced";
-		}
 		// Candidate metadata is the general execution sidecar. Combo slot state
 		// remains the attribution source for combo-specific observability.
 		const selectedCandidate = selectedRouteCandidates[i];
@@ -4023,18 +3902,11 @@ async function handleProxyCoreImpl(
 			if (settled) {
 				if (settled.candidateWon) {
 					recordXaiAffinityIfServed(settled.response, accounts[i], candidateId);
-					recordCachePacingRoute(
-						pacingObservation,
-						{
-							accountId: accounts[i].id,
-							accountName: accounts[i].name,
-							provider: accounts[i].provider,
-						},
-						{
-							candidate: pacingEligible,
-							assignedBypass: assignedCodexPacingBypass,
-						},
-					);
+					recordCachePacingRoute(pacingObservation, {
+						accountId: accounts[i].id,
+						accountName: accounts[i].name,
+						provider: accounts[i].provider,
+					});
 				}
 				return finishPacing(pacingSlot, settled.response);
 			}
@@ -4174,18 +4046,11 @@ async function handleProxyCoreImpl(
 			if (settled) {
 				if (settled.candidateWon) {
 					recordXaiAffinityIfServed(settled.response, accounts[i], candidateId);
-					recordCachePacingRoute(
-						pacingObservation,
-						{
-							accountId: accounts[i].id,
-							accountName: accounts[i].name,
-							provider: accounts[i].provider,
-						},
-						{
-							candidate: pacingEligible,
-							assignedBypass: assignedCodexPacingBypass,
-						},
-					);
+					recordCachePacingRoute(pacingObservation, {
+						accountId: accounts[i].id,
+						accountName: accounts[i].name,
+						provider: accounts[i].provider,
+					});
 				}
 				return finishPacing(pacingSlot, settled.response);
 			}
@@ -4338,17 +4203,6 @@ async function handleProxyCoreImpl(
 			);
 			let anyFallbackAttempted = false;
 			for (let i = 0; i < fallbackAccounts.length; i++) {
-				if (
-					pacingBypassed &&
-					!crossoverPacingRestored &&
-					fallbackAccounts[i].provider !== "codex"
-				) {
-					pacingObservation = await observeAndRecordPacing();
-					pacingSlot = pacingObservation?.slot ?? null;
-					crossoverPacingRestored = true;
-					pacingBypassed = false;
-					requestMeta.codexPacingAction = "crossover-paced";
-				}
 				const probeAdmission = getRateLimitProbeAdmission(fallbackAccounts[i]);
 				if (probeAdmission === "suppressed") {
 					if (contextAdmissionTracker) {
@@ -4450,18 +4304,11 @@ async function handleProxyCoreImpl(
 								fallbackAccount,
 								candidateId,
 							);
-							recordCachePacingRoute(
-								pacingObservation,
-								{
-									accountId: fallbackAccount.id,
-									accountName: fallbackAccount.name,
-									provider: fallbackAccount.provider,
-								},
-								{
-									candidate: pacingEligible,
-									assignedBypass: assignedCodexPacingBypass,
-								},
-							);
+							recordCachePacingRoute(pacingObservation, {
+								accountId: fallbackAccount.id,
+								accountName: fallbackAccount.name,
+								provider: fallbackAccount.provider,
+							});
 						}
 						return finishPacing(pacingSlot, settled.response);
 					}
@@ -4564,18 +4411,11 @@ async function handleProxyCoreImpl(
 								fallbackAccount,
 								candidateId,
 							);
-							recordCachePacingRoute(
-								pacingObservation,
-								{
-									accountId: fallbackAccount.id,
-									accountName: fallbackAccount.name,
-									provider: fallbackAccount.provider,
-								},
-								{
-									candidate: pacingEligible,
-									assignedBypass: assignedCodexPacingBypass,
-								},
-							);
+							recordCachePacingRoute(pacingObservation, {
+								accountId: fallbackAccount.id,
+								accountName: fallbackAccount.name,
+								provider: fallbackAccount.provider,
+							});
 						}
 						return finishPacing(pacingSlot, settled.response);
 					}
@@ -4855,17 +4695,6 @@ async function handleProxyCoreImpl(
 					contextAdmissionTracker.nonCapacitySkipCount++;
 				}
 				continue;
-			}
-			if (
-				pacingBypassed &&
-				!crossoverPacingRestored &&
-				route.account.provider !== "codex"
-			) {
-				pacingObservation = await observeAndRecordPacing();
-				pacingSlot = pacingObservation?.slot ?? null;
-				crossoverPacingRestored = true;
-				pacingBypassed = false;
-				requestMeta.codexPacingAction = "crossover-paced";
 			}
 
 			// Snapshot finality before acquiring this route's probe lease. The current
