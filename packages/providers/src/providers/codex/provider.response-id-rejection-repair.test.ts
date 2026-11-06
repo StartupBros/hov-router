@@ -431,15 +431,15 @@ describe("CodexProvider.prepareCodexResponseIdRejectionRepair", () => {
 		);
 	});
 
-	it("an attempt owned by turn-state (not response-id) performs no repair", async () => {
+	it("a non-response-id-owned attempt performs no repair", async () => {
 		const provider = new CodexProvider();
 		// No native header, no opt-in: response-id never owns this attempt.
 		const request = new Request(CODEX_DEFAULT_ENDPOINT, {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
-				"x-better-ccflare-request-id": "rid-turn-state-owned",
-				"x-better-ccflare-attempt-id": "aid-turn-state-owned",
+				"x-better-ccflare-request-id": "rid-non-response-id-owned",
+				"x-better-ccflare-attempt-id": "aid-non-response-id-owned",
 				"x-better-ccflare-attempt-ordinal": "1",
 				"x-better-ccflare-attempt-cause": "initial",
 				"x-better-ccflare-final-model": physicalModel,
@@ -455,7 +455,9 @@ describe("CodexProvider.prepareCodexResponseIdRejectionRepair", () => {
 		});
 		await provider.transformRequestBody(request, account);
 		expect(
-			provider.prepareCodexResponseIdRejectionRepair("aid-turn-state-owned"),
+			provider.prepareCodexResponseIdRejectionRepair(
+				"aid-non-response-id-owned",
+			),
 		).toBe(false);
 	});
 
@@ -600,16 +602,13 @@ describe("KTD13 aggregate byte budget exhaustion (scenario 7)", () => {
 			CODEX_RESPONSE_ID_MAX_AGGREGATE_BYTES,
 		);
 
-		// (a) A budget-vetoed attempt is never staged as response-id-owned:
-		// no pending candidate, and the attempt is recorded as turn-state-
-		// owned (the fork's normal fallback), never response-id.
 		expect(
 			internals(provider).pendingResponseIdByAttempt.has(vetoedAttemptId),
 		).toBe(false);
 		expect(
 			internals(provider).continuationOwnerByAttempt.get(vetoedAttemptId)
 				?.owner,
-		).toBe("turn-state");
+		).toBe("none");
 
 		// (b) A rejection arriving on this (never-staged) attempt performs no
 		// repair and consumes no budget slot.
@@ -631,6 +630,6 @@ describe("KTD13 aggregate byte budget exhaustion (scenario 7)", () => {
 		expect(
 			internals(provider).continuationOwnerByAttempt.get(vetoedAttemptId)
 				?.owner,
-		).toBe("turn-state");
+		).toBe("none");
 	}, 20_000);
 });

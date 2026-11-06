@@ -3845,17 +3845,8 @@ export async function proxyWithAccount(
 			return prepared;
 		};
 		let headers = prepareAttemptHeaders(attemptPlan);
-		// A nonzero ordinal only means this logical request has been sent before,
-		// not that it moved. Re-entry on the same account AND the same physical
-		// model -- the bounded 401 retry after refreshing credentials, for
-		// instance -- is a compatible retry: the rejected credential never
-		// committed the model turn, so its turn state is still valid and must not
-		// be discarded as failover would. Any change of account or of physical
-		// model is a route change instead, and a route change must invalidate and
-		// suppress rather than replay: a deferred cross-family fallback re-enters
-		// with this same request metadata and only the model differs. An unknown
-		// account or model on either side keeps the route-change classification,
-		// because that side only discards state while the retry side preserves it.
+		// Re-entry on the same account and physical model is a retry. A changed
+		// account or model is a route change, including deferred model fallbacks.
 		const previousAttemptAccountId = requestMeta.codexLastAttemptAccountId;
 		const previousAttemptModel = requestMeta.codexLastAttemptModel;
 		const entryTransportModel = normalizeCodexAttemptModel(
@@ -3867,11 +3858,8 @@ export async function proxyWithAccount(
 			previousAttemptModel === entryTransportModel;
 		stampCodexAttempt(
 			headers,
-			// Keyed on whether a route was ever dispatched, not on the attempt
-			// ordinal. The ordinal counts candidates, including ones abandoned before
-			// the wire, so using it here stamped the first real send of a request as
-			// a failover from a route that never sent -- which then invalidated and
-			// suppressed turn state that was still eligible.
+			// Candidate ordinals include never-sent attempts; only dispatched routes
+			// establish the prior account/model for fallback attribution.
 			previousAttemptAccountId === undefined ||
 				previousAttemptAccountId === null
 				? "initial"
@@ -4245,15 +4233,10 @@ export async function proxyWithAccount(
 		 * Runs one physical attempt, from the final transport boundary through the
 		 * upstream response.
 		 *
-		 * Codex registers an attempt's turn-state context earlier, while its body is
-		 * transformed, so an attempt can be abandoned here without ever reaching the
-		 * wire: the request-local physical budget can veto the send, the attempt's
-		 * commitment budget can already be exhausted, or staging can fail. Left
-		 * registered, such an attempt keeps its lease and reads as live, suppressing
-		 * the client's next replay for the full attempt TTL and leaving a request
-		 * record for a send that never happened. Releasing it on every pre-dispatch
-		 * exit is one guard for the whole class, so a new veto added ahead of the
-		 * transport is covered without a matching release beside it.
+		 * Body transformation records the attempt before dispatch. A budget veto,
+		 * duplicate route claim, or staging failure must annul that never-sent
+		 * candidate and release provider state. Once dispatch starts, transport
+		 * failures release state without a tombstone, preserving the physical send.
 		 */
 		const nativeClaimedModels = new Set<string | null>();
 		/**
@@ -4318,14 +4301,12 @@ export async function proxyWithAccount(
 							// Sent, but no response came back, so nothing downstream will
 							// ever finalize this attempt. Release it without the "never
 							// sent" tombstone, which would wrongly annul a real send.
-							provider.releaseDispatchedTurnStateAttempt?.(
-								currentTransportAttemptId,
-							);
+							provider.releaseDispatchedAttempt?.(currentTransportAttemptId);
 						} else {
-							provider.abortTurnStateAttempt?.(currentTransportAttemptId);
+							provider.abortAttempt?.(currentTransportAttemptId);
 						}
 					} catch {
-						// Turn-state bookkeeping never replaces the transport failure.
+						// Provider bookkeeping never replaces the transport failure.
 					}
 					// Nothing to undo when it never dispatched: this attempt's route was
 					// only ever held pending, so dropping it stops a later attempt
@@ -4593,14 +4574,7 @@ export async function proxyWithAccount(
 			log.debug(
 				`Skipping duplicate request-local route account=${account.name} model=${currentTransportModel ?? "unknown"}`,
 			);
-			// The body transform above already registered this attempt's turn-state
-			// context, and nothing will ever dispatch it or process its response.
-			// Without this release it would hold its lease and keep its scope alive,
-			// suppressing every matching continuation. Its route is dropped for the
-			// same reason: a route that never sent must not be what a later re-entry
-			// compares itself against. It was only ever held pending, so dropping it
-			// is enough -- there is nothing published to restore.
-			provider.abortTurnStateAttempt?.(currentTransportAttemptId);
+			provider.abortAttempt?.(currentTransportAttemptId);
 			pendingCodexAttemptRoute = null;
 			return null;
 		}
@@ -5512,18 +5486,16 @@ export async function proxyWithAccount(
 		// Behavior 2 (KTD6/KTD13 rejected-id repair): upstream can reject the
 		// gateway-supplied previous_response_id with a recognized 400/404
 		// naming that exact field. Repair AT MOST ONCE per lane: remove the
-		// rejected id, suppress turn-state (via the dedicated
-		// "continuation_repair_retry" attemptCause, self-suppressed in
-		// turn-state.ts's RESCUE_CAUSES), and resend full history on the SAME
-		// authorized account and physical model through this exact shared
-		// physical-send boundary, consuming one physical-attempt budget slot
-		// (transportAttemptOrdinal, via stampCodexAttempt below).
+		// rejected id and resend full history on the SAME authorized account
+		// and physical model through this exact shared physical-send boundary,
+		// stamped "continuation_repair_retry" and consuming one physical-attempt
+		// budget slot (transportAttemptOrdinal, via stampCodexAttempt below).
 		// `prepareCodexResponseIdRejectionRepair` drains the rejected
-		// response through its exact owner and retires/suppresses the lane
-		// BEFORE this block ever sends the retry, so a generic 400/404, a
-		// malformed error, a budget veto (never staged as response-id-owned
-		// in the first place), or a second rejection on an already-suppressed
-		// lane all correctly perform no repair.
+		// response through its exact owner and retires the lane BEFORE this
+		// block ever sends the retry, so a generic 400/404, a malformed error,
+		// a budget veto (never staged as response-id-owned in the first
+		// place), or a second rejection on an already-retired lane all
+		// correctly perform no repair.
 		if (
 			!irreversibleSearchDispatchCommitted() &&
 			attemptPlan.providerName === "codex" &&
@@ -6798,12 +6770,11 @@ export async function proxyWithAccount(
 								continue;
 							fallbackHeaders = prepareAttemptHeaders(fallbackPlan);
 							// Stamp before the request is built and transformed: the Codex
-							// provider registers this attempt's turn-state context during the
-							// transform, reading the attempt ID and cause from these headers.
-							// Stamping afterwards registered the attempt under an identity the
-							// response never carries -- so its terminal resolved nothing -- and
-							// hid the model fallback behind the default `initial` cause, which
-							// skips the suppression a route change requires. Mirrors the
+							// provider reads this attempt's ID and cause from these headers
+							// during the transform, for its trace record and continuation
+							// owner. Stamping afterwards records the attempt under an
+							// identity the response never carries and hides the model
+							// fallback behind the default `initial` cause. Mirrors the
 							// in-place 529 retry, which stamps before transforming.
 							stampCodexAttempt(fallbackHeaders, "model_fallback", nextModel);
 							fallbackAttemptStamped = true;
@@ -6827,7 +6798,7 @@ export async function proxyWithAccount(
 							// This candidate never sends, so the superseded response is still
 							// the live attempt for whatever runs next.
 							if (fallbackAttemptStamped) {
-								provider.abortTurnStateAttempt?.(currentTransportAttemptId);
+								provider.abortAttempt?.(currentTransportAttemptId);
 								currentTransportAttemptId = supersededCodexAttemptId;
 								requestMeta.codexLastAttemptAccountId =
 									supersededCodexAccountId;
@@ -6872,7 +6843,7 @@ export async function proxyWithAccount(
 							log.debug(
 								`Skipping duplicate request-local model fallback account=${account.name} model=${nextModel}`,
 							);
-							provider.abortTurnStateAttempt?.(currentTransportAttemptId);
+							provider.abortAttempt?.(currentTransportAttemptId);
 							currentTransportAttemptId = supersededCodexAttemptId;
 							requestMeta.codexLastAttemptAccountId = supersededCodexAccountId;
 							requestMeta.codexLastAttemptModel = supersededCodexModel;

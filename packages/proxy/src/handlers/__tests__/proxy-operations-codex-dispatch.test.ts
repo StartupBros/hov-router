@@ -452,13 +452,13 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 		installUsageCollector();
 		const provider = getProvider("codex") as
 			| (NonNullable<ReturnType<typeof getProvider>> & {
-					abortTurnStateAttempt(attemptId: string | null | undefined): void;
+					abortAttempt(attemptId: string | null | undefined): void;
 			  })
 			| undefined;
 		if (!provider) throw new Error("Codex provider is not registered");
-		const originalAbortAttempt = provider.abortTurnStateAttempt;
+		const originalAbortAttempt = provider.abortAttempt;
 		const abortedAttemptIds: Array<string | null | undefined> = [];
-		provider.abortTurnStateAttempt = (attemptId) => {
+		provider.abortAttempt = (attemptId) => {
 			abortedAttemptIds.push(attemptId);
 			originalAbortAttempt.call(provider, attemptId);
 		};
@@ -477,7 +477,7 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 			);
 			expect(response).toBeNull();
 		} finally {
-			provider.abortTurnStateAttempt = originalAbortAttempt;
+			provider.abortAttempt = originalAbortAttempt;
 		}
 
 		expect(httpAttempt).not.toHaveBeenCalled();
@@ -535,22 +535,20 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 		installUsageCollector();
 		const provider = getProvider("codex") as
 			| (NonNullable<ReturnType<typeof getProvider>> & {
-					abortTurnStateAttempt(attemptId: string | null | undefined): void;
-					releaseDispatchedTurnStateAttempt(
-						attemptId: string | null | undefined,
-					): void;
+					abortAttempt(attemptId: string | null | undefined): void;
+					releaseDispatchedAttempt(attemptId: string | null | undefined): void;
 			  })
 			| undefined;
 		if (!provider) throw new Error("Codex provider is not registered");
-		const originalAbort = provider.abortTurnStateAttempt;
-		const originalRelease = provider.releaseDispatchedTurnStateAttempt;
+		const originalAbort = provider.abortAttempt;
+		const originalRelease = provider.releaseDispatchedAttempt;
 		const aborted: Array<string | null | undefined> = [];
 		const released: Array<string | null | undefined> = [];
-		provider.abortTurnStateAttempt = (attemptId) => {
+		provider.abortAttempt = (attemptId) => {
 			aborted.push(attemptId);
 			originalAbort.call(provider, attemptId);
 		};
-		provider.releaseDispatchedTurnStateAttempt = (attemptId) => {
+		provider.releaseDispatchedAttempt = (attemptId) => {
 			released.push(attemptId);
 			originalRelease?.call(provider, attemptId);
 		};
@@ -567,8 +565,8 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 				"codex-post-dispatch-failure",
 			).catch(() => undefined);
 		} finally {
-			provider.abortTurnStateAttempt = originalAbort;
-			provider.releaseDispatchedTurnStateAttempt = originalRelease;
+			provider.abortAttempt = originalAbort;
+			provider.releaseDispatchedAttempt = originalRelease;
 		}
 
 		// The send really happened, so no "never sent" tombstone may be written --
@@ -661,24 +659,12 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 		expect(causes.at(-1)).toBe("initial");
 	});
 
-	it("replays only the provider-owned Codex turn state upstream", async () => {
+	it("strips the client x-codex-turn-state before dispatch", async () => {
 		installUsageCollector();
 		const provider = getProvider("codex");
 		if (!provider?.transformRequestBody) {
 			throw new Error("Codex provider transformation is unavailable");
 		}
-		const originalTransformRequestBody = provider.transformRequestBody;
-		provider.transformRequestBody = async (request, account) => {
-			const transformed = await originalTransformRequestBody.call(
-				provider,
-				request,
-				account,
-			);
-			const headers = new Headers(transformed.headers);
-			headers.set("x-codex-turn-state", "trusted-provider-turn-state");
-			return new Request(transformed, { headers });
-		};
-
 		const upstreamTurnStates: Array<string | null> = [];
 		globalThis.fetch = mock(async (request: Request) => {
 			upstreamTurnStates.push(request.headers.get("x-codex-turn-state"));
@@ -696,23 +682,18 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 			);
 		});
 
-		try {
-			const body = makeRequestBody();
-			const response = await runProxy(
-				makeRequest(body, {
-					"x-codex-turn-state": "client-controlled-turn-state",
-				}),
-				body,
-				makePolicy(1_000),
-				"codex-http-turn-state-only",
-			);
-			expect(response?.status).toBe(200);
-			expect(await response?.text()).toContain("http");
-		} finally {
-			provider.transformRequestBody = originalTransformRequestBody;
-		}
-
-		expect(upstreamTurnStates).toEqual(["trusted-provider-turn-state"]);
+		const body = makeRequestBody();
+		const response = await runProxy(
+			makeRequest(body, {
+				"x-codex-turn-state": "client-controlled-turn-state",
+			}),
+			body,
+			makePolicy(1_000),
+			"codex-http-turn-state-only",
+		);
+		expect(response?.status).toBe(200);
+		expect(await response?.text()).toContain("http");
+		expect(upstreamTurnStates).toEqual([null]);
 	});
 
 	it("stamps a same-account model fallback before its request is transformed", async () => {
@@ -721,9 +702,6 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 		if (!provider?.transformRequestBody) {
 			throw new Error("Codex provider transformation is unavailable");
 		}
-		// The Codex provider registers each attempt's turn-state context during the
-		// transform, reading the attempt identity the proxy stamped into these
-		// headers. Capture what every transform actually observes.
 		const transformedAttempts: Array<{
 			attemptId: string | null;
 			cause: string | null;
@@ -841,9 +819,6 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 					codexLastAttemptModel: "gpt-5.4",
 				},
 			);
-			// Same account, different physical model: a deferred cross-family
-			// fallback re-enters exactly like this. The route changed, so turn state
-			// must be invalidated rather than replayed.
 			const sameAccountOtherModelBody = makeRequestBody();
 			await runProxy(
 				makeRequest(sameAccountOtherModelBody),

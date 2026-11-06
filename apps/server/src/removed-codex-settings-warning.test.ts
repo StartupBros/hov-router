@@ -12,6 +12,7 @@ import {
 	REMOVED_CODEX_CACHE_EXPERIMENT_ENV_NAMES,
 	REMOVED_CODEX_CONTINUITY_CANARY_ENV_NAMES,
 	REMOVED_CODEX_SETTING_GROUPS,
+	REMOVED_CODEX_TURN_STATE_ENV_NAMES,
 	REMOVED_CODEX_WEBSOCKET_ENV_NAMES,
 	readSetEnvNames,
 } from "./removed-codex-settings-warning";
@@ -45,7 +46,7 @@ describe("readSetEnvNames", () => {
 				CCFLARE_CODEX_WS_OBSERVE_ONLY: "1",
 				CCFLARE_CODEX_WS_MODELS: "",
 				CCFLARE_CODEX_WS_MAX_GLOBAL: "   ",
-				CCFLARE_CODEX_TURN_STATE_PERCENT: "100",
+				CCFLARE_UNRELATED_SETTING: "100",
 				PATH: "/usr/bin",
 			}),
 		).toEqual([
@@ -193,5 +194,61 @@ describe("logRemovedCodexSettingsWarnings", () => {
 		logRemovedCodexSettingsWarnings({ PATH: "/usr/bin" }, log);
 
 		expect(warnings).toHaveLength(0);
+	});
+});
+
+describe("removed HTTP turn-state settings", () => {
+	it("names exactly seven removed settings in declared order and ignores empty and pseudo names", () => {
+		expect(REMOVED_CODEX_TURN_STATE_ENV_NAMES).toEqual([
+			"CCFLARE_CODEX_TURN_STATE_PERCENT",
+			"CCFLARE_CODEX_TURN_STATE_ACCOUNT_IDS",
+			"CCFLARE_CODEX_TURN_STATE_MODELS",
+			"CCFLARE_CODEX_TURN_STATE_COHORT_IDS",
+			"CCFLARE_CODEX_TURN_STATE_OBSERVE_ONLY",
+			"CCFLARE_CODEX_TURN_STATE_MAX_ENTRIES",
+			"CCFLARE_CODEX_TURN_STATE_IDLE_TTL_MS",
+		]);
+		const env = Object.fromEntries(
+			REMOVED_CODEX_TURN_STATE_ENV_NAMES.map((name) => [name, "secret-value"]),
+		);
+		expect(readSetEnvNames(REMOVED_CODEX_TURN_STATE_ENV_NAMES, env)).toEqual([
+			...REMOVED_CODEX_TURN_STATE_ENV_NAMES,
+		]);
+		expect(
+			readSetEnvNames(REMOVED_CODEX_TURN_STATE_ENV_NAMES, {
+				CCFLARE_CODEX_TURN_STATE_PERCENT: "0",
+				CCFLARE_CODEX_TURN_STATE_ACCOUNT_IDS: "",
+				CCFLARE_CODEX_TURN_STATE_MODELS: "   ",
+				CCFLARE_CODEX_TURN_STATE_COHORT_SENTINEL: "*",
+			}),
+		).toEqual(["CCFLARE_CODEX_TURN_STATE_PERCENT"]);
+	});
+	it("logs the removal and header contract with names only, and is silent when unset", () => {
+		const { log, warnings } = recordingLog();
+		logRemovedCodexSettingsWarnings(
+			Object.fromEntries(
+				REMOVED_CODEX_TURN_STATE_ENV_NAMES.map((name) => [
+					name,
+					"secret-value",
+				]),
+			),
+			log,
+		);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain(
+			`The Codex HTTP turn-state replay was removed from ${PRODUCT_NAME}.`,
+		);
+		expect(warnings[0]).toContain(
+			"Codex requests never replay x-codex-turn-state; a client-sent copy is still dropped.",
+		);
+		for (const name of REMOVED_CODEX_TURN_STATE_ENV_NAMES)
+			expect(warnings[0]).toContain(name);
+		expect(warnings[0]).not.toContain("secret-value");
+		expect(
+			buildRemovedSettingsWarning(
+				groupFor(REMOVED_CODEX_TURN_STATE_ENV_NAMES),
+				[],
+			),
+		).toBeNull();
 	});
 });

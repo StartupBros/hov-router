@@ -18,7 +18,7 @@ afterEach(() => {
 	delete process.env[CODEX_TRACE_HMAC_KEY_ENV];
 });
 
-describe("Codex HTTP turn-state telemetry (schema 18)", () => {
+describe("Codex aborted-attempt telemetry (schema 24)", () => {
 	test("annuls an attempt that never reached the wire", () => {
 		const dir = mkdtempSync(join(tmpdir(), "codex-trace-abort-"));
 		process.env[CODEX_TRACE_DIR_ENV] = dir;
@@ -40,7 +40,7 @@ describe("Codex HTTP turn-state telemetry (schema 18)", () => {
 				.split("\n")
 				.map((line) => JSON.parse(line));
 			expect(tombstone).toMatchObject({
-				trace_schema_version: 23,
+				trace_schema_version: 24,
 				// The analyzer duplicates this literal (it imports nothing from the
 				// provider); both sides are pinned so either one drifting fails here.
 				phase: "attempt_aborted",
@@ -51,82 +51,6 @@ describe("Codex HTTP turn-state telemetry (schema 18)", () => {
 			// this record up.
 			expect(tombstone.phase).not.toBe("request");
 			expect(tombstone.phase).not.toBe("response");
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("writes only bounded request and response attribution", () => {
-		const dir = mkdtempSync(join(tmpdir(), "codex-trace-turn-state-"));
-		process.env[CODEX_TRACE_DIR_ENV] = dir;
-		process.env[CODEX_TRACE_HMAC_KEY_ENV] = "trace-test-key";
-		try {
-			writeCodexTrace({
-				codexInput: [],
-				turnStateArm: "treatment",
-				turnStateCohortId: "0123456789abcdef",
-				turnStateRequestAction: "replay",
-				turnStateReplayApplied: true,
-				turnState: "private-request-turn-state",
-			});
-			writeCodexResponseTrace({
-				turnStateTerminalAction: "advanced",
-				summary: summarizeCodexResponse([], {}, "end_turn"),
-			});
-
-			const file = readdirSync(dir).find((name) => name.endsWith(".jsonl"));
-			const rawTrace = readFileSync(join(dir, file as string), "utf8");
-			const [request, response] = rawTrace
-				.trim()
-				.split("\n")
-				.map((line) => JSON.parse(line));
-			expect(request).toMatchObject({
-				trace_schema_version: 23,
-				codex_turn_state_arm: "treatment",
-				codex_turn_state_cohort_id: "0123456789abcdef",
-				codex_turn_state_request_action: "replay",
-				codex_turn_state_replay_applied: true,
-			});
-			expect(request.codex_turn_state_request_hmac).toMatch(/^[0-9a-f]{64}$/);
-			expect(response).toMatchObject({
-				trace_schema_version: 23,
-				codex_turn_state_terminal_action: "advanced",
-			});
-			expect(rawTrace).not.toContain("private-request-turn-state");
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-
-	test("collapses invalid or future attribution instead of echoing it", () => {
-		const dir = mkdtempSync(join(tmpdir(), "codex-trace-turn-state-"));
-		process.env[CODEX_TRACE_DIR_ENV] = dir;
-		try {
-			writeCodexTrace({
-				codexInput: [],
-				turnStateArm: "future" as never,
-				turnStateCohortId: "private-cohort-value",
-				turnStateRequestAction: "private-action" as never,
-				turnStateReplayApplied: true,
-			});
-			writeCodexResponseTrace({
-				turnStateTerminalAction: "private-terminal" as never,
-				summary: summarizeCodexResponse([], {}, "end_turn"),
-			});
-			const file = readdirSync(dir).find((name) => name.endsWith(".jsonl"));
-			const rawTrace = readFileSync(join(dir, file as string), "utf8");
-			const [request, response] = rawTrace
-				.trim()
-				.split("\n")
-				.map((line) => JSON.parse(line));
-			expect(request.codex_turn_state_arm).toBe("ineligible");
-			expect(request.codex_turn_state_cohort_id).toBeNull();
-			expect(request.codex_turn_state_request_action).toBe("missing_binding");
-			expect(request.codex_turn_state_replay_applied).toBe(false);
-			expect(response.codex_turn_state_terminal_action).toBe("ineligible");
-			expect(rawTrace).not.toContain("private-cohort-value");
-			expect(rawTrace).not.toContain("private-action");
-			expect(rawTrace).not.toContain("private-terminal");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -153,7 +77,7 @@ describe("reasoning retention telemetry (schema 18)", () => {
 			const rawTrace = readFileSync(join(dir, file as string), "utf8");
 			const record = JSON.parse(rawTrace.trim());
 			expect(record).toMatchObject({
-				trace_schema_version: 23,
+				trace_schema_version: 24,
 				phase: "request",
 				reasoning_input_item_count: 1,
 			});
@@ -181,7 +105,7 @@ describe("reasoning retention telemetry (schema 18)", () => {
 				readFileSync(join(dir, file as string), "utf8").trim(),
 			);
 			expect(record).toMatchObject({
-				trace_schema_version: 23,
+				trace_schema_version: 24,
 				phase: "response",
 				reasoning_output_item_count: 3,
 				reasoning_encrypted_present: true,
@@ -217,7 +141,7 @@ describe("writeCodexTrace schema 18 cache experiments", () => {
 				readFileSync(join(dir, file as string), "utf8").trim(),
 			);
 			expect(record).toMatchObject({
-				trace_schema_version: 23,
+				trace_schema_version: 24,
 				cache_key_continuity_applied: false,
 				continuity_evidence_id: "0123456789abcdef",
 				request_id: "logical-1",
@@ -271,7 +195,7 @@ describe("orchestration demotion diagnostics (preserved in current schema)", () 
 				readFileSync(join(dir, file as string), "utf8").trim(),
 			);
 			expect(record).toMatchObject({
-				trace_schema_version: 23,
+				trace_schema_version: 24,
 				orchestration_demotion_observed: true,
 				elapsed_ms_since_root: 4_242,
 			});
@@ -290,7 +214,7 @@ describe("orchestration demotion diagnostics (preserved in current schema)", () 
 			const record = JSON.parse(
 				readFileSync(join(dir, file as string), "utf8").trim(),
 			);
-			expect(record.trace_schema_version).toBe(23);
+			expect(record.trace_schema_version).toBe(24);
 			expect(record.orchestration_demotion_observed).toBeNull();
 			expect(record.elapsed_ms_since_root).toBeNull();
 		} finally {
@@ -334,7 +258,7 @@ describe("orchestration admission basis (introduced in schema 13, preserved in s
 				readFileSync(join(dir, file as string), "utf8").trim(),
 			);
 			expect(record).toMatchObject({
-				trace_schema_version: 23,
+				trace_schema_version: 24,
 				orchestration_admission: "root",
 				orchestration_basis: "lineage_match",
 			});
@@ -747,20 +671,14 @@ describe("writeCodexResponseTrace protocol identity telemetry", () => {
 		try {
 			writeCodexResponseTrace({
 				summary,
-				turnStateHeaderPresent: true,
-				turnState: "private-turn-state-a",
 				responseId: "private-response-a",
 			});
 			writeCodexResponseTrace({
 				summary,
-				turnStateHeaderPresent: true,
-				turnState: "private-turn-state-a",
 				responseId: "private-response-b",
 			});
 			writeCodexResponseTrace({
 				summary,
-				turnStateHeaderPresent: true,
-				turnState: "private-turn-state-b",
 				responseId: "private-response-c",
 			});
 
@@ -771,18 +689,9 @@ describe("writeCodexResponseTrace protocol identity telemetry", () => {
 				.split("\n")
 				.map((line) => JSON.parse(line));
 
-			expect(records[0].codex_turn_state_present).toBe(true);
-			expect(records[0].codex_turn_state_hmac).toHaveLength(64);
-			expect(records[0].codex_turn_state_hmac).toBe(
-				records[1].codex_turn_state_hmac,
-			);
-			expect(records[0].codex_turn_state_hmac).not.toBe(
-				records[2].codex_turn_state_hmac,
-			);
 			expect(records[0].response_id_present).toBe(true);
 			expect(records[0].response_id_hmac).toHaveLength(64);
 			expect(records[0].response_id_hmac).not.toBe(records[1].response_id_hmac);
-			expect(rawTrace).not.toContain("private-turn-state");
 			expect(rawTrace).not.toContain("private-response");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -795,15 +704,12 @@ describe("writeCodexResponseTrace protocol identity telemetry", () => {
 		try {
 			writeCodexResponseTrace({
 				summary: summarizeCodexResponse([], {}, "end_turn"),
-				turnStateHeaderPresent: true,
-				turnState: "must-not-be-written",
+				responseId: "must-not-be-written",
 			});
 			const file = readdirSync(dir).find((name) => name.endsWith(".jsonl"));
 			const rawTrace = readFileSync(join(dir, file as string), "utf8");
 			const record = JSON.parse(rawTrace.trim());
-			expect(record.codex_turn_state_present).toBe(true);
-			expect(record.codex_turn_state_hmac).toBeNull();
-			expect(record.response_id_present).toBe(false);
+			expect(record.response_id_present).toBe(true);
 			expect(record.response_id_hmac).toBeNull();
 			expect(rawTrace).not.toContain("must-not-be-written");
 		} finally {

@@ -306,7 +306,6 @@ describe("Codex stream retention bounds", () => {
 				request: string,
 				attempt: string,
 				model: string,
-				hosted: boolean,
 				abort: AbortController,
 			) => Response;
 		};
@@ -315,7 +314,6 @@ describe("Codex stream retention bounds", () => {
 			"cancel-fixture",
 			"cancel-attempt",
 			"fixture-model",
-			false,
 			abort,
 		);
 		const reader = response.body?.getReader();
@@ -381,7 +379,6 @@ describe("Codex stream retention bounds", () => {
 				request: string,
 				attempt: string,
 				model: string,
-				hosted: boolean,
 				abort: AbortController,
 			) => Response;
 		};
@@ -390,7 +387,6 @@ describe("Codex stream retention bounds", () => {
 			"cap-fixture",
 			"cap-attempt",
 			"fixture-model",
-			false,
 			abort,
 		);
 		const body = await response.text();
@@ -436,7 +432,6 @@ describe("Codex stream retention bounds", () => {
 				request: string,
 				attempt: string,
 				model: string,
-				hosted: boolean,
 				abort: AbortController,
 			) => Response;
 		};
@@ -445,7 +440,6 @@ describe("Codex stream retention bounds", () => {
 			"stalled-cap-fixture",
 			"stalled-cap-attempt",
 			"fixture-model",
-			false,
 			abort,
 		);
 		const reader = response.body?.getReader();

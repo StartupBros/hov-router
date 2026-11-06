@@ -116,6 +116,13 @@ describe("cache parity handler", () => {
 		const data = await response.json();
 		expect(data.verdict).toBe("insufficient_evidence");
 		expect(data.metricScopes.durable).toBe("logical_request_final_usage");
+		expect(data.policy.turnStatePercent).toBe(0);
+		expect(data.policy.turnStateObserveOnly).toBe(false);
+		expect(
+			data.driftReport.deviations.find(
+				(entry: { lever: string }) => entry.lever === "turnStatePercent",
+			),
+		).toBeUndefined();
 		const codex = data.windows.authoritative7d.providers.find(
 			(item: { key: string }) => item.key === "codex",
 		);

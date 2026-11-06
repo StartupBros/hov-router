@@ -43,6 +43,17 @@ export const REMOVED_CODEX_CACHE_EXPERIMENT_ENV_NAMES = [
 	"CCFLARE_CODEX_GPT56_EXPLICIT_CACHE_BREAKPOINT_PERCENT",
 ] as const;
 
+/** Ignored settings for the removed Codex HTTP turn-state replay. */
+export const REMOVED_CODEX_TURN_STATE_ENV_NAMES = [
+	"CCFLARE_CODEX_TURN_STATE_PERCENT",
+	"CCFLARE_CODEX_TURN_STATE_ACCOUNT_IDS",
+	"CCFLARE_CODEX_TURN_STATE_MODELS",
+	"CCFLARE_CODEX_TURN_STATE_COHORT_IDS",
+	"CCFLARE_CODEX_TURN_STATE_OBSERVE_ONLY",
+	"CCFLARE_CODEX_TURN_STATE_MAX_ENTRIES",
+	"CCFLARE_CODEX_TURN_STATE_IDLE_TTL_MS",
+] as const;
+
 export interface RemovedSettingGroup {
 	/** The sentence saying what was removed. */
 	readonly removed: string;
@@ -68,6 +79,12 @@ export const REMOVED_CODEX_SETTING_GROUPS: readonly RemovedSettingGroup[] = [
 		removed: `The Codex cache experiments (session keys, prefix sharding, pacing settle, pacing bypass and GPT-5.6 explicit breakpoints) were removed from ${PRODUCT_NAME}.`,
 		outcome: "Codex requests always get the behavior these settings gave at 0.",
 		names: REMOVED_CODEX_CACHE_EXPERIMENT_ENV_NAMES,
+	},
+	{
+		removed: `The Codex HTTP turn-state replay was removed from ${PRODUCT_NAME}.`,
+		outcome:
+			"Codex requests never replay x-codex-turn-state; a client-sent copy is still dropped.",
+		names: REMOVED_CODEX_TURN_STATE_ENV_NAMES,
 	},
 ];
 

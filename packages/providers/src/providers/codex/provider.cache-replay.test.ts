@@ -1,16 +1,4 @@
-// KTD6/KTD7/KTD13 -- native Codex Responses response-id continuation.
-//
-// Separate from provider.test.ts's turn-state coverage: these tests exercise
-// the native-Responses-lane `previous_response_id` checkpoint mechanism
-// (provider.ts's "Native response-id continuation" block), its exclusivity
-// against the fork's own turn-state continuation, and its KTD13 retention
-// ceilings. All assertions read the actual wire payload (the outbound
-// `Request`'s JSON body / headers, and the transformed client-facing SSE
-// stream), not internal state flags.
-import { afterEach, describe, expect, it, spyOn } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, it, spyOn } from "bun:test";
 import { deriveConversationIdentity } from "./orchestration-election";
 import {
 	CODEX_AUTHENTICATED_CALLER_HEADER,
@@ -21,24 +9,17 @@ import {
 	CODEX_RESPONSE_ID_PENDING_TTL_MS,
 	CodexProvider,
 } from "./provider";
-import { CODEX_TRACE_DIR_ENV, CODEX_TRACE_HMAC_KEY_ENV } from "./trace";
-import {
-	CODEX_TURN_STATE_ACCOUNT_IDS_ENV,
-	CODEX_TURN_STATE_COHORT_IDS_ENV,
-	CODEX_TURN_STATE_MODELS_ENV,
-	CODEX_TURN_STATE_PERCENT_ENV,
-	deriveCodexTurnStateCohortId,
-} from "./turn-state";
 
-const readTraceRecords = (dir: string): Array<Record<string, unknown>> => {
-	const file = readdirSync(dir).find((f) => f.endsWith(".jsonl"));
-	if (!file) return [];
-	return readFileSync(join(dir, file), "utf8")
-		.trim()
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => JSON.parse(line) as Record<string, unknown>);
-};
+/** The continuation owner the provider recorded for an attempt at transform time. */
+const continuationOwnerOf = (
+	provider: CodexProvider,
+	attemptId: string,
+): string | undefined =>
+	(
+		provider as unknown as {
+			continuationOwnerByAttempt: Map<string, { owner: string }>;
+		}
+	).continuationOwnerByAttempt.get(attemptId)?.owner;
 
 const sseBody = (lines: string[]) => `${lines.join("\n")}\n`;
 const eventLine = (name: string, data: unknown) => [
@@ -76,26 +57,6 @@ const conversationIdentity = deriveConversationIdentity(
 if (!conversationIdentity) {
 	throw new Error("response-id fixture has no conversation identity");
 }
-
-function enableTurnStateTreatment(): void {
-	process.env[CODEX_TURN_STATE_PERCENT_ENV] = "100";
-	process.env[CODEX_TURN_STATE_ACCOUNT_IDS_ENV] = account.id;
-	process.env[CODEX_TURN_STATE_MODELS_ENV] = physicalModel;
-	process.env[CODEX_TURN_STATE_COHORT_IDS_ENV] = deriveCodexTurnStateCohortId({
-		accountId: account.id,
-		model: physicalModel,
-		conversationIdentity,
-	});
-}
-
-afterEach(() => {
-	delete process.env[CODEX_TURN_STATE_PERCENT_ENV];
-	delete process.env[CODEX_TURN_STATE_ACCOUNT_IDS_ENV];
-	delete process.env[CODEX_TURN_STATE_MODELS_ENV];
-	delete process.env[CODEX_TURN_STATE_COHORT_IDS_ENV];
-	delete process.env[CODEX_TRACE_DIR_ENV];
-	delete process.env[CODEX_TRACE_HMAC_KEY_ENV];
-});
 
 /**
  * Builds an incoming request exactly as proxy-operations.ts's
@@ -286,8 +247,6 @@ describe("CodexProvider native response-id continuation (KTD6/KTD7/KTD13)", () =
 		const coldBody = (await coldRequest.json()) as Record<string, unknown>;
 		expect(coldBody.previous_response_id).toBeUndefined();
 		expect((coldBody.input as unknown[]).length).toBe(1);
-		// KTD6: response-id owns this attempt, so turn-state must not have been
-		// invoked -- no turn-state token on the wire.
 		expect(coldRequest.headers.get(turnStateHeader)).toBeNull();
 		// Internal trust headers never reach the outbound (real-upstream) request.
 		expect(coldRequest.headers.get(CODEX_NATIVE_RESPONSES_HEADER)).toBeNull();
@@ -370,8 +329,7 @@ describe("CodexProvider native response-id continuation (KTD6/KTD7/KTD13)", () =
 		expect(body.previous_response_id).toBeUndefined();
 	});
 
-	it("response-id ownership excludes the fork's turn-state on the SAME attempt, even when turn-state treatment is enabled (KTD6 exclusivity)", async () => {
-		enableTurnStateTreatment();
+	it("response-id requests send no x-codex-turn-state header", async () => {
 		const provider = new CodexProvider();
 		const request = await provider.transformRequestBody(
 			nativeResponseIdRequestFor({
@@ -382,8 +340,6 @@ describe("CodexProvider native response-id continuation (KTD6/KTD7/KTD13)", () =
 			}),
 			account,
 		);
-		// response-id owns the attempt (native + opt-in): turn-state's
-		// beginAttempt must not have run, so no turn-state header is set.
 		expect(request.headers.get(turnStateHeader)).toBeNull();
 	});
 
@@ -406,6 +362,7 @@ describe("CodexProvider native response-id continuation (KTD6/KTD7/KTD13)", () =
 		);
 		const body = (await request.json()) as Record<string, unknown>;
 		expect(body.previous_response_id).toBeUndefined();
+		expect(continuationOwnerOf(provider, "aid-custom-tools")).toBe("none");
 		// hasCustomTools routes processResponse through the passthrough branch,
 		// which never runs processEvents; confirm the client still gets an
 		// ordinary response (not stuck / not erroring) via that branch.
@@ -426,46 +383,38 @@ describe("CodexProvider native response-id continuation (KTD6/KTD7/KTD13)", () =
 		expect(transformed.status).toBe(200);
 	});
 
-	it("a request declaring a non-function tool via the raw tools passthrough never claims response-id ownership -- turn-state still runs for it -- even though the plain-text input digest alone would otherwise qualify (KTD13 leak guard, tools-array path)", async () => {
-		enableTurnStateTreatment();
-		const traceDir = mkdtempSync(
-			join(tmpdir(), "codex-response-id-custom-tools-"),
-		);
-		process.env[CODEX_TRACE_DIR_ENV] = traceDir;
-		process.env[CODEX_TRACE_HMAC_KEY_ENV] = "test-only-key";
-		try {
+	it("a request declaring a non-function tool via the raw tools passthrough never claims response-id ownership even though the plain-text input digest alone would otherwise qualify (KTD13 leak guard, tools-array path)", async () => {
+		const ownerFor = async (
+			attemptId: string,
+			passthroughTools?: unknown[],
+		): Promise<string | undefined> => {
 			const provider = new CodexProvider();
 			const request = await provider.transformRequestBody(
 				nativeResponseIdRequestFor({
-					requestId: "rid-custom-tools-array",
-					attemptId: "aid-custom-tools-array",
+					requestId: `rid-${attemptId}`,
+					attemptId,
 					messages: [{ role: "user", content: firstUserText }],
 					stream: true,
-					// Declared only via codexBody.tools (not an input item), so the
-					// input digest itself is plain, digestible text -- proving this
-					// exclusion is load-bearing and not just a side effect of the
-					// digest already failing closed on an "additional_tools" item.
-					passthroughTools: [{ type: "computer_use_preview" }],
+					passthroughTools,
 				}),
 				account,
 			);
 			const body = (await request.json()) as Record<string, unknown>;
 			expect(body.previous_response_id).toBeUndefined();
-			// Wire-observable proof of exclusivity, not just an internal flag:
-			// with turn-state treatment enabled and response-id correctly
-			// excluded, turn-state's own beginAttempt must have actually run
-			// for this attempt (arm/action are NOT the "response_id_owned"
-			// stub `selectCodexResponseIdOwner` would otherwise have produced).
-			const record = readTraceRecords(traceDir).find(
-				(r) => r.attempt_id === "aid-custom-tools-array",
-			);
-			expect(record).toBeDefined();
-			expect(record?.codex_turn_state_request_action).not.toBe(
-				"response_id_owned",
-			);
-		} finally {
-			rmSync(traceDir, { recursive: true, force: true });
-		}
+			return continuationOwnerOf(provider, attemptId);
+		};
+		// Control: the same request without the tool claims ownership, so the
+		// exclusion below is what refuses it.
+		expect(await ownerFor("aid-plain-tools-array")).toBe("response-id");
+		// Declared only via codexBody.tools (not an input item), so the input
+		// digest itself is plain, digestible text -- proving this exclusion is
+		// load-bearing and not just a side effect of the digest already failing
+		// closed on an "additional_tools" item.
+		expect(
+			await ownerFor("aid-custom-tools-array", [
+				{ type: "computer_use_preview" },
+			]),
+		).toBe("none");
 	});
 
 	it("a same-chunk trailing frame after response.completed disqualifies the checkpoint, but still delivers the terminal event to the client (KTD7 scenario 10/6)", async () => {
