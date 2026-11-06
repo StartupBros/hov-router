@@ -1,4 +1,5 @@
 import { DEFAULT_AGENT_MODEL } from "@better-ccflare/core";
+import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { format, formatDistanceToNow } from "date-fns";
 import {
 	AlertCircle,
@@ -124,8 +125,9 @@ export function AgentsTab() {
 						No Agents Found
 					</CardTitle>
 					<CardDescription>
-						No agent definition files found in ~/.claude/agents/ or workspace
-						directories
+						No agent definition files found in ~/.claude/agents/ or a registered
+						workspace on the machine running {PRODUCT_NAME}. Agents on the
+						computers that connect to it are not listed here.
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-4">
@@ -133,17 +135,20 @@ export function AgentsTab() {
 						<h3 className="font-medium mb-2">Global Agents</h3>
 						<p className="text-sm text-muted-foreground">
 							To add global agents, create markdown files in the
-							~/.claude/agents/ directory.
+							~/.claude/agents/ directory of the account that runs{" "}
+							{PRODUCT_NAME}.
 						</p>
 					</div>
 					<Separator />
 					<div>
 						<h3 className="font-medium mb-2">Workspace Agents</h3>
 						<p className="text-sm text-muted-foreground">
-							To add workspace-specific agents, create markdown files in your
-							project's .claude/agents/ directory. They should be able to
-							discover local project agents after you send a message from within
-							that directory.
+							Workspace agents live in a project's .claude/agents/ directory.{" "}
+							{PRODUCT_NAME} registers projects only when
+							BETTER_CCFLARE_AGENT_WORKSPACE_AUTODISCOVER=true is set. It then
+							registers a project from the next request sent from inside it, if
+							that folder is on its own machine under the directory it runs
+							from.
 						</p>
 					</div>
 					<Separator />
@@ -191,6 +196,10 @@ Your system prompt content here...`}
 						</h2>
 						<p className="text-muted-foreground mt-1">
 							Manage your AI agents and their model preferences
+						</p>
+						<p className="text-xs text-muted-foreground mt-1">
+							Lists agent files on the machine running {PRODUCT_NAME}, not the
+							agents on the computers that connect to it.
 						</p>
 						<p className="text-xs text-muted-foreground mt-1">
 							Model preference on a card sets a runtime proxy override (database

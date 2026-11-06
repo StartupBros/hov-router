@@ -3,9 +3,13 @@ import { formatTimestamp, formatTokens } from "@better-ccflare/ui-common";
 import { Eye } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type RequestPayload, type RequestSummary } from "../api";
-import { attributionSourceLabel } from "../lib/attribution";
+import {
+	attributionSourceLabel,
+	describeRequestAgent,
+} from "../lib/attribution";
 import { ConversationView } from "./ConversationView";
 import { CopyButton } from "./CopyButton";
+import { RequestAgentBadge } from "./RequestAgentBadge";
 import { RequestCostBadge } from "./RequestCostBadge";
 import { TokenUsageDisplay } from "./TokenUsageDisplay";
 import { Badge } from "./ui/badge";
@@ -150,18 +154,12 @@ export function RequestDetailsModal({
 										</Badge>
 									);
 								})()}
-							{summary?.agentUsed &&
-								(() => {
-									const agentSrcLabel = attributionSourceLabel(
-										summary.agentAttributionSource,
-									);
-									return (
-										<Badge variant="secondary">
-											Agent: {summary.agentUsed}
-											{agentSrcLabel ? ` · ${agentSrcLabel}` : ""}
-										</Badge>
-									);
-								})()}
+							<RequestAgentBadge
+								view={describeRequestAgent(
+									summary?.agentUsed,
+									summary?.agentAttributionSource,
+								)}
+							/>
 							{summary?.totalTokens && (
 								<Badge variant="outline">
 									{formatTokens(summary.totalTokens)} tokens
