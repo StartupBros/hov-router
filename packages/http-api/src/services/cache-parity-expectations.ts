@@ -37,13 +37,10 @@ import type {
  *   pacingBypassPercent, explicitBreakpointPercent, webSocketPercent:
  *   REMOVED — the code is gone and the snapshot reports a fixed 0 for one
  *   release.
- * - turnStatePercent: RETIRE — measured no better than the KEEP baseline, so
- *   declared default is 0.
+ * - turnStatePercent: REMOVED — fixed at 0 for one release.
  * - globalKeepaliveTtlMinutes, xaiCacheKeepaliveTtlMinutes: default-off
  *   diagnostic/compatibility surfaces with no parity claim, declared default 0.
- * - turnStateObserveOnly: declared false — moot while turnStatePercent's
- *   declared default is 0 (no cohort is ever eligible for treatment), and
- *   matches the code's own env-unset default.
+ * - turnStateObserveOnly: REMOVED — fixed at false for one release.
  */
 export const CACHE_PARITY_DECLARED_DEFAULTS: CacheParityPolicySnapshot = {
 	promptCacheKeyEnabled: true,
@@ -98,12 +95,7 @@ export const CACHE_PARITY_DECLARED_FLOOR: CacheParityDeclaredFloor = {
  */
 export const CACHE_PARITY_ACKNOWLEDGED_DEVIATIONS: Partial<
 	Record<CacheParityLeverKey, CacheParityDeclaredAcknowledgement>
-> = {
-	turnStatePercent: {
-		issue: 199,
-		note: "CCFLARE_CODEX_TURN_STATE_PERCENT=50 stays as-is pending diagnosis (issue #199 comment, 2026-08-17); measured null as a parity lever.",
-	},
-};
+> = {};
 
 const DECLARED_LEVER_KEYS: CacheParityLeverKey[] = [
 	"promptCacheKeyEnabled",

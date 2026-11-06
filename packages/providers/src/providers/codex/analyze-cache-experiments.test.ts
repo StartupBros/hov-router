@@ -4,6 +4,7 @@ import {
 	analyzeCodexTrace,
 	formatCacheExperimentReport,
 	formatReport,
+	parseTraceJsonl,
 } from "./analyze-trace";
 
 describe("analyzeCodexCacheExperiments", () => {
@@ -19,10 +20,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				attempt_cause: "initial",
 				model_out: "gpt-5.6-sol",
 				prompt_cache_key_id: "private-key",
-				codex_turn_state_arm: "treatment",
-				codex_turn_state_cohort_id: "0123456789abcdef",
-				codex_turn_state_request_action: "replay",
-				codex_turn_state_replay_applied: true,
 			},
 			{
 				// Registered while its body was transformed, then abandoned before
@@ -36,9 +33,6 @@ describe("analyzeCodexCacheExperiments", () => {
 				attempt_cause: "model_fallback",
 				model_out: "gpt-5.6-sol",
 				prompt_cache_key_id: "private-key",
-				codex_turn_state_arm: "ineligible",
-				codex_turn_state_request_action: "failover_suppressed",
-				codex_turn_state_replay_applied: false,
 			},
 			{
 				trace_schema_version: 19,
@@ -58,172 +52,90 @@ describe("analyzeCodexCacheExperiments", () => {
 				cache_read_input_tokens: 900,
 				cache_creation_input_tokens: 0,
 				cache_creation_measurement_available: true,
-				codex_turn_state_terminal_action: "advanced",
 			},
 		]);
 
 		// The dispatched attempt keeps final-attempt attribution, so its response
 		// still joins; the phantom neither inflates key pressure and fallback
 		// counts nor strands the real response as unjoined.
-		expect(report.turnState.rows).toMatchObject([
+		expect(report.promptKeyConcentration).toEqual({
+			distinctKeys: 1,
+			maxRequestsPerKeyMinute: 1,
+			keysOver15RequestsPerMinute: 0,
+		});
+		expect(report.pacing.rows).toMatchObject([
 			{
-				arm: "treatment",
-				requests: 1,
-				joinedResponses: 1,
-				unjoinedRequests: 0,
-				outcomes: {
-					observedExtraAttempts: 0,
-					observedFallbackAttempts: 0,
-					finalAttemptFallbacks: 0,
-					terminalActions: { advanced: 1 },
-				},
-				promptKeyConcentration: {
-					distinctKeys: 1,
-					maxRequestsPerKeyMinute: 1,
-					keysOver15RequestsPerMinute: 0,
-				},
+				observedCodexAttempts: 1,
+				joinedObservedCodexResponses: 1,
 			},
 		]);
-		expect(
-			report.turnState.promptKeyConcentration.maxRequestsPerKeyMinute,
-		).toBe(1);
 	});
 
-	test("attributes HTTP turn-state by first attempt and final outcome", () => {
+	test("counts records without experiment fields and ignores unusable keys or timestamps", () => {
 		const report = analyzeCodexCacheExperiments([
 			{
-				trace_schema_version: 19,
 				phase: "request",
-				ts: "2026-08-13T00:00:00.000Z",
-				request_id: "private-logical-first",
-				attempt_id: "private-attempt-first",
-				attempt_ordinal: 1,
-				attempt_cause: "initial",
-				model_out: "gpt-5.6-sol",
+				request_id: "a",
+				attempt_id: "a1",
+				ts: "2026-08-13T00:00:00Z",
 				prompt_cache_key_id: "private-key",
+			},
+			{
+				phase: "request",
+				request_id: "b",
+				attempt_id: "b1",
+				ts: "2026-08-13T00:00:30Z",
+				prompt_cache_key_id: "private-key",
+			},
+			{
+				phase: "request",
+				request_id: "c",
+				attempt_id: "c1",
+				ts: "invalid",
+				prompt_cache_key_id: "private-key",
+			},
+			{
+				phase: "request",
+				request_id: "d",
+				attempt_id: "d1",
+				ts: "2026-08-13T00:00:40Z",
+				prompt_cache_key_id: "",
+			},
+		]);
+		expect(report.schemaVersion).toBe(7);
+		expect(report.promptKeyConcentration).toEqual({
+			distinctKeys: 1,
+			maxRequestsPerKeyMinute: 2,
+			keysOver15RequestsPerMinute: 0,
+		});
+		expect(formatCacheExperimentReport(report)).toContain(
+			"PROMPT KEY CONCENTRATION:",
+		);
+	});
+	test("parses schema-23 records with retired fields", () => {
+		const records = parseTraceJsonl(
+			JSON.stringify({
+				trace_schema_version: 23,
+				phase: "request",
+				request_id: "old",
+				attempt_id: "old1",
+				ts: "2026-08-13T00:00:00Z",
+				prompt_cache_key_id: "private-old-key",
 				codex_turn_state_arm: "treatment",
-				codex_turn_state_cohort_id: "0123456789abcdef",
 				codex_turn_state_request_action: "replay",
 				codex_turn_state_replay_applied: true,
-				codex_turn_state_request_hmac: "matched-hmac",
-			},
-			{
-				trace_schema_version: 19,
-				phase: "request",
-				ts: "2026-08-13T00:00:01.000Z",
-				request_id: "private-logical-first",
-				attempt_id: "private-attempt-final",
-				attempt_ordinal: 2,
-				attempt_cause: "reasoning_retry",
-				model_out: "gpt-5.6-sol",
-				prompt_cache_key_id: "private-key",
-				codex_turn_state_arm: "ineligible",
-				codex_turn_state_cohort_id: "fedcba9876543210",
-				codex_turn_state_request_action: "rescue_suppressed",
-				codex_turn_state_replay_applied: false,
-			},
-			{
-				trace_schema_version: 19,
-				phase: "response",
-				ts: "2026-08-13T00:00:03.000Z",
-				request_id: "private-logical-first",
-				attempt_id: "private-attempt-final",
-				stop_reason: "end_turn",
-				input_tokens: 1_000,
-				cache_read_input_tokens: 900,
-				cache_creation_input_tokens: 0,
-				cache_creation_measurement_available: true,
-				context_utilization_pct: 75,
-				codex_turn_state_hmac: "matched-hmac",
-				codex_turn_state_terminal_action: "advanced",
-			},
-			{
-				trace_schema_version: 19,
-				phase: "request",
-				ts: "2026-08-13T00:02:00.000Z",
-				request_id: "private-control",
-				attempt_id: "private-control-attempt",
-				attempt_ordinal: 1,
-				attempt_cause: "initial",
-				model_out: "gpt-5.6-sol",
-				codex_turn_state_arm: "control",
-				codex_turn_state_cohort_id: "0123456789abcdef",
-				codex_turn_state_request_action: "would_replay",
-				codex_turn_state_replay_applied: false,
-			},
-		]);
-
-		// schemaVersion bumped for #204: cache rows now also carry
-		// medianCachedReadPct/p25CachedReadPct/p75CachedReadPct alongside the
-		// pre-existing weighted figure, so consumers keyed on the row shape
-		// need to know the shape changed. Bumped again (4 -> 5) when the
-		// `websocket` report left with the Codex WebSocket transport, and
-		// (5 -> 6) when the pacing-bypass and explicit-breakpoint canaries
-		// were retired.
-		expect(report.schemaVersion).toBe(6);
-		expect(report.turnState.assignmentCounts).toEqual({
-			observe: 0,
-			control: 1,
-			treatment: 1,
-			ineligible: 0,
-			unassigned: 0,
-		});
-		expect(report.turnState.rows).toMatchObject([
-			{
-				arm: "control",
-				model: "gpt-5.6-sol",
-				turn: "follow_up_observed",
-				gapBand: "from_1m_to_5m",
-				contextBand: "unavailable",
-				requests: 1,
-				unjoinedRequests: 1,
-				requestActions: { would_replay: 1 },
-			},
-			{
-				arm: "treatment",
-				model: "gpt-5.6-sol",
-				turn: "first_observed",
-				gapBand: "unknown",
-				contextBand: "from_50_to_80",
-				requests: 1,
-				joinedResponses: 1,
-				cache: {
-					weightedCachedReadPct: 90,
-					positiveHitRatePct: 100,
-					zeroHitRatePct: 0,
-				},
-				outcomes: {
-					observedExtraAttempts: 1,
-					observedFallbackAttempts: 0,
-					terminalActions: { advanced: 1 },
-				},
-				tokenHmac: { matched: 1, mismatched: 0, unavailable: 0 },
-				requestActions: { replay: 1 },
-				promptKeyConcentration: {
-					distinctKeys: 1,
-					maxRequestsPerKeyMinute: 2,
-					keysOver15RequestsPerMinute: 0,
-				},
-			},
-		]);
-		const text = formatCacheExperimentReport(report);
-		expect(text).toContain("HTTP TURN STATE CANARY");
-		for (const privateValue of [
-			"private-logical-first",
-			"private-attempt-first",
-			"private-attempt-final",
-			"private-key",
-			"0123456789abcdef",
-			"matched-hmac",
-		]) {
-			expect(text).not.toContain(privateValue);
-		}
+			}),
+		);
+		expect(records).toHaveLength(1);
+		expect(
+			analyzeCodexCacheExperiments(records).promptKeyConcentration.distinctKeys,
+		).toBe(1);
 	});
 
 	test("reports prompt-key pressure across rows, not only within one row", () => {
 		// One key receiving 16 requests inside a minute, split evenly across two
-		// context bands. Row-level concentration sees 8 per row and reports no
-		// violation; the 15 requests/minute/key guard has to see all 16.
+		// context bands. The 15 requests/minute/key guard is report-wide, so it
+		// has to see all 16 whatever pacing row each request lands in.
 		const records = Array.from({ length: 16 }, (_, index) => {
 			const ts = `2026-08-13T00:00:${String(index).padStart(2, "0")}.000Z`;
 			return [
@@ -237,10 +149,6 @@ describe("analyzeCodexCacheExperiments", () => {
 					attempt_cause: "initial" as const,
 					model_out: "gpt-5.6-sol",
 					prompt_cache_key_id: "private-shared-key",
-					codex_turn_state_arm: "treatment" as const,
-					codex_turn_state_cohort_id: "0123456789abcdef",
-					codex_turn_state_request_action: "replay" as const,
-					codex_turn_state_replay_applied: true,
 				},
 				{
 					trace_schema_version: 19 as const,
@@ -255,20 +163,13 @@ describe("analyzeCodexCacheExperiments", () => {
 					cache_creation_measurement_available: true,
 					// Alternating bands put the same key in two different rows.
 					context_utilization_pct: index % 2 === 0 ? 40 : 75,
-					codex_turn_state_terminal_action: "advanced" as const,
 				},
 			];
 		}).flat();
 
 		const report = analyzeCodexCacheExperiments(records);
 
-		for (const row of report.turnState.rows) {
-			expect(row.promptKeyConcentration.keysOver15RequestsPerMinute).toBe(0);
-			expect(row.promptKeyConcentration.maxRequestsPerKeyMinute).toBeLessThan(
-				16,
-			);
-		}
-		expect(report.turnState.promptKeyConcentration).toEqual({
+		expect(report.promptKeyConcentration).toEqual({
 			distinctKeys: 1,
 			maxRequestsPerKeyMinute: 16,
 			keysOver15RequestsPerMinute: 1,
@@ -276,6 +177,44 @@ describe("analyzeCodexCacheExperiments", () => {
 		expect(formatCacheExperimentReport(report)).not.toContain(
 			"private-shared-key",
 		);
+	});
+
+	test("counts every dispatched attempt of a logical request toward its key", () => {
+		// One logical request that reached the wire three times (an initial send
+		// and two retries) puts three requests on its key, not one: the guard is
+		// about upstream pressure, which retries add to.
+		const causes = ["initial", "overload_529", "other_retry"] as const;
+		const requests = causes.map((cause, index) => ({
+			trace_schema_version: 24,
+			phase: "request" as const,
+			ts: `2026-08-13T00:00:0${index}.000Z`,
+			request_id: "private-logical-retried",
+			attempt_id: `private-attempt-${index}`,
+			attempt_ordinal: index + 1,
+			attempt_cause: cause,
+			model_out: "gpt-5.6-sol",
+			prompt_cache_key_id: "private-retried-key",
+		}));
+		const response = {
+			trace_schema_version: 24,
+			phase: "response" as const,
+			ts: "2026-08-13T00:00:03.000Z",
+			request_id: "private-logical-retried",
+			attempt_id: "private-attempt-2",
+			stop_reason: "end_turn" as const,
+			input_tokens: 1_000,
+			cache_read_input_tokens: 900,
+			cache_creation_input_tokens: 0,
+			cache_creation_measurement_available: true,
+		};
+
+		const report = analyzeCodexCacheExperiments([...requests, response]);
+
+		expect(report.promptKeyConcentration).toEqual({
+			distinctKeys: 1,
+			maxRequestsPerKeyMinute: 3,
+			keysOver15RequestsPerMinute: 0,
+		});
 	});
 
 	test("groups every observed Codex attempt by model, turn, and gap band", () => {
@@ -352,7 +291,7 @@ describe("analyzeCodexCacheExperiments", () => {
 			},
 		]);
 
-		expect(report.schemaVersion).toBe(6);
+		expect(report.schemaVersion).toBe(7);
 		expect(report.attribution.unit).toBe("final_observed_codex_attempt");
 		expect(report.attribution.pacingWaitMs).toBe("schema20_request_receipt");
 		expect(report.pacing.rows).toMatchObject([
@@ -997,7 +936,7 @@ describe("analyzeCodexCacheExperiments", () => {
 // retracted. These tests pin the per-response distribution stats
 // (medianCachedReadPct / p25CachedReadPct / p75CachedReadPct) that must ship
 // alongside weightedCachedReadPct on both CacheExperimentRow.cache (pacing)
-// and TurnStateExperimentRow.cache.
+// in CacheExperimentRow.cache.
 describe("cache-read distribution stats (median alongside weighted)", () => {
 	function pacingPair(
 		requestId: string,
@@ -1047,31 +986,12 @@ describe("cache-read distribution stats (median alongside weighted)", () => {
 		);
 		const huge = pacingPair("huge", "2026-08-17T00:00:10.000Z", 996_000, 0);
 
-		const records = [
-			...small,
-			...huge,
-			// Same underlying attempts, tagged for the turn-state dimension too,
-			// so both row shapes are exercised against one dataset.
-		].map((record) => ({
-			...record,
-			...(record.phase === "request"
-				? {
-						codex_turn_state_arm: "treatment" as const,
-						codex_turn_state_request_action: "replay" as const,
-					}
-				: {}),
-		}));
+		const records = [...small, ...huge];
 
 		const report = analyzeCodexCacheExperiments(records);
 
 		expect(report.pacing.rows).toHaveLength(1);
 		expect(report.pacing.rows[0]?.cache).toMatchObject({
-			measuredResponses: 5,
-			weightedCachedReadPct: 0.4,
-			medianCachedReadPct: 90,
-		});
-		expect(report.turnState.rows).toHaveLength(1);
-		expect(report.turnState.rows[0]?.cache).toMatchObject({
 			measuredResponses: 5,
 			weightedCachedReadPct: 0.4,
 			medianCachedReadPct: 90,

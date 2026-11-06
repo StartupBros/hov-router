@@ -33,7 +33,6 @@ export {
 	CODEX_NATIVE_RESPONSES_HEADER,
 	CODEX_PING_MODEL,
 	CODEX_PROMPT_CACHE_KEY_ENV,
-	CODEX_TURN_STATE_HEADER,
 	CODEX_USER_AGENT,
 	CODEX_VERSION,
 	CodexProvider,
@@ -54,5 +53,4 @@ export {
 	consumeCodexResetCredit,
 	fetchCodexResetCredits,
 } from "./reset-credits";
-export { readCodexTurnStateConfig } from "./turn-state";
 export { parseCodexUsageHeaders } from "./usage";

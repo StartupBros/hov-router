@@ -5,11 +5,6 @@ import {
 	summarizeCacheReadObservations,
 } from "@better-ccflare/core";
 import { classifyCodexModelFamily } from "./model-family";
-import {
-	CODEX_TURN_STATE_ARMS,
-	CODEX_TURN_STATE_REQUEST_ACTIONS,
-	CODEX_TURN_STATE_TERMINAL_ACTIONS,
-} from "./turn-state";
 
 interface ToolCall {
 	name: string;
@@ -56,14 +51,6 @@ export interface TraceRecord {
 	pacing_role?: "leader" | "follower" | string | null;
 	pacing_wait_ms?: number | null;
 	pacing_release_reason?: "leader" | "cap" | string | null;
-	codex_turn_state_arm?: string | null;
-	codex_turn_state_cohort_id?: string | null;
-	codex_turn_state_request_action?: string | null;
-	codex_turn_state_replay_applied?: boolean | null;
-	codex_turn_state_request_hmac?: string | null;
-	codex_turn_state_present?: boolean;
-	codex_turn_state_hmac?: string | null;
-	codex_turn_state_terminal_action?: string | null;
 	input_item_count?: number;
 	input_item_total_count?: number;
 	input_item_fingerprints?: InputFingerprint[];
@@ -327,88 +314,6 @@ export interface CacheExperimentDimensionReport {
 	rows: CacheExperimentRow[];
 }
 
-export type TurnStateExperimentArm =
-	| "observe"
-	| "control"
-	| "treatment"
-	| "ineligible"
-	| "unassigned";
-export type TurnStateContextBand =
-	| "under_50"
-	| "from_50_to_80"
-	| "from_80_to_95"
-	| "at_least_95"
-	| "unavailable";
-
-export interface TurnStateExperimentRow {
-	arm: TurnStateExperimentArm;
-	model: string;
-	turn: CacheExperimentTurn;
-	gapBand: CacheExperimentGapBand;
-	contextBand: TurnStateContextBand;
-	requests: number;
-	joinedResponses: number;
-	unjoinedRequests: number;
-	replayAppliedRequests: number;
-	wouldReplayRequests: number;
-	cache: {
-		measuredResponses: number;
-		unavailableResponses: number;
-		inputTokens: number;
-		cachedReadTokens: number;
-		weightedCachedReadPct: number | null;
-		/** See CacheExperimentRow.cache -- same #204 median-alongside-weighted contract. */
-		medianCachedReadPct: number | null;
-		p25CachedReadPct: number | null;
-		p75CachedReadPct: number | null;
-		positiveHitResponses: number;
-		positiveHitRatePct: number | null;
-		zeroHitResponses: number;
-		zeroHitRatePct: number | null;
-		cacheWriteMeasuredResponses: number;
-		cacheWriteUnavailableResponses: number;
-		cacheWriteTokens: number;
-	};
-	latency: {
-		availableResponses: number;
-		unavailableResponses: number;
-		p50Ms: number | null;
-		p95Ms: number | null;
-	};
-	outcomes: {
-		observed400Responses: number;
-		observedErrorResponses: number;
-		finalAttemptFallbacks: number;
-		observedExtraAttempts: number;
-		observedFallbackAttempts: number;
-		terminalActions: Record<string, number>;
-	};
-	tokenHmac: { matched: number; mismatched: number; unavailable: number };
-	requestActions: Record<string, number>;
-	promptKeyConcentration: {
-		distinctKeys: number;
-		maxRequestsPerKeyMinute: number;
-		keysOver15RequestsPerMinute: number;
-	};
-}
-
-export interface TurnStateCacheExperimentReport {
-	assignmentCounts: Record<TurnStateExperimentArm, number>;
-	/**
-	 * Report-wide prompt-key pressure, aggregated over every physical attempt
-	 * before rows are partitioned. Row-level concentration divides one key across
-	 * arm/model/turn/gap/context rows, so a key that exceeds the documented
-	 * 15 requests/minute/key guard can sit below the threshold in every row. This
-	 * field is the guard's authoritative view.
-	 */
-	promptKeyConcentration: {
-		distinctKeys: number;
-		maxRequestsPerKeyMinute: number;
-		keysOver15RequestsPerMinute: number;
-	};
-	rows: TurnStateExperimentRow[];
-}
-
 export interface CodexCacheExperimentReport {
 	/**
 	 * Bumped 3 -> 4 when CacheExperimentRow.pacing gained schema-20 role,
@@ -417,9 +322,11 @@ export interface CodexCacheExperimentReport {
 	 * 5 -> 6 when the pacing-bypass and explicit-breakpoint canaries were
 	 * retired: `explicitBreakpoint` is gone, and pacing rows lost `arm`,
 	 * `actions`, the per-action pacing counters and `assignmentCounts`.
+	 * 6 -> 7 removes the HTTP replay report and promotes promptKeyConcentration
+	 * to all logical samples, including traces without experiment fields.
 	 * Consumers that key on a fixed shape need to know the report changed.
 	 */
-	schemaVersion: 6;
+	schemaVersion: 7;
 	attribution: {
 		unit: "final_observed_codex_attempt";
 		responseScope: "codex_trace_only_no_cross_provider_terminal_visibility";
@@ -429,7 +336,12 @@ export interface CodexCacheExperimentReport {
 		pacingWaitReason: "legacy_or_invalid_receipt_is_unknown";
 	};
 	pacing: CacheExperimentDimensionReport;
-	turnState: TurnStateCacheExperimentReport;
+	/** Report-wide sliding 60-second pressure across every physical attempt's prompt key. */
+	promptKeyConcentration: {
+		distinctKeys: number;
+		maxRequestsPerKeyMinute: number;
+		keysOver15RequestsPerMinute: number;
+	};
 }
 
 function keyOf(call: ToolCall): string {
@@ -495,10 +407,6 @@ function finishContextBand(band: ContextBandAccumulator): ContextBandStats {
 				? Math.round((1000 * band.cacheReadInputTokens) / band.inputTokens) / 10
 				: null,
 	};
-}
-
-function increment(distribution: Record<string, number>, value: string): void {
-	distribution[value] = (distribution[value] ?? 0) + 1;
 }
 
 // Logical-ID joins are a compatibility path for schema 6-8 records only. A
@@ -590,22 +498,6 @@ function analyzeRequestTransitions(requests: TraceRecord[]) {
 
 const SAFE_COHORT = /^[a-fA-F0-9]{16}$/;
 const FALLBACK_CAUSES = new Set(["model_fallback", "account_failover"]);
-// Derived from the canonical vocabularies in turn-state.ts. Repeating the
-// literals here once meant a newly emitted action could be silently dropped by
-// this allowlist -- making a fail-closed guard invisible to the analysis meant
-// to prove it works.
-/** @internal Exported only so the vocabulary invariant can be asserted. */
-export const TURN_STATE_ARMS = new Set<TurnStateExperimentArm>(
-	CODEX_TURN_STATE_ARMS,
-);
-/** @internal Exported only so the vocabulary invariant can be asserted. */
-export const TURN_STATE_REQUEST_ACTIONS = new Set<string>(
-	CODEX_TURN_STATE_REQUEST_ACTIONS,
-);
-/** @internal Exported only so the vocabulary invariant can be asserted. */
-export const TURN_STATE_TERMINAL_ACTIONS = new Set<string>(
-	CODEX_TURN_STATE_TERMINAL_ACTIONS,
-);
 interface CacheExperimentLogicalSample {
 	request: TraceRecord;
 	attempts: TraceRecord[];
@@ -1534,180 +1426,6 @@ function cacheExperimentDimension(
 	return { rows: finishedRows };
 }
 
-interface TurnStateAnnotatedSample extends CacheExperimentLogicalSample {
-	provenance: TraceRecord;
-	arm: TurnStateExperimentArm;
-	model: string;
-	turn: CacheExperimentTurn;
-	gapBand: CacheExperimentGapBand;
-	contextBand: TurnStateContextBand;
-	requestAction: string;
-}
-
-interface TurnStateExperimentRowAccumulator extends TurnStateExperimentRow {
-	inputTokens: number;
-	cachedReadTokens: number;
-	latencySamples: number[];
-	keyTimestamps: Map<string, number[]>;
-	/** Cache-inclusive observations, one entry per measured response in this row. */
-	cacheUsageObservations: CacheUsageObservation[];
-}
-
-function turnStateArm(value: unknown): TurnStateExperimentArm {
-	return typeof value === "string" &&
-		TURN_STATE_ARMS.has(value as TurnStateExperimentArm)
-		? (value as TurnStateExperimentArm)
-		: "unassigned";
-}
-
-function turnStateAction(
-	value: unknown,
-	allowlist: ReadonlySet<string>,
-): string {
-	if (value === null || value === undefined || value === "")
-		return "unavailable";
-	return typeof value === "string" && allowlist.has(value) ? value : "unknown";
-}
-
-function turnStateContextBand(
-	response: TraceRecord | undefined,
-): TurnStateContextBand {
-	const utilization = response?.context_utilization_pct;
-	if (typeof utilization !== "number" || !Number.isFinite(utilization))
-		return "unavailable";
-	if (utilization < 50) return "under_50";
-	if (utilization < 80) return "from_50_to_80";
-	if (utilization < 95) return "from_80_to_95";
-	return "at_least_95";
-}
-
-function annotateTurnStateSamples(
-	samples: readonly CacheExperimentLogicalSample[],
-): TurnStateAnnotatedSample[] {
-	const included = samples
-		.map((sample) => ({
-			...sample,
-			provenance: sample.attempts[0] ?? sample.request,
-		}))
-		.filter(
-			(sample) =>
-				sample.provenance.codex_turn_state_arm !== undefined ||
-				sample.provenance.codex_turn_state_request_action !== undefined,
-		);
-	const position = new Map<
-		CacheExperimentLogicalSample,
-		{ turn: CacheExperimentTurn; gapBand: CacheExperimentGapBand }
-	>();
-	const groups = new Map<string, Array<(typeof included)[number]>>();
-	for (const sample of included) {
-		const cohort = sample.provenance.codex_turn_state_cohort_id;
-		if (
-			typeof cohort !== "string" ||
-			!SAFE_COHORT.test(cohort) ||
-			sample.logicalTimestamp === null
-		) {
-			position.set(sample, { turn: "unknown", gapBand: "unknown" });
-			continue;
-		}
-		const normalized = cohort.toLowerCase();
-		const group = groups.get(normalized) ?? [];
-		group.push(sample);
-		groups.set(normalized, group);
-	}
-	for (const group of groups.values()) {
-		group.sort((a, b) => (a.logicalTimestamp ?? 0) - (b.logicalTimestamp ?? 0));
-		group.forEach((sample, index) => {
-			const previous = group[index - 1];
-			const currentTs = sample.logicalTimestamp;
-			const previousTs = previous?.logicalTimestamp ?? null;
-			position.set(sample, {
-				turn: index === 0 ? "first_observed" : "follow_up_observed",
-				gapBand:
-					index === 0 ||
-					currentTs === null ||
-					previousTs === null ||
-					currentTs < previousTs
-						? "unknown"
-						: gapBand(currentTs - previousTs),
-			});
-		});
-	}
-	return included.map((sample) => ({
-		...sample,
-		arm: turnStateArm(sample.provenance.codex_turn_state_arm),
-		model: safeModel(sample.provenance),
-		...(position.get(sample) ?? {
-			turn: "unknown" as const,
-			gapBand: "unknown" as const,
-		}),
-		contextBand: turnStateContextBand(sample.response),
-		requestAction: turnStateAction(
-			sample.provenance.codex_turn_state_request_action,
-			TURN_STATE_REQUEST_ACTIONS,
-		),
-	}));
-}
-
-function turnStateRowAccumulator(
-	sample: TurnStateAnnotatedSample,
-): TurnStateExperimentRowAccumulator {
-	return {
-		arm: sample.arm,
-		model: sample.model,
-		turn: sample.turn,
-		gapBand: sample.gapBand,
-		contextBand: sample.contextBand,
-		requests: 0,
-		joinedResponses: 0,
-		unjoinedRequests: 0,
-		replayAppliedRequests: 0,
-		wouldReplayRequests: 0,
-		cache: {
-			measuredResponses: 0,
-			unavailableResponses: 0,
-			inputTokens: 0,
-			cachedReadTokens: 0,
-			weightedCachedReadPct: null,
-			medianCachedReadPct: null,
-			p25CachedReadPct: null,
-			p75CachedReadPct: null,
-			positiveHitResponses: 0,
-			positiveHitRatePct: null,
-			zeroHitResponses: 0,
-			zeroHitRatePct: null,
-			cacheWriteMeasuredResponses: 0,
-			cacheWriteUnavailableResponses: 0,
-			cacheWriteTokens: 0,
-		},
-		latency: {
-			availableResponses: 0,
-			unavailableResponses: 0,
-			p50Ms: null,
-			p95Ms: null,
-		},
-		outcomes: {
-			observed400Responses: 0,
-			observedErrorResponses: 0,
-			finalAttemptFallbacks: 0,
-			observedExtraAttempts: 0,
-			observedFallbackAttempts: 0,
-			terminalActions: {},
-		},
-		tokenHmac: { matched: 0, mismatched: 0, unavailable: 0 },
-		requestActions: {},
-		promptKeyConcentration: {
-			distinctKeys: 0,
-			maxRequestsPerKeyMinute: 0,
-			keysOver15RequestsPerMinute: 0,
-		},
-		inputTokens: 0,
-		cachedReadTokens: 0,
-		latencySamples: [],
-		keyTimestamps: new Map(),
-		cacheUsageObservations: [],
-	};
-}
-
 /**
  * Largest value in a list, or 0 for an empty one.
  *
@@ -1736,237 +1454,26 @@ function maximumRequestsPerMinute(timestamps: readonly number[]): number {
 	return maximum;
 }
 
-function finishTurnStateRow(
-	row: TurnStateExperimentRowAccumulator,
-): TurnStateExperimentRow {
-	const concentrations = [...row.keyTimestamps.values()].map(
-		maximumRequestsPerMinute,
-	);
-	const cacheSummary = summarizeCacheReadObservations(
-		row.cacheUsageObservations,
-	);
-	return {
-		arm: row.arm,
-		model: row.model,
-		turn: row.turn,
-		gapBand: row.gapBand,
-		contextBand: row.contextBand,
-		requests: row.requests,
-		joinedResponses: row.joinedResponses,
-		unjoinedRequests: row.unjoinedRequests,
-		replayAppliedRequests: row.replayAppliedRequests,
-		wouldReplayRequests: row.wouldReplayRequests,
-		cache: {
-			...row.cache,
-			weightedCachedReadPct: cacheSummary.weightedCacheReadPercent,
-			medianCachedReadPct: cacheSummary.medianCacheReadPercent,
-			p25CachedReadPct: cacheSummary.p25CacheReadPercent,
-			p75CachedReadPct: cacheSummary.p75CacheReadPercent,
-			positiveHitRatePct: cacheSummary.positiveHitRatePercent,
-			zeroHitRatePct: cacheSummary.zeroHitRatePercent,
-		},
-		latency: {
-			availableResponses: row.latency.availableResponses,
-			unavailableResponses: row.latency.unavailableResponses,
-			p50Ms: percentile(row.latencySamples, 0.5),
-			p95Ms: percentile(row.latencySamples, 0.95),
-		},
-		outcomes: {
-			...row.outcomes,
-			terminalActions: Object.fromEntries(
-				Object.entries(row.outcomes.terminalActions).sort(([a], [b]) =>
-					a.localeCompare(b),
-				),
-			),
-		},
-		tokenHmac: row.tokenHmac,
-		requestActions: Object.fromEntries(
-			Object.entries(row.requestActions).sort(([a], [b]) => a.localeCompare(b)),
-		),
-		promptKeyConcentration: {
-			distinctKeys: row.keyTimestamps.size,
-			maxRequestsPerKeyMinute: maxOfCounts(concentrations),
-			keysOver15RequestsPerMinute: concentrations.filter((count) => count > 15)
-				.length,
-		},
-	};
-}
-
-function analyzeTurnStateCacheExperiments(
+function promptKeyConcentration(
 	samples: readonly CacheExperimentLogicalSample[],
-): TurnStateCacheExperimentReport {
-	const annotated = annotateTurnStateSamples(samples);
-	const assignmentCounts: Record<TurnStateExperimentArm, number> = {
-		observe: 0,
-		control: 0,
-		treatment: 0,
-		ineligible: 0,
-		unassigned: 0,
-	};
-	const rows = new Map<string, TurnStateExperimentRowAccumulator>();
-	// Row-level concentration answers "was this cohort hot"; the guard asks
-	// "was this key hot", and one key legitimately spans several arm/model/turn/
-	// gap/context rows. Accumulate the same attempt timestamps once more here so
-	// the 15 requests/minute/key ceiling is evaluated on the whole key.
-	const reportKeyTimestamps = new Map<string, number[]>();
-	for (const sample of annotated) {
-		assignmentCounts[sample.arm]++;
-		const rowKey = [
-			sample.arm,
-			sample.model,
-			sample.turn,
-			sample.gapBand,
-			sample.contextBand,
-		].join("\0");
-		let row = rows.get(rowKey);
-		if (!row) {
-			row = turnStateRowAccumulator(sample);
-			rows.set(rowKey, row);
-		}
-		row.requests++;
-		if (sample.provenance.codex_turn_state_replay_applied === true)
-			row.replayAppliedRequests++;
-		if (sample.requestAction === "would_replay") row.wouldReplayRequests++;
-		increment(row.requestActions, sample.requestAction);
-		row.outcomes.observedExtraAttempts += Math.max(
-			0,
-			sample.attempts.length - 1,
-		);
-		row.outcomes.observedFallbackAttempts += sample.attempts.filter((attempt) =>
-			FALLBACK_CAUSES.has(attempt.attempt_cause ?? ""),
-		).length;
-		if (FALLBACK_CAUSES.has(sample.request.attempt_cause ?? ""))
-			row.outcomes.finalAttemptFallbacks++;
+): CodexCacheExperimentReport["promptKeyConcentration"] {
+	const timestampsByKey = new Map<string, number[]>();
+	for (const sample of samples) {
 		for (const attempt of sample.attempts) {
 			const key = attempt.prompt_cache_key_id;
-			const attemptTimestamp = traceTimestamp(attempt);
-			if (
-				typeof key !== "string" ||
-				key.length === 0 ||
-				attemptTimestamp === null
-			)
+			const timestamp = traceTimestamp(attempt);
+			if (typeof key !== "string" || key.length === 0 || timestamp === null)
 				continue;
-			const timestamps = row.keyTimestamps.get(key) ?? [];
-			timestamps.push(attemptTimestamp);
-			row.keyTimestamps.set(key, timestamps);
-			const reportTimestamps = reportKeyTimestamps.get(key) ?? [];
-			reportTimestamps.push(attemptTimestamp);
-			reportKeyTimestamps.set(key, reportTimestamps);
+			const timestamps = timestampsByKey.get(key) ?? [];
+			timestamps.push(timestamp);
+			timestampsByKey.set(key, timestamps);
 		}
-		const response = sample.response;
-		if (!response) {
-			row.unjoinedRequests++;
-			continue;
-		}
-		row.joinedResponses++;
-		if (response.stop_reason === "error") row.outcomes.observedErrorResponses++;
-		if (
-			Number(response.error_status) === 400 ||
-			response.error_type === "http_400"
-		)
-			row.outcomes.observed400Responses++;
-		increment(
-			row.outcomes.terminalActions,
-			turnStateAction(
-				response.codex_turn_state_terminal_action,
-				TURN_STATE_TERMINAL_ACTIONS,
-			),
-		);
-		if (
-			response.cache_measurement_available !== false &&
-			safeTokenCount(response.input_tokens) &&
-			safeTokenCount(response.cache_read_input_tokens) &&
-			response.cache_read_input_tokens <= response.input_tokens
-		) {
-			const nextInput = safeTokenSum(row.inputTokens, response.input_tokens);
-			const nextRead = safeTokenSum(
-				row.cachedReadTokens,
-				response.cache_read_input_tokens,
-			);
-			if (nextInput === null || nextRead === null) {
-				row.cache.unavailableResponses++;
-			} else {
-				row.cache.measuredResponses++;
-				row.inputTokens = nextInput;
-				row.cachedReadTokens = nextRead;
-				row.cache.inputTokens = nextInput;
-				row.cache.cachedReadTokens = nextRead;
-				row.cacheUsageObservations.push({
-					shape: "inclusive",
-					totalInputTokens: response.input_tokens,
-					cacheReadInputTokens: response.cache_read_input_tokens,
-				});
-				if (response.cache_read_input_tokens > 0)
-					row.cache.positiveHitResponses++;
-				else row.cache.zeroHitResponses++;
-			}
-		} else row.cache.unavailableResponses++;
-		if (hasMeasuredCacheWrite(response)) {
-			const nextWrite = safeTokenSum(
-				row.cache.cacheWriteTokens,
-				response.cache_creation_input_tokens ?? 0,
-			);
-			if (nextWrite === null) row.cache.cacheWriteUnavailableResponses++;
-			else {
-				row.cache.cacheWriteMeasuredResponses++;
-				row.cache.cacheWriteTokens = nextWrite;
-			}
-		} else row.cache.cacheWriteUnavailableResponses++;
-		const requestTs = sample.request.ts
-			? Date.parse(sample.request.ts)
-			: Number.NaN;
-		const responseTs = response.ts ? Date.parse(response.ts) : Number.NaN;
-		const elapsed = responseTs - requestTs;
-		if (
-			Number.isFinite(requestTs) &&
-			Number.isFinite(responseTs) &&
-			responseTs >= requestTs &&
-			Number.isSafeInteger(elapsed)
-		) {
-			row.latency.availableResponses++;
-			row.latencySamples.push(elapsed);
-		} else row.latency.unavailableResponses++;
-		const requestHmac = sample.provenance.codex_turn_state_request_hmac;
-		const responseHmac = response.codex_turn_state_hmac;
-		if (
-			typeof requestHmac === "string" &&
-			requestHmac.length > 0 &&
-			typeof responseHmac === "string" &&
-			responseHmac.length > 0
-		) {
-			if (requestHmac === responseHmac) row.tokenHmac.matched++;
-			else row.tokenHmac.mismatched++;
-		} else row.tokenHmac.unavailable++;
 	}
-	const finishedRows = [...rows.values()].map(finishTurnStateRow);
-	const armOrder: TurnStateExperimentArm[] = [
-		"observe",
-		"control",
-		"treatment",
-		"ineligible",
-		"unassigned",
-	];
-	finishedRows.sort(
-		(a, b) =>
-			armOrder.indexOf(a.arm) - armOrder.indexOf(b.arm) ||
-			a.model.localeCompare(b.model) ||
-			TURN_ORDER.indexOf(a.turn) - TURN_ORDER.indexOf(b.turn) ||
-			GAP_ORDER.indexOf(a.gapBand) - GAP_ORDER.indexOf(b.gapBand) ||
-			a.contextBand.localeCompare(b.contextBand),
-	);
-	const reportConcentrations = [...reportKeyTimestamps.values()].map(
-		maximumRequestsPerMinute,
-	);
+	const counts = [...timestampsByKey.values()].map(maximumRequestsPerMinute);
 	return {
-		assignmentCounts,
-		promptKeyConcentration: {
-			distinctKeys: reportKeyTimestamps.size,
-			maxRequestsPerKeyMinute: maxOfCounts(reportConcentrations),
-			keysOver15RequestsPerMinute: reportConcentrations.filter(
-				(concentration) => concentration > 15,
-			).length,
-		},
-		rows: finishedRows,
+		distinctKeys: timestampsByKey.size,
+		maxRequestsPerKeyMinute: maxOfCounts(counts),
+		keysOver15RequestsPerMinute: counts.filter((count) => count > 15).length,
 	};
 }
 
@@ -1980,7 +1487,7 @@ export function analyzeCodexCacheExperiments(
 	const records = withoutAbortedAttempts(allRecords);
 	const samples = cacheExperimentLogicalSamples(records);
 	return {
-		schemaVersion: 6,
+		schemaVersion: 7,
 		attribution: {
 			unit: "final_observed_codex_attempt",
 			responseScope: "codex_trace_only_no_cross_provider_terminal_visibility",
@@ -1991,7 +1498,7 @@ export function analyzeCodexCacheExperiments(
 			pacingWaitReason: "legacy_or_invalid_receipt_is_unknown",
 		},
 		pacing: cacheExperimentDimension(samples),
-		turnState: analyzeTurnStateCacheExperiments(samples),
+		promptKeyConcentration: promptKeyConcentration(samples),
 	};
 }
 
@@ -2543,10 +2050,8 @@ export function formatCacheExperimentReport(
 	for (const row of report.pacing.rows) lines.push(`  ${JSON.stringify(row)}`);
 	lines.push(
 		"",
-		`HTTP TURN STATE CANARY: assignments=${JSON.stringify(report.turnState.assignmentCounts)} prompt_key_concentration=${JSON.stringify(report.turnState.promptKeyConcentration)}`,
+		`PROMPT KEY CONCENTRATION: ${JSON.stringify(report.promptKeyConcentration)}`,
 	);
-	for (const row of report.turnState.rows)
-		lines.push(`  ${JSON.stringify(row)}`);
 	return lines.join("\n");
 }
 

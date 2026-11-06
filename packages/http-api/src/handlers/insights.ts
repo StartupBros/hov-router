@@ -9,7 +9,6 @@ import {
 	CODEX_CACHE_KEY_MODE_ENV,
 	CODEX_PROMPT_CACHE_KEY_ENV,
 	classifyCodexModelFamily,
-	readCodexTurnStateConfig,
 } from "@better-ccflare/providers";
 import { readCachePacingMs } from "@better-ccflare/proxy";
 import {
@@ -310,7 +309,6 @@ function toCacheParityAggregateRow(
 }
 
 function readCacheParityPolicy(context: APIContext): CacheParityPolicy {
-	const turnState = readCodexTurnStateConfig();
 	return {
 		promptCacheKeyEnabled: process.env[CODEX_PROMPT_CACHE_KEY_ENV] !== "0",
 		cacheKeyMode:
@@ -330,8 +328,9 @@ function readCacheParityPolicy(context: APIContext): CacheParityPolicy {
 		// GPT-5.6 explicit breakpoints were removed; always off.
 		explicitBreakpointPercent: 0,
 		explicitBreakpointSuppressedScopes: 0,
-		turnStatePercent: turnState.percent,
-		turnStateObserveOnly: turnState.observeOnly,
+		// Removed lever; keep these compatibility fields for one release.
+		turnStatePercent: 0,
+		turnStateObserveOnly: false,
 		// The Codex WebSocket transport was removed; the lever stays in the
 		// declared levers for one release and always reads as off.
 		webSocketPercent: 0,

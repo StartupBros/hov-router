@@ -333,19 +333,17 @@ export interface Provider {
 	 * Must be idempotent and safe for an unknown attempt ID. Providers that hold
 	 * no per-attempt state omit it.
 	 */
-	abortTurnStateAttempt?(attemptId: string | null | undefined): void;
+	abortAttempt?(attemptId: string | null | undefined): void;
 
 	/**
 	 * Optional: release provider-local per-attempt state for an attempt that DID
 	 * reach the wire but produced no response — a socket, TLS, timeout, or abort
 	 * failure after dispatch. Such an attempt never reaches `processResponse`, so
-	 * nothing else finalizes it. Distinct from `abortTurnStateAttempt` because the
+	 * nothing else finalizes it. Distinct from `abortAttempt` because the
 	 * request really was sent: implementations must not annul its request record.
 	 * Must be idempotent and safe for an unknown attempt ID.
 	 */
-	releaseDispatchedTurnStateAttempt?(
-		attemptId: string | null | undefined,
-	): void;
+	releaseDispatchedAttempt?(attemptId: string | null | undefined): void;
 
 	/**
 	 * Optional: Behavior 2 (Codex rejected-id repair). Called immediately

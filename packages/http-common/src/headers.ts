@@ -102,13 +102,8 @@ export function sanitizeProxyHeaders(original: Headers): Headers {
 	sanitized.delete(GUARD_CORRELATION_SECRET_HEADER);
 	sanitized.delete(CODEX_LOGICAL_MODEL_FAMILY_HEADER);
 
-	// Codex's per-turn sticky-routing token is provider-private process state and
-	// must never reach a client. The Codex provider strips it from every response
-	// it transforms, but terminal 400/404 and retained responses are returned raw
-	// through this helper, so the guard belongs here as well.
-	// keep in sync with CODEX_TURN_STATE_HEADER in @better-ccflare/providers
-	// (http-common is the lower layer; importing the providers constant here
-	// would invert the package dependency)
+	// The Codex CLI turn-state header must never reach clients, including raw
+	// terminal errors and retained responses that bypass provider conversion.
 	sanitized.delete("x-codex-turn-state");
 
 	return sanitized;

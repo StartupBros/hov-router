@@ -1,12 +1,3 @@
-// U5c Behavior 1 -- Messages-lane continuation
-// (CCFLARE_CODEX_MESSAGES_CONTINUATION). Reuses the exact same KTD6/KTD7/
-// KTD13 owner-selection, tail-validation, and retention machinery
-// provider.cache-replay.test.ts already proves for the native-Responses
-// lane; these tests exercise ONLY the Behavior 1 gate (flag, model filter)
-// and the cross-lane isolation guarantee (protocol discriminator), plus
-// the "no turn-state registration/capture" parity requirement. All
-// assertions read the actual wire payload (the outbound `Request`'s JSON
-// body / headers) or the response, never internal state directly.
 import { afterEach, describe, expect, it } from "bun:test";
 import { deriveConversationIdentity } from "./orchestration-election";
 import {
@@ -17,13 +8,6 @@ import {
 	CODEX_NATIVE_RESPONSES_HEADER,
 	CodexProvider,
 } from "./provider";
-import {
-	CODEX_TURN_STATE_ACCOUNT_IDS_ENV,
-	CODEX_TURN_STATE_COHORT_IDS_ENV,
-	CODEX_TURN_STATE_MODELS_ENV,
-	CODEX_TURN_STATE_PERCENT_ENV,
-	deriveCodexTurnStateCohortId,
-} from "./turn-state";
 
 const sseBody = (lines: string[]) => `${lines.join("\n")}\n`;
 const eventLine = (name: string, data: unknown) => [
@@ -50,10 +34,6 @@ const callerDigest =
 afterEach(() => {
 	delete process.env[CODEX_MESSAGES_CONTINUATION_ENV];
 	delete process.env[CODEX_MESSAGES_CONTINUATION_MODELS_ENV];
-	delete process.env[CODEX_TURN_STATE_PERCENT_ENV];
-	delete process.env[CODEX_TURN_STATE_ACCOUNT_IDS_ENV];
-	delete process.env[CODEX_TURN_STATE_MODELS_ENV];
-	delete process.env[CODEX_TURN_STATE_COHORT_IDS_ENV];
 });
 
 /**
@@ -214,17 +194,6 @@ const conversationIdentity = deriveConversationIdentity(
 );
 if (!conversationIdentity) {
 	throw new Error("messages-continuation fixture has no conversation identity");
-}
-
-function enableTurnStateTreatment(): void {
-	process.env[CODEX_TURN_STATE_PERCENT_ENV] = "100";
-	process.env[CODEX_TURN_STATE_ACCOUNT_IDS_ENV] = account.id;
-	process.env[CODEX_TURN_STATE_MODELS_ENV] = physicalModel;
-	process.env[CODEX_TURN_STATE_COHORT_IDS_ENV] = deriveCodexTurnStateCohortId({
-		accountId: account.id,
-		model: physicalModel,
-		conversationIdentity,
-	});
 }
 
 describe("CodexProvider Behavior 1 -- Messages-lane continuation (CCFLARE_CODEX_MESSAGES_CONTINUATION)", () => {
@@ -475,19 +444,13 @@ describe("CodexProvider Behavior 1 -- Messages-lane continuation (CCFLARE_CODEX_
 		expect(messagesContinuedBody.previous_response_id).toBeUndefined();
 	});
 
-	it("a Messages-lane response-id-owned attempt performs no turn-state registration or capture (scenario 5)", async () => {
+	it("a Messages-lane response-id-owned attempt completes cleanly (scenario 5)", async () => {
 		process.env[CODEX_MESSAGES_CONTINUATION_ENV] = "1";
-		// Turn-state treatment is deliberately enabled at 100% for this exact
-		// account/model/cohort -- if response-id ownership did not actually
-		// exclude turn-state, turn-state WOULD register/capture for this
-		// attempt. Its absence below is therefore load-bearing proof, not
-		// just a default.
-		enableTurnStateTreatment();
 		const provider = new CodexProvider();
 		const request = await provider.transformRequestBody(
 			messagesRequestFor({
-				requestId: "rid-no-turn-state",
-				attemptId: "aid-no-turn-state",
+				requestId: "rid-response-id-only",
+				attemptId: "aid-response-id-only",
 				messages: [{ role: "user", content: firstUserText }],
 				stream: true,
 			}),
@@ -501,16 +464,14 @@ describe("CodexProvider Behavior 1 -- Messages-lane continuation (CCFLARE_CODEX_
 
 		const response = await provider.processResponse(
 			completedResponse({
-				requestId: "rid-no-turn-state",
-				attemptId: "aid-no-turn-state",
-				responseId: "resp-no-turn-state-1",
+				requestId: "rid-response-id-only",
+				attemptId: "aid-response-id-only",
+				responseId: "resp-response-id-only-1",
 				outputText: "hello",
 				stream: true,
 			}),
 			null,
 		);
-		// Completes cleanly -- no turn-state capture stalls or errors the
-		// response.
 		const text = await response.text();
 		expect(text).toContain("message_stop");
 	});

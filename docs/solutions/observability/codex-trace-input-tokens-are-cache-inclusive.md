@@ -41,10 +41,11 @@ turn-state shipped, and an unscoped aggregate silently mixes pre-deploy records
 in: one unscoped funnel read "0.3% of traffic is treated" when the
 correctly-scoped figure for that day was 50.2%.
 
-Turn-state fields in the JSONL are snake_case and prefixed `codex_turn_state_*`
-— not the camelCase names in `trace.ts`'s TypeScript input interface. Grepping
-the TypeScript names returns zero matches and reads as "telemetry is broken"
-when it is flowing fine.
+The historical `codex_turn_state_*` fields were removed at trace schema 24,
+and the analyzer's turn-state report was removed at report schemaVersion 7.
+Older traces still carry those keys and still parse; unknown keys are ignored.
+The report-wide pressure guard is now the top-level `promptKeyConcentration`,
+which counts every logical sample's attempts, excluding aborted attempts.
 
 A reference implementation of the corrected analysis (attempt-aware joins,
 read-only SQLite, both formulas side by side) lives on the

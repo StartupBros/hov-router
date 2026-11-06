@@ -31,14 +31,6 @@ import type {
 	OrchestrationAdmission,
 	OrchestrationAdmissionBasis,
 } from "./orchestration-election";
-import {
-	CODEX_TURN_STATE_ARMS,
-	CODEX_TURN_STATE_REQUEST_ACTIONS,
-	CODEX_TURN_STATE_TERMINAL_ACTIONS,
-	type CodexTurnStateArm,
-	type CodexTurnStateRequestAction,
-	type CodexTurnStateTerminalAction,
-} from "./turn-state";
 
 export const CODEX_TRACE_DIR_ENV = "CCFLARE_CODEX_TRACE_DIR";
 export const CODEX_TRACE_FULL_ENV = "CCFLARE_CODEX_TRACE_FULL";
@@ -57,22 +49,9 @@ export const CODEX_FANOUT_WARN_ENV = "CCFLARE_CODEX_FANOUT_WARN";
 // Schema 23 drops the retired canary fields (cache_key_assignment,
 // cache_key_cohort_id, cache_key_assignment_source, explicit_breakpoint_*,
 // pacing_canary, pacing_action); no remaining field changed meaning.
-const TRACE_SCHEMA_VERSION = 23;
+// Schema 24 removes the HTTP replay fields; older traces remain readable.
+const TRACE_SCHEMA_VERSION = 24;
 const DEFAULT_FANOUT_WARN = 8;
-const TURN_STATE_COHORT_PATTERN = /^[0-9a-f]{16}$/;
-// Derived from the canonical vocabularies so a new category cannot be emitted
-// without also being serializable here. See turn-state.ts for why.
-/** @internal Exported only so the vocabulary invariant can be asserted. */
-export const TURN_STATE_ARMS = new Set<CodexTurnStateArm>(
-	CODEX_TURN_STATE_ARMS,
-);
-/** @internal Exported only so the vocabulary invariant can be asserted. */
-export const TURN_STATE_REQUEST_ACTIONS = new Set<CodexTurnStateRequestAction>(
-	CODEX_TURN_STATE_REQUEST_ACTIONS,
-);
-/** @internal Exported only so the vocabulary invariant can be asserted. */
-export const TURN_STATE_TERMINAL_ACTIONS =
-	new Set<CodexTurnStateTerminalAction>(CODEX_TURN_STATE_TERMINAL_ACTIONS);
 const MAX_INPUT_ITEM_FINGERPRINTS = 64;
 /**
  * Tool names that spawn subagents in Claude Code ("Task" historically,
@@ -301,12 +280,6 @@ interface TraceInputs {
 	pacingWaitMs?: string | number | null;
 	/** Event that released a follower; null for leaders. */
 	pacingReleaseReason?: string | null;
-	turnStateArm?: CodexTurnStateArm;
-	turnStateCohortId?: string | null;
-	turnStateRequestAction?: CodexTurnStateRequestAction;
-	turnStateReplayApplied?: boolean;
-	/** Never written raw; converted to a keyed, domain-separated fingerprint. */
-	turnState?: string | null;
 	instructions?: string;
 	isDescendant?: boolean;
 	/**
@@ -399,13 +372,8 @@ interface ResponseTraceInputs {
 	modelOut?: string;
 	/** Raw model context window, for utilization telemetry. */
 	modelContextWindow?: number;
-	/** Whether the upstream response carried x-codex-turn-state. */
-	turnStateHeaderPresent?: boolean;
-	/** Never written raw; converted to a keyed, domain-separated fingerprint. */
-	turnState?: string | null;
 	/** Never written raw; converted to a keyed, domain-separated fingerprint. */
 	responseId?: string | null;
-	turnStateTerminalAction?: CodexTurnStateTerminalAction;
 	summary: CodexResponseSummary;
 }
 
@@ -513,24 +481,6 @@ function normalizePacingReleaseReason(
  * Append one request JSONL trace record. No-op (and never throws) when disabled.
  */
 export function writeCodexTrace(inputs: TraceInputs): void {
-	const turnStateArm = TURN_STATE_ARMS.has(inputs.turnStateArm ?? "ineligible")
-		? (inputs.turnStateArm ?? "ineligible")
-		: "ineligible";
-	const turnStateRequestAction = TURN_STATE_REQUEST_ACTIONS.has(
-		inputs.turnStateRequestAction ?? "missing_binding",
-	)
-		? (inputs.turnStateRequestAction ?? "missing_binding")
-		: "missing_binding";
-	const turnStateCohortId =
-		typeof inputs.turnStateCohortId === "string" &&
-		TURN_STATE_COHORT_PATTERN.test(inputs.turnStateCohortId)
-			? inputs.turnStateCohortId
-			: null;
-	const turnStateReplayApplied =
-		turnStateArm === "treatment" &&
-		(turnStateRequestAction === "replay" ||
-			turnStateRequestAction === "retry_replay") &&
-		inputs.turnStateReplayApplied === true;
 	const instructionsMetrics = inputs.instructions
 		? serializedMetrics(inputs.instructions)
 		: null;
@@ -570,13 +520,6 @@ export function writeCodexTrace(inputs: TraceInputs): void {
 		pacing_release_reason: normalizePacingReleaseReason(
 			inputs.pacingReleaseReason,
 		),
-		codex_turn_state_arm: turnStateArm,
-		codex_turn_state_cohort_id: turnStateCohortId,
-		codex_turn_state_request_action: turnStateRequestAction,
-		codex_turn_state_replay_applied: turnStateReplayApplied,
-		codex_turn_state_request_hmac: turnStateReplayApplied
-			? privacyHmac("turn-state", inputs.turnState)
-			: null,
 		is_descendant: inputs.isDescendant ?? false,
 		orchestration_admission:
 			inputs.orchestrationAdmission ?? "no_orchestration_tools",
@@ -619,11 +562,6 @@ export function writeCodexResponseTrace(inputs: ResponseTraceInputs): void {
 			`response ${inputs.requestId ?? "unknown"} (${inputs.modelOut ?? "unknown model"}) spawned ${inputs.summary.new_subagent_spawn_count} subagents in one turn (warn threshold ${warnThreshold}). Possible recursive fan-out.`,
 		);
 	}
-	const turnStateTerminalAction = TURN_STATE_TERMINAL_ACTIONS.has(
-		inputs.turnStateTerminalAction ?? "ineligible",
-	)
-		? (inputs.turnStateTerminalAction ?? "ineligible")
-		: "ineligible";
 	appendTraceRecord({
 		trace_schema_version: TRACE_SCHEMA_VERSION,
 		phase: "response",
@@ -631,10 +569,6 @@ export function writeCodexResponseTrace(inputs: ResponseTraceInputs): void {
 		request_id: inputs.requestId ?? null,
 		attempt_id: inputs.attemptId ?? null,
 		model_out: inputs.modelOut ?? null,
-		codex_turn_state_present:
-			inputs.turnStateHeaderPresent ?? Boolean(inputs.turnState),
-		codex_turn_state_hmac: privacyHmac("turn-state", inputs.turnState),
-		codex_turn_state_terminal_action: turnStateTerminalAction,
 		response_id_present: Boolean(inputs.responseId),
 		response_id_hmac: privacyHmac("response-id", inputs.responseId),
 		context_utilization_pct:
@@ -684,7 +618,7 @@ export function writeCodexAbortedAttemptTrace(inputs: {
 }
 
 function privacyHmac(
-	domain: "turn-state" | "response-id",
+	domain: "response-id",
 	value: string | null | undefined,
 ): string | null {
 	const key = process.env[CODEX_TRACE_HMAC_KEY_ENV];

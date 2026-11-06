@@ -494,10 +494,8 @@ export async function handleResponsesRequest(
 	if (body.parallel_tool_calls !== undefined)
 		codexPassthrough.parallel_tool_calls = body.parallel_tool_calls;
 	if (body.store !== undefined) codexPassthrough.store = body.store;
-	// Opt-in only: this header selects the response-id continuation strategy
-	// (KTD6/KTD7/KTD13) for this request's lane. Any other value, or absence
-	// of the header, leaves `continuation_strategy` unset and the Codex
-	// provider falls back to its existing turn-state continuation.
+	// Explicit opt-in selects response-id continuation for this lane. Other
+	// values leave the strategy unset and preserve full-history requests.
 	if (
 		req.headers.get(CODEX_CONTINUATION_HEADER) ===
 		CODEX_CONTINUATION_STRATEGY_PREVIOUS_RESPONSE_ID

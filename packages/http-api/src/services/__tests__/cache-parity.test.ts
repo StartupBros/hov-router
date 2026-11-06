@@ -156,16 +156,17 @@ describe("buildCacheParityResponse", () => {
 		);
 	});
 
-	test("carries a drift report, and a live turn-state percent reports as acknowledged", () => {
+	test("carries a drift report with no deviation for the removed turnStatePercent constant", () => {
 		const data = response([row()], [row()], {
 			...POLICY,
-			turnStatePercent: 50,
+			turnStatePercent: 0,
+			turnStateObserveOnly: false,
 		});
-		const turnStateDrift = data.driftReport.deviations.find(
-			(deviation) => deviation.lever === "turnStatePercent",
-		);
-		expect(turnStateDrift?.acknowledged).toBe(true);
-		expect(turnStateDrift?.acknowledgement?.issue).toBe(199);
+		expect(
+			data.driftReport.deviations.find(
+				(deviation) => deviation.lever === "turnStatePercent",
+			),
+		).toBeUndefined();
 		expect(data.driftReport.floorHeld).toBe(true);
 	});
 });

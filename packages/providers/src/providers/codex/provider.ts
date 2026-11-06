@@ -124,16 +124,6 @@ import {
 	writeCodexResponseTrace,
 	writeCodexTrace,
 } from "./trace";
-import {
-	type CodexTurnStateAttemptCause,
-	CodexTurnStateCoordinator,
-	type CodexTurnStateLineage,
-	type CodexTurnStateTerminalAction,
-	codexInputEndsWithToolOutput,
-	extractCodexTurnStateLineage,
-	fingerprintCodexTurnStateCallId,
-	normalizeCodexTurnStateFingerprints,
-} from "./turn-state";
 import { normalizeCodexResponseInputUsage } from "./usage";
 
 const log = new Logger("CodexProvider");
@@ -175,7 +165,7 @@ function sanitizeResponseHeaders(headers: Headers): Headers {
 	for (const h of INTERNAL_HEADERS) {
 		sanitized.delete(h);
 	}
-	sanitized.delete(CODEX_TURN_STATE_HEADER);
+	sanitized.delete(CODEX_CLIENT_TURN_STATE_HEADER);
 	return sanitized;
 }
 
@@ -201,7 +191,8 @@ const CODEX_SYNTHETIC_COUNT_TOKENS_URL =
 const CODEX_SYNTHETIC_RESPONSE_URL =
 	"https://better-ccflare.local/codex/response";
 export const CODEX_PROMPT_CACHE_KEY_ENV = "CCFLARE_CODEX_PROMPT_CACHE_KEY";
-export const CODEX_TURN_STATE_HEADER = "x-codex-turn-state";
+// The Codex CLI's turn-state header must never be forwarded to the subscription backend.
+const CODEX_CLIENT_TURN_STATE_HEADER = "x-codex-turn-state";
 /** "conversation" (default) or "session"; see derivePromptCacheKey. */
 export const CODEX_CACHE_KEY_MODE_ENV = "CCFLARE_CODEX_CACHE_KEY_MODE";
 /**
@@ -713,7 +704,6 @@ interface AnthropicRequest {
 interface FunctionCallBuffer {
 	contentBlockIndex: number;
 	name: string;
-	callIdFingerprint: string | null;
 	arguments: string[];
 	/** Running byte total of buffered argument deltas, capped by TOOL_ARGS_PER_CALL_BYTE_CAP. */
 	bytes: number;
@@ -904,8 +894,6 @@ interface StreamState {
 	};
 	// Newly emitted tool calls from this response only (not historical replay).
 	traceNewToolCalls: ToolCallSummary[];
-	turnStateOutputCallFingerprints: string[];
-	turnStateOutputCallsInvalid: boolean;
 	traceReasoningOutputItemCount: number;
 	traceReasoningEncryptedPresent: boolean;
 	traceReasoningUnrepresentableIdSkipCount: number;
@@ -915,13 +903,6 @@ interface StreamState {
 	pendingReasoningBlocks: string[];
 	traceRequestId: string;
 	traceAttemptId?: string;
-	traceTurnStateHeaderPresent: boolean;
-	traceTurnState: string | null;
-	turnStateTerminalAction: CodexTurnStateTerminalAction | null;
-	finalizeTurnState: (
-		stopReason: "error" | "end_turn" | "tool_use" | "max_tokens" | "refusal",
-		outputLineage: CodexTurnStateLineage,
-	) => CodexTurnStateTerminalAction;
 	traceResponseId: string | null;
 	/** Last canonical Anthropic ping translated from allowlisted Codex progress. */
 	lastProgressPingAt: number | null;
@@ -980,26 +961,6 @@ function writeCodexStreamTerminalTrace(
 									: error
 										? "read_error"
 										: "unknown";
-	// A buffer still open at the terminal is a call the client was handed but that
-	// never completed upstream. Its fingerprint is missing, so the lineage would
-	// be an exact-looking subset of the turn upstream actually produced, and a
-	// continuation carrying only the completed calls would replay a token minted
-	// for a different turn. Only an exactly paired added/done set may be captured.
-	if (state.functionCallBlocks.size > 0) {
-		state.turnStateOutputCallsInvalid = true;
-	}
-	const outputLineage =
-		stopReason === "tool_use" && !state.turnStateOutputCallsInvalid
-			? normalizeCodexTurnStateFingerprints(
-					state.turnStateOutputCallFingerprints,
-				)
-			: stopReason === "tool_use"
-				? ({ kind: "invalid" } as const)
-				: ({ kind: "none" } as const);
-	state.turnStateTerminalAction = state.finalizeTurnState(
-		stopReason,
-		outputLineage,
-	);
 	writeCodexResponseTrace({
 		streamDiagnostics: codexStreamDiagnostics(state),
 		requestId: state.traceRequestId,
@@ -1011,9 +972,6 @@ function writeCodexStreamTerminalTrace(
 			state.accountId,
 			state.modelContextSnapshot,
 		)?.rawContextWindow,
-		turnStateHeaderPresent: state.traceTurnStateHeaderPresent,
-		turnState: state.traceTurnState,
-		turnStateTerminalAction: state.turnStateTerminalAction ?? "unknown_attempt",
 		responseId: state.traceResponseId,
 		summary: summarizeCodexResponse(
 			state.traceNewToolCalls,
@@ -1102,34 +1060,10 @@ interface CodexTransformOptions {
 	reasoningSnapshot?: ReturnType<typeof captureCodexModelReasoningSnapshot>;
 }
 
-interface CodexProcessResponseOptions {
-	/**
-	 * Whether this response belongs to a hosted-search attempt. Hosted attempts
-	 * are never registered with the turn-state coordinator, so they must not try
-	 * to finalize one: the lookup would miss and report `unknown_attempt`, which
-	 * is reserved for an attempt that was registered and then lost.
-	 */
-	hosted?: boolean;
-}
-
-// ── Native response-id continuation (KTD6/KTD7/KTD13) ───────────────────────
-//
-// A SEPARATE mechanism from the fork's own turn-state continuation
-// (turn-state.ts), scoped to the native Responses protocol lane only (a
-// request that reached this provider through the trusted Responses adapter,
-// see `x-better-ccflare-native-responses` below). Exactly one of
-// {"response-id", "turn-state", "none"} owns a given physical attempt; see
-// `selectCodexContinuationOwner`.
-//
-// Trust boundary: the client's own opt-in header
-// (`x-better-ccflare-codex-continuation: previous_response_id`) is read only
-// by the Responses adapter itself (openai-responses-adapter/src/handler.ts)
-// and carried inside the already-trust-gated
-// `__better_ccflare_codex_passthrough` carrier. A caller-supplied
-// `previous_response_id` value is NEVER consumed -- only an internally
-// computed, digest-verified prior response id may ever populate
-// `codexBody.previous_response_id`.
-
+// Native response-id continuation (KTD6/KTD7/KTD13) uses trusted adapter opt-in
+// or the explicitly enabled Messages lane. Only an internally computed,
+// digest-verified prior response ID may populate codexBody.previous_response_id;
+// a caller-supplied previous_response_id is never consumed.
 /** External opt-in header consumed only by the Responses adapter. */
 export const CODEX_CONTINUATION_HEADER = "x-better-ccflare-codex-continuation";
 /**
@@ -1166,7 +1100,7 @@ export const CODEX_MESSAGES_CONTINUATION_ENV =
 export const CODEX_MESSAGES_CONTINUATION_MODELS_ENV =
 	"CCFLARE_CODEX_MESSAGES_CONTINUATION_MODELS";
 
-type CodexContinuationOwner = "response-id" | "turn-state" | "none";
+type CodexContinuationOwner = "response-id" | "none";
 /** Protocol lane discriminator, hashed into every response-id lane key so a
  * native-Responses checkpoint and a Messages-lane checkpoint can never be
  * reachable from one another, even for an identical account/model/caller/
@@ -1428,7 +1362,7 @@ function estimateCodexResponseIdCharge(
  * `CodexProvider.prepareCodexResponseIdRejectionRepair` returning `true`
  * before dispatching a retry -- this function alone never confirms the
  * attempt was response-id-owned, so a generic 400/404 that happens to
- * mention that field on a turn-state-owned or cold attempt is correctly
+ * mention that field on a non-response-id-owned or cold attempt is correctly
  * refused downstream instead of here.
  */
 export async function isCodexResponseIdRejectionError(
@@ -1487,7 +1421,6 @@ export class CodexProvider extends BaseProvider {
 	name = "codex";
 	private readonly streamLivenessOptions: CodexStreamLivenessOptions;
 	private readonly streamDrainDeadlineMs: number;
-	private readonly turnStateCoordinator = new CodexTurnStateCoordinator();
 
 	// ── Native response-id continuation state (KTD6/KTD7/KTD13) ──────────────
 	/** Keyed by lane digest (account+model+caller+session+config). */
@@ -1504,10 +1437,10 @@ export class CodexProvider extends BaseProvider {
 		string,
 		CodexPendingResponseIdCandidate
 	>();
-	/** Recorded once per physical attempt, before either facility has side effects. */
+	/** Recorded during transformation; preserves trace identity for aborted sends. */
 	private readonly continuationOwnerByAttempt = new Map<
 		string,
-		{ owner: CodexContinuationOwner; ts: number }
+		{ owner: CodexContinuationOwner; ts: number; requestId: string | null }
 	>();
 	/** Lane -> expiry. At most one repair per lane while suppressed. */
 	private readonly responseIdRejectedLanes = new Map<string, number>();
@@ -1540,43 +1473,17 @@ export class CodexProvider extends BaseProvider {
 			options.streamDrainDeadlineMs ?? CODEX_STREAM_DRAIN_DEADLINE_MS;
 	}
 
-	/**
-	 * Releases turn-state context for an attempt that was registered during
-	 * request transformation but will never be dispatched. Idempotent; see
-	 * `CodexTurnStateCoordinator.abortAttempt`.
-	 *
-	 * Also annuls the attempt's request trace, so analysis does not count a
-	 * candidate that never reached the wire as a physical request. That is
-	 * deliberately not conditional on turn-state eligibility: the request record
-	 * was written for this attempt whatever arm it landed in, so the correction
-	 * has to be written the same way.
-	 */
-	abortTurnStateAttempt(attemptId: string | null | undefined): void {
-		const requestId = this.turnStateCoordinator.abortAttempt(attemptId);
+	/** Annuls a never-sent attempt with a trace tombstone and releases response-id state. */
+	abortAttempt(attemptId: string | null | undefined): void {
+		const requestId = attemptId
+			? this.continuationOwnerByAttempt.get(attemptId)?.requestId
+			: null;
 		writeCodexAbortedAttemptTrace({ attemptId, requestId });
 		this.releaseCodexResponseIdAttempt(attemptId);
 	}
 
-	/**
-	 * Releases an attempt that reached the wire but never produced a response --
-	 * a socket, TLS, timeout, or abort failure after dispatch.
-	 *
-	 * Such an attempt never reaches `processResponse`, so nothing else finalizes
-	 * it. Left registered it reads as live, which keeps its logical request's
-	 * lease held and suppresses every later turn on the scope until the attempt
-	 * TTL expires. Deliberately writes no `attempt_aborted` tombstone: that record
-	 * means "never sent", and this request was sent -- annulling it would erase a
-	 * real physical attempt from requests-per-key and fallback accounting.
-	 *
-	 * The pending turn is left intact on purpose. The send's effect upstream is
-	 * unknown, and the official contract's answer to that is precisely to replay
-	 * the same token on a compatible retry, so discarding it here would forfeit
-	 * the reuse this canary exists to measure.
-	 */
-	releaseDispatchedTurnStateAttempt(
-		attemptId: string | null | undefined,
-	): void {
-		this.turnStateCoordinator.abortAttempt(attemptId);
+	/** Releases a sent attempt after transport failure. No tombstone: it reached the wire. */
+	releaseDispatchedAttempt(attemptId: string | null | undefined): void {
 		this.releaseCodexResponseIdAttempt(attemptId);
 	}
 
@@ -1748,9 +1655,7 @@ export class CodexProvider extends BaseProvider {
 	 * KTD6: selects exactly one continuation owner for this physical attempt
 	 * and, when response-id owns it, mutates the codex request in place
 	 * (setting `previous_response_id` and truncating `input` to the new tail)
-	 * and stages a pending candidate keyed by `attemptId`. Must run, and must
-	 * fully resolve ownership, before `CodexTurnStateCoordinator.beginAttempt`
-	 * is invoked for this attempt.
+	 * and stages a pending candidate keyed by `attemptId`.
 	 */
 	private selectCodexResponseIdOwner(params: {
 		nativeResponses: boolean;
@@ -1789,20 +1694,7 @@ export class CodexProvider extends BaseProvider {
 		// opt-in) or the plain Messages lane (server-verified ABSENCE of that
 		// header + the default-OFF env flag, and optional model filter).
 		const eligible = nativeResponses ? continuationOptIn : messagesLaneAdmitted;
-		if (
-			!eligible ||
-			!attemptId ||
-			hosted ||
-			// A request declaring a custom (non-function) tool takes the raw
-			// Responses passthrough branch in processResponse
-			// (buildCustomToolCallPassthroughResponse), which never runs
-			// processEvents/handleCodexEvent at all. Claiming response-id
-			// ownership here would suppress turn-state for nothing -- no
-			// checkpoint can ever be committed on that path -- and would leak
-			// the KTD13 charge staged below. Fail closed to "turn-state" (or
-			// "none") instead.
-			customToolsDeclared
-		) {
+		if (!eligible || !attemptId || hosted || customToolsDeclared) {
 			return false;
 		}
 		const protocol: CodexResponseIdProtocol = nativeResponses
@@ -1857,8 +1749,6 @@ export class CodexProvider extends BaseProvider {
 		this.responseIdLanes.set(lane, laneEntry);
 		if (matchedPrefixLength > 0 && laneState) {
 			codexBody.previous_response_id = laneState.responseId;
-			// Only response-id projection truncates input; fork turn-state
-			// never does.
 			codexBody.input = codexBody.input.slice(matchedPrefixLength);
 			laneState.lastUsedAt = Date.now();
 		}
@@ -1943,7 +1833,7 @@ export class CodexProvider extends BaseProvider {
 	 * frame loop, directly, once the rest of the chunk containing the
 	 * terminal event has been scanned for a same-chunk trailing frame (see
 	 * `state.responseIdTailTainted`) -- this is the ONLY call site when the
-	 * KTD7 move-only handoff below is not eligible (turn-state-owned
+	 * KTD7 move-only handoff below is not eligible (non-response-id-owned
 	 * attempts, an already-tainted same-chunk tail, or no reader/pending
 	 * candidate to hand off); and (2) `runCodexResponseIdTailValidator`,
 	 * asynchronously, once that dedicated validator has independently
@@ -2279,20 +2169,12 @@ export class CodexProvider extends BaseProvider {
 					sanitizeClientFunctionArguments: (name, argumentsJson) =>
 						this.sanitizeToolUsePartialJson(name, argumentsJson),
 					fallback: () =>
-						// Hosted search never registers a turn-state attempt (it has no
-						// reachable turn-state terminal), so finalizing here would look
-						// up an attempt the coordinator was never told about and report
-						// `unknown_attempt` -- a counter that otherwise means "we lost
-						// an attempt we should still have". Say `ineligible` instead,
-						// which is what this attempt actually was. Thread the identity
-						// captured (at admission, when available) into telemetry so a
-						// later catalog publication cannot change this attempt's
-						// reported capacity.
+						// Preserve the admission-time capacity snapshot in fallback telemetry.
 						this.processResponse(
 							response,
 							context.account,
 							undefined,
-							{ hosted: true },
+							undefined,
 							identity.modelContextSnapshot,
 						),
 				});
@@ -2599,7 +2481,7 @@ export class CodexProvider extends BaseProvider {
 		newHeaders.delete("anthropic-beta");
 		newHeaders.delete("x-api-key");
 		newHeaders.delete("host");
-		newHeaders.delete(CODEX_TURN_STATE_HEADER);
+		newHeaders.delete(CODEX_CLIENT_TURN_STATE_HEADER);
 
 		// Remove internal proxy headers.
 		for (const key of [...newHeaders.keys()]) {
@@ -2740,11 +2622,11 @@ export class CodexProvider extends BaseProvider {
 			: null;
 		if (
 			request.headers.has(CODEX_LOGICAL_MODEL_FAMILY_HEADER) ||
-			request.headers.has(CODEX_TURN_STATE_HEADER)
+			request.headers.has(CODEX_CLIENT_TURN_STATE_HEADER)
 		) {
 			const sanitizedHeaders = new Headers(request.headers);
 			sanitizedHeaders.delete(CODEX_LOGICAL_MODEL_FAMILY_HEADER);
-			sanitizedHeaders.delete(CODEX_TURN_STATE_HEADER);
+			sanitizedHeaders.delete(CODEX_CLIENT_TURN_STATE_HEADER);
 			request = new Request(request, { headers: sanitizedHeaders });
 		}
 		// /v1/models is a GET passthrough to the subscription catalog endpoint.
@@ -2872,17 +2754,6 @@ export class CodexProvider extends BaseProvider {
 				codexBody.input.some(
 					(item) => (item as { type?: string }).type === "additional_tools",
 				);
-			// KTD6: resolve the single continuation owner for this physical
-			// attempt before CodexTurnStateCoordinator.beginAttempt runs. Either
-			// a server-verified native-Responses request (see
-			// prepareAttemptHeaders in proxy-operations.ts) with an explicit
-			// client opt-in (`continuation_strategy: "previous_response_id"`,
-			// carried only through the already-trust-gated passthrough
-			// carrier), or -- Behavior 1 -- a plain Claude Messages request
-			// (server-verified ABSENCE of the native-Responses header) with
-			// the default-OFF CCFLARE_CODEX_MESSAGES_CONTINUATION=1 env flag
-			// (and optional model allowlist) is eligible; everything else
-			// falls through to the fork's own turn-state mechanism unchanged.
 			this.sweepCodexResponseIdState();
 			const nativeResponses =
 				request.headers.get(CODEX_NATIVE_RESPONSES_HEADER) === "1";
@@ -2915,40 +2786,11 @@ export class CodexProvider extends BaseProvider {
 			});
 			if (attemptId) {
 				this.continuationOwnerByAttempt.set(attemptId, {
-					owner: responseIdOwns ? "response-id" : "turn-state",
+					owner: responseIdOwns ? "response-id" : "none",
+					requestId,
 					ts: Date.now(),
 				});
 			}
-			// KTD6 owner exclusivity: response-id and turn-state never both own
-			// the same physical attempt. When response-id owns it, turn-state's
-			// own beginAttempt (percentage/cohort gating, token issuance, replay
-			// bookkeeping) must not run at all for this attempt -- not run and
-			// discarded, never run.
-			const turnStateDecision = responseIdOwns
-				? {
-						arm: "ineligible" as const,
-						cohortId: null,
-						action: "response_id_owned" as const,
-						replayApplied: false,
-						turnState: undefined,
-					}
-				: this.turnStateCoordinator.beginAttempt({
-						accountId: account?.id,
-						model: codexBody.model,
-						conversationIdentity: sessionIdentity,
-						requestId,
-						attemptId,
-						attemptCause: attemptCause as CodexTurnStateAttemptCause | null,
-						eligibleEndpoint: isSubscriptionEndpoint,
-						hosted: options.hosted === true,
-						lineage: extractCodexTurnStateLineage(body.messages),
-						// Reported from the converted body, not the client's messages: those
-						// are what lineage is derived from, but conversion is free to append
-						// after them (see the Skill nudge in convertToCodexFormat).
-						continuationTailIntact: codexInputEndsWithToolOutput(
-							codexBody.input,
-						),
-					});
 			// The subscription backend derives prompt-cache affinity from the
 			// `session-id` request header (see affinity-headers.ts).
 			// Applied before the trace so the record can prove what went on the wire.
@@ -3003,11 +2845,6 @@ export class CodexProvider extends BaseProvider {
 				pacingReleaseReason: request.headers.get(
 					"x-better-ccflare-pacing-release-reason",
 				),
-				turnStateArm: turnStateDecision.arm,
-				turnStateCohortId: turnStateDecision.cohortId,
-				turnStateRequestAction: turnStateDecision.action,
-				turnStateReplayApplied: turnStateDecision.replayApplied,
-				turnState: turnStateDecision.turnState,
 				isDescendant: isAttributedAgent,
 				orchestrationAdmission,
 				orchestrationBasis,
@@ -3034,10 +2871,7 @@ export class CodexProvider extends BaseProvider {
 			}
 
 			newHeaders.set("content-type", "application/json");
-			newHeaders.delete(CODEX_TURN_STATE_HEADER);
-			if (turnStateDecision.turnState) {
-				newHeaders.set(CODEX_TURN_STATE_HEADER, turnStateDecision.turnState);
-			}
+			newHeaders.delete(CODEX_CLIENT_TURN_STATE_HEADER);
 			newHeaders.set(
 				"x-better-ccflare-request-stream",
 				body.stream === true ? "true" : "false",
@@ -3090,16 +2924,14 @@ export class CodexProvider extends BaseProvider {
 	 * @param _requestHeaders - Third positional slot in the `Provider` contract.
 	 * Codex does not read it, but it is accepted so this stays assignable to the
 	 * shared signature -- the same collision that bit `transformRequestBody`.
-	 * @param drainAbortOrOptions - The shared contract supplies the exact fetch's
-	 * abort controller in this slot. Codex-owned hosted-search callers may instead
-	 * pass private turn-state options; exact response ownership wins when both an
-	 * explicit controller and a registered response controller exist.
+	 * @param explicitDrainAbort - Abort controller for this fetch. A registered
+	 * response controller takes precedence so cleanup follows exact ownership.
 	 */
 	async processResponse(
 		response: Response,
 		account: Account | null,
 		_requestHeaders?: Headers,
-		drainAbortOrOptions: AbortController | CodexProcessResponseOptions = {},
+		explicitDrainAbort?: AbortController,
 		attemptSnapshot?: CodexModelContextSnapshot,
 	): Promise<Response> {
 		const accountId = account?.id;
@@ -3109,12 +2941,6 @@ export class CodexProvider extends BaseProvider {
 				: accountId
 					? captureCodexModelContextSnapshot(accountId)
 					: null;
-		const options =
-			drainAbortOrOptions instanceof AbortController ? {} : drainAbortOrOptions;
-		const explicitDrainAbort =
-			drainAbortOrOptions instanceof AbortController
-				? drainAbortOrOptions
-				: undefined;
 		const drainAbort =
 			getResponseDrainTransport(response) ?? explicitDrainAbort;
 
@@ -3139,10 +2965,7 @@ export class CodexProvider extends BaseProvider {
 			});
 		}
 		const attemptId = response.headers.get("x-better-ccflare-attempt-id");
-		const turnStateHeaderPresent = response.headers.has(
-			CODEX_TURN_STATE_HEADER,
-		);
-		const turnState = response.headers.get(CODEX_TURN_STATE_HEADER);
+
 		const finalModel =
 			response.headers.get("x-better-ccflare-final-model") ?? undefined;
 		const headerRequestedStream = response.headers.get(
@@ -3176,7 +2999,6 @@ export class CodexProvider extends BaseProvider {
 						requestId ?? undefined,
 						attemptId ?? undefined,
 						finalModel,
-						options.hosted === true,
 						drainAbort,
 						accountId,
 						modelContextSnapshot,
@@ -3187,7 +3009,6 @@ export class CodexProvider extends BaseProvider {
 					requestId ?? undefined,
 					attemptId ?? undefined,
 					finalModel,
-					options.hosted === true,
 					drainAbort,
 					accountId,
 					modelContextSnapshot,
@@ -3260,7 +3081,6 @@ export class CodexProvider extends BaseProvider {
 					requestId ?? undefined,
 					attemptId ?? undefined,
 					finalModel,
-					options.hosted === true,
 					drainAbort,
 					accountId,
 					modelContextSnapshot,
@@ -3271,7 +3091,6 @@ export class CodexProvider extends BaseProvider {
 				requestId ?? undefined,
 				attemptId ?? undefined,
 				finalModel,
-				options.hosted === true,
 				drainAbort,
 				accountId,
 				modelContextSnapshot,
@@ -3282,21 +3101,10 @@ export class CodexProvider extends BaseProvider {
 		// error), so transformStreamingResponse's own cleanup never runs for
 		// it: release any staged response-id candidate here instead.
 		this.releaseCodexResponseIdAttempt(attemptId);
-		const turnStateTerminalAction = attemptId
-			? this.turnStateCoordinator.finalizeAttempt({
-					attemptId,
-					stopReason: "error",
-					responseTurnState: turnState,
-					outputLineage: { kind: "none" },
-				})
-			: "unknown_attempt";
 		writeCodexResponseTrace({
 			requestId: requestId ?? "unknown",
 			attemptId: attemptId ?? undefined,
 			modelOut: finalModel ?? "unknown",
-			turnStateHeaderPresent,
-			turnState,
-			turnStateTerminalAction,
 			summary: summarizeCodexResponse(
 				[],
 				{},
@@ -4461,7 +4269,6 @@ export class CodexProvider extends BaseProvider {
 			undefined,
 		finalModel = response.headers.get("x-better-ccflare-final-model") ??
 			undefined,
-		hosted = false,
 		drainAbort?: AbortController,
 		accountId?: string,
 		modelContextSnapshot: CodexModelContextSnapshot = accountId
@@ -4473,7 +4280,6 @@ export class CodexProvider extends BaseProvider {
 			requestId,
 			attemptId,
 			finalModel,
-			hosted,
 			drainAbort,
 			accountId,
 			modelContextSnapshot,
@@ -4711,7 +4517,6 @@ export class CodexProvider extends BaseProvider {
 			undefined,
 		finalModel = response.headers.get("x-better-ccflare-final-model") ??
 			"unknown",
-		hosted = false,
 		drainAbort?: AbortController,
 		accountId?: string,
 		modelContextSnapshot: CodexModelContextSnapshot = accountId
@@ -4754,32 +4559,12 @@ export class CodexProvider extends BaseProvider {
 			functionCallBytesTotal: 0,
 			sawToolUse: false,
 			traceNewToolCalls: [],
-			turnStateOutputCallFingerprints: [],
-			turnStateOutputCallsInvalid: false,
 			traceReasoningOutputItemCount: 0,
 			traceReasoningEncryptedPresent: false,
 			traceReasoningUnrepresentableIdSkipCount: 0,
 			pendingReasoningBlocks: [],
 			traceRequestId: requestId,
 			traceAttemptId: attemptId,
-			traceTurnStateHeaderPresent: response.headers.has(
-				CODEX_TURN_STATE_HEADER,
-			),
-			traceTurnState: response.headers.get(CODEX_TURN_STATE_HEADER),
-			turnStateTerminalAction: null,
-			finalizeTurnState: (stopReason, outputLineage) =>
-				hosted
-					? "ineligible"
-					: attemptId
-						? this.turnStateCoordinator.finalizeAttempt({
-								attemptId,
-								stopReason,
-								responseTurnState: response.headers.get(
-									CODEX_TURN_STATE_HEADER,
-								),
-								outputLineage,
-							})
-						: "unknown_attempt",
 			traceResponseId: null,
 			lastProgressPingAt: null,
 			terminalTraceWritten: false,
@@ -5182,11 +4967,6 @@ export class CodexProvider extends BaseProvider {
 								cancelSignal: tailAbort.signal,
 							});
 						} else {
-							// Handoff not eligible (turn-state-owned attempt,
-							// already same-chunk-tainted, no pending candidate, or
-							// no reader): fall back to the existing cleanup path
-							// unchanged. commitCodexResponseIdCheckpoint is a
-							// no-op whenever there is nothing to promote/discard.
 							this.commitCodexResponseIdCheckpoint(state);
 							streamLiveness.stop();
 							cancelUpstreamOnce("Codex terminal response received");
@@ -5592,26 +5372,10 @@ export class CodexProvider extends BaseProvider {
 						content_block: { type: "tool_use", id: callId, name, input: {} },
 					});
 					state.hasSentContentBlockStart = true;
-					if (outputIndex === undefined) {
-						// Untracked: without an index this call can never be paired with
-						// its done event, so its fingerprint would be silently missing
-						// from the lineage.
-						state.turnStateOutputCallsInvalid = true;
-					}
 					if (outputIndex !== undefined) {
-						const callIdFingerprint = fingerprintCodexTurnStateCallId(callId);
-						if (!callIdFingerprint) {
-							state.turnStateOutputCallsInvalid = true;
-						}
-						if (state.functionCallBlocks.has(outputIndex)) {
-							// A reused index overwrites the buffer still open under it, so
-							// one of the two calls can never contribute its fingerprint.
-							state.turnStateOutputCallsInvalid = true;
-						}
 						state.functionCallBlocks.set(outputIndex, {
 							contentBlockIndex: blockIdx,
 							name,
-							callIdFingerprint,
 							arguments: [],
 							bytes: 0,
 						});
@@ -5723,27 +5487,7 @@ export class CodexProvider extends BaseProvider {
 						outputIndex !== undefined
 							? state.functionCallBlocks.get(outputIndex)
 							: undefined;
-					if (!buffer) {
-						// Completed without a matching added event, so this call's
-						// fingerprint was never collected and the lineage cannot be an
-						// exact record of the turn.
-						state.turnStateOutputCallsInvalid = true;
-					}
 					if (buffer) {
-						// Pairing is by output index alone, so the completion has to be
-						// checked against the call the start announced. Upstream completing
-						// a different call at the same index would otherwise record the
-						// started id -- the one the client was handed -- and a continuation
-						// carrying it would match a lineage minted for another call set.
-						const doneCallIdFingerprint = fingerprintCodexTurnStateCallId(
-							item?.call_id,
-						);
-						if (
-							!doneCallIdFingerprint ||
-							doneCallIdFingerprint !== buffer.callIdFingerprint
-						) {
-							state.turnStateOutputCallsInvalid = true;
-						}
 						const partialJson = this.sanitizeToolUsePartialJson(
 							buffer.name,
 							buffer.arguments.join(""),
@@ -5753,13 +5497,6 @@ export class CodexProvider extends BaseProvider {
 							name: buffer.name,
 							arg_preview: partialJson.slice(0, 120),
 						});
-						if (buffer.callIdFingerprint) {
-							state.turnStateOutputCallFingerprints.push(
-								buffer.callIdFingerprint,
-							);
-						} else {
-							state.turnStateOutputCallsInvalid = true;
-						}
 						await writeSSE("content_block_delta", {
 							type: "content_block_delta",
 							index: buffer.contentBlockIndex,
@@ -6134,14 +5871,6 @@ export class CodexProvider extends BaseProvider {
 					messageDelta.context_window = state.contextWindow;
 				}
 
-				// Commit turn state only once both terminal frames are enqueued.
-				// `writeCodexStreamTerminalTrace` finalizes the coordinator entry,
-				// so running it first would capture or advance a turn whose response
-				// the client never receives: a cancel or enqueue failure between the
-				// two awaits would leave the next request replaying a token for a
-				// turn that did not complete. If either write throws, the cancel
-				// callback and the stream catch block finalize as `error` instead,
-				// which never mutates turn state.
 				await writeSSE("message_delta", messageDelta);
 				await writeSSE("message_stop", { type: "message_stop" });
 				state.hasSentTerminalEvents = true;

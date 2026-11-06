@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { CacheParityMetrics } from "@better-ccflare/types";
 import {
 	buildCacheParityDriftReport,
+	CACHE_PARITY_ACKNOWLEDGED_DEVIATIONS,
 	CACHE_PARITY_DECLARED_DEFAULTS,
 	CACHE_PARITY_DECLARED_FLOOR,
 } from "../cache-parity-expectations";
@@ -43,26 +44,21 @@ describe("buildCacheParityDriftReport", () => {
 		expect(report.declaredDefaults).toEqual(CACHE_PARITY_DECLARED_DEFAULTS);
 	});
 
-	test("an acknowledged deviation (turnStatePercent, issue 199) does not read as unacknowledged drift", () => {
+	test("removed turnStatePercent at its constant has no drift", () => {
 		const report = buildCacheParityDriftReport(
-			{ ...CACHE_PARITY_DECLARED_DEFAULTS, turnStatePercent: 50 },
+			{
+				...CACHE_PARITY_DECLARED_DEFAULTS,
+				turnStatePercent: 0,
+				turnStateObserveOnly: false,
+			},
 			metrics(),
 		);
-		const entry = report.deviations.find(
-			(deviation) => deviation.lever === "turnStatePercent",
-		);
-		expect(entry).toBeDefined();
-		expect(entry?.acknowledged).toBe(true);
-		expect(entry?.acknowledgement?.issue).toBe(199);
-		expect(entry?.declaredValue).toBe(0);
-		expect(entry?.liveValue).toBe(50);
-		// No other deviation is silently marked acknowledged.
 		expect(
-			report.deviations.every(
-				(deviation) =>
-					deviation.lever === "turnStatePercent" || !deviation.acknowledged,
+			report.deviations.find(
+				(deviation) => deviation.lever === "turnStatePercent",
 			),
-		).toBe(true);
+		).toBeUndefined();
+		expect(report.deviations).toEqual([]);
 	});
 
 	test("an undeclared deviation reports as unacknowledged", () => {
@@ -76,6 +72,27 @@ describe("buildCacheParityDriftReport", () => {
 		expect(entry).toBeDefined();
 		expect(entry?.acknowledged).toBe(false);
 		expect(entry?.acknowledgement).toBeNull();
+	});
+
+	test("a deviation listed in the acknowledgement map reports as acknowledged", () => {
+		// The map ships empty since turn-state replay (#199) was removed, so add
+		// one entry for this test and remove it again afterwards.
+		const acknowledgement = { issue: 730, note: "test-only acknowledgement" };
+		CACHE_PARITY_ACKNOWLEDGED_DEVIATIONS.webSocketPercent = acknowledgement;
+		try {
+			const report = buildCacheParityDriftReport(
+				{ ...CACHE_PARITY_DECLARED_DEFAULTS, webSocketPercent: 25 },
+				metrics(),
+			);
+			const entry = report.deviations.find(
+				(deviation) => deviation.lever === "webSocketPercent",
+			);
+			expect(entry?.acknowledged).toBe(true);
+			expect(entry?.acknowledgement).toEqual(acknowledgement);
+		} finally {
+			delete CACHE_PARITY_ACKNOWLEDGED_DEVIATIONS.webSocketPercent;
+		}
+		expect(CACHE_PARITY_ACKNOWLEDGED_DEVIATIONS).toEqual({});
 	});
 
 	test("excludes the explicitBreakpointSuppressedScopes counter from drift, even when nonzero", () => {
