@@ -22,9 +22,14 @@ import { api, type RequestPayload, type RequestSummary } from "../api";
 import { API_LIMITS } from "../constants";
 import { useAccounts, useApiKeys, useRequests } from "../hooks/queries";
 import { useRequestStream } from "../hooks/useRequestStream";
-import { attributionSourceLabel } from "../lib/attribution";
+import {
+	attributionSourceLabel,
+	describeRequestAgent,
+	groupAgentFilterOptions,
+} from "../lib/attribution";
 import { isAnthropicPeakHour, isZaiPeakHour } from "../utils/provider-utils";
 import { CopyButton } from "./CopyButton";
+import { RequestAgentBadge } from "./RequestAgentBadge";
 import { RequestCostBadge } from "./RequestCostBadge";
 import { RequestDetailsModal } from "./RequestDetailsModal";
 import { TokenUsageDisplay } from "./TokenUsageDisplay";
@@ -47,7 +52,9 @@ import { Label } from "./ui/label";
 import {
 	Select,
 	SelectContent,
+	SelectGroup,
 	SelectItem,
+	SelectLabel,
 	SelectTrigger,
 	SelectValue,
 } from "./ui/select";
@@ -152,20 +159,23 @@ export function RequestsTab() {
 		).sort((a, b) => a - b);
 	}, [data]);
 
-	// Extract unique agents for filter - memoized
-	const uniqueAgents = useMemo(() => {
-		if (!data) return [];
-		return Array.from(
-			new Set(
-				data.requests
-					.map((r) => {
-						const summary = data.summaries.get(r.id);
-						return summary?.agentUsed || r.meta.agentUsed;
-					})
-					.filter(Boolean),
-			),
-		).sort();
+	// Agent filter options, with session-id fallbacks listed apart from agents
+	const agentFilterOptions = useMemo(() => {
+		if (!data) return { agents: [], sessions: [] };
+		return groupAgentFilterOptions(
+			data.requests.map((r) => {
+				const summary = data.summaries.get(r.id);
+				return {
+					agentUsed: summary?.agentUsed || r.meta.agentUsed,
+					source:
+						summary?.agentAttributionSource || r.meta.agentAttributionSource,
+				};
+			}),
+		);
 	}, [data]);
+	const agentFilterSession = agentFilterOptions.sessions.find(
+		(s) => s.value === agentFilter,
+	);
 
 	// API key filter: union of all configured keys (from /api/api-keys) and any
 	// keys observed in the loaded request slice (covers historical keys that
@@ -428,8 +438,14 @@ export function RequestsTab() {
 							)}
 							{agentFilter !== "all" && (
 								<Badge variant="outline" className="gap-1.5 pr-1">
-									<Bot className="h-3 w-3" />
-									{agentFilter}
+									{agentFilterSession ? (
+										agentFilterSession.label
+									) : (
+										<>
+											<Bot className="h-3 w-3" />
+											{agentFilter}
+										</>
+									)}
 									<button
 										type="button"
 										onClick={() => setAgentFilter("all")}
@@ -625,11 +641,32 @@ export function RequestsTab() {
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value="all">All agents</SelectItem>
-											{uniqueAgents.map((agent) => (
-												<SelectItem key={agent} value={agent || ""}>
-													{agent}
-												</SelectItem>
-											))}
+											{agentFilterOptions.agents.length > 0 && (
+												<SelectGroup>
+													<SelectLabel>Agents</SelectLabel>
+													{agentFilterOptions.agents.map((agent) => (
+														<SelectItem key={agent} value={agent}>
+															{agent}
+														</SelectItem>
+													))}
+												</SelectGroup>
+											)}
+											{agentFilterOptions.sessions.length > 0 && (
+												<SelectGroup>
+													<SelectLabel>
+														No agent detected (by session)
+													</SelectLabel>
+													{agentFilterOptions.sessions.map((session) => (
+														<SelectItem
+															key={session.value}
+															value={session.value}
+															title={`Claude Code session ${session.value}`}
+														>
+															{session.label}
+														</SelectItem>
+													))}
+												</SelectGroup>
+											)}
 										</SelectContent>
 									</Select>
 								</div>
@@ -747,8 +784,8 @@ export function RequestsTab() {
 								(request.meta.accountId
 									? `${request.meta.accountId.slice(0, 8)}...`
 									: null);
-							const agent = summary?.agentUsed || request.meta.agentUsed;
-							const agentSrcLabel = attributionSourceLabel(
+							const agentView = describeRequestAgent(
+								summary?.agentUsed || request.meta.agentUsed,
 								summary?.agentAttributionSource ||
 									request.meta.agentAttributionSource,
 							);
@@ -878,7 +915,7 @@ export function RequestsTab() {
 									{/* Badges row: wraps freely, holds all the non-essential context */}
 									{(summary?.model ||
 										summary?.project ||
-										agent ||
+										agentView ||
 										summary?.comboName ||
 										summary?.apiKeyName ||
 										summary?.totalTokens != null ||
@@ -905,17 +942,7 @@ export function RequestsTab() {
 													)}
 												</Badge>
 											)}
-											{agent && (
-												<Badge variant="secondary" className="text-xs">
-													<Bot className="h-3 w-3 mr-1" />
-													{agent}
-													{agentSrcLabel && (
-														<span className="text-muted-foreground/70 ml-1">
-															· {agentSrcLabel}
-														</span>
-													)}
-												</Badge>
-											)}
+											<RequestAgentBadge view={agentView} className="text-xs" />
 											{summary?.comboName && (
 												<Badge
 													variant="outline"
