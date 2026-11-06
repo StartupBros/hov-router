@@ -113,37 +113,31 @@ The following environment variables can be used during development:
 **First time setup**: Make sure you've run `bun run build` at least once (see step 5 above).
 
 ```bash
-# Start the server in development mode with hot reload
+# Start the server with hot reload
 bun run dev:server
 
-# In another terminal, start the CLI
-bun run dev:cli
-
-# Or start the CLI interface
+# In another terminal, run the CLI from source
 bun run cli
-
-# Or work on the dashboard (rebuilds on changes)
-bun run dev:dashboard
 ```
 
-**Note**: If you're making changes to the dashboard, use `bun run dev:dashboard` for hot reloading. For other changes, you may need to run `bun run build:dashboard` or `bun run build:cli` to see your changes reflected.
+**Note**: The server serves the dashboard bundle that `bun run build:dashboard` writes to `packages/dashboard-web/dist/`, and the dashboard calls the API on the same origin, so there is no standalone dashboard dev server. After changing dashboard code, re-run `bun run build:dashboard` and restart the server. Run `bun run build:cli` to rebuild the compiled CLI binary.
 
 ### Running Tests
 
-**Note**: The project is currently in the process of setting up a comprehensive test suite. Test infrastructure is not yet implemented.
-
-When implemented, tests will use Bun's built-in test runner:
+Tests use Bun's built-in test runner. Most live beside the code they test, as `*.test.ts` files or in `__tests__/` directories; a few cross-package suites live under `tests/`.
 
 ```bash
+# Run one test file (preferred while iterating)
+bun test packages/core/src/__tests__/errors.test.ts
+
+# Run every test in a package
+bun test packages/core
+
 # Run all tests
 bun test
-
-# Run tests in watch mode
-bun test --watch
-
-# Run tests for a specific package
-bun test packages/core
 ```
+
+Run changed suites one file at a time: a full `bun test` batch can show cross-file mock-isolation failures that do not occur when a file runs alone. In a fresh checkout or worktree, run `bun run build:cli` once first; it generates the gitignored database worker modules some suites import.
 
 ### Important Post-Change Commands
 
@@ -484,34 +478,15 @@ Add screenshots for UI changes.
 Closes #(issue number)
 ```
 
-### Claude Code Review
-
-This repository includes an automated Claude code review system that can be triggered in two ways:
-
-1. **Automatic Review**: Runs automatically when a new pull request is opened
-2. **Manual Review**: Can be manually triggered by contributors by commenting `/claude-review` on the PR
-
-The manual trigger is only available to:
-- Repository members and collaborators
-- Users who are organization members
-- The pull request author
-
-Example manual trigger comment:
-```
-/claude-review
-```
-
-This will initiate a Claude code review of your pull request changes.
-
 ### Review Process
 
 1. **Manual Checks**: Run `bun run lint`, `bun run typecheck`, and `bun run format` locally
-2. **Code Review**: At least one maintainer must review and approve
+2. **Code Review**: A maintainer may review; `main` requires the two checks below, not an approving review
 3. **Testing**: Reviewer may ask for additional tests or manual testing
 4. **Documentation**: Ensure docs are updated if needed
 5. **Merge**: Maintainer will merge using "Squash and merge"
 
-**Note**: CI/CD is not yet implemented. Contributors must ensure all checks pass locally before submitting PRs. There is also no PR template in the repository yet - please follow the template provided in this guide when creating PRs.
+**Note**: Every pull request runs two required checks, `managed-routing-foundation` (`.github/workflows/managed-routing-postgres.yml`) and `prepare` (`.github/workflows/prepare-router-artifacts.yml`), and `main` only accepts branches that are up to date with it. Run the local checks above before pushing. The repository has no PR template file; follow the template in this guide.
 
 ### After PR is Merged
 
@@ -521,11 +496,11 @@ This will initiate a Claude code review of your pull request changes.
 
 ## Testing Guidelines
 
-**Current Status**: Test infrastructure is not yet implemented. This section describes the planned testing approach.
+See [Running Tests](#running-tests) for how to run them.
 
-### Future Test Structure
+### Test Structure
 
-Tests will be co-located with the code they test:
+Tests live beside the code they test, either as `*.test.ts` files next to the module or in a `__tests__/` directory:
 
 ```
 packages/core/
@@ -537,7 +512,7 @@ packages/core/
 └── package.json
 ```
 
-### Writing Tests (Future Implementation)
+### Writing Tests
 
 1. **Unit Tests**
    - Test individual functions and classes
@@ -547,7 +522,7 @@ packages/core/
 
    ```typescript
    import { describe, it, expect, mock } from 'bun:test';
-   import { calculateAccountWeight } from './utils';
+   import { calculateAccountPriority } from './utils';
    
    describe('calculateAccountPriority', () => {
      it('should return priority 0 for primary accounts', () => {
@@ -771,11 +746,8 @@ bun run dev:server
 ### Working with the Dashboard
 
 ```bash
-# Build the dashboard
+# Build the dashboard (the server serves this bundle; restart it after a rebuild)
 bun run build:dashboard
-
-# Run dashboard in development mode
-bun run dev:dashboard
 ```
 
 ### Working with the CLI

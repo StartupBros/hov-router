@@ -14,7 +14,6 @@
 		"start": "bun run apps/server/src/server.ts",
 		"server": "bun run apps/server/src/server.ts",
 		"dev:server": "bun run --hot apps/server/src/server.ts",
-		"dev:dashboard": "bun --hot packages/dashboard-web/src/index.tsx",
 		"typecheck": "bunx tsc --noEmit && bunx tsc --noEmit -p packages/dashboard-web",
 		"test": "bun test",
 		"test:cli": "bun test apps/cli/__tests__",

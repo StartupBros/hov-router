@@ -40,11 +40,9 @@
   - Supports custom endpoints (local/LAN/self-hosted)
   - No real API key required
 - **Ollama Cloud** - Hosted Ollama at ollama.com:
-  - Uses Ollama Cloud's `/api/chat` endpoint
+  - Forwards Anthropic-format `/v1/messages` requests to `https://ollama.com` without format conversion
   - Model mapping required (e.g., `claude-sonnet-4-6` → `deepseek-v4-flash:cloud`)
   - Bearer token authentication via API key
-  - Converts Anthropic-format requests to Ollama native `/api/chat` format
-  - Converts NDJSON streaming responses back to Anthropic SSE
 - **Meta** (`meta`) - Meta Model API at `https://api.meta.ai`:
   - `meta` is the canonical provider identifier; legacy `muse-spark` is accepted only for server-side HTTP ingress compatibility
   - Anthropic-compatible Messages endpoint (`/v1/messages`, `/v1/messages/count_tokens`)
@@ -146,8 +144,7 @@ The HoV Router providers system is a modular architecture designed to support mu
 
 10. **Ollama Cloud Provider** - Provides access to:
    - **Ollama Cloud hosted API** at ollama.com
-   - Converts Anthropic-format requests to Ollama native `/api/chat` format
-   - NDJSON streaming responses converted back to Anthropic SSE
+   - Forwards Anthropic-format `/v1/messages` requests unchanged; no format conversion
    - Bearer token authentication via API key
    - Model mapping required (configured via `model_mappings` on account)
 
@@ -485,15 +482,12 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 #### Step 2: Add Vertex AI Account
 
+The CLI's `--mode` list does not include `vertex-ai`, so add the account from the dashboard (**Add Account**, then **Vertex AI (Google Cloud)**) or with the HTTP API, which requires `projectId` and `region`:
+
 ```bash
-# Using environment variables (recommended)
-export ANTHROPIC_VERTEX_PROJECT_ID=your-project-id
-export CLOUD_ML_REGION=global
-
-bun run cli --add-account vertex-claude --mode vertex-ai --priority 0
-
-# Or enter details interactively
-bun run cli --add-account vertex-claude --mode vertex-ai
+curl -X POST http://localhost:8080/api/accounts/vertex-ai \
+  -H "Content-Type: application/json" \
+  -d '{"name": "vertex-claude", "projectId": "your-project-id", "region": "global", "priority": 0}'
 ```
 
 #### Step 3: Test the Account
@@ -753,41 +747,21 @@ Both paths call the same underlying OpenAI-compatible `/models` discovery, but t
 
 ### Usage Examples
 
-**OpenRouter:**
+The CLI adds an OpenAI-compatible account interactively. It takes only `--add-account`, `--mode` and `--priority`, then prompts for the API key, the endpoint URL and optional custom model mappings:
+
 ```bash
-better-ccflare --add-account openrouter-account \
-  --provider openai-compatible \
-  --api-key sk-or-v1-... \
-  --endpoint https://openrouter.ai/api/v1 \
-  --priority 10  # Lower priority = higher preference
+better-ccflare --add-account together-account --mode openai-compatible --priority 20
 ```
 
-**Together AI:**
-```bash
-better-ccflare --add-account together-account \
-  --provider openai-compatible \
-  --api-key ... \
-  --endpoint https://api.together.xyz/v1 \
-  --priority 20  # Higher number = lower preference
-```
+At the endpoint prompt, enter the provider's OpenAI-compatible base URL:
 
-**Local Models (Ollama/LM Studio):**
-```bash
-better-ccflare --add-account local-models \
-  --provider openai-compatible \
-  --api-key dummy-key \
-  --endpoint http://localhost:11434/v1 \
-  --priority 99  # Use as last resort
-```
+| Provider | Endpoint |
+|---|---|
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| Together AI | `https://api.together.xyz/v1` |
+| Local Ollama | `http://localhost:11434/v1` |
 
-**Custom Model Mappings via JSON Configuration:**
-```bash
-# Store custom mappings in custom_endpoint as JSON
-better-ccflare --add-account custom-provider \
-  --provider openai-compatible \
-  --api-key sk-... \
-  --endpoint '{"modelMappings": {"opus": "gpt-4-turbo", "haiku": "gpt-3.5-turbo"}}'
-```
+Lower priority numbers are preferred. For a non-interactive setup, or to supply model mappings as JSON, use `POST /api/accounts/openai-compatible` as the Vercel recipe below does. OpenRouter also has a dedicated account type, added from the dashboard or with `POST /api/accounts/openrouter`; the CLI's `--mode` list does not include it.
 
 ### Usage Example: Vercel AI Gateway catch-all lane
 

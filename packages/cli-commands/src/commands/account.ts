@@ -1903,7 +1903,7 @@ export async function addAccount(
 		);
 		console.log(`\nAccount '${name}' added successfully!`);
 		console.log("Type: Ollama Cloud");
-		console.log(`Endpoint: https://ollama.com/api/chat`);
+		console.log("Endpoint: https://ollama.com");
 		return createdAccount;
 	} else if (mode === "meta") {
 		const apiKey = await adapter.input("\nEnter your Meta Model API key: ");
