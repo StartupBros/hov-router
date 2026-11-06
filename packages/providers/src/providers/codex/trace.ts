@@ -242,7 +242,6 @@ interface TraceInputs {
 		| "thinking_retry"
 		| "reasoning_retry"
 		| "cache_control_retry"
-		| "prompt_cache_breakpoint_retry"
 		| "cache_lane_rescue"
 		| "precommit_sse_retry"
 		| "account_failover"

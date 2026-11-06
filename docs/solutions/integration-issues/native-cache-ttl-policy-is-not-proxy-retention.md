@@ -41,7 +41,7 @@ The proxy's `system_prompt_cache_ttl_1h` was separately set to `false`. Main con
 |---|---|
 | Proxy injector | Runs without a provider predicate, before account selection. It adds `1h` only to array-form system blocks with an ephemeral marker and a missing/falsy TTL. Explicit `5m` and `1h` remain unchanged. Disabling the switch skips this mutation; it does **not** strip client TTLs or force five minutes. See [`proxy.ts:1135–1138`](../../../packages/proxy/src/proxy.ts#L1135-L1138) and [`:5143–5184`](../../../packages/proxy/src/proxy.ts#L5143-L5184). |
 | OpenAI-compatible chat conversion | Copies the system text block's `cache_control` object. That proves preservation at this converter, not backend acceptance or a retention promise. See [`converters.ts:169–201`](../../../packages/openai-formats/src/converters.ts#L169-L201). |
-| Codex conversion | Extracts system text without TTL metadata. An ephemeral marker's presence can influence the separate explicit-breakpoint feature; its `1h` value is not translated into a retention setting by this path. See [`provider.ts:3737–3747`](../../../packages/providers/src/providers/codex/provider.ts#L3737-L3747), [`:4808–4839`](../../../packages/providers/src/providers/codex/provider.ts#L4808-L4839), and the [TTL-removal test](../../../packages/providers/src/providers/codex/explicit-cache-breakpoint.test.ts#L281-L296). |
+| Codex conversion | Extracts system text and drops every `cache_control` marker, so a `1h` value is not translated into a retention setting by this path. (The GPT-5.6 explicit-breakpoint feature that an ephemeral marker used to influence was removed.) See [`provider.ts:3509–3519`](../../../packages/providers/src/providers/codex/provider.ts#L3509-L3519). |
 
 ## Why This Matters
 

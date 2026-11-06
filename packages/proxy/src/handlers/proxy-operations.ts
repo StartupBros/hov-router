@@ -3690,7 +3690,6 @@ export async function proxyWithAccount(
 				| "thinking_retry"
 				| "reasoning_retry"
 				| "cache_control_retry"
-				| "prompt_cache_breakpoint_retry"
 				| "cache_lane_rescue"
 				| "precommit_sse_retry"
 				| "account_failover"
@@ -3764,12 +3763,11 @@ export async function proxyWithAccount(
 						requestMeta.agentAttributionSource,
 					) || isClaudeCodeSubagent(req.headers);
 				// Client-supplied copies are untrusted. Strip before attaching only
-				// server-derived experiment metadata so traces cannot be spoofed or
-				// retain arbitrary sensitive header content. The canary and action
-				// headers are no longer set, but a client copy is still stripped.
-				prepared.delete("x-better-ccflare-pacing-canary");
+				// server-derived pacing metadata so traces cannot be spoofed or
+				// retain arbitrary sensitive header content. (Codex prepareHeaders
+				// already drops every client x-better-ccflare-* header, including
+				// the retired pacing canary and action headers.)
 				prepared.delete("x-better-ccflare-pacing-cohort-id");
-				prepared.delete("x-better-ccflare-pacing-action");
 				prepared.delete("x-better-ccflare-pacing-role");
 				prepared.delete("x-better-ccflare-pacing-wait-ms");
 				prepared.delete("x-better-ccflare-pacing-release-reason");

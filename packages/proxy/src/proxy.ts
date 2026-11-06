@@ -2196,8 +2196,6 @@ async function handleProxyCoreImpl(
 
 	if (pacingEligible) {
 		pacingObservation = await observeAndRecordPacing();
-	}
-	if (pacingEligible) {
 		warnOnLookbackRisk(parsedBody, requestMeta.clientSessionId);
 		recordDiagnosisCandidate(
 			requestMeta.clientSessionId,

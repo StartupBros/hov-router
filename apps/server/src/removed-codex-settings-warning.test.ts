@@ -124,6 +124,8 @@ describe("buildRemovedSettingsWarning", () => {
 		expect(text).toContain("1 setting is still set and ignored");
 		expect(text).toContain("CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT");
 		expect(text).toContain("always on");
+		expect(text).toContain("CCFLARE_CODEX_CACHE_KEY_MODE=session");
+		expect(text).toContain("CCFLARE_CODEX_SINGLE_ORCHESTRATION_ROOT=0");
 	});
 
 	it("says the retired cache experiments behave as they did at 0", () => {

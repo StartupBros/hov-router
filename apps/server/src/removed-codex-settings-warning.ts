@@ -60,7 +60,8 @@ export const REMOVED_CODEX_SETTING_GROUPS: readonly RemovedSettingGroup[] = [
 	},
 	{
 		removed: `The Codex cache-key continuity canary was removed from ${PRODUCT_NAME}.`,
-		outcome: "Cache-key continuity is always on.",
+		outcome:
+			"Cache-key continuity is always on; to turn it off, set CCFLARE_CODEX_CACHE_KEY_MODE=session or CCFLARE_CODEX_SINGLE_ORCHESTRATION_ROOT=0.",
 		names: REMOVED_CODEX_CONTINUITY_CANARY_ENV_NAMES,
 	},
 	{
