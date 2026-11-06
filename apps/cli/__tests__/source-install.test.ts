@@ -229,16 +229,13 @@ describe("documented source install", () => {
 		mkdirSync(configDir, { recursive: true });
 		const fixtures = {
 			"better-ccflare.json":
-				'{"default_agent_model":"synthetic-legacy-model","unrelated":{"keep":true}}\n',
+				'{"data_retention_days":7,"unrelated":{"keep":true}}\n',
 			"better-ccflare.json.backup": "synthetic recovery material\n",
 		};
 		for (const [name, bytes] of Object.entries(fixtures))
 			writeFileSync(join(configDir, name), bytes);
 		const override = join(home, "override.json");
-		writeFileSync(
-			override,
-			'{"default_agent_model":"synthetic-override-model"}\n',
-		);
+		writeFileSync(override, '{"data_retention_days":9}\n');
 		const version = JSON.parse(
 			readFileSync(join(root, "apps/cli/package.json"), "utf8"),
 		).version;
@@ -283,7 +280,7 @@ describe("documented source install", () => {
 				sourceEvidence.stderr,
 			]);
 			for (const custom of [false, true]) {
-				const result = spawnSync(executable, ["--get-model"], {
+				const result = spawnSync(executable, ["--show-config"], {
 					cwd: home,
 					env: {
 						...env,
@@ -293,8 +290,11 @@ describe("documented source install", () => {
 					timeout: 10000,
 				});
 				expect(result.status).toBe(0);
-				expect(result.stdout).toContain(
-					custom ? "synthetic-override-model" : "synthetic-legacy-model",
+				// The value and its [Config file] tag prove the file was read.
+				expect(result.stdout).toMatch(
+					custom
+						? /Data Retention\s+9 days\s+\[Config file\]/
+						: /Data Retention\s+7 days\s+\[Config file\]/,
 				);
 				expect(result.stderr).toBe("");
 				const previousOutput = configOutputs.get(custom);
@@ -305,9 +305,7 @@ describe("documented source install", () => {
 		}
 		for (const [name, bytes] of Object.entries(fixtures))
 			expect(readFileSync(join(configDir, name), "utf8")).toBe(bytes);
-		expect(readFileSync(override, "utf8")).toBe(
-			'{"default_agent_model":"synthetic-override-model"}\n',
-		);
+		expect(readFileSync(override, "utf8")).toBe('{"data_retention_days":9}\n');
 		expect(readdirSync(join(home, ".config"))).toEqual(["better-ccflare"]);
 		expect(readdirSync(configDir).sort()).toEqual(Object.keys(fixtures).sort());
 	}, 60000);

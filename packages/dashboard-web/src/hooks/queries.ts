@@ -960,30 +960,6 @@ export const useUpdateAgentPreference = () => {
 	});
 };
 
-export const useDefaultAgentModel = () => {
-	return useQuery({
-		queryKey: queryKeys.defaultAgentModel(),
-		queryFn: () => api.getDefaultAgentModel(),
-		staleTime: 2 * 60 * 1000, // Consider data fresh for 2 minutes
-		refetchInterval: 5 * 60 * 1000, // Poll every 5 minutes instead of 1
-		refetchIntervalInBackground: false, // Don't refresh when tab is not focused
-		gcTime: 30 * 60 * 1000, // Keep in cache for 30 minutes
-	});
-};
-
-export const useSetDefaultAgentModel = () => {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (model: string) => api.setDefaultAgentModel(model),
-		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: queryKeys.defaultAgentModel(),
-			});
-			queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-		},
-	});
-};
-
 export const useBulkUpdateAgentPreferences = () => {
 	const queryClient = useQueryClient();
 	return useMutation({

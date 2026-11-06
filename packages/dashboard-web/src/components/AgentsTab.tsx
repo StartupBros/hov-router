@@ -16,10 +16,8 @@ import { useState } from "react";
 import {
 	useAgents,
 	useBulkUpdateAgentPreferences,
-	useDefaultAgentModel,
 	useModels,
 	useRefreshModels,
-	useSetDefaultAgentModel,
 } from "../hooks/queries";
 import { AgentCard, ModelSelect, WorkspaceCard } from "./agents";
 import { Badge } from "./ui/badge";
@@ -46,9 +44,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 export function AgentsTab() {
 	const { data: response, isLoading, error, refetch } = useAgents();
-	const { data: defaultModel, isLoading: isLoadingDefaultModel } =
-		useDefaultAgentModel();
-	const setDefaultModel = useSetDefaultAgentModel();
 	const bulkUpdatePreferences = useBulkUpdateAgentPreferences();
 	const refreshModels = useRefreshModels();
 	const { data: modelCatalog } = useModels();
@@ -58,10 +53,6 @@ export function AgentsTab() {
 	const [bulkUpdateDialogOpen, setBulkUpdateDialogOpen] = useState(false);
 	const [bulkUpdateModel, setBulkUpdateModel] =
 		useState<string>(DEFAULT_AGENT_MODEL);
-
-	const handleDefaultModelChange = (model: string) => {
-		setDefaultModel.mutate(model);
-	};
 
 	const handleBulkUpdate = () => {
 		bulkUpdatePreferences.mutate(bulkUpdateModel, {
@@ -227,18 +218,17 @@ Your system prompt content here...`}
 					</div>
 				</div>
 
-				{/* Default Model Settings */}
+				{/* Agent model preferences */}
 				<Card>
 					<CardHeader>
 						<div className="flex items-center justify-between">
 							<div>
 								<CardTitle className="text-base flex items-center gap-2">
 									<Settings className="h-4 w-4" />
-									Default Agent Model
+									Agent Model Preferences
 								</CardTitle>
 								<CardDescription>
-									Set the default model for all agents. Individual agent
-									preferences will override this setting.
+									Set every agent's model preference at once.
 								</CardDescription>
 							</div>
 							<div className="flex items-center gap-3">
@@ -272,28 +262,6 @@ Your system prompt content here...`}
 					</CardHeader>
 					<CardContent>
 						<div className="space-y-4">
-							<div className="flex items-center gap-4">
-								<div className="flex-1">
-									<ModelSelect
-										value={defaultModel || DEFAULT_AGENT_MODEL}
-										onValueChange={handleDefaultModelChange}
-										disabled={
-											isLoadingDefaultModel || setDefaultModel.isPending
-										}
-										placeholder="Select a model"
-										triggerClassName="w-full max-w-xs"
-										ariaLabel="Default agent model"
-									/>
-								</div>
-								{setDefaultModel.isPending && (
-									<span className="text-sm text-muted-foreground">
-										Updating...
-									</span>
-								)}
-							</div>
-
-							<Separator />
-
 							<div className="space-y-2">
 								<p className="text-sm font-medium">Force Update All Agents</p>
 								<p className="text-sm text-muted-foreground">

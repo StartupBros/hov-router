@@ -1296,8 +1296,7 @@ bun run apps/cli/src/main.ts --clear-history          # Clear request history
 bun run apps/cli/src/main.ts --analyze                # Analyze database performance
 
 # Configuration
-bun run apps/cli/src/main.ts --get-model               # Show current model
-bun run apps/cli/src/main.ts --set-model <model>       # Set default model
+bun run apps/cli/src/main.ts --show-config            # Show effective configuration
 bun run apps/cli/src/main.ts --help                   # Show help
 ```
 

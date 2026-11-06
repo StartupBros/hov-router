@@ -18,7 +18,6 @@ import {
 } from "@better-ccflare/cli-commands/runner";
 import { Config } from "@better-ccflare/config";
 import {
-	CLAUDE_MODEL_IDS,
 	getGitSha,
 	getVersionSync,
 	installOutboundProxy,
@@ -189,8 +188,6 @@ ${getManagedRoutingHelpText()}
     --since <date>        Only replay snapshots at/after this date (YYYY-MM-DD)
     --dry-run              Report what would change; write nothing
   --compact            Compact database (WAL checkpoint + VACUUM)
-  --get-model          Show current default agent model
-  --set-model <model>  Set default agent model (opus-4 or sonnet-4)
 
 API Key Management:
   --generate-api-key <name>  Generate a new API key
@@ -272,8 +269,6 @@ interface ParsedArgs {
 	rebuildWindowsSince: number | null;
 	rebuildWindowsDryRun: boolean;
 	compact: boolean;
-	getModel: boolean;
-	setModel: string | null;
 	generateApiKey: string | null;
 	listApiKeys: boolean;
 	disableApiKey: string | null;
@@ -511,18 +506,6 @@ function displayConfigInfo(parsed: ParsedArgs, config: Config): void {
 		description: "Retry backoff multiplier",
 	});
 
-	// Agent Configuration
-	configItems.push({
-		name: "Default Agent Model",
-		value: config.getDefaultAgentModel(),
-		source: process.env.DEFAULT_AGENT_MODEL
-			? "Environment (DEFAULT_AGENT_MODEL)"
-			: config.get("default_agent_model")
-				? "Config file"
-				: "Default",
-		description: "Default Claude model for agents",
-	});
-
 	// Data Retention
 	configItems.push({
 		name: "Data Retention",
@@ -650,8 +633,6 @@ function parseArgs(args: string[]): ParsedArgs {
 		rebuildWindowsSince: null,
 		rebuildWindowsDryRun: false,
 		compact: false,
-		getModel: false,
-		setModel: null,
 		generateApiKey: null,
 		listApiKeys: false,
 		disableApiKey: null,
@@ -952,16 +933,6 @@ function parseArgs(args: string[]): ParsedArgs {
 				break;
 			case "--compact":
 				parsed.compact = true;
-				break;
-			case "--get-model":
-				parsed.getModel = true;
-				break;
-			case "--set-model":
-				if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
-					console.error("❌ --set-model requires a model name");
-					fastExit(1);
-				}
-				parsed.setModel = args[++i];
 				break;
 			case "--generate-api-key":
 				if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
@@ -1493,48 +1464,6 @@ async function main() {
 					: "Managed-routing API configuration is invalid.",
 			);
 			fastExit(2);
-		}
-	}
-
-	// Handle commands that don't need database or DI initialization
-	if (parsed.getModel || parsed.setModel) {
-		// Initialize only config for these simple commands
-		const config = new Config();
-
-		if (parsed.getModel) {
-			const model = config.getDefaultAgentModel();
-			console.log(`Current default agent model: ${model}`);
-			fastExit(0);
-			return;
-		}
-
-		if (parsed.setModel) {
-			// Validate the model
-			const modelMap: Record<string, string> = {
-				"opus-4": CLAUDE_MODEL_IDS.OPUS_4,
-				"sonnet-4": CLAUDE_MODEL_IDS.SONNET_4,
-				"opus-4.1": CLAUDE_MODEL_IDS.OPUS_4_1,
-				"opus-5": CLAUDE_MODEL_IDS.OPUS_5,
-				"opus-5.5": CLAUDE_MODEL_IDS.OPUS_5_5,
-				"sonnet-4.5": CLAUDE_MODEL_IDS.SONNET_4_5,
-				"sonnet-4.6": CLAUDE_MODEL_IDS.SONNET_4_6,
-				"sonnet-5": CLAUDE_MODEL_IDS.SONNET_5,
-				"sonnet-5.5": CLAUDE_MODEL_IDS.SONNET_5_5,
-				"haiku-5.5": CLAUDE_MODEL_IDS.HAIKU_5_5,
-			};
-
-			const fullModel = modelMap[parsed.setModel];
-			if (!fullModel) {
-				console.error(`❌ Invalid model: ${parsed.setModel}`);
-				console.error(`Valid models: ${Object.keys(modelMap).join(", ")}`);
-				fastExit(1);
-				return;
-			}
-
-			config.setDefaultAgentModel(fullModel);
-			console.log(`✅ Default agent model set to: ${fullModel}`);
-			fastExit(0);
-			return;
 		}
 	}
 

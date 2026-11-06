@@ -54,8 +54,6 @@ export const KNOWN_FLAGS = [
 	"--since",
 	"--dry-run",
 	"--compact",
-	"--get-model",
-	"--set-model",
 	"--generate-api-key",
 	"--admin",
 	"--list-api-keys",

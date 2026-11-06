@@ -1901,50 +1901,6 @@ class API extends HttpClient {
 		}
 	}
 
-	async getDefaultAgentModel(): Promise<string> {
-		const startTime = Date.now();
-		const url = "/api/config/model";
-
-		this.logger.debug(`→ GET ${url}`);
-
-		try {
-			const data = await this.get<{ model: string }>(url);
-			const duration = Date.now() - startTime;
-			this.logger.debug(`← GET ${url} - 200 (${duration}ms)`);
-			return data.model;
-		} catch (error) {
-			const duration = Date.now() - startTime;
-			this.logger.error(`✗ GET ${url} - ERROR (${duration}ms)`, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			});
-			throw error;
-		}
-	}
-
-	async setDefaultAgentModel(model: string): Promise<void> {
-		const startTime = Date.now();
-		const url = "/api/config/model";
-
-		this.logger.debug(`→ POST ${url}`, { model });
-
-		try {
-			await this.post(url, { model });
-			const duration = Date.now() - startTime;
-			this.logger.debug(`← POST ${url} - 200 (${duration}ms)`);
-		} catch (error) {
-			const duration = Date.now() - startTime;
-			this.logger.error(`✗ POST ${url} - ERROR (${duration}ms)`, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-			});
-			if (error instanceof HttpError) {
-				throw new Error(error.message, { cause: error });
-			}
-			throw error;
-		}
-	}
-
 	async getModels(): Promise<ModelCatalogResponse> {
 		const startTime = Date.now();
 		const url = "/api/models";

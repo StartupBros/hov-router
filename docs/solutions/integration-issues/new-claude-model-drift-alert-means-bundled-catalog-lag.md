@@ -61,7 +61,7 @@ PR #515 registered the model. Each of these places keys off a model id, and each
 - **`packages/core/src/value-pricing.ts`:**
   - Add a `LIST_PRICE_ERAS` entry, with `longContext` rates when the model has a tier.
   - Bump `VALUE_PRICING_VERSION`. At startup the ledger re-prices every closed window stamped with another version (`revalueStaleClosedWindows`).
-- **Model lists:** add the model to `COMMON_MODELS` in `packages/types/src/agent.ts` and to the `--set-model` map in `apps/cli/src/main.ts`.
+- **Model lists:** add the model to `COMMON_MODELS` in `packages/types/src/agent.ts`.
 - **Forced tool choice:** check the model against Anthropic's tool-use docs before deciding whether it belongs in `FORCED_TOOL_CHOICE_UNSUPPORTED` in `models.ts`. Haiku 5.5 accepts a forced `tool_choice`, unlike Opus 5.5, Sonnet 5.5 and Fable 5.1, so it is not in that set (auto memory [claude]).
 - **Auto lane:** check `SUPPORTED_IDENTITIES` in `packages/providers/src/auto-model-capabilities.ts`. PR #515 did not extend it, because the adapter requires reviewed support evidence before an identity joins. `claude-haiku` still lists only Haiku 4.5 ids, so Haiku 5.5 workers escalate to Fable (issue #513, open).
 - **Responses-adapter sampling parameters:** `temperature` and `top_p` are still forwarded to 5.5 targets that reject them (issue #514, open).

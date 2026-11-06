@@ -32,8 +32,6 @@ export const queryKeys = {
 		[...queryKeys.all, "requests", { limit }] as const,
 	logs: () => [...queryKeys.all, "logs"] as const,
 	logHistory: () => [...queryKeys.all, "logs", "history"] as const,
-	defaultAgentModel: () =>
-		[...queryKeys.all, "config", "defaultAgentModel"] as const,
 	combos: () => [...queryKeys.all, "combos"] as const,
 	families: () => [...queryKeys.all, "families"] as const,
 	routingEffective: (family?: string) =>
