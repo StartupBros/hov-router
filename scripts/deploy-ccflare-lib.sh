@@ -1673,11 +1673,12 @@ NODE
 			;;
 	esac
 }
-# The transaction client gives up after 3 s with exit 70, but the server may
-# still be hashing the candidate. Once it accepts, it records the transaction in
-# intent.json and starts the handoff whether or not its reply arrived, so on 70
-# look for this transaction there for up to $7 seconds (default 60) before
-# reporting failure. The runner rolls back if no deploy commits the handoff.
+# The client exits 0 only once the listener confirms the handoff. The listener
+# hands off only after the client acknowledges its prepared reply, and rewinds a
+# prepared transaction nobody acknowledged. Exit 70 means the confirmation was
+# lost or never sent, so wait up to $7 seconds (default 60) for this transaction
+# to move past prepared, which only the runner's handoff does, before reporting
+# failure. The runner rolls back if no deploy commits the handoff.
 request_backend_handoff() {
  local dir="$1" module="$2" binary="$3" source="$4" rendered="$5" schema="$6" reply_wait="${7:-60}" command
  local status=0 waited=0 recorded
@@ -1691,10 +1692,10 @@ NODE
  while ((status == 70 && waited < reply_wait)); do
   recorded=0
   sudo node - "$command" "$dir/intent.json" <<'NODE' || recorded=$?
-const fs=require("node:fs");try{const id=JSON.parse(fs.readFileSync(process.argv[2])).manifest.transactionId,t=JSON.parse(fs.readFileSync(process.argv[3]));if(t.manifest?.transactionId!==id)process.exit(1);process.exit(["held","rolled_back"].includes(t.phase)?2:0);}catch{process.exit(1);}
+const fs=require("node:fs");try{const id=JSON.parse(fs.readFileSync(process.argv[2])).manifest.transactionId,t=JSON.parse(fs.readFileSync(process.argv[3]));if(t.manifest?.transactionId!==id||t.phase==="prepared")process.exit(1);process.exit(["held","rolled_back"].includes(t.phase)?2:0);}catch{process.exit(1);}
 NODE
   if ((recorded == 0)); then
-   echo "backend transaction accepted although the client got no reply; continuing" >&2
+   echo "backend transaction handoff started although the client got no confirmation; continuing" >&2
    status=0
   elif ((recorded == 2)); then
    break
