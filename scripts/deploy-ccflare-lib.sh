@@ -1673,9 +1673,14 @@ NODE
 			;;
 	esac
 }
+# The transaction client gives up after 3 s with exit 70, but the server may
+# still be hashing the candidate. Once it accepts, it records the transaction in
+# intent.json and starts the handoff whether or not its reply arrived, so on 70
+# look for this transaction there for up to $7 seconds (default 60) before
+# reporting failure. The runner rolls back if no deploy commits the handoff.
 request_backend_handoff() {
- local dir="$1" module="$2" binary="$3" source="$4" rendered="$5" schema="$6" command
- local status=0
+ local dir="$1" module="$2" binary="$3" source="$4" rendered="$5" schema="$6" reply_wait="${7:-60}" command
+ local status=0 waited=0 recorded
  command="$(sudo mktemp)" || return $?
  sudo node - "$dir/runtime.json" "$binary" "$source" "$rendered" "$schema" "$command" <<'NODE' || status=$?
 const fs=require("node:fs"),crypto=require("node:crypto");const [file,binary,source,pin,schema,out]=process.argv.slice(2),r=JSON.parse(fs.readFileSync(file)),hash=p=>crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");const manifest={transactionId:crypto.randomUUID(),expectedGeneration:r.generation,oldPid:r.oldPid,oldStartTime:r.oldStartTime,previousPinHash:r.pinHash,candidatePinHash:hash(pin),candidateBinary:fs.realpathSync(binary),candidateHash:hash(binary),candidateSourceSha:source,candidateNonce:crypto.randomBytes(16).toString("hex"),schemaDigest:schema,ingress:r.ingress};fs.writeFileSync(out,JSON.stringify({command:"prepare",manifest}),{mode:0o600});
@@ -1683,6 +1688,20 @@ NODE
  if ((status == 0)); then
   sudo node "$module" client "$dir" "$command" || status=$?
  fi
+ while ((status == 70 && waited < reply_wait)); do
+  recorded=0
+  sudo node - "$command" "$dir/intent.json" <<'NODE' || recorded=$?
+const fs=require("node:fs");try{const id=JSON.parse(fs.readFileSync(process.argv[2])).manifest.transactionId,t=JSON.parse(fs.readFileSync(process.argv[3]));if(t.manifest?.transactionId!==id)process.exit(1);process.exit(["held","rolled_back"].includes(t.phase)?2:0);}catch{process.exit(1);}
+NODE
+  if ((recorded == 0)); then
+   echo "backend transaction accepted although the client got no reply; continuing" >&2
+   status=0
+  elif ((recorded == 2)); then
+   break
+  else
+   sleep 1;((waited+=1))
+  fi
+ done
  sudo rm -f -- "$command";return "$status"
 }
 await_backend_handoff_phase() {
