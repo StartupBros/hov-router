@@ -376,13 +376,13 @@ server {
         proxy_request_buffering off;
     }
 
-    # WebSocket support for real-time updates
-    location /ws {
+    # Dashboard live updates use Server-Sent Events. Without this block nginx
+    # buffers them, so events and the 20-second keepalives arrive late.
+    # The $ anchor leaves the /stream/token POSTs under location /.
+    location ~ ^/api/(requests|logs|insights/alerts)/stream$ {
         proxy_pass http://better-ccflare_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 86400;
+        proxy_buffering off;
+        proxy_cache off;
     }
 
     # Static assets caching

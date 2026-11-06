@@ -130,7 +130,7 @@ footer.composition-signal { margin-top: 3rem; padding-top: 1rem; border-top: 1px
   <h1>Ideation: What to tear out of HoV Router's upstream inheritance</h1>
   <p class="meta-line">Date: <time datetime="2026-11-03">2026-11-03</time> · Repository at <code>origin/main</code> 26a62b89</p>
   <div class="focus"><b>Focus</b>we adopted this project hov-router from upstream better-ccflare and ccflare. some parts of it should probably be totally torn out for our version. let's find obvious candidates</div>
-  <div class="focus" style="border-left: 4px solid var(--keep-border);"><b>Status, 2026-11-05: closed</b>
+  <div class="focus" style="border-left: 4px solid var(--keep-border);"><b>Status, 2026-11-06: closed</b>
     <ul style="margin: 0.3rem 0 0; padding-left: 1.2rem;">
       <li><b>1. Shipped</b> in #725 (e784510d), live 2026-11-04. Departure from the title: the scheduler's proactive token refresh went too, because request-time refresh and the 401 retry already cover it.</li>
       <li><b>2. Held.</b> Not now; find out what customers use first.</li>
@@ -138,6 +138,7 @@ footer.composition-signal { margin-top: 3rem; padding-top: 1rem; border-top: 1px
       <li><b>4. Shipped</b> in #713 (b58eb525): wholesale merges ended, cherry-pick only, publishers deleted. Follow-on: deploy from any checkout (#727).</li>
       <li><b>5. Dropped.</b></li>
     </ul>
+    Follow-on removals from a second search, all live by 2026-11-06: dead code with no callers (#731, efd32050), the inert probe-backoff tie-break (#733, 5f55cd56), the Codex WebSocket transport (#734, cc4d49be), and the Codex cache levers (#735 3e4c8f27, #736 ae31d544, #737 4df7c760). The production drop-ins that set those levers were removed on 2026-11-06.
     Docs close-out: #728. Upstream releases are checked ad hoc, with no schedule. The first check ran on 2026-11-05 over tombii main from v3.5.109 to 4d76f79c: 57 commits, none worth porting under the four checks in <code>UPSTREAM.md</code>.</div>
   <details class="doc-meta">
     <summary>Document metadata</summary>
