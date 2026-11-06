@@ -32,7 +32,7 @@ Record the current executable location with `command -v` and the command name yo
 
 There is no new HoV configuration namespace and no config or credential migration. Do not rename storage directories, recovery files, environment variables, headers, or database files to match the product name. Existing deployments keep their paths, service names, and ports.
 
-`hov-router --get-model` reads the default agent model from configuration without opening the account database or contacting a provider. `--help` and `--version` alone do not prove that configuration was loaded. `--show-config` provides a broader diagnostic view, but its normal default-loading behavior may persist missing defaults; it is not a byte-preservation check.
+`hov-router --show-config` reads configuration without opening the account database or contacting a provider, and tags each value it took from the config file `[Config file]`. `--help` and `--version` alone do not prove that configuration was loaded. When a config file exists, `--show-config` leaves its contents unchanged; when none exists, it creates one holding only the default load-balancing strategy.
 
 ## PostgreSQL support removed
 

@@ -987,7 +987,7 @@ export BETTER_CCFLARE_DB_PATH=/var/lib/better-ccflare/better-ccflare.db
 
 ## Model Catalog
 
-HoV Router maintains a cache of the Anthropic model catalog (id, display name, creation date) used to populate model dropdowns in the dashboard (agent preferences, default agent model). It's exposed read-only via `GET /api/models` and force-refreshable via `POST /api/models/refresh` — see [api-http.md](api-http.md#model-catalog) for the endpoint reference. This is the unscoped Anthropic catalog only; per-account live discovery for Codex and OpenAI-compatible accounts (`?provider=&accountId=` and the unsaved-credential preview endpoint) is a separate mechanism — see [Model Discovery](providers.md#model-discovery).
+HoV Router maintains a cache of the Anthropic model catalog (id, display name, creation date) used to populate model dropdowns in the dashboard (agent preferences). It's exposed read-only via `GET /api/models` and force-refreshable via `POST /api/models/refresh` — see [api-http.md](api-http.md#model-catalog) for the endpoint reference. This is the unscoped Anthropic catalog only; per-account live discovery for Codex and OpenAI-compatible accounts (`?provider=&accountId=` and the unsaved-credential preview endpoint) is a separate mechanism — see [Model Discovery](providers.md#model-discovery).
 
 ### Why this isn't fetched from every account
 

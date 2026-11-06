@@ -4,7 +4,6 @@ import {
 	PROVIDER_MODEL_DEFAULTS_ENV_VAR,
 } from "@better-ccflare/config";
 import {
-	DEFAULT_AGENT_MODEL,
 	NETWORK,
 	STRATEGIES,
 	type StrategyName,
@@ -25,15 +24,10 @@ import {
 	setProviderModelDefaultOverrides,
 } from "@better-ccflare/providers";
 import { resolveCodexClientIdentity } from "@better-ccflare/providers/codex";
-import type { APIContext } from "@better-ccflare/types";
 import {
 	describeCodexAccountCatalog,
 	resolveCodexAccountFamilyDefault,
 } from "../services/codex-effective-defaults";
-import {
-	allowedModelErrorMessage,
-	isAllowedModel,
-} from "../services/model-validation";
 import type { ConfigResponse, RetentionSetRequest } from "../types";
 
 const CODEX_FAMILIES = ["fable", "opus", "sonnet", "haiku"] as const;
@@ -44,7 +38,6 @@ const CODEX_FAMILIES = ["fable", "opus", "sonnet", "haiku"] as const;
 export function createConfigHandlers(
 	config: Config,
 	runtime?: { port: number; tlsEnabled: boolean },
-	modelCatalog?: APIContext["modelCatalog"],
 	dbOps?: DatabaseOperations,
 ) {
 	/**
@@ -204,8 +197,6 @@ export function createConfigHandlers(
 				// (default, then SESSION_DURATION_MS, then session_duration_ms). The
 				// raw settings keys are snake_case and 0 is a legitimate value.
 				sessionDurationMs: config.getRuntime().sessionDurationMs,
-				default_agent_model:
-					(settings.default_agent_model as string) || DEFAULT_AGENT_MODEL,
 				// Include actual TLS status
 				tls_enabled: runtime?.tlsEnabled || false,
 				system_prompt_cache_ttl_1h: config.getSystemPromptCacheTtl1h(),
@@ -259,42 +250,6 @@ export function createConfigHandlers(
 		 */
 		getStrategies: (): Response => {
 			return jsonResponse(STRATEGIES);
-		},
-
-		/**
-		 * Get default agent model
-		 */
-		getDefaultAgentModel: (): Response => {
-			const model = config.getDefaultAgentModel();
-			return jsonResponse({ model });
-		},
-
-		/**
-		 * Set default agent model
-		 */
-		setDefaultAgentModel: async (req: Request): Promise<Response> => {
-			const body = await req.json();
-
-			// Validate model input
-			const modelValidation = validateString(body.model, "model", {
-				required: true,
-			});
-
-			if (!modelValidation) {
-				return errorResponse(BadRequest("Model is required"));
-			}
-
-			// Validate model is in allowed list (parity with agent preference
-			// validation in agents.ts).
-			if (!(await isAllowedModel(modelValidation, modelCatalog))) {
-				return errorResponse(
-					BadRequest(`Invalid model. ${allowedModelErrorMessage()}`),
-				);
-			}
-
-			config.setDefaultAgentModel(modelValidation);
-
-			return jsonResponse({ success: true, model: modelValidation });
 		},
 
 		/**

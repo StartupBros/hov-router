@@ -17,7 +17,6 @@ import {
 import { dirname, posix } from "node:path";
 import {
 	compileQualityRoutingPolicy,
-	DEFAULT_AGENT_MODEL,
 	DEFAULT_STRATEGY,
 	isValidStrategy,
 	NETWORK,
@@ -931,7 +930,6 @@ export interface ConfigData {
 	retry_backoff?: number;
 	session_duration_ms?: number;
 	port?: number;
-	default_agent_model?: string;
 	data_retention_days?: number;
 	request_retention_days?: number;
 	usage_history_retention_days?: number;
@@ -1629,27 +1627,6 @@ export class Config extends EventEmitter {
 			throw new Error(`Invalid strategy: ${strategy}`);
 		}
 		this.set("lb_strategy", strategy);
-	}
-
-	getDefaultAgentModel(): string {
-		// First check environment variable
-		const envModel = process.env.DEFAULT_AGENT_MODEL;
-		if (envModel) {
-			return envModel;
-		}
-
-		// Then check config file
-		const configModel = this.data.default_agent_model;
-		if (configModel) {
-			return configModel;
-		}
-
-		// Default to the centralized default agent model
-		return DEFAULT_AGENT_MODEL;
-	}
-
-	setDefaultAgentModel(model: string): void {
-		this.set("default_agent_model", model);
 	}
 
 	getProviderModelDefaultOverrides(): ProviderModelDefaultOverrides {
@@ -2795,7 +2772,6 @@ export class Config extends EventEmitter {
 					}
 				: {}),
 			lb_strategy: this.getStrategy(),
-			default_agent_model: this.getDefaultAgentModel(),
 			data_retention_days: this.getDataRetentionDays(),
 			request_retention_days: this.getRequestRetentionDays(),
 			usage_history_retention_days: this.getUsageHistoryRetentionDays(),

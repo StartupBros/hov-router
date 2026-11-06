@@ -275,7 +275,6 @@ export class APIRouter {
 		const configHandlers = createConfigHandlers(
 			config,
 			this.context.runtime,
-			this.context.modelCatalog,
 			dbOps,
 		);
 		const logsStreamHandler = createLogsStreamHandler();
@@ -495,12 +494,6 @@ export class APIRouter {
 		);
 		this.handlers.set("GET:/api/strategies", () =>
 			configHandlers.getStrategies(),
-		);
-		this.handlers.set("GET:/api/config/model", () =>
-			configHandlers.getDefaultAgentModel(),
-		);
-		this.handlers.set("POST:/api/config/model", (req) =>
-			configHandlers.setDefaultAgentModel(req),
 		);
 		this.handlers.set("GET:/api/config/retention", () =>
 			configHandlers.getRetention(),
