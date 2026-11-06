@@ -30,10 +30,7 @@ import {
 	resetOrchestrationElectionForTest,
 } from "./orchestration-election";
 import {
-	CODEX_CACHE_KEY_CONTINUITY_PERCENT_ENV,
 	CODEX_CACHE_KEY_MODE_ENV,
-	CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV,
-	CODEX_CACHE_KEY_SESSION_PERCENT_ENV,
 	CODEX_DEFAULT_ENDPOINT,
 	CODEX_PING_MODEL,
 	CODEX_PROMPT_CACHE_KEY_ENV,
@@ -41,11 +38,6 @@ import {
 	CODEX_VERSION,
 	CodexProvider,
 	codexEventCommitsOutput,
-	deriveCodexCacheKeyContinuityBucket,
-	deriveCodexCacheKeySessionBucket,
-	readCodexCacheKeyContinuityPercent,
-	readCodexCacheKeyPrefixShardPercent,
-	readCodexCacheKeySessionPercent,
 	resolveCodexRequestModel,
 } from "./provider";
 import { CODEX_TRACE_DIR_ENV, CODEX_TRACE_HMAC_KEY_ENV } from "./trace";
@@ -329,12 +321,18 @@ describe("CodexProvider selected account identity", () => {
 	});
 });
 
+// Retired cache-key canary settings. The server warns once at startup when
+// one is set, and nothing reads them.
+const RETIRED_CODEX_CACHE_KEY_ENVS = [
+	"CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT",
+	"CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT",
+	"CCFLARE_CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT",
+] as const;
+
 afterEach(() => {
 	delete process.env[CODEX_PROMPT_CACHE_KEY_ENV];
-	delete process.env[CODEX_CACHE_KEY_CONTINUITY_PERCENT_ENV];
-	delete process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV];
 	delete process.env[CODEX_CACHE_KEY_MODE_ENV];
-	delete process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV];
+	for (const key of RETIRED_CODEX_CACHE_KEY_ENVS) delete process.env[key];
 	delete process.env[CODEX_SINGLE_ORCHESTRATION_ROOT_ENV];
 	delete process.env.CCFLARE_CODEX_REASONING_RETENTION;
 	delete process.env[CODEX_TRACE_DIR_ENV];
@@ -8901,7 +8899,10 @@ describe("CodexProvider.transformRequestBody", () => {
 
 		const traceDir = mkdtempSync(join(tmpdir(), "codex-trace-"));
 		process.env[CODEX_TRACE_DIR_ENV] = traceDir;
-		let compacted: { tools: Array<{ name: string }> };
+		let compacted: {
+			tools: Array<{ name: string }>;
+			prompt_cache_key?: string;
+		};
 		try {
 			compacted = await send(compactedMessages, {
 				"x-better-ccflare-request-id": "compacted-follow-up",
@@ -8916,14 +8917,20 @@ describe("CodexProvider.transformRequestBody", () => {
 			// recorded lineage and is admitted as root (basis: lineage_match), not
 			// demoted.
 			expect(requestTrace).toMatchObject({
-				trace_schema_version: 22,
+				trace_schema_version: 23,
 				orchestration_admission: "root",
 				orchestration_basis: "lineage_match",
 				cache_key_continuity_basis: "lineage_match",
-				cache_key_continuity_applied: false,
-				canonical_conversation_id: null,
+				cache_key_continuity_applied: true,
 				orchestration_demotion_observed: false,
 			});
+			// Continuity is always on, so the lineage match also carries the
+			// root's canonical identity, and with it the root's cache key.
+			expect(requestTrace?.canonical_conversation_id).toBeString();
+			expect(requestTrace?.canonical_conversation_id).toBe(
+				requestTrace?.continuity_evidence_id,
+			);
+			expect(compacted.prompt_cache_key).toBe(root.prompt_cache_key);
 			expect(requestTrace?.elapsed_ms_since_root).toBeNull();
 		} finally {
 			delete process.env[CODEX_TRACE_DIR_ENV];
@@ -9166,7 +9173,7 @@ describe("CodexProvider.transformRequestBody", () => {
 				(record) => record.phase === "request",
 			);
 			expect(requestTrace).toMatchObject({
-				trace_schema_version: 22,
+				trace_schema_version: 23,
 				orchestration_admission: "attributed_descendant",
 				orchestration_basis: null,
 				is_descendant: true,
@@ -9281,9 +9288,8 @@ describe("CodexProvider.transformRequestBody", () => {
 		);
 	});
 
-	describe("session cache-key canary", () => {
+	describe("prompt cache key selection", () => {
 		const sessionA = "11111111-1111-4111-8111-111111111111";
-		const sessionB = "22222222-2222-4222-8222-222222222222";
 		const transform = async (
 			sessionId: string,
 			content = "task A",
@@ -9311,118 +9317,44 @@ describe("CodexProvider.transformRequestBody", () => {
 				.then((response) => response.json());
 		};
 
-		it.each([
-			[undefined, 0],
-			["", 0],
-			["0", 0],
-			["37", 37],
-			["100", 100],
-			["101", 100],
-			["999", 100],
-			["-1", 0],
-			["+1", 0],
-			["1.5", 0],
-			["1e2", 0],
-			[" 10", 0],
-			["10 ", 0],
-			["nope", 0],
-		] as const)("strictly parses session percentage %p", (raw, expected) => {
-			expect(readCodexCacheKeySessionPercent(raw)).toBe(expected);
-		});
-
-		it.each([
-			[undefined, 0],
-			["", 0],
-			["0", 0],
-			["37", 37],
-			["100", 100],
-			["101", 100],
-			["999", 100],
-			["-1", 0],
-			["+1", 0],
-			["1.5", 0],
-			["1e2", 0],
-			[" 10", 0],
-			["10 ", 0],
-			["nope", 0],
-		] as const)("strictly parses prefix-shard percentage %p", (raw, expected) => {
-			expect(readCodexCacheKeyPrefixShardPercent(raw)).toBe(expected);
-		});
-
-		it("strictly parses the continuity percentage and keeps its bucket stable", () => {
-			for (const [raw, expected] of [
-				[undefined, 0],
-				["", 0],
-				["0", 0],
-				["37", 37],
-				["100", 100],
-				["101", 100],
-				["-1", 0],
-				["1.5", 0],
-				[" 10", 0],
-				["nope", 0],
-			] as const) {
-				expect(readCodexCacheKeyContinuityPercent(raw)).toBe(expected);
-			}
-			expect(deriveCodexCacheKeyContinuityBucket(sessionA)).toBe(
-				deriveCodexCacheKeyContinuityBucket(sessionA.toUpperCase()),
-			);
-		});
-
-		it("uses stable domain-separated bucket fixtures and normalizes UUID case", () => {
-			expect(deriveCodexCacheKeySessionBucket(sessionA)).toBe(39);
-			expect(deriveCodexCacheKeySessionBucket(sessionB)).toBe(31);
-			expect(deriveCodexCacheKeySessionBucket(sessionA.toUpperCase())).toBe(
-				deriveCodexCacheKeySessionBucket(sessionA),
-			);
-		});
-
-		it("keeps 0 percent in conversation mode and 100 percent in session mode", async () => {
+		it("ignores the retired cache-key canary percentages", async () => {
 			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "0";
-			const control = await transform(sessionA);
-			expect(control.prompt_cache_key).toMatch(/^ccflare-convo-[0-9a-f]{48}$/);
-
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "100";
-			const treatment = await transform(sessionA);
-			expect(treatment.prompt_cache_key).toMatch(
-				/^ccflare-session-[0-9a-f]{48}$/,
-			);
-		});
-
-		it("assigns fixed sessions on opposite sides of a deterministic boundary", async () => {
-			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "35";
-			const control = await transform(sessionA);
-			const treatment = await transform(sessionB);
-			expect(control.prompt_cache_key).toMatch(/^ccflare-convo-/);
-			expect(treatment.prompt_cache_key).toMatch(/^ccflare-session-/);
-		});
-
-		it("keeps assignment stable across turns, providers, restarts, and sibling conversations", async () => {
-			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "35";
-			const first = await transform(sessionA, "task A");
-			const later = await transform(
+			const baseline = await transform(sessionA);
+			const officialBaseline = await transform(
 				sessionA,
 				"task A",
 				"shared system prompt",
-				[
-					{ role: "user", content: "task A" },
-					{ role: "assistant", content: "working" },
-					{ role: "user", content: "continue" },
-				],
+				undefined,
+				undefined,
+				undefined,
+				{},
+				CODEX_DEFAULT_ENDPOINT,
 			);
-			const sibling = await transform(sessionA, "task B");
-			expect(first.prompt_cache_key).toMatch(/^ccflare-convo-/);
-			expect(later.prompt_cache_key).toBe(first.prompt_cache_key);
-			expect(sibling.prompt_cache_key).toMatch(/^ccflare-convo-/);
-			expect(sibling.prompt_cache_key).not.toBe(first.prompt_cache_key);
+			process.env.CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT = "100";
+			process.env.CCFLARE_CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT = "100";
+			process.env.CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT = "0";
+			expect(await transform(sessionA)).toEqual(baseline);
+			expect(
+				await transform(
+					sessionA,
+					"task A",
+					"shared system prompt",
+					undefined,
+					undefined,
+					undefined,
+					{},
+					CODEX_DEFAULT_ENDPOINT,
+				),
+			).toEqual(officialBaseline);
+			expect(officialBaseline.prompt_cache_key).toMatch(
+				/^ccflare-convo-[0-9a-f]{48}$/,
+			);
 		});
 
-		it("reuses and traces the canonical root key for treated compaction continuations only", async () => {
+		it("reuses and traces the canonical root key for compaction continuations", async () => {
 			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_CONTINUITY_PERCENT_ENV] = "100";
+			// Continuity is always on: the retired percentage cannot turn it off.
+			process.env.CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT = "0";
 			const traceDir = mkdtempSync(join(tmpdir(), "codex-continuity-trace-"));
 			process.env[CODEX_TRACE_DIR_ENV] = traceDir;
 			const tools = [{ name: "Agent", input_schema: { type: "object" } }];
@@ -9446,96 +9378,76 @@ describe("CodexProvider.transformRequestBody", () => {
 				rootMessages[2],
 				{ role: "user", content: "continue" },
 			];
-			const treatedRoot = await transform(
-				sessionA,
-				"start",
-				"shared system prompt",
-				rootMessages,
-				undefined,
-				tools,
-				{ "x-better-ccflare-request-id": "treated-root" },
-			);
-			const treatedCompacted = await transform(
-				sessionA,
-				"continue",
-				"shared system prompt",
-				compactedMessages,
-				undefined,
-				tools,
-				{ "x-better-ccflare-request-id": "treated-compacted" },
-			);
-			expect(treatedCompacted.prompt_cache_key).toBe(
-				treatedRoot.prompt_cache_key,
-			);
-			const treatedRecords = readTraceRecords(traceDir).filter(
-				(record) => record.phase === "request",
-			);
-			const treatedRootTrace = treatedRecords.find(
-				(record) => record.request_id === "treated-root",
-			);
-			const treatedCompactedTrace = treatedRecords.find(
-				(record) => record.request_id === "treated-compacted",
-			);
-			expect(treatedRootTrace).toMatchObject({
-				trace_schema_version: 22,
-				cache_key_continuity_applied: true,
-			});
-			expect(treatedCompactedTrace).toMatchObject({
-				trace_schema_version: 22,
-				cache_key_continuity_basis: "lineage_match",
-				cache_key_continuity_applied: true,
-			});
-			expect(treatedRootTrace?.continuity_evidence_id).toBeString();
-			expect(treatedCompactedTrace?.continuity_evidence_id).toBe(
-				treatedRootTrace?.continuity_evidence_id,
-			);
-			expect(treatedRootTrace?.canonical_conversation_id).toBe(
-				treatedRootTrace?.continuity_evidence_id,
-			);
-			expect(treatedCompactedTrace?.canonical_conversation_id).toBe(
-				treatedRootTrace?.canonical_conversation_id,
-			);
+			try {
+				const root = await transform(
+					sessionA,
+					"start",
+					"shared system prompt",
+					rootMessages,
+					undefined,
+					tools,
+					{ "x-better-ccflare-request-id": "continuity-root" },
+				);
+				const compacted = await transform(
+					sessionA,
+					"continue",
+					"shared system prompt",
+					compactedMessages,
+					undefined,
+					tools,
+					{ "x-better-ccflare-request-id": "continuity-compacted" },
+				);
+				expect(compacted.prompt_cache_key).toBe(root.prompt_cache_key);
+				const records = readTraceRecords(traceDir).filter(
+					(record) => record.phase === "request",
+				);
+				const rootTrace = records.find(
+					(record) => record.request_id === "continuity-root",
+				);
+				const compactedTrace = records.find(
+					(record) => record.request_id === "continuity-compacted",
+				);
+				expect(rootTrace).toMatchObject({
+					trace_schema_version: 23,
+					cache_key_continuity_applied: true,
+				});
+				expect(compactedTrace).toMatchObject({
+					trace_schema_version: 23,
+					cache_key_continuity_basis: "lineage_match",
+					cache_key_continuity_applied: true,
+				});
+				expect(rootTrace?.continuity_evidence_id).toBeString();
+				expect(compactedTrace?.continuity_evidence_id).toBe(
+					rootTrace?.continuity_evidence_id,
+				);
+				expect(rootTrace?.canonical_conversation_id).toBe(
+					rootTrace?.continuity_evidence_id,
+				);
+				expect(compactedTrace?.canonical_conversation_id).toBe(
+					rootTrace?.canonical_conversation_id,
+				);
 
-			delete process.env[CODEX_TRACE_DIR_ENV];
-			rmSync(traceDir, { recursive: true, force: true });
-			process.env[CODEX_CACHE_KEY_CONTINUITY_PERCENT_ENV] = "0";
-			resetOrchestrationElectionForTest();
-			const controlRoot = await transform(
-				sessionA,
-				"start",
-				"shared system prompt",
-				rootMessages,
-				undefined,
-				tools,
-			);
-			const controlCompacted = await transform(
-				sessionA,
-				"continue",
-				"shared system prompt",
-				compactedMessages,
-				undefined,
-				tools,
-			);
-			expect(controlCompacted.prompt_cache_key).not.toBe(
-				controlRoot.prompt_cache_key,
-			);
+				// With no root on record, the same compacted turn keeps the key
+				// derived from its own first input item.
+				resetOrchestrationElectionForTest();
+				const unmatched = await transform(
+					sessionA,
+					"continue",
+					"shared system prompt",
+					compactedMessages,
+					undefined,
+					tools,
+				);
+				expect(unmatched.prompt_cache_key).toMatch(/^ccflare-convo-/);
+				expect(unmatched.prompt_cache_key).not.toBe(root.prompt_cache_key);
+			} finally {
+				delete process.env[CODEX_TRACE_DIR_ENV];
+				rmSync(traceDir, { recursive: true, force: true });
+			}
 		});
 
-		it("shares one session key across sibling conversations in treatment", async () => {
+		it("session mode marks continuity inapplicable in traces", async () => {
 			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "100";
-			const first = await transform(sessionA, "task A");
-			const sibling = await transform(
-				sessionA,
-				"task B",
-				"other system prompt",
-			);
-			expect(sibling.prompt_cache_key).toBe(first.prompt_cache_key);
-		});
-
-		it("gives the explicit session override precedence and marks continuity inapplicable", async () => {
-			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "0";
 			process.env[CODEX_CACHE_KEY_MODE_ENV] = "session";
 			const traceDir = mkdtempSync(join(tmpdir(), "codex-session-trace-"));
 			process.env[CODEX_TRACE_DIR_ENV] = traceDir;
@@ -9566,255 +9478,14 @@ describe("CodexProvider.transformRequestBody", () => {
 			}
 		});
 
-		it("preserves the session-key empty-input fallback", async () => {
+		it("falls back to the session key when there is no input", async () => {
 			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "0";
 			const body = await transform(sessionA, "", "shared system prompt", []);
 			expect(body.prompt_cache_key).toMatch(/^ccflare-session-/);
 		});
 
-		it("keeps zero percent byte-for-byte compatible with the unset canary", async () => {
-			const baseline = await transform(sessionA);
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "0";
-			const explicitZero = await transform(sessionA);
-			expect(explicitZero).toEqual(baseline);
-		});
-
-		it("keeps zero prefix-shard byte-for-byte compatible and emits a digest on the official endpoint", async () => {
+		it("attaches the key only at OpenAI prompt-cache endpoints", async () => {
 			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			const baseline = await transform(
-				sessionA,
-				"task A",
-				"shared system prompt",
-				undefined,
-				undefined,
-				undefined,
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "0";
-			const explicitZero = await transform(
-				sessionA,
-				"task A",
-				"shared system prompt",
-				undefined,
-				undefined,
-				undefined,
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			expect(explicitZero).toEqual(baseline);
-			expect(baseline.prompt_cache_key).toMatch(/^ccflare-convo-[0-9a-f]{48}$/);
-
-			delete process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV];
-			const emptyToolsBaseline = await transform(
-				sessionA,
-				"task A",
-				"shared system prompt",
-				undefined,
-				undefined,
-				[],
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "0";
-			const emptyToolsZero = await transform(
-				sessionA,
-				"task A",
-				"shared system prompt",
-				undefined,
-				undefined,
-				[],
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			expect(emptyToolsZero).toEqual(emptyToolsBaseline);
-			expect(emptyToolsBaseline.tools).toBeUndefined();
-
-			process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "100";
-			const treated = await transform(
-				sessionA,
-				"task A",
-				"shared system prompt",
-				undefined,
-				undefined,
-				undefined,
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			expect(treated.prompt_cache_key).toMatch(/^[0-9a-f]{64}$/);
-		});
-
-		it("labels prefix-shard treatment separately in privacy-safe traces", async () => {
-			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "100";
-			const traceDir = mkdtempSync(join(tmpdir(), "codex-prefix-shard-trace-"));
-			process.env[CODEX_TRACE_DIR_ENV] = traceDir;
-			try {
-				await transform(
-					sessionA,
-					"cold sibling task",
-					"shared system prompt",
-					undefined,
-					undefined,
-					undefined,
-					{ "x-better-ccflare-request-id": "prefix-shard-treatment" },
-					CODEX_DEFAULT_ENDPOINT,
-				);
-				const trace = readTraceRecords(traceDir).find(
-					(record) => record.request_id === "prefix-shard-treatment",
-				);
-				expect(trace).toMatchObject({
-					cache_key_mode: "conversation",
-					cache_key_assignment: "conversation",
-					cache_key_assignment_source: "prefix_shard",
-				});
-			} finally {
-				delete process.env[CODEX_TRACE_DIR_ENV];
-				rmSync(traceDir, { recursive: true, force: true });
-			}
-		});
-
-		it("reuses one of eight shared prefix keys only for matching deterministic shards", async () => {
-			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "100";
-			const keys = new Map<string, string[]>();
-			for (let index = 0; index < 96; index++) {
-				const content = `sibling conversation ${index}`;
-				const body = await transform(
-					sessionA,
-					content,
-					"shared system prompt",
-					undefined,
-					undefined,
-					undefined,
-					{},
-					CODEX_DEFAULT_ENDPOINT,
-				);
-				const key = body.prompt_cache_key as string;
-				expect(key).toMatch(/^[0-9a-f]{64}$/);
-				keys.set(key, [...(keys.get(key) ?? []), content]);
-			}
-			expect(keys.size).toBe(8);
-
-			const [sharedKey, conversations] = [...keys.entries()].find(
-				([, values]) => values.length > 1,
-			) ?? ["", []];
-			expect(conversations.length).toBeGreaterThan(1);
-			for (const content of conversations) {
-				const body = await transform(
-					sessionA,
-					content,
-					"shared system prompt",
-					undefined,
-					undefined,
-					undefined,
-					{},
-					CODEX_DEFAULT_ENDPOINT,
-				);
-				expect(body.prompt_cache_key).toBe(sharedKey);
-			}
-			const distinctKey = [...keys.keys()].find((key) => key !== sharedKey);
-			expect(distinctKey).toBeDefined();
-		});
-
-		it("keeps a treated conversation stable and rotates its shared key on prefix changes", async () => {
-			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "100";
-			const baseArgs = [
-				sessionA,
-				"first task",
-				"shared system prompt",
-				undefined,
-				undefined,
-				undefined,
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			] as const;
-			const first = await transform(...baseArgs);
-			const later = await transform(
-				sessionA,
-				"first task",
-				"shared system prompt",
-				[
-					{ role: "user", content: "first task" },
-					{ role: "assistant", content: "working" },
-					{ role: "user", content: "continue" },
-				],
-				undefined,
-				undefined,
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			expect(later.prompt_cache_key).toBe(first.prompt_cache_key);
-
-			const instructions = await transform(
-				sessionA,
-				"first task",
-				"different system prompt",
-				undefined,
-				undefined,
-				undefined,
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			const absentTools = await transform(...baseArgs);
-			const emptyTools = await transform(
-				sessionA,
-				"first task",
-				"shared system prompt",
-				undefined,
-				undefined,
-				[],
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			const changedTool = await transform(
-				sessionA,
-				"first task",
-				"shared system prompt",
-				undefined,
-				undefined,
-				[
-					{
-						name: "Lookup",
-						description: "Lookup a value",
-						input_schema: {
-							type: "object",
-							properties: { id: { type: "string" } },
-						},
-					},
-				],
-				{},
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			const changedModel = await transform(
-				sessionA,
-				"first task",
-				"shared system prompt",
-				undefined,
-				undefined,
-				undefined,
-				{ "x-better-ccflare-final-model": "gpt-5.5" },
-				CODEX_DEFAULT_ENDPOINT,
-			);
-			expect(instructions.prompt_cache_key).not.toBe(
-				absentTools.prompt_cache_key,
-			);
-			expect(emptyTools.prompt_cache_key).not.toBe(
-				absentTools.prompt_cache_key,
-			);
-			expect(changedTool.prompt_cache_key).not.toBe(
-				absentTools.prompt_cache_key,
-			);
-			expect(changedModel.prompt_cache_key).not.toBe(
-				absentTools.prompt_cache_key,
-			);
-		});
-
-		it("limits treatment to conversation-mode requests at the exact Codex subscription endpoint", async () => {
-			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-			process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "100";
 			const official = await transform(
 				sessionA,
 				"task A",
@@ -9865,7 +9536,7 @@ describe("CodexProvider.transformRequestBody", () => {
 				{},
 				lookalikeEndpoint,
 			);
-			expect(official.prompt_cache_key).toMatch(/^[0-9a-f]{64}$/);
+			expect(official.prompt_cache_key).toMatch(/^ccflare-convo-[0-9a-f]{48}$/);
 			expect(api.prompt_cache_key).toMatch(/^ccflare-convo-[0-9a-f]{48}$/);
 			expect(custom.prompt_cache_key).toBeUndefined();
 			expect(lookalike.prompt_cache_key).toBeUndefined();
@@ -9885,41 +9556,9 @@ describe("CodexProvider.transformRequestBody", () => {
 					)
 				).prompt_cache_key,
 			).toMatch(/^ccflare-session-[0-9a-f]{48}$/);
-			delete process.env[CODEX_CACHE_KEY_MODE_ENV];
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "100";
-			expect(
-				(
-					await transform(
-						sessionA,
-						"task A",
-						"shared system prompt",
-						undefined,
-						undefined,
-						undefined,
-						{},
-						CODEX_DEFAULT_ENDPOINT,
-					)
-				).prompt_cache_key,
-			).toMatch(/^ccflare-session-[0-9a-f]{48}$/);
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "0";
-			expect(
-				(
-					await transform(
-						sessionA,
-						"",
-						"shared system prompt",
-						[],
-						undefined,
-						undefined,
-						{},
-						CODEX_DEFAULT_ENDPOINT,
-					)
-				).prompt_cache_key,
-			).toMatch(/^ccflare-session-[0-9a-f]{48}$/);
 		});
 
 		it("re-evaluates endpoint eligibility for the selected account", async () => {
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "100";
 			const eligible = await transform(sessionA);
 			const customAccount = {
 				name: "custom-codex",
@@ -9932,17 +9571,11 @@ describe("CodexProvider.transformRequestBody", () => {
 				undefined,
 				customAccount,
 			);
-			expect(eligible.prompt_cache_key).toMatch(/^ccflare-session-/);
+			expect(eligible.prompt_cache_key).toMatch(/^ccflare-convo-/);
 			expect(ineligible.prompt_cache_key).toBeUndefined();
 		});
 
-		it("does not assign malformed metadata or bypass explicit disable", async () => {
-			process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "100";
-			process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "0";
-			const disabled = await transform(sessionA);
-			expect(disabled.prompt_cache_key).toBeUndefined();
-
-			delete process.env[CODEX_PROMPT_CACHE_KEY_ENV];
+		it("omits the key for a session id that is not a UUID", async () => {
 			const malformed = await transform("not-a-uuid");
 			expect(malformed.prompt_cache_key).toBeUndefined();
 		});
@@ -9972,7 +9605,6 @@ describe("CodexProvider.transformRequestBody", () => {
 
 	it("rotates only an official subscription cache key for a cache-lane rescue", async () => {
 		process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-		process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "100";
 		const provider = new CodexProvider();
 		const payload = JSON.stringify({
 			model: "claude-opus-4-8",
@@ -10020,7 +9652,7 @@ describe("CodexProvider.transformRequestBody", () => {
 			"logical-request-b",
 		);
 
-		expect(initial.prompt_cache_key).toMatch(/^[0-9a-f]{64}$/);
+		expect(initial.prompt_cache_key).toMatch(/^ccflare-convo-[0-9a-f]{48}$/);
 		expect(repeatedInitial.prompt_cache_key).toBe(initial.prompt_cache_key);
 		expect(rescue.prompt_cache_key).toMatch(/^ccflare-rescue-[0-9a-f]{48}$/);
 		expect(rescue.prompt_cache_key).not.toBe(initial.prompt_cache_key);
@@ -10086,7 +9718,6 @@ describe("CodexProvider.transformRequestBody", () => {
 	});
 
 	it("rotates and traces a precommit SSE retry under its own attempt cause", async () => {
-		process.env[CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT_ENV] = "100";
 		const traceDir = mkdtempSync(join(tmpdir(), "codex-trace-"));
 		process.env[CODEX_TRACE_DIR_ENV] = traceDir;
 		const payload = JSON.stringify({
@@ -10128,7 +9759,7 @@ describe("CodexProvider.transformRequestBody", () => {
 				"physical-sse-retry",
 			);
 
-			expect(initial.prompt_cache_key).toMatch(/^[0-9a-f]{64}$/);
+			expect(initial.prompt_cache_key).toMatch(/^ccflare-convo-[0-9a-f]{48}$/);
 			expect(retry.prompt_cache_key).toMatch(/^ccflare-rescue-[0-9a-f]{48}$/);
 			expect(retry.prompt_cache_key).not.toBe(initial.prompt_cache_key);
 			const retryRecord = readTraceRecords(traceDir).find(

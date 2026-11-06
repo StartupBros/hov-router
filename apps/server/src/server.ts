@@ -150,7 +150,6 @@ import {
 	BodyAdmissionController,
 	withBodyAdmission,
 } from "./body-admission";
-import { logCodexWebSocketRemovedWarning } from "./codex-websocket-removed-warning";
 import {
 	EventLoopStallMonitor,
 	formatEventLoopStallReport,
@@ -160,6 +159,7 @@ import {
 	createManagedIngress,
 	malformedRequestUrlResponse,
 } from "./managed-ingress";
+import { logRemovedCodexSettingsWarnings } from "./removed-codex-settings-warning";
 import {
 	describeRetentionSweepStop,
 	type RetentionSweepPacer,
@@ -1697,8 +1697,9 @@ export default async function startServer(options?: {
 	// Auto-refresh was removed; name the accounts that still have it stored on.
 	// The helper logs a failed query rather than throwing.
 	await logAutoRefreshRemovedWarning(db, log);
-	// The Codex WebSocket transport was removed; name its variables still set.
-	logCodexWebSocketRemovedWarning(process.env, log);
+	// Removed Codex features (WebSocket transport, cache canaries); name their
+	// variables still set.
+	logRemovedCodexSettingsWarnings(process.env, log);
 	// Each pass reads the destination fresh and does nothing while it is off
 	// or blocked, so the scheduler always runs.
 	const stopMemberNotices = startMemberNoticeScheduler((signal) =>

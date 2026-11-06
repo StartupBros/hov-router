@@ -8,9 +8,6 @@ import {
 	setSystemTime,
 	spyOn,
 } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { CODEX_LOGICAL_MODEL_FAMILY_HEADER } from "@better-ccflare/http-common";
 import type {
 	ProviderAttemptPlan,
@@ -23,18 +20,13 @@ import {
 	monotonicNowNs,
 	registerManagedTerminal,
 } from "../../../../../scripts/ccflare-managed-timing.mjs";
-import { CACHE_REPLAY_MODEL_HEADER } from "../../cache-transport-staging";
 import type { ModelFallbackExecutionPolicy } from "../proxy-operations";
 import type { ProxyContext } from "../proxy-types";
 
 // Source worktrees intentionally exclude generated database worker bundles.
 // This harness injects dbOps and never constructs these classes.
 const usageCollectorModule = await import("../../usage-collector");
-const {
-	getProvider,
-	isCodexExplicitCacheBreakpointSuppressed,
-	resetCodexExplicitBreakpointSuppressionsForTest,
-} = await import("@better-ccflare/providers");
+const { getProvider } = await import("@better-ccflare/providers");
 const { ForceRouteUnavailableError, selectAccountsForRequest } = await import(
 	"../account-selector"
 );
@@ -112,28 +104,6 @@ function makeRequestBody(): ArrayBuffer {
 				user_id:
 					"user_11111111-1111-4111-8111-111111111111_account__session_11111111-1111-4111-8111-111111111111",
 			},
-			tools: [
-				{
-					name: "Lookup",
-					description: "Lookup a value",
-					input_schema: { type: "object" },
-				},
-			],
-			max_tokens: 16,
-			stream: true,
-		}),
-	).buffer;
-}
-
-function makeConversationRequestBody(
-	messages: unknown[],
-	sessionId = "11111111-1111-4111-8111-111111111111",
-): ArrayBuffer {
-	return new TextEncoder().encode(
-		JSON.stringify({
-			model: "claude-sonnet-4-5",
-			messages,
-			metadata: { user_id: JSON.stringify({ session_id: sessionId }) },
 			tools: [
 				{
 					name: "Lookup",
@@ -323,74 +293,16 @@ async function runProxy(
 	);
 }
 
-function makeGpt56RequestBody(): ArrayBuffer {
-	return new TextEncoder().encode(
-		JSON.stringify({
-			model: "claude-sonnet-4-5",
-			messages: [
-				{
-					role: "user",
-					content: [
-						{
-							type: "text",
-							text: "stable cached prefix",
-							cache_control: { type: "ephemeral" },
-						},
-					],
-				},
-				{ role: "user", content: "current turn" },
-			],
-			metadata: {
-				user_id: JSON.stringify({
-					session_id: "11111111-1111-4111-8111-111111111111",
-				}),
-			},
-			max_tokens: 16,
-			stream: true,
-		}),
-	).buffer;
-}
-
-function breakpointRejectionResponse(
-	message = "Unknown field: prompt_cache_breakpoint is not supported for this model",
-): Response {
-	return new Response(JSON.stringify({ error: { message } }), {
-		status: 400,
-		headers: { "content-type": "application/json" },
-	});
-}
-
-function readRequestTrace(
-	dir: string,
-	requestId: string,
-): Record<string, unknown> {
-	for (const file of readdirSync(dir).filter((name) =>
-		name.endsWith(".jsonl"),
-	)) {
-		for (const line of readFileSync(join(dir, file), "utf8").split("\n")) {
-			if (!line.trim()) continue;
-			const trace = JSON.parse(line) as Record<string, unknown>;
-			if (trace.phase === "request" && trace.request_id === requestId) {
-				return trace;
-			}
-		}
-	}
-	throw new Error(`missing request trace for ${requestId}`);
-}
-
 describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 	let originalFetch: typeof globalThis.fetch;
 	let originalPromptCacheKey: string | undefined;
 	let originalCacheKeyMode: string | undefined;
-	let originalPrefixShardPercent: string | undefined;
 	let originalAnthropicPrecommitTimeout: string | undefined;
 
 	beforeEach(() => {
 		originalFetch = globalThis.fetch;
 		originalPromptCacheKey = process.env.CCFLARE_CODEX_PROMPT_CACHE_KEY;
 		originalCacheKeyMode = process.env.CCFLARE_CODEX_CACHE_KEY_MODE;
-		originalPrefixShardPercent =
-			process.env.CCFLARE_CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT;
 		originalAnthropicPrecommitTimeout =
 			process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS;
 		process.env.CCFLARE_CODEX_PROMPT_CACHE_KEY = "1";
@@ -408,12 +320,6 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 			delete process.env.CCFLARE_CODEX_CACHE_KEY_MODE;
 		} else {
 			process.env.CCFLARE_CODEX_CACHE_KEY_MODE = originalCacheKeyMode;
-		}
-		if (originalPrefixShardPercent === undefined) {
-			delete process.env.CCFLARE_CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT;
-		} else {
-			process.env.CCFLARE_CODEX_CACHE_KEY_PREFIX_SHARD_PERCENT =
-				originalPrefixShardPercent;
 		}
 		if (originalAnthropicPrecommitTimeout === undefined) {
 			delete process.env.CCFLARE_ANTHROPIC_PRECOMMIT_TIMEOUT_MS;
@@ -1113,345 +1019,6 @@ describe("proxyWithAccount: Codex attempt dispatch boundary", () => {
 		expect(elapsedMs).toBeGreaterThanOrEqual(60);
 		expect(elapsedMs).toBeLessThan(250);
 		expect(response).toBeNull();
-	});
-});
-
-describe("proxyWithAccount: GPT-5.6 explicit breakpoint compatibility retry", () => {
-	let originalFetch: typeof globalThis.fetch;
-	let originalPercent: string | undefined;
-	let originalCacheKeyMode: string | undefined;
-
-	beforeEach(() => {
-		originalFetch = globalThis.fetch;
-		originalPercent =
-			process.env.CCFLARE_CODEX_GPT56_EXPLICIT_CACHE_BREAKPOINT_PERCENT;
-		originalCacheKeyMode = process.env.CCFLARE_CODEX_CACHE_KEY_MODE;
-		process.env.CCFLARE_CODEX_GPT56_EXPLICIT_CACHE_BREAKPOINT_PERCENT = "100";
-		process.env.CCFLARE_CODEX_PROMPT_CACHE_KEY = "1";
-		resetCodexExplicitBreakpointSuppressionsForTest();
-	});
-
-	afterEach(() => {
-		globalThis.fetch = originalFetch;
-		if (originalPercent === undefined) {
-			delete process.env.CCFLARE_CODEX_GPT56_EXPLICIT_CACHE_BREAKPOINT_PERCENT;
-		} else {
-			process.env.CCFLARE_CODEX_GPT56_EXPLICIT_CACHE_BREAKPOINT_PERCENT =
-				originalPercent;
-		}
-		delete process.env.CCFLARE_CODEX_PROMPT_CACHE_KEY;
-		if (originalCacheKeyMode === undefined) {
-			delete process.env.CCFLARE_CODEX_CACHE_KEY_MODE;
-		} else {
-			process.env.CCFLARE_CODEX_CACHE_KEY_MODE = originalCacheKeyMode;
-		}
-		delete process.env.CCFLARE_CODEX_TRACE_DIR;
-		resetCodexExplicitBreakpointSuppressionsForTest();
-		mock.restore();
-	});
-
-	it("gates and traces the breakpoint from the trusted cache-replay physical model", async () => {
-		installUsageCollector();
-		for (const testCase of [
-			{
-				name: "demotion",
-				mappedModel: "gpt-5.6-sol",
-				physicalModel: "gpt-5.5",
-				expectsBreakpoint: false,
-				expectedCanary: "ineligible",
-				expectedAction: "skip_non_gpt56",
-			},
-			{
-				name: "promotion",
-				mappedModel: "gpt-5.5",
-				physicalModel: "gpt-5.6-sol",
-				expectsBreakpoint: true,
-				expectedCanary: "treatment",
-				expectedAction: "placed_source_marker",
-			},
-		] as const) {
-			const traceDir = mkdtempSync(join(tmpdir(), "codex-breakpoint-replay-"));
-			try {
-				process.env.CCFLARE_CODEX_TRACE_DIR = traceDir;
-				const outbound: Array<{
-					body: Record<string, unknown>;
-					finalModelHeader: string | null;
-				}> = [];
-				globalThis.fetch = mock(async (request: Request) => {
-					outbound.push({
-						body: (await request.clone().json()) as Record<string, unknown>,
-						finalModelHeader: request.headers.get(
-							"x-better-ccflare-final-model",
-						),
-					});
-					return new Response(
-						JSON.stringify({
-							id: `response-${testCase.name}`,
-							model: testCase.physicalModel,
-						}),
-						{ status: 200, headers: { "content-type": "application/json" } },
-					);
-				});
-
-				const account = makeCodexAccount({
-					id: `codex-replay-${testCase.name}`,
-					name: `codex-replay-${testCase.name}`,
-					model_mappings: JSON.stringify({ sonnet: testCase.mappedModel }),
-				});
-				const body = makeGpt56RequestBody();
-				const requestId = `codex-breakpoint-replay-${testCase.name}`;
-				const response = await runProxy(
-					makeRequest(body, {
-						[CACHE_REPLAY_MODEL_HEADER]: testCase.physicalModel,
-					}),
-					body,
-					makePolicy(1_000),
-					requestId,
-					account,
-				);
-
-				expect(response?.status).toBe(200);
-				expect(outbound).toHaveLength(1);
-				expect(outbound[0]?.body.model).toBe(testCase.physicalModel);
-				expect(outbound[0]?.finalModelHeader).toBeNull();
-				expect(
-					JSON.stringify(outbound[0]?.body).includes("prompt_cache_breakpoint"),
-				).toBe(testCase.expectsBreakpoint);
-
-				const trace = readRequestTrace(traceDir, requestId);
-				expect(trace.model_out).toBe(testCase.physicalModel);
-				expect(trace.explicit_breakpoint_canary).toBe(testCase.expectedCanary);
-				expect(trace.explicit_breakpoint_action).toBe(testCase.expectedAction);
-			} finally {
-				delete process.env.CCFLARE_CODEX_TRACE_DIR;
-				rmSync(traceDir, { recursive: true, force: true });
-			}
-		}
-	});
-
-	it("retries one pre-content 400 without the marker and suppresses that account/model", async () => {
-		installUsageCollector();
-		const codex = getProvider("codex");
-		const anthropic = getProvider("anthropic");
-		if (!codex || !anthropic) throw new Error("Providers are not registered");
-		const proxyContext = { ...makeProxyContext(), provider: anthropic };
-		const observedBodies: unknown[] = [];
-		const observedStatuses: number[] = [];
-		const observeUpstream = spyOn(codex, "observeUpstream").mockImplementation(
-			async (request) => {
-				observedBodies.push(await request.clone().json());
-				return {
-					response: (response) => {
-						observedStatuses.push(response.status);
-						return response;
-					},
-					error: () => undefined,
-				};
-			},
-		);
-		process.env.CCFLARE_CODEX_CACHE_KEY_MODE = "session";
-		const outbound: Array<Record<string, unknown>> = [];
-		const httpReservedHeaderNames: string[][] = [];
-		globalThis.fetch = mock(async (request: Request) => {
-			httpReservedHeaderNames.push(
-				[...request.headers.keys()].filter((name) =>
-					name.startsWith("x-better-ccflare-"),
-				),
-			);
-			outbound.push((await request.clone().json()) as Record<string, unknown>);
-			if (outbound.length === 1) {
-				return new Response(
-					JSON.stringify({
-						error: {
-							message:
-								"Unknown field: prompt_cache_breakpoint is not supported for this model",
-						},
-					}),
-					{ status: 400, headers: { "content-type": "application/json" } },
-				);
-			}
-			return new Response(
-				[
-					'event: response.created\ndata: {"type":"response.created","response":{"id":"resp_ok","model":"gpt-5.6-sol"}}\n\n',
-					'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"ok"}\n\n',
-					'event: response.completed\ndata: {"type":"response.completed","response":{"id":"resp_ok","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":10,"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":0}}}}\n\n',
-					"data: [DONE]\n\n",
-				].join(""),
-				{
-					status: 200,
-					headers: { "content-type": "text/event-stream" },
-				},
-			);
-		});
-
-		const account = makeCodexAccount({
-			model_mappings: JSON.stringify({ sonnet: "gpt-5.6-sol" }),
-		});
-		const body = makeConversationRequestBody([
-			{
-				role: "user",
-				content: [
-					{
-						type: "text",
-						text: "stable cached prefix",
-						cache_control: { type: "ephemeral" },
-					},
-				],
-			},
-			{
-				role: "assistant",
-				content: [
-					{
-						type: "tool_use",
-						id: "tool-lineage-breakpoint-retry",
-						name: "Lookup",
-						input: { value: "retry" },
-					},
-				],
-			},
-			{
-				role: "user",
-				content: [
-					{
-						type: "tool_result",
-						tool_use_id: "tool-lineage-breakpoint-retry",
-						content: "retry result",
-					},
-				],
-			},
-		]);
-		const response = await runProxy(
-			makeRequest(body),
-			body,
-			makePolicy(1_000),
-			"codex-breakpoint-400",
-			account,
-			undefined,
-			undefined,
-			undefined,
-			proxyContext,
-		);
-
-		expect(outbound).toHaveLength(2);
-		// Both physical HTTP attempts use the selected provider's observer,
-		// including the repaired wire body produced by the compatibility retry.
-		expect(observeUpstream).toHaveBeenCalledTimes(2);
-		expect(observedBodies).toEqual(outbound);
-		expect(observedStatuses).toEqual([400, 200]);
-		expect(httpReservedHeaderNames).toEqual([[], []]);
-		expect(response?.status).toBe(200);
-		expect(JSON.stringify(outbound[0])).toContain("prompt_cache_breakpoint");
-		expect(JSON.stringify(outbound[1])).not.toContain(
-			"prompt_cache_breakpoint",
-		);
-		expect(outbound[1]?.prompt_cache_key).toBe(outbound[0]?.prompt_cache_key);
-		const firstWithoutMarker = structuredClone(outbound[0]);
-		for (const item of firstWithoutMarker.input as Array<
-			Record<string, unknown>
-		>) {
-			if (!Array.isArray(item.content)) continue;
-			for (const block of item.content as Array<Record<string, unknown>>) {
-				delete block.prompt_cache_breakpoint;
-			}
-		}
-		expect(outbound[1]?.input).toEqual(firstWithoutMarker.input);
-		expect(outbound[1]?.tools).toEqual(outbound[0]?.tools);
-		expect(
-			isCodexExplicitCacheBreakpointSuppressed(account.id, "gpt-5.6-sol"),
-		).toBeTrue();
-
-		// The learned suppression keeps the marker off the next turn on this
-		// account/model without another rejection.
-		const followUp = await runProxy(
-			makeRequest(body),
-			body,
-			makePolicy(1_000),
-			"codex-breakpoint-400-follow-up",
-			account,
-			undefined,
-			undefined,
-			undefined,
-			proxyContext,
-		);
-		expect(followUp?.status).toBe(200);
-		expect(outbound).toHaveLength(3);
-		expect(JSON.stringify(outbound[2])).not.toContain(
-			"prompt_cache_breakpoint",
-		);
-	});
-
-	it("never retries a generic 400 or a prompt literal without an injected marker", async () => {
-		installUsageCollector();
-		process.env.CCFLARE_CODEX_GPT56_EXPLICIT_CACHE_BREAKPOINT_PERCENT = "0";
-		let calls = 0;
-		globalThis.fetch = mock(async () => {
-			calls++;
-			return breakpointRejectionResponse();
-		});
-		const parsed = JSON.parse(
-			new TextDecoder().decode(makeGpt56RequestBody()),
-		) as Record<string, unknown>;
-		const messages = parsed.messages as Array<Record<string, unknown>>;
-		messages[0] = {
-			role: "user",
-			content:
-				'The string "prompt_cache_breakpoint" is only ordinary prompt text.',
-		};
-		const body = new TextEncoder().encode(JSON.stringify(parsed)).buffer;
-		const account = makeCodexAccount({
-			model_mappings: JSON.stringify({ sonnet: "gpt-5.6-sol" }),
-		});
-		const response = await runProxy(
-			makeRequest(body),
-			body,
-			makePolicy(1_000),
-			"codex-breakpoint-prompt-literal",
-			account,
-		);
-		expect(calls).toBe(1);
-		expect(response?.status).toBe(400);
-
-		calls = 0;
-		globalThis.fetch = mock(async () => {
-			calls++;
-			return new Response(
-				JSON.stringify({ error: { message: "unrelated invalid parameter" } }),
-				{ status: 400, headers: { "content-type": "application/json" } },
-			);
-		});
-		process.env.CCFLARE_CODEX_GPT56_EXPLICIT_CACHE_BREAKPOINT_PERCENT = "100";
-		const genericBody = makeGpt56RequestBody();
-		const generic = await runProxy(
-			makeRequest(genericBody),
-			genericBody,
-			makePolicy(1_000),
-			"codex-breakpoint-generic-400",
-			account,
-		);
-		expect(calls).toBe(1);
-		expect(generic?.status).toBe(400);
-	});
-
-	it("bounds an exact compatibility rejection to one retry", async () => {
-		installUsageCollector();
-		let calls = 0;
-		globalThis.fetch = mock(async () => {
-			calls++;
-			return breakpointRejectionResponse();
-		});
-		const account = makeCodexAccount({
-			model_mappings: JSON.stringify({ sonnet: "gpt-5.6-sol" }),
-		});
-		const body = makeGpt56RequestBody();
-		const response = await runProxy(
-			makeRequest(body),
-			body,
-			makePolicy(1_000),
-			"codex-breakpoint-second-400",
-			account,
-		);
-		expect(calls).toBe(2);
-		expect(response?.status).toBe(400);
 	});
 });
 

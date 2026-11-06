@@ -2,26 +2,23 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
 	acquireCachePacing,
 	CACHE_PACING_MS_ENV,
-	CODEX_CACHE_PACING_SETTLE_MS_ENV,
-	CODEX_PACING_BYPASS_PERCENT_ENV,
 	derivePacingCohortKey,
 	finishPacing,
 	getCachePacingRouteStats,
 	getCachePacingStats,
-	isCodexPacingBypassCandidate,
 	observeCachePacing,
 	readCachePacingMs,
-	readCodexCachePacingSettleMs,
-	readCodexPacingBypassPercent,
 	recordCachePacingRoute,
 	resetCachePacing,
 } from "../cache-pacing";
 
+// Retired in schema 23: the server warns once at startup and nothing reads it.
+const RETIRED_CODEX_SETTLE_MS_ENV = "CCFLARE_CODEX_CACHE_PACING_SETTLE_MS";
+
 afterEach(() => {
 	resetCachePacing();
 	delete process.env[CACHE_PACING_MS_ENV];
-	delete process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV];
-	delete process.env[CODEX_PACING_BYPASS_PERCENT_ENV];
+	delete process.env[RETIRED_CODEX_SETTLE_MS_ENV];
 });
 
 function sseResponse(chunks: string[], delayMs = 0): Response {
@@ -102,37 +99,8 @@ describe("readCachePacingMs", () => {
 	});
 });
 
-describe("readCodexCachePacingSettleMs", () => {
-	test("defaults off, parses unsigned integers strictly, and clamps at ten seconds", () => {
-		expect(readCodexCachePacingSettleMs()).toBe(0);
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "0";
-		expect(readCodexCachePacingSettleMs()).toBe(0);
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "6000";
-		expect(readCodexCachePacingSettleMs()).toBe(6_000);
-		for (const invalid of ["5ms", "1e3", "+5", "-1", "1.5", " 5", "5 "]) {
-			process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = invalid;
-			expect(readCodexCachePacingSettleMs()).toBe(0);
-		}
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "999999";
-		expect(readCodexCachePacingSettleMs()).toBe(10_000);
-	});
-});
-
-describe("Codex pacing bypass cohort", () => {
-	test("defaults off, parses strictly, and clamps to 100", () => {
-		expect(readCodexPacingBypassPercent()).toBe(0);
-		for (const invalid of ["junk", "1e2", "-1", "1.5"]) {
-			process.env[CODEX_PACING_BYPASS_PERCENT_ENV] = invalid;
-			expect(readCodexPacingBypassPercent()).toBe(0);
-		}
-		process.env[CODEX_PACING_BYPASS_PERCENT_ENV] = "17";
-		expect(readCodexPacingBypassPercent()).toBe(17);
-		process.env[CODEX_PACING_BYPASS_PERCENT_ENV] = "999";
-		expect(readCodexPacingBypassPercent()).toBe(100);
-	});
-
-	test("assignment is deterministic by conversation and missing identity stays control", () => {
-		process.env[CACHE_PACING_MS_ENV] = "15000";
+describe("derivePacingCohortKey", () => {
+	test("is stable across a conversation's turns and distinct across siblings", () => {
 		const turn1 = derivePacingCohortKey("session-a", {
 			system: "same system",
 			messages: [{ role: "user", content: "task A" }],
@@ -149,60 +117,11 @@ describe("Codex pacing bypass cohort", () => {
 			system: "same system",
 			messages: [{ role: "user", content: "task B" }],
 		});
+		expect(turn1).toMatch(/^[a-f0-9]{64}$/);
 		expect(turn1).toBe(turn2);
 		expect(sibling).not.toBe(turn1);
 		expect(derivePacingCohortKey(null, { messages: [] })).toBeNull();
-		expect(isCodexPacingBypassCandidate(null, 100)).toBe(false);
-		expect(isCodexPacingBypassCandidate(turn1, 0)).toBe(false);
-		expect(isCodexPacingBypassCandidate(turn1, 100)).toBe(true);
-		const first = isCodexPacingBypassCandidate(turn1, 37);
-		for (let i = 0; i < 20; i++) {
-			expect(isCodexPacingBypassCandidate(turn1, 37)).toBe(first);
-		}
-	});
-
-	test("records treatment, control, and crossovers separately", () => {
-		const codex = {
-			accountId: "pro",
-			accountName: "pro-primary",
-			provider: "codex",
-		};
-		const anthropic = {
-			accountId: "max",
-			accountName: "max-secondary",
-			provider: "anthropic",
-		};
-		recordCachePacingRoute(null, codex, {
-			candidate: true,
-			assignedBypass: true,
-		});
-		const control = {
-			key: "k",
-			role: "leader" as const,
-			waitedMs: 0,
-			releaseReason: null,
-			slot: null,
-		};
-		recordCachePacingRoute(control, codex, {
-			candidate: true,
-			assignedBypass: false,
-		});
-		// The ordinary non-treatment population is also part of control.
-		recordCachePacingRoute(control, codex, {
-			candidate: true,
-			assignedBypass: false,
-		});
-		recordCachePacingRoute(null, anthropic, {
-			candidate: true,
-			assignedBypass: true,
-		});
-
-		const routes = getCachePacingRouteStats();
-		expect(routes.pro.canaryBypassServed).toBe(1);
-		expect(routes.pro.canaryControlServed).toBe(2);
-		expect(routes.pro.canaryCrossovers).toBe(0);
-		expect(routes.max.canaryCrossovers).toBe(1);
-		expect(routes.max.canaryBypassServed).toBe(0);
+		expect(derivePacingCohortKey("session-a", { messages: [] })).toBeNull();
 	});
 });
 
@@ -290,39 +209,17 @@ describe("acquireCachePacing", () => {
 		expect(wrapped.headers.get("content-type")).toBe("text/event-stream");
 	});
 
-	test("Anthropic releases a follower at the first chunk even when Codex settling is enabled", async () => {
+	test("Codex releases a follower at the first chunk even with the retired settle env set", async () => {
 		process.env[CACHE_PACING_MS_ENV] = "500";
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "100";
+		process.env[RETIRED_CODEX_SETTLE_MS_ENV] = "200";
 		const leader = await observeCachePacing({
-			sessionKey: "anthropic-first",
-			model: "m",
-		});
-		route(leader, "anthropic");
-		const follower = observeCachePacing({
-			sessionKey: "anthropic-first",
-			model: "m",
-		});
-		const source = controlledResponse();
-		const reader = requireReader(
-			finishPacing(leader?.slot ?? null, source.response),
-		);
-		source.enqueue("first");
-		expect(new TextDecoder().decode((await reader.read()).value)).toBe("first");
-		await follower;
-		source.close();
-	});
-
-	test("Codex holds through clean EOF, preserves chunks, then settles before releasing", async () => {
-		process.env[CACHE_PACING_MS_ENV] = "500";
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "60";
-		const leader = await observeCachePacing({
-			sessionKey: "codex-terminal",
-			model: "m",
+			sessionKey: "codex-first",
+			model: "gpt-5.6-sol",
 		});
 		route(leader, "codex");
 		const follower = observeCachePacing({
-			sessionKey: "codex-terminal",
-			model: "m",
+			sessionKey: "codex-first",
+			model: "gpt-5.6-sol",
 		});
 		const source = controlledResponse();
 		const reader = requireReader(
@@ -330,32 +227,17 @@ describe("acquireCachePacing", () => {
 		);
 		source.enqueue("first");
 		expect(new TextDecoder().decode((await reader.read()).value)).toBe("first");
-		await wait(15);
-		let followerReleased = false;
-		void follower.then(() => {
-			followerReleased = true;
-		});
-		expect(followerReleased).toBe(false);
-		source.enqueue(" second");
-		expect(new TextDecoder().decode((await reader.read()).value)).toBe(
-			" second",
-		);
+		// Released at the first chunk: well inside the retired 200 ms settle and
+		// the 500 ms cap, with the leader's stream still open.
+		const released = await follower;
+		expect(released?.role).toBe("follower");
+		expect(released?.releaseReason).toBe("leader");
+		expect(released?.waitedMs).toBeLessThan(150);
 		source.close();
-		expect((await reader.read()).done).toBe(true);
-		await wait(25);
-		expect(followerReleased).toBe(false);
-		await follower;
-		expect(
-			getCachePacingRouteStats()["codex-account"].leadersReachedTerminal,
-		).toBe(1);
-		expect(
-			getCachePacingRouteStats()["codex-account"].leadersReleasedAfterSettle,
-		).toBe(1);
 	});
 
 	test("Codex cancellation and stream errors release followers immediately", async () => {
 		process.env[CACHE_PACING_MS_ENV] = "500";
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "200";
 		for (const mode of ["cancel", "error"] as const) {
 			const leader = await observeCachePacing({
 				sessionKey: `codex-${mode}`,
@@ -378,11 +260,16 @@ describe("acquireCachePacing", () => {
 			}
 			await follower;
 		}
+		// The serving route is bound, so leader releases count against it.
+		expect(
+			getCachePacingRouteStats()["codex-account"]
+				.leadersReleasedOnCancelOrError,
+		).toBe(2);
+		expect(getCachePacingStats().other?.leadersReleasedOnCancelOrError).toBe(2);
 	});
 
 	test("bodyless and non-OK responses release Codex leaders immediately", async () => {
 		process.env[CACHE_PACING_MS_ENV] = "500";
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "200";
 		for (const response of [
 			new Response(null, { status: 204 }),
 			new Response("bad", { status: 503 }),
@@ -401,69 +288,29 @@ describe("acquireCachePacing", () => {
 		}
 	});
 
-	test("follower cap bounds a longer Codex settle delay", async () => {
-		process.env[CACHE_PACING_MS_ENV] = "40";
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "200";
-		const leader = await observeCachePacing({
-			sessionKey: "codex-cap",
-			model: "m",
-		});
-		route(leader, "codex");
-		const wrapped = finishPacing(leader?.slot ?? null, sseResponse(["done"]));
-		await wrapped.text();
-		const start = Date.now();
-		await observeCachePacing({ sessionKey: "codex-cap", model: "m" });
-		expect(Date.now() - start).toBeLessThan(150);
-	});
-
-	test("Anthropic winner after Codex intent uses default first-chunk release", async () => {
-		process.env[CACHE_PACING_MS_ENV] = "500";
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "100";
-		const leader = await observeCachePacing({
-			sessionKey: "codex-failover",
-			model: "gpt-5",
-		});
-		route(leader, "anthropic");
-		const follower = observeCachePacing({
-			sessionKey: "codex-failover",
-			model: "gpt-5",
-		});
-		const source = controlledResponse();
-		const reader = requireReader(
-			finishPacing(leader?.slot ?? null, source.response),
-		);
-		source.enqueue("first");
-		await reader.read();
-		await follower;
-		source.close();
-	});
-
-	test("a stale delayed leader cannot delete its replacement", async () => {
+	test("a stale leader that finishes late cannot delete its replacement", async () => {
 		process.env[CACHE_PACING_MS_ENV] = "100";
-		process.env[CODEX_CACHE_PACING_SETTLE_MS_ENV] = "60";
 		let clock = 0;
+		const now = () => clock;
 		const first = await observeCachePacing({
 			sessionKey: "replace",
 			model: "m",
-			now: () => clock,
+			now,
 		});
-		route(first, "codex");
-		const firstResponse = finishPacing(
-			first?.slot ?? null,
-			sseResponse(["done"]),
-		);
-		await firstResponse.text();
+		// Past twice the cap the first leader is stale and gets replaced.
 		clock = 300;
 		const replacement = await observeCachePacing({
 			sessionKey: "replace",
 			model: "m",
-			now: () => clock,
+			now,
 		});
-		await wait(80);
+		expect(replacement?.role).toBe("leader");
+		// The stale leader's stream only now produces its first chunk.
+		await finishPacing(first?.slot ?? null, sseResponse(["done"])).text();
 		const follower = observeCachePacing({
 			sessionKey: "replace",
 			model: "m",
-			now: () => clock,
+			now,
 		});
 		await wait(5);
 		let released = false;
@@ -472,7 +319,9 @@ describe("acquireCachePacing", () => {
 		});
 		expect(released).toBe(false);
 		replacement?.slot?.abandon();
-		await follower;
+		const held = await follower;
+		expect(held?.role).toBe("follower");
+		expect(held?.releaseReason).toBe("leader");
 	});
 
 	test("abandon releases followers immediately", async () => {
@@ -630,8 +479,8 @@ describe("getCachePacingStats", () => {
 		expect(routes["acct-pro"].provider).toBe("codex");
 	});
 
-	// Route counters are the Codex-bypass counterfactual: a served Codex
-	// follower's ordinary wait metrics are exactly what bypass would avoid.
+	// Family stats key on the model name; route stats carry the provider that
+	// actually served the request.
 	test("preserves openai family compatibility while routes carry actual provider", async () => {
 		process.env[CACHE_PACING_MS_ENV] = "5000";
 		const observation = await observeCachePacing({

@@ -443,102 +443,47 @@ Environment=CCFLARE_CODEX_SINGLE_ORCHESTRATION_ROOT=0
 
 This switch disables root election only. Trusted descendant filtering and `CCFLARE_SESSION_MAX_REQUESTS_PER_HOUR` remain active. Remove the override to restore containment.
 
-### Codex prompt-cache-key canary
+### Codex prompt cache keys
 
-The Codex prompt-cache-key canary compares the existing conversation-scoped key with a session-scoped key. Prompt cache keys are enabled by default for OpenAI-owned `chatgpt.com` and `api.openai.com` endpoints, while the session-mode treatment is off by default. The canary assigns each eligible Claude session deterministically, so every validated request in that session remains in the same arm across turns, sibling conversations, provider instances, and service restarts.
-
-Configure the canary percentage in the systemd environment:
-
-```ini
-Environment=CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT=0
-```
-
-`CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT` produces an effective percentage from 0 through 100. Parsing accepts only an unsigned base-10 integer with no sign, fraction, exponent, or surrounding whitespace. Missing, empty, malformed, signed, fractional, exponential, and whitespace-padded values become `0`. Valid integers above `100` clamp to `100`.
-
-Eligible requests must target an OpenAI-owned prompt-cache endpoint and contain valid Claude session metadata. The normalized session UUID is assigned through a domain-separated SHA-256 bucket. Requests outside the configured percentage use the `conversation` control arm, while requests inside it use the `session` treatment arm. Custom or self-hosted OpenAI-compatible endpoints and invalid or missing session metadata are not assigned and emit no prompt cache key.
+Prompt cache keys are enabled by default for OpenAI-owned `chatgpt.com` and `api.openai.com` endpoints. Each key is conversation-scoped: it comes from the Claude session, the instructions, and the first input item, so concurrent subagents in one session do not share one OpenAI cache machine. A validated continuation of the session's orchestration root keeps the root's key; see [Codex cache-key continuity](configuration.md#codex-cache-key-continuity).
 
 Configuration precedence is:
 
 1. `CCFLARE_CODEX_PROMPT_CACHE_KEY=0` is the explicit global opt-out. Unset or other values leave prompt cache keys enabled by default.
-2. The account selected for the transform must resolve to OpenAI's `chatgpt.com` or `api.openai.com` endpoint. Other endpoints are ineligible and emit no key or assignment.
+2. The account selected for the transform must resolve to OpenAI's `chatgpt.com` or `api.openai.com` endpoint. Other endpoints are ineligible and emit no key.
 3. Missing or malformed Claude session metadata remains ineligible and emits no key.
-4. `CCFLARE_CODEX_CACHE_KEY_MODE=session` is an explicit all-session override. It produces a session key and records effective session behavior even if deterministic assignment would select conversation mode.
-5. Without the explicit override, the deterministic canary assignment selects the conversation or session key derivation. Empty transformed input retains the existing session-key fallback; other control requests use conversation mode.
+4. `CCFLARE_CODEX_CACHE_KEY_MODE=session` is an explicit all-session override: one key per session, shared by all of its subagents, with no continuity.
+5. Otherwise requests use conversation keys. Empty transformed input keeps the session-key fallback.
 
-At `0`, eligible traffic retains the current conversation-key behavior. At `100`, all eligible sessions use session keys. Changing the percentage can reclassify sessions near the threshold, so keep it fixed throughout an observation window. Do not use repeated percentage changes as a ramping mechanism within one cohort window.
+The session-key canary that compared the two modes was removed. `CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT` is ignored and the router logs a startup warning while it is still set, so delete it from the drop-in.
 
 #### Trace schema and analysis
 
-Codex trace schema 9 keeps the schema 8 canary fields and adds physical-attempt identity so retries and failover no longer collapse into one logical request:
+Since schema 9, Codex traces carry physical-attempt identity so retries and failover do not collapse into one logical request:
 
 | Field | Meaning |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `cache_key_assignment` | Intended `conversation` or `session` arm for eligible canary traffic |
-| `cache_key_cohort_id` | Short domain-separated digest of the normalized session UUID for assignment-stability checks |
+| ----------------- | ------- |
 | `conversation_id` | Short digest of the logical conversation identity, independent of the outbound cache key |
-| `cache_key_assignment_source` | `canary`, `explicit_session_override`, or null |
 | `attempt_id` | Unique physical upstream transport identity for one transport attempt |
 | `attempt_ordinal` | One-based physical transport ordinal within the logical `request_id` |
-| `attempt_cause` | Why the attempt was opened: `initial`, `model_fallback`, `overload_529`, `thinking_retry`, `cache_control_retry`, `other_retry`, or `account_failover` |
+| `attempt_cause` | Why the attempt was opened: `initial`, `model_fallback`, `overload_529`, `thinking_retry`, `reasoning_retry`, `cache_control_retry`, `cache_lane_rescue`, `precommit_sse_retry`, `account_failover`, `continuation_repair_retry`, or `other_retry` |
 
-The existing `prompt_cache_key_set`, `prompt_cache_key_id`, and `cache_key_mode` fields remain authoritative for effective behavior. Assignment and effective mode are intentionally separate so the analyzer can report configuration crossovers rather than infer them from key prefixes.
+`prompt_cache_key_set`, `prompt_cache_key_id`, and `cache_key_mode` record the effective key behavior. Traces written while the canary existed also carry `cache_key_assignment`, `cache_key_cohort_id`, and `cache_key_assignment_source`; the analyzer still reads those traces and ignores the three fields.
 
 Join rules for analysis:
 
-1. Prefer unambiguous one-to-one joins on `attempt_id` for schema 9 request/response pairs.
+1. Prefer unambiguous one-to-one joins on `attempt_id` for schema 9 and later request/response pairs.
 2. Accept valid legacy schema 6-8 joins only when both sides lack `attempt_id` and there is exactly one request and one response for that `request_id`.
 3. Exclude orphan responses, duplicate request or response identities, and any ambiguous multi-record `request_id` groups from attempt-inclusive cache stats.
-4. Count assigned requests without a joined terminal as missing terminals rather than client aborts.
+4. Count requests without a joined terminal as missing joins rather than client aborts.
 
-Attempt-inclusive cache stats therefore measure every unambiguous physical transport, while final-response denominators still describe one terminal outcome per logical client request. Schema 6 and 7 records remain in an explicit unassigned compatibility bucket when canary assignment fields are absent.
-
-For each intended arm, the analyzer reports:
-
-- Assigned requests, joined terminal responses, missing-terminal requests, and cache-measured responses
-- Final-response and attempt-inclusive weighted cache reuse using only responses with numeric cache telemetry
-- Cache-positive response rate with its measured denominator
-- Input, output, and cache token totals
-- Aggregate usage availability counts so unavailable totals stay distinct from measured zero
-- Terminal distributions, including errors, refusals, and `max_tokens`
-- Effective-mode distributions and explicit crossover counts
-- Model and account distributions
-- Logical conversation counts
-- First-request and cache-eligible follow-up statistics
-- Observed conversation-turn bands derived from all retained records for each `conversation_id`
-- Rolling hot-key concentration for attempt-aware cache economics
-
-Use intention-to-treat arm comparisons as the primary result. Check effective-mode crossovers, model and account balance, missing terminals, attempt reconciliation, and complete-session coverage before interpreting cache reuse.
+Attempt-inclusive cache stats therefore measure every unambiguous physical transport, while final-response denominators still describe one terminal outcome per logical client request.
 
 #### Privacy
 
-Schema 9 stores only bounded digests, enum values, and physical-attempt identifiers for the canary. It never stores raw session IDs, prompt material, or outbound cache keys. Internal experiment metadata is stripped before upstream transport. Cache token counts and serialized prefix-boundary byte lengths are different units, so trace analysis must not claim an exact provider token-cache boundary from HMAC boundary telemetry.
+These trace fields hold only bounded digests, enum values, and physical-attempt identifiers. They never store raw session IDs, prompt material, or outbound cache keys. Internal routing metadata is stripped before upstream transport. Cache token counts and serialized prefix-boundary byte lengths are different units, so trace analysis must not claim an exact provider token-cache boundary from HMAC boundary telemetry.
 
 Prefix retention and instruction/tool stability require `CCFLARE_CODEX_TRACE_HMAC_KEY`, because summaries written without that key intentionally contain no HMACs. Those comparisons are reported as unavailable rather than changed when HMACs are absent. With a dedicated trace key, traces include bounded cumulative prefix-boundary HMACs and byte lengths, allowing an earlier full input to be compared with the corresponding prefix of a later turn. Old boundaries outside the bounded retention window are also reported as unavailable. The key itself is never written to the trace. Rotate or remove it after the observation window.
-
-#### Rollout and stop conditions
-
-Use this bounded rollout after the schema 9 build is merged and deployed from `refs/heads/main`:
-
-1. Deploy with `CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT=0`. Do not change prompt-key, pacing, routing, model, or orchestration settings.
-2. Verify service health, schema 9 trace coverage, stable cohort IDs, distinct and stable conversation IDs, attempt-aware request-response joins, increasing attempt ordinals across retries and failover, and zero unexpected effective-mode crossovers.
-3. Reconcile physical attempts against logical requests before reading attempt-inclusive reuse. Confirm unambiguous one-to-one joins, legacy compatibility joins, and exclusion of orphans or duplicates.
-4. Set a small treatment cohort, preferably `10` rather than `1` when an overnight window contains only about ten sessions. Keep the percentage fixed for the full observation window.
-5. Compare intention-to-treat weighted reuse for both final-response and attempt-inclusive denominators, cache-positive rate, follow-up-only behavior, available request latency, terminal outcomes, missing-terminal rate, model and account balance, and orchestration containment indicators.
-
-Stop the canary and return the percentage to `0` if errors, refusals, `max_tokens` terminals, missing terminals, containment failures, or unexpected effective-mode crossovers worsen. Also stop if cache reuse shows no credible benefit after enough complete sessions have been observed. An immediate global switch to session mode is outside this rollout.
-
-Rollback requires only restoring conversation assignment and restarting the service:
-
-```ini
-Environment=CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT=0
-```
-
-```sh
-systemctl daemon-reload
-systemctl restart ccflare-stack.service
-```
-
-Leave `CCFLARE_CODEX_PROMPT_CACHE_KEY` unset to preserve the default-enabled conversation-scoped prompt-cache-key behavior, or retain any existing nonzero value. Remove `CCFLARE_CODEX_CACHE_KEY_MODE=session` if an explicit session override was present, because that override takes precedence over the percentage. If prompt cache keys themselves must be disabled, set `CCFLARE_CODEX_PROMPT_CACHE_KEY=0` as a separate rollback decision.
 
 Accounts with mature repeated 429 streaks use process-local single-flight recovery probes after cooldown expiry. Journal events are `cooldown_probe_admitted`, `cooldown_probe_suppressed`, `cooldown_probe_recovery_success`, and `cooldown_probe_reapplied`. The upstream reset time remains authoritative; probe gating prevents concurrent re-entry without imposing a longer fixed cooldown.
 

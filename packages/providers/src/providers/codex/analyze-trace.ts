@@ -22,6 +22,11 @@ interface InputFingerprint {
 	hmac: string;
 }
 
+/**
+ * One JSONL trace line. Records from trace schema 22 and earlier can also
+ * carry the retired canary fields (cache_key_assignment, pacing_canary,
+ * pacing_action, explicit_breakpoint_*, ...); the analyzer ignores them.
+ */
 export interface TraceRecord {
 	trace_schema_version?: number;
 	phase?: "request" | "response" | "attempt_aborted";
@@ -34,14 +39,7 @@ export interface TraceRecord {
 	model_out?: string | null;
 	account?: string | null;
 	cache_key_mode?: "conversation" | "session" | null;
-	cache_key_assignment?: "conversation" | "session" | null;
-	cache_key_cohort_id?: string | null;
 	conversation_id?: string | null;
-	cache_key_assignment_source?:
-		| "canary"
-		| "explicit_session_override"
-		| "prefix_shard"
-		| null;
 	cache_key_continuity_basis?:
 		| "derived"
 		| "identity_match"
@@ -54,16 +52,10 @@ export interface TraceRecord {
 	cache_key_continuity_applied?: boolean | null;
 	continuity_evidence_id?: string | null;
 	canonical_conversation_id?: string | null;
-	pacing_canary?: string | null;
 	pacing_cohort_id?: string | null;
-	pacing_action?: string | null;
 	pacing_role?: "leader" | "follower" | string | null;
 	pacing_wait_ms?: number | null;
 	pacing_release_reason?: "leader" | "cap" | string | null;
-	/** Additive schema reserved for the explicit cache-breakpoint canary. */
-	explicit_breakpoint_canary?: string | null;
-	explicit_breakpoint_cohort_id?: string | null;
-	explicit_breakpoint_action?: string | null;
 	codex_turn_state_arm?: string | null;
 	codex_turn_state_cohort_id?: string | null;
 	codex_turn_state_request_action?: string | null;
@@ -137,50 +129,6 @@ interface ContextBandAccumulator extends ContextBandStats {
 	cacheReadInputTokens: number;
 }
 
-interface CanaryTurnStats {
-	requests: number;
-	joinedTerminalResponses: number;
-	cacheMeasuredResponses: number;
-	weightedCacheReusePct: number | null;
-	cachePositiveResponses: number;
-	cachePositiveRatePct: number | null;
-}
-
-export interface CanaryArmStats {
-	assignedRequests: number;
-	joinedTerminalResponses: number;
-	missingTerminalRequests: number;
-	cacheMeasuredResponses: number;
-	weightedCacheReusePct: number | null;
-	cachePositiveResponses: number;
-	cachePositiveRatePct: number | null;
-	usage: {
-		inputTokens: number;
-		outputTokens: number;
-		cacheReadInputTokens: number;
-		cacheCreationInputTokens: number;
-		availableResponses: number;
-		unavailableResponses: number;
-	};
-	terminals: Record<string, number>;
-	effectiveModes: Record<string, number>;
-	explicitCrossovers: {
-		conversationToSession: number;
-		sessionToConversation: number;
-	};
-	models: Record<string, number>;
-	accounts: Record<string, number>;
-	logicalConversations: number;
-	turns: { first: CanaryTurnStats; followUp: CanaryTurnStats };
-	conversationTurnBands: Record<string, number>;
-	attemptInclusive: {
-		attempts: number;
-		joinedResponses: number;
-		cacheMeasuredResponses: number;
-		weightedCacheReusePct: number | null;
-	};
-}
-
 export type CacheKeyContinuityBasis =
 	| "derived"
 	| "identity_match"
@@ -240,19 +188,11 @@ export interface TraceReport {
 		};
 	};
 	readiness: {
-		treatmentAbsent: boolean;
-		assignmentEffectiveCrossovers: number;
 		maxRequestsPerKeyMinute: number;
 		keysOver15RequestsPerMinute: number;
 	};
 	continuity: CacheKeyContinuityReport;
 	span: { first?: string; last?: string };
-	canary: {
-		conversation: CanaryArmStats;
-		session: CanaryArmStats;
-		unassigned: CanaryArmStats;
-		unjoinedResponses: number;
-	};
 	request: {
 		maxHistoryToolCalls: number;
 		maxInputItems: number;
@@ -311,11 +251,6 @@ export interface TraceReport {
 	};
 }
 
-export type CacheExperimentArm =
-	| "treatment"
-	| "control"
-	| "ineligible"
-	| "unassigned";
 export type CacheExperimentTurn =
 	| "first_observed"
 	| "follow_up_observed"
@@ -329,7 +264,6 @@ export type CacheExperimentGapBand =
 	| "unknown";
 
 export interface CacheExperimentRow {
-	arm: CacheExperimentArm;
 	model: string;
 	turn: CacheExperimentTurn;
 	gapBand: CacheExperimentGapBand;
@@ -376,10 +310,6 @@ export interface CacheExperimentRow {
 		observedCodexFallbackAttempts: number;
 	};
 	pacing: {
-		pacedRequests: number;
-		bypassedRequests: number;
-		crossoverPacedRequests: number;
-		unknownRequests: number;
 		waitMsAvailableRequests: number;
 		waitMsUnavailableRequests: number;
 		p50WaitMs: number | null;
@@ -391,12 +321,9 @@ export interface CacheExperimentRow {
 			unknown: number;
 		};
 	};
-	/** Whitelisted action buckets only; unknown values are never echoed. */
-	actions: Record<string, number>;
 }
 
 export interface CacheExperimentDimensionReport {
-	assignmentCounts: Record<CacheExperimentArm, number>;
 	rows: CacheExperimentRow[];
 }
 
@@ -485,11 +412,14 @@ export interface TurnStateCacheExperimentReport {
 export interface CodexCacheExperimentReport {
 	/**
 	 * Bumped 3 -> 4 when CacheExperimentRow.pacing gained schema-20 role,
-	 * release-reason, and wait-duration receipt summaries, and 4 -> 5 when the
-	 * `websocket` report was removed with the Codex WebSocket transport.
+	 * release-reason, and wait-duration receipt summaries, 4 -> 5 when the
+	 * `websocket` report was removed with the Codex WebSocket transport, and
+	 * 5 -> 6 when the pacing-bypass and explicit-breakpoint canaries were
+	 * retired: `explicitBreakpoint` is gone, and pacing rows lost `arm`,
+	 * `actions`, the per-action pacing counters and `assignmentCounts`.
 	 * Consumers that key on a fixed shape need to know the report changed.
 	 */
-	schemaVersion: 5;
+	schemaVersion: 6;
 	attribution: {
 		unit: "final_observed_codex_attempt";
 		responseScope: "codex_trace_only_no_cross_provider_terminal_visibility";
@@ -499,7 +429,6 @@ export interface CodexCacheExperimentReport {
 		pacingWaitReason: "legacy_or_invalid_receipt_is_unknown";
 	};
 	pacing: CacheExperimentDimensionReport;
-	explicitBreakpoint: CacheExperimentDimensionReport;
 	turnState: TurnStateCacheExperimentReport;
 }
 
@@ -572,387 +501,11 @@ function increment(distribution: Record<string, number>, value: string): void {
 	distribution[value] = (distribution[value] ?? 0) + 1;
 }
 
-interface CanaryTurnAccumulator extends CanaryTurnStats {
-	measuredInputTokens: number;
-	cacheReadInputTokens: number;
-}
-
-interface CanaryArmAccumulator
-	extends Omit<CanaryArmStats, "turns" | "attemptInclusive"> {
-	measuredInputTokens: number;
-	conversationIds: Set<string>;
-	attemptInclusive: {
-		attempts: number;
-		joinedResponses: number;
-		cacheMeasuredResponses: number;
-		measuredInputTokens: number;
-		cacheReadInputTokens: number;
-	};
-	turns: {
-		first: CanaryTurnAccumulator;
-		followUp: CanaryTurnAccumulator;
-	};
-}
-
-function canaryTurnAccumulator(): CanaryTurnAccumulator {
-	return {
-		requests: 0,
-		joinedTerminalResponses: 0,
-		cacheMeasuredResponses: 0,
-		weightedCacheReusePct: null,
-		cachePositiveResponses: 0,
-		cachePositiveRatePct: null,
-		measuredInputTokens: 0,
-		cacheReadInputTokens: 0,
-	};
-}
-
-function canaryArmAccumulator(): CanaryArmAccumulator {
-	return {
-		assignedRequests: 0,
-		joinedTerminalResponses: 0,
-		missingTerminalRequests: 0,
-		cacheMeasuredResponses: 0,
-		weightedCacheReusePct: null,
-		cachePositiveResponses: 0,
-		cachePositiveRatePct: null,
-		usage: {
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheReadInputTokens: 0,
-			cacheCreationInputTokens: 0,
-			availableResponses: 0,
-			unavailableResponses: 0,
-		},
-		terminals: {},
-		effectiveModes: {},
-		explicitCrossovers: {
-			conversationToSession: 0,
-			sessionToConversation: 0,
-		},
-		models: {},
-		accounts: {},
-		logicalConversations: 0,
-		turns: {
-			first: canaryTurnAccumulator(),
-			followUp: canaryTurnAccumulator(),
-		},
-		conversationTurnBands: {},
-		measuredInputTokens: 0,
-		conversationIds: new Set(),
-		attemptInclusive: {
-			attempts: 0,
-			joinedResponses: 0,
-			cacheMeasuredResponses: 0,
-			measuredInputTokens: 0,
-			cacheReadInputTokens: 0,
-		},
-	};
-}
-
-function finishCanaryTurn(turn: CanaryTurnAccumulator): CanaryTurnStats {
-	return {
-		requests: turn.requests,
-		joinedTerminalResponses: turn.joinedTerminalResponses,
-		cacheMeasuredResponses: turn.cacheMeasuredResponses,
-		weightedCacheReusePct:
-			turn.measuredInputTokens > 0
-				? Math.round(
-						(1000 * turn.cacheReadInputTokens) / turn.measuredInputTokens,
-					) / 10
-				: null,
-		cachePositiveResponses: turn.cachePositiveResponses,
-		cachePositiveRatePct:
-			turn.cacheMeasuredResponses > 0
-				? Math.round(
-						(1000 * turn.cachePositiveResponses) / turn.cacheMeasuredResponses,
-					) / 10
-				: null,
-	};
-}
-
-function finishCanaryArm(arm: CanaryArmAccumulator): CanaryArmStats {
-	return {
-		assignedRequests: arm.assignedRequests,
-		joinedTerminalResponses: arm.joinedTerminalResponses,
-		missingTerminalRequests: arm.missingTerminalRequests,
-		cacheMeasuredResponses: arm.cacheMeasuredResponses,
-		weightedCacheReusePct:
-			arm.measuredInputTokens > 0
-				? Math.round(
-						(1000 * arm.usage.cacheReadInputTokens) / arm.measuredInputTokens,
-					) / 10
-				: null,
-		cachePositiveResponses: arm.cachePositiveResponses,
-		cachePositiveRatePct:
-			arm.cacheMeasuredResponses > 0
-				? Math.round(
-						(1000 * arm.cachePositiveResponses) / arm.cacheMeasuredResponses,
-					) / 10
-				: null,
-		usage: arm.usage,
-		terminals: arm.terminals,
-		effectiveModes: arm.effectiveModes,
-		explicitCrossovers: arm.explicitCrossovers,
-		models: arm.models,
-		accounts: arm.accounts,
-		logicalConversations: arm.conversationIds.size,
-		turns: {
-			first: finishCanaryTurn(arm.turns.first),
-			followUp: finishCanaryTurn(arm.turns.followUp),
-		},
-		conversationTurnBands: arm.conversationTurnBands,
-		attemptInclusive: {
-			attempts: arm.attemptInclusive.attempts,
-			joinedResponses: arm.attemptInclusive.joinedResponses,
-			cacheMeasuredResponses: arm.attemptInclusive.cacheMeasuredResponses,
-			weightedCacheReusePct:
-				arm.attemptInclusive.measuredInputTokens > 0
-					? Math.round(
-							(1000 * arm.attemptInclusive.cacheReadInputTokens) /
-								arm.attemptInclusive.measuredInputTokens,
-						) / 10
-					: null,
-		},
-	};
-}
-
 // Logical-ID joins are a compatibility path for schema 6-8 records only. A
 // schema-9 record without attempt_id is an instrumentation failure and must
 // surface as unjoinable rather than silently collapsing physical attempts.
 function isLegacyJoinEligible(record: TraceRecord): boolean {
 	return (record.trace_schema_version ?? 0) < 9;
-}
-
-function analyzeCanary(
-	requestRecords: readonly TraceRecord[],
-	responseRecords: readonly TraceRecord[],
-): TraceReport["canary"] {
-	const requestAttemptsById = new Map<string, TraceRecord[]>();
-	const responseAttemptsById = new Map<string, TraceRecord[]>();
-	const legacyRequestsByLogicalId = new Map<string, TraceRecord[]>();
-	const legacyResponsesByLogicalId = new Map<string, TraceRecord[]>();
-	let responsesWithoutId = 0;
-	const append = (
-		map: Map<string, TraceRecord[]>,
-		id: string,
-		record: TraceRecord,
-	) => {
-		const group = map.get(id) ?? [];
-		group.push(record);
-		map.set(id, group);
-	};
-	for (const request of requestRecords) {
-		if (request.attempt_id)
-			append(requestAttemptsById, request.attempt_id, request);
-		else if (request.request_id && isLegacyJoinEligible(request))
-			append(legacyRequestsByLogicalId, request.request_id, request);
-	}
-	for (const response of responseRecords) {
-		if (response.attempt_id)
-			append(responseAttemptsById, response.attempt_id, response);
-		else if (response.request_id && isLegacyJoinEligible(response))
-			append(legacyResponsesByLogicalId, response.request_id, response);
-		else responsesWithoutId++;
-	}
-	const requestsByLogicalId = new Map<string, TraceRecord[]>();
-	const anonymousRequests: TraceRecord[] = [];
-	for (const request of requestRecords) {
-		if (!request.request_id) {
-			anonymousRequests.push(request);
-			continue;
-		}
-		append(requestsByLogicalId, request.request_id, request);
-	}
-	const retainedRequests = [...requestsByLogicalId.values()]
-		.map((attempts) =>
-			[...attempts]
-				.sort(
-					(a, b) =>
-						(a.attempt_ordinal ?? 0) - (b.attempt_ordinal ?? 0) ||
-						(a.ts ?? "").localeCompare(b.ts ?? ""),
-				)
-				.at(-1),
-		)
-		.filter((request): request is TraceRecord => Boolean(request));
-	retainedRequests.push(...anonymousRequests);
-	const responseFor = (request: TraceRecord): TraceRecord | undefined => {
-		if (request.attempt_id) {
-			const requests = requestAttemptsById.get(request.attempt_id) ?? [];
-			const responses = responseAttemptsById.get(request.attempt_id) ?? [];
-			return requests.length === 1 && responses.length === 1
-				? responses[0]
-				: undefined;
-		}
-		if (!request.request_id || !isLegacyJoinEligible(request)) return undefined;
-		const requests = legacyRequestsByLogicalId.get(request.request_id) ?? [];
-		const responses = legacyResponsesByLogicalId.get(request.request_id) ?? [];
-		return requests.length === 1 && responses.length === 1
-			? responses[0]
-			: undefined;
-	};
-
-	const conversationRequests = new Map<string, TraceRecord[]>();
-	for (const request of retainedRequests) {
-		if (!request.conversation_id) continue;
-		const group = conversationRequests.get(request.conversation_id) ?? [];
-		group.push(request);
-		conversationRequests.set(request.conversation_id, group);
-	}
-	const turnIndexByRequest = new Map<TraceRecord, number>();
-	const conversationSizeByRequest = new Map<TraceRecord, number>();
-	for (const group of conversationRequests.values()) {
-		group.sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""));
-		group.forEach((request, index) => {
-			turnIndexByRequest.set(request, index);
-			conversationSizeByRequest.set(request, group.length);
-		});
-	}
-
-	const arms = {
-		conversation: canaryArmAccumulator(),
-		session: canaryArmAccumulator(),
-		unassigned: canaryArmAccumulator(),
-	};
-	for (const request of retainedRequests) {
-		const assignment = request.cache_key_assignment;
-		const arm =
-			assignment === "conversation" || assignment === "session"
-				? arms[assignment]
-				: arms.unassigned;
-		arm.assignedRequests++;
-		if (request.cache_key_mode)
-			increment(arm.effectiveModes, request.cache_key_mode);
-		if (request.model_out) increment(arm.models, request.model_out);
-		if (request.account) increment(arm.accounts, request.account);
-		if (request.conversation_id)
-			arm.conversationIds.add(request.conversation_id);
-		const conversationSize = conversationSizeByRequest.get(request);
-		if (conversationSize !== undefined)
-			increment(arm.conversationTurnBands, String(conversationSize));
-		if (
-			request.cache_key_assignment_source === "explicit_session_override" &&
-			assignment === "conversation" &&
-			request.cache_key_mode === "session"
-		)
-			arm.explicitCrossovers.conversationToSession++;
-		if (assignment === "session" && request.cache_key_mode === "conversation")
-			arm.explicitCrossovers.sessionToConversation++;
-
-		const turn =
-			turnIndexByRequest.get(request) === 0
-				? arm.turns.first
-				: arm.turns.followUp;
-		turn.requests++;
-		const response = responseFor(request);
-		if (!response) {
-			arm.missingTerminalRequests++;
-			continue;
-		}
-		arm.joinedTerminalResponses++;
-		turn.joinedTerminalResponses++;
-		increment(arm.terminals, response.stop_reason ?? "unknown");
-		const inputTokens = response.input_tokens ?? 0;
-		if (response.usage_measurement_available === false) {
-			arm.usage.unavailableResponses++;
-		} else if (typeof response.input_tokens === "number") {
-			arm.usage.availableResponses++;
-			arm.usage.inputTokens += inputTokens;
-			arm.usage.outputTokens += response.output_tokens ?? 0;
-			if (hasMeasuredCacheWrite(response)) {
-				arm.usage.cacheCreationInputTokens +=
-					response.cache_creation_input_tokens ?? 0;
-			}
-		} else {
-			arm.usage.unavailableResponses++;
-		}
-		if (
-			response.cache_measurement_available === false ||
-			typeof response.cache_read_input_tokens !== "number" ||
-			typeof response.input_tokens !== "number"
-		)
-			continue;
-		const cacheRead = Math.min(
-			Math.max(response.cache_read_input_tokens, 0),
-			inputTokens,
-		);
-		arm.cacheMeasuredResponses++;
-		arm.measuredInputTokens += inputTokens;
-		arm.usage.cacheReadInputTokens += cacheRead;
-		turn.cacheMeasuredResponses++;
-		turn.measuredInputTokens += inputTokens;
-		turn.cacheReadInputTokens += cacheRead;
-		if (cacheRead > 0) {
-			arm.cachePositiveResponses++;
-			turn.cachePositiveResponses++;
-		}
-	}
-
-	// Attempt-inclusive per-arm economics: every physical attempt joins under
-	// the arm of its own request record, so retry and failover costs are
-	// attributable to the treatment that incurred them.
-	const armFor = (request: TraceRecord) => {
-		const assignment = request.cache_key_assignment;
-		return assignment === "conversation" || assignment === "session"
-			? arms[assignment]
-			: arms.unassigned;
-	};
-	for (const request of requestRecords) {
-		armFor(request).attemptInclusive.attempts++;
-	}
-	const accumulateAttemptJoin = (
-		requests: readonly TraceRecord[],
-		responses: readonly TraceRecord[],
-	) => {
-		if (requests.length !== 1 || responses.length !== 1) return;
-		const request = requests[0];
-		const response = responses[0];
-		if (!request || !response) return;
-		const arm = armFor(request);
-		arm.attemptInclusive.joinedResponses++;
-		if (
-			response.cache_measurement_available === false ||
-			typeof response.cache_read_input_tokens !== "number" ||
-			typeof response.input_tokens !== "number"
-		)
-			return;
-		const inputTokens = response.input_tokens;
-		const cacheRead = Math.min(
-			Math.max(response.cache_read_input_tokens, 0),
-			inputTokens,
-		);
-		arm.attemptInclusive.cacheMeasuredResponses++;
-		arm.attemptInclusive.measuredInputTokens += inputTokens;
-		arm.attemptInclusive.cacheReadInputTokens += cacheRead;
-	};
-	for (const [attemptId, requests] of requestAttemptsById) {
-		accumulateAttemptJoin(requests, responseAttemptsById.get(attemptId) ?? []);
-	}
-	for (const [logicalId, requests] of legacyRequestsByLogicalId) {
-		accumulateAttemptJoin(
-			requests,
-			legacyResponsesByLogicalId.get(logicalId) ?? [],
-		);
-	}
-	let unjoinedResponses = responsesWithoutId;
-	for (const [attemptId, responses] of responseAttemptsById)
-		if (
-			(requestAttemptsById.get(attemptId)?.length ?? 0) !== 1 ||
-			responses.length !== 1
-		)
-			unjoinedResponses += responses.length;
-	for (const [requestId, responses] of legacyResponsesByLogicalId) {
-		const requests = legacyRequestsByLogicalId.get(requestId) ?? [];
-		if (requests.length !== 1 || responses.length !== 1) {
-			unjoinedResponses += responses.length;
-		}
-	}
-	return {
-		conversation: finishCanaryArm(arms.conversation),
-		session: finishCanaryArm(arms.session),
-		unassigned: finishCanaryArm(arms.unassigned),
-		unjoinedResponses,
-	};
 }
 
 function analyzeRequestTransitions(requests: TraceRecord[]) {
@@ -1037,7 +590,6 @@ function analyzeRequestTransitions(requests: TraceRecord[]) {
 
 const SAFE_COHORT = /^[a-fA-F0-9]{16}$/;
 const FALLBACK_CAUSES = new Set(["model_fallback", "account_failover"]);
-const PACING_ACTIONS = new Set(["paced", "bypassed", "crossover-paced"]);
 // Derived from the canonical vocabularies in turn-state.ts. Repeating the
 // literals here once meant a newly emitted action could be silently dropped by
 // this allowlist -- making a fail-closed guard invisible to the analysis meant
@@ -1054,20 +606,6 @@ export const TURN_STATE_REQUEST_ACTIONS = new Set<string>(
 export const TURN_STATE_TERMINAL_ACTIONS = new Set<string>(
 	CODEX_TURN_STATE_TERMINAL_ACTIONS,
 );
-const EXPLICIT_BREAKPOINT_ACTIONS = new Set([
-	"placed_source_marker",
-	"placed_first_user_text",
-	"skip_percent_control",
-	"skip_env_disabled",
-	"skip_non_gpt56",
-	"skip_non_eligible_endpoint",
-	"skip_no_prompt_cache_key",
-	"skip_no_conversation",
-	"skip_known_unsupported",
-	"skip_no_eligible_block",
-	"skip_rotated_cache_key_attempt",
-]);
-
 interface CacheExperimentLogicalSample {
 	request: TraceRecord;
 	attempts: TraceRecord[];
@@ -1076,11 +614,9 @@ interface CacheExperimentLogicalSample {
 }
 
 interface CacheExperimentAnnotatedSample extends CacheExperimentLogicalSample {
-	arm: CacheExperimentArm;
 	model: string;
 	turn: CacheExperimentTurn;
 	gapBand: CacheExperimentGapBand;
-	action: string;
 }
 
 interface CacheExperimentRowAccumulator extends CacheExperimentRow {
@@ -1089,8 +625,6 @@ interface CacheExperimentRowAccumulator extends CacheExperimentRow {
 	cacheUsageObservations: CacheUsageObservation[];
 	pacingWaitSamples: number[];
 }
-
-type CacheExperimentKind = "pacing" | "explicitBreakpoint";
 
 /**
  * Phase of the tombstone written by `writeCodexAbortedAttemptTrace` in
@@ -1257,59 +791,15 @@ function cacheExperimentLogicalSamples(
 	return samples;
 }
 
-function experimentField(
-	request: TraceRecord,
-	kind: CacheExperimentKind,
-): string | null | undefined {
-	return kind === "pacing"
-		? request.pacing_canary
-		: request.explicit_breakpoint_canary;
-}
-
-function experimentCohort(
-	request: TraceRecord,
-	kind: CacheExperimentKind,
-): string | null {
-	const cohort =
-		kind === "pacing"
-			? request.pacing_cohort_id
-			: request.explicit_breakpoint_cohort_id;
+function pacingCohort(request: TraceRecord): string | null {
+	const cohort = request.pacing_cohort_id;
 	return typeof cohort === "string" && SAFE_COHORT.test(cohort)
 		? cohort.toLowerCase()
 		: null;
 }
 
-function experimentArm(
-	value: string | null | undefined,
-	kind: CacheExperimentKind,
-): CacheExperimentArm {
-	if (kind === "pacing") {
-		if (value === "bypass") return "treatment";
-		if (value === "control") return "control";
-		return "unassigned";
-	}
-	if (value === "treatment" || value === "control" || value === "ineligible")
-		return value;
-	return "unassigned";
-}
-
 function safeModel(request: TraceRecord): string {
 	return classifyCodexModelFamily(request.model_out ?? request.model_in);
-}
-
-function experimentAction(
-	request: TraceRecord,
-	kind: CacheExperimentKind,
-): string {
-	const action =
-		kind === "pacing"
-			? request.pacing_action
-			: request.explicit_breakpoint_action;
-	if (action === null || action === undefined || action === "")
-		return "unavailable";
-	const allowlist =
-		kind === "pacing" ? PACING_ACTIONS : EXPLICIT_BREAKPOINT_ACTIONS;
-	return allowlist.has(action) ? action : "unknown";
 }
 
 function gapBand(gapMs: number): CacheExperimentGapBand {
@@ -1689,21 +1179,21 @@ function analyzeContinuityProvenance(
 	return { rows: finishedRows };
 }
 
+/**
+ * Every observed Codex attempt is a pacing sample. Turn and gap come from the
+ * pacing cohort; an attempt without one (no client session, or a keepalive
+ * replay) is counted with turn and gap "unknown".
+ */
 function annotateExperimentSamples(
 	samples: readonly CacheExperimentLogicalSample[],
-	kind: CacheExperimentKind,
 ): CacheExperimentAnnotatedSample[] {
-	const included = samples.filter((sample) => {
-		const assignment = experimentField(sample.request, kind);
-		return typeof assignment === "string" && assignment.length > 0;
-	});
 	const turnBySample = new Map<
 		CacheExperimentLogicalSample,
 		{ turn: CacheExperimentTurn; gapBand: CacheExperimentGapBand }
 	>();
 	const samplesByCohort = new Map<string, CacheExperimentLogicalSample[]>();
-	for (const sample of included) {
-		const cohort = experimentCohort(sample.request, kind);
+	for (const sample of samples) {
+		const cohort = pacingCohort(sample.request);
 		if (!cohort || sample.logicalTimestamp === null) {
 			turnBySample.set(sample, { turn: "unknown", gapBand: "unknown" });
 			continue;
@@ -1746,15 +1236,13 @@ function annotateExperimentSamples(
 			});
 		});
 	}
-	return included.map((sample) => ({
+	return samples.map((sample) => ({
 		...sample,
-		arm: experimentArm(experimentField(sample.request, kind), kind),
 		model: safeModel(sample.request),
 		...(turnBySample.get(sample) ?? {
 			turn: "unknown" as const,
 			gapBand: "unknown" as const,
 		}),
-		action: experimentAction(sample.request, kind),
 	}));
 }
 
@@ -1762,7 +1250,6 @@ function cacheExperimentRowAccumulator(
 	sample: CacheExperimentAnnotatedSample,
 ): CacheExperimentRowAccumulator {
 	return {
-		arm: sample.arm,
 		model: sample.model,
 		turn: sample.turn,
 		gapBand: sample.gapBand,
@@ -1799,10 +1286,6 @@ function cacheExperimentRowAccumulator(
 			observedCodexFallbackAttempts: 0,
 		},
 		pacing: {
-			pacedRequests: 0,
-			bypassedRequests: 0,
-			crossoverPacedRequests: 0,
-			unknownRequests: 0,
 			waitMsAvailableRequests: 0,
 			waitMsUnavailableRequests: 0,
 			p50WaitMs: null,
@@ -1814,7 +1297,6 @@ function cacheExperimentRowAccumulator(
 				unknown: 0,
 			},
 		},
-		actions: {},
 		elapsedSamples: [],
 		cacheUsageObservations: [],
 		pacingWaitSamples: [],
@@ -1854,25 +1336,14 @@ function percentile(
 	return sorted[index] ?? null;
 }
 
-function incrementPacingAction(
-	row: CacheExperimentRowAccumulator,
-	action: string | null | undefined,
-): void {
-	if (action === "paced") row.pacing.pacedRequests++;
-	else if (action === "bypassed") row.pacing.bypassedRequests++;
-	else if (action === "crossover-paced") row.pacing.crossoverPacedRequests++;
-	else row.pacing.unknownRequests++;
-}
-
 function incrementPacingReceipt(
 	row: CacheExperimentRowAccumulator,
 	request: TraceRecord,
 ): void {
+	// A pacing role means the request held the slot (leader) or waited for it
+	// (follower), so a wait receipt is expected.
 	const waitExpected =
-		request.pacing_action === "paced" ||
-		request.pacing_action === "crossover-paced" ||
-		request.pacing_role === "leader" ||
-		request.pacing_role === "follower";
+		request.pacing_role === "leader" || request.pacing_role === "follower";
 	if ((request.trace_schema_version ?? 0) < 20) {
 		row.pacing.receiptCounts.unknown++;
 		if (waitExpected) row.pacing.waitMsUnavailableRequests++;
@@ -1909,14 +1380,10 @@ function incrementPacingReceipt(
 function finishCacheExperimentRow(
 	row: CacheExperimentRowAccumulator,
 ): CacheExperimentRow {
-	const actions = Object.fromEntries(
-		Object.entries(row.actions).sort(([a], [b]) => a.localeCompare(b)),
-	);
 	const cacheSummary = summarizeCacheReadObservations(
 		row.cacheUsageObservations,
 	);
 	return {
-		arm: row.arm,
 		model: row.model,
 		turn: row.turn,
 		gapBand: row.gapBand,
@@ -1943,16 +1410,9 @@ function finishCacheExperimentRow(
 			p50WaitMs: percentile(row.pacingWaitSamples, 0.5),
 			p95WaitMs: percentile(row.pacingWaitSamples, 0.95),
 		},
-		actions,
 	};
 }
 
-const ARM_ORDER: CacheExperimentArm[] = [
-	"control",
-	"treatment",
-	"ineligible",
-	"unassigned",
-];
 const TURN_ORDER: CacheExperimentTurn[] = [
 	"first_observed",
 	"follow_up_observed",
@@ -1969,29 +1429,17 @@ const GAP_ORDER: CacheExperimentGapBand[] = [
 
 function cacheExperimentDimension(
 	samples: readonly CacheExperimentLogicalSample[],
-	kind: CacheExperimentKind,
 ): CacheExperimentDimensionReport {
-	const annotated = annotateExperimentSamples(samples, kind);
-	const assignmentCounts: Record<CacheExperimentArm, number> = {
-		treatment: 0,
-		control: 0,
-		ineligible: 0,
-		unassigned: 0,
-	};
+	const annotated = annotateExperimentSamples(samples);
 	const rows = new Map<string, CacheExperimentRowAccumulator>();
 	for (const sample of annotated) {
-		assignmentCounts[sample.arm]++;
-		const rowKey = [sample.arm, sample.model, sample.turn, sample.gapBand].join(
-			"\u0000",
-		);
+		const rowKey = [sample.model, sample.turn, sample.gapBand].join("\u0000");
 		let row = rows.get(rowKey);
 		if (!row) {
 			row = cacheExperimentRowAccumulator(sample);
 			rows.set(rowKey, row);
 		}
 		row.observedCodexAttempts++;
-		increment(row.actions, sample.action);
-		incrementPacingAction(row, sample.request.pacing_action);
 		incrementPacingReceipt(row, sample.request);
 		const fallbackAttempts = sample.attempts.filter((attempt) =>
 			FALLBACK_CAUSES.has(attempt.attempt_cause ?? ""),
@@ -2079,12 +1527,11 @@ function cacheExperimentDimension(
 	const finishedRows = [...rows.values()].map(finishCacheExperimentRow);
 	finishedRows.sort(
 		(a, b) =>
-			ARM_ORDER.indexOf(a.arm) - ARM_ORDER.indexOf(b.arm) ||
 			a.model.localeCompare(b.model) ||
 			TURN_ORDER.indexOf(a.turn) - TURN_ORDER.indexOf(b.turn) ||
 			GAP_ORDER.indexOf(a.gapBand) - GAP_ORDER.indexOf(b.gapBand),
 	);
-	return { assignmentCounts, rows: finishedRows };
+	return { rows: finishedRows };
 }
 
 interface TurnStateAnnotatedSample extends CacheExperimentLogicalSample {
@@ -2533,7 +1980,7 @@ export function analyzeCodexCacheExperiments(
 	const records = withoutAbortedAttempts(allRecords);
 	const samples = cacheExperimentLogicalSamples(records);
 	return {
-		schemaVersion: 5,
+		schemaVersion: 6,
 		attribution: {
 			unit: "final_observed_codex_attempt",
 			responseScope: "codex_trace_only_no_cross_provider_terminal_visibility",
@@ -2543,8 +1990,7 @@ export function analyzeCodexCacheExperiments(
 			pacingWaitMs: "schema20_request_receipt",
 			pacingWaitReason: "legacy_or_invalid_receipt_is_unknown",
 		},
-		pacing: cacheExperimentDimension(samples, "pacing"),
-		explicitBreakpoint: cacheExperimentDimension(samples, "explicitBreakpoint"),
+		pacing: cacheExperimentDimension(samples),
 		turnState: analyzeTurnStateCacheExperiments(samples),
 	};
 }
@@ -2945,24 +2391,12 @@ export function analyzeCodexTrace(
 			finalResponseOnly: measuredStats(finalResponses),
 		},
 		readiness: {
-			treatmentAbsent: !requestRecords.some(
-				(request) => request.cache_key_assignment === "session",
-			),
-			assignmentEffectiveCrossovers: requestRecords.filter(
-				(request) =>
-					request.cache_key_assignment !== null &&
-					request.cache_key_assignment !== undefined &&
-					request.cache_key_mode !== null &&
-					request.cache_key_mode !== undefined &&
-					request.cache_key_assignment !== request.cache_key_mode,
-			).length,
 			maxRequestsPerKeyMinute,
 			keysOver15RequestsPerMinute: concentration.filter((count) => count > 15)
 				.length,
 		},
 		continuity,
 		span: { first: timestamps[0], last: timestamps.at(-1) },
-		canary: analyzeCanary(requestRecords, responseRecords),
 		request: {
 			maxHistoryToolCalls,
 			maxInputItems,
@@ -3033,25 +2467,6 @@ export function parseTraceJsonl(text: string): TraceRecord[] {
 	return records;
 }
 
-function formatCanaryArm(name: string, arm: CanaryArmStats): string[] {
-	return [
-		`  ${name}: assigned=${arm.assignedRequests} joined=${arm.joinedTerminalResponses} missing-terminal=${arm.missingTerminalRequests}`,
-		`    cache measured: ${arm.cacheMeasuredResponses}; weighted reuse: ${arm.weightedCacheReusePct ?? "n/a"}%`,
-		`    attempt-inclusive: attempts=${arm.attemptInclusive.attempts} joined=${arm.attemptInclusive.joinedResponses} measured=${arm.attemptInclusive.cacheMeasuredResponses} weighted reuse=${arm.attemptInclusive.weightedCacheReusePct ?? "n/a"}%`,
-		`    cache positive: ${arm.cachePositiveResponses}/${arm.cacheMeasuredResponses} measured (${arm.cachePositiveRatePct ?? "n/a"}%)`,
-		`    terminals: ${JSON.stringify(arm.terminals)}`,
-		`    effective modes: ${JSON.stringify(arm.effectiveModes)}`,
-		`    explicit crossovers: conversation->session=${arm.explicitCrossovers.conversationToSession}, session->conversation=${arm.explicitCrossovers.sessionToConversation}`,
-		`    usage: ${JSON.stringify(arm.usage)}`,
-		`    models: ${JSON.stringify(arm.models)}`,
-		`    accounts: ${JSON.stringify(arm.accounts)}`,
-		`    logical conversations: ${arm.logicalConversations}`,
-		`    first requests: ${JSON.stringify(arm.turns.first)}`,
-		`    cache-eligible follow-ups: ${JSON.stringify(arm.turns.followUp)}`,
-		`    observed conversation-turn bands: ${JSON.stringify(arm.conversationTurnBands)}`,
-	];
-}
-
 export function formatReport(report: TraceReport): string {
 	const lines = [
 		`FINGERPRINT AVAILABILITY: usable=${report.request.fingerprintCoverage.usable} missing=${report.request.fingerprintCoverage.missing} truncated=${report.request.fingerprintCoverage.truncated}`,
@@ -3062,7 +2477,6 @@ export function formatReport(report: TraceReport): string {
 		`response records  : ${report.responses}`,
 		`joins             : missing=${report.joins.missing} ambiguous=${report.joins.ambiguous} schema9-missing-attempt-id=${report.joins.schema9MissingAttemptId}`,
 		`cache denominators: final=${JSON.stringify(report.cacheDenominators.finalResponseOnly)} attempts=${JSON.stringify(report.cacheDenominators.attemptInclusive)}`,
-		`experiment ready  : treatment-absent=${report.readiness.treatmentAbsent} crossovers=${report.readiness.assignmentEffectiveCrossovers}`,
 		`key concentration : max=${report.readiness.maxRequestsPerKeyMinute}/min keys-over-15=${report.readiness.keysOver15RequestsPerMinute}`,
 		"",
 		"REQUEST (historical replay load, NOT new fan-out):",
@@ -3099,12 +2513,6 @@ export function formatReport(report: TraceReport): string {
 			.join(", ")}`,
 		`  RE-SPAWN responses         : ${report.response.respawnResponses}`,
 		"",
-		"CONVERSATION VS SESSION CANARY (intention-to-treat):",
-		...formatCanaryArm("conversation", report.canary.conversation),
-		...formatCanaryArm("session", report.canary.session),
-		...formatCanaryArm("unassigned compatibility", report.canary.unassigned),
-		`  unjoined responses: ${report.canary.unjoinedResponses}`,
-		"",
 		"CACHE KEY CONTINUITY PROVENANCE:",
 		...report.continuity.rows.map((row) => `  ${JSON.stringify(row)}`),
 	];
@@ -3131,15 +2539,8 @@ export function formatCacheExperimentReport(
 		"CODEX CACHE EXPERIMENTS",
 		`attribution: unit=${report.attribution.unit} scope=${report.attribution.responseScope} elapsed=${report.attribution.elapsed} gap=${report.attribution.gap} pacing_wait_ms=${report.attribution.pacingWaitMs}`,
 	];
-	const append = (name: string, dimension: CacheExperimentDimensionReport) => {
-		lines.push(
-			"",
-			`${name}: assignments=${JSON.stringify(dimension.assignmentCounts)}`,
-		);
-		for (const row of dimension.rows) lines.push(`  ${JSON.stringify(row)}`);
-	};
-	append("PACING BYPASS CANARY", report.pacing);
-	append("EXPLICIT BREAKPOINT CANARY", report.explicitBreakpoint);
+	lines.push("", "CACHE PACING (all observed Codex attempts):");
+	for (const row of report.pacing.rows) lines.push(`  ${JSON.stringify(row)}`);
 	lines.push(
 		"",
 		`HTTP TURN STATE CANARY: assignments=${JSON.stringify(report.turnState.assignmentCounts)} prompt_key_concentration=${JSON.stringify(report.turnState.promptKeyConcentration)}`,

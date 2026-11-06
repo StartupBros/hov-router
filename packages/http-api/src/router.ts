@@ -10,7 +10,6 @@ import {
 	getCachePacingStats,
 	handleCacheDiagnosisRequest,
 	readCachePacingMs,
-	readCodexCachePacingSettleMs,
 } from "@better-ccflare/proxy";
 import { createAccountPublicValueHandler } from "./handlers/account-public-value";
 import {
@@ -616,7 +615,8 @@ export class APIRouter {
 		this.handlers.set("GET:/api/debug/cache-pacing", () =>
 			Response.json({
 				pacing_ms: readCachePacingMs(),
-				codex_settle_ms: readCodexCachePacingSettleMs(),
+				// The Codex settle window was removed; kept at 0 for one release.
+				codex_settle_ms: 0,
 				families: getCachePacingStats(),
 				routes: getCachePacingRouteStats(),
 			}),

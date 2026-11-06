@@ -9,7 +9,6 @@ import {
 } from "./orchestration-election";
 import {
 	CODEX_CACHE_KEY_MODE_ENV,
-	CODEX_CACHE_KEY_SESSION_PERCENT_ENV,
 	CODEX_DEFAULT_ENDPOINT,
 	CODEX_LOGICAL_MODEL_FAMILY_HEADER,
 	CODEX_PROMPT_CACHE_KEY_ENV,
@@ -28,6 +27,15 @@ import {
 	CODEX_TURN_STATE_PERCENT_ENV,
 	deriveCodexTurnStateCohortId,
 } from "./turn-state";
+
+// Retired in schema 23: the server warns once at startup and nothing reads it.
+const RETIRED_CODEX_CACHE_KEY_SESSION_PERCENT_ENV =
+	"CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT";
+const RETIRED_CACHE_KEY_FIELDS = [
+	"cache_key_assignment",
+	"cache_key_cohort_id",
+	"cache_key_assignment_source",
+] as const;
 
 function messagesRequest(
 	body: unknown,
@@ -81,7 +89,7 @@ describe("Codex trace wiring (integration)", () => {
 		delete process.env[CODEX_TRACE_HMAC_KEY_ENV];
 		delete process.env[CODEX_PROMPT_CACHE_KEY_ENV];
 		delete process.env[CODEX_CACHE_KEY_MODE_ENV];
-		delete process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV];
+		delete process.env[RETIRED_CODEX_CACHE_KEY_SESSION_PERCENT_ENV];
 		delete process.env[CODEX_SINGLE_ORCHESTRATION_ROOT_ENV];
 		delete process.env[CODEX_TURN_STATE_PERCENT_ENV];
 		delete process.env[CODEX_TURN_STATE_ACCOUNT_IDS_ENV];
@@ -141,7 +149,7 @@ describe("Codex trace wiring (integration)", () => {
 		const rawTrace = readFileSync(join(dir, file as string), "utf8");
 		const record = JSON.parse(rawTrace.trim());
 		expect(record).toMatchObject({
-			trace_schema_version: 22,
+			trace_schema_version: 23,
 			phase: "response",
 			reasoning_output_item_count: 3,
 			reasoning_encrypted_present: true,
@@ -180,7 +188,7 @@ describe("Codex trace wiring (integration)", () => {
 		const rawTrace = readFileSync(join(dir, file as string), "utf8");
 		const record = JSON.parse(rawTrace.trim());
 		expect(record).toMatchObject({
-			trace_schema_version: 22,
+			trace_schema_version: 23,
 			phase: "request",
 			reasoning_input_item_count: 1,
 		});
@@ -373,7 +381,7 @@ describe("Codex trace wiring (integration)", () => {
 		const replayTerminal = byAttemptAndPhase.get("turn-attempt-2:response");
 
 		expect(initialRequest).toMatchObject({
-			trace_schema_version: 22,
+			trace_schema_version: 23,
 			codex_turn_state_arm: "treatment",
 			codex_turn_state_request_action: "new_turn",
 			codex_turn_state_replay_applied: false,
@@ -383,18 +391,18 @@ describe("Codex trace wiring (integration)", () => {
 			/^[0-9a-f]{16}$/,
 		);
 		expect(initialTerminal).toMatchObject({
-			trace_schema_version: 22,
+			trace_schema_version: 23,
 			codex_turn_state_terminal_action: "captured",
 			codex_turn_state_present: true,
 		});
 		expect(replayRequest).toMatchObject({
-			trace_schema_version: 22,
+			trace_schema_version: 23,
 			codex_turn_state_arm: "treatment",
 			codex_turn_state_request_action: "replay",
 			codex_turn_state_replay_applied: true,
 		});
 		expect(replayTerminal).toMatchObject({
-			trace_schema_version: 22,
+			trace_schema_version: 23,
 			codex_turn_state_terminal_action: "advanced",
 			codex_turn_state_present: true,
 		});
@@ -440,7 +448,7 @@ describe("Codex trace wiring (integration)", () => {
 		const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
 		expect(files.length).toBe(1);
 		const rec = JSON.parse(readFileSync(join(dir, files[0]), "utf8").trim());
-		expect(rec.trace_schema_version).toBe(22);
+		expect(rec.trace_schema_version).toBe(23);
 		expect(rec.phase).toBe("request");
 		expect(rec.orchestration_admission).toBe("no_orchestration_tools");
 		expect(rec.request_id).toBe("req_trace_1");
@@ -507,7 +515,7 @@ describe("Codex trace wiring (integration)", () => {
 			readFileSync(join(dir, file as string), "utf8").trim(),
 		);
 		expect(record).toMatchObject({
-			trace_schema_version: 22,
+			trace_schema_version: 23,
 			request_id: "req_trace_fable_default",
 			model_in: "claude-fable-5",
 			model_out: "gpt-5.6-sol",
@@ -527,10 +535,11 @@ describe("Codex trace wiring (integration)", () => {
 		).toBeNull();
 	});
 
-	test("traces stable canary decisions across sibling conversations", async () => {
+	test("keys sibling conversations apart even with the retired session canary set", async () => {
 		process.env[CODEX_TRACE_DIR_ENV] = dir;
 		process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-		process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "100";
+		// The retired canary once forced every sibling onto one session key.
+		process.env[RETIRED_CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "100";
 		const sessionId = "11111111-1111-4111-8111-111111111111";
 		const metadata = { user_id: JSON.stringify({ session_id: sessionId }) };
 		const provider = new CodexProvider();
@@ -550,10 +559,10 @@ describe("Codex trace wiring (integration)", () => {
 				),
 			);
 			const upstream = await transformed.json();
-			expect(upstream).not.toHaveProperty("cache_key_assignment");
-			expect(upstream).not.toHaveProperty("cache_key_cohort_id");
+			for (const field of RETIRED_CACHE_KEY_FIELDS) {
+				expect(upstream).not.toHaveProperty(field);
+			}
 			expect(upstream).not.toHaveProperty("conversation_id");
-			expect(upstream).not.toHaveProperty("cache_key_assignment_source");
 		}
 
 		const file = readdirSync(dir).find((f) => f.endsWith(".jsonl")) as string;
@@ -561,31 +570,29 @@ describe("Codex trace wiring (integration)", () => {
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line));
-		expect(records.every((record) => record.trace_schema_version === 22)).toBe(
+		expect(records.every((record) => record.trace_schema_version === 23)).toBe(
 			true,
 		);
-		expect(records.map((record) => record.cache_key_assignment)).toEqual([
-			"session",
-			"session",
+		for (const record of records) {
+			for (const field of RETIRED_CACHE_KEY_FIELDS) {
+				expect(record).not.toHaveProperty(field);
+			}
+		}
+		expect(records.map((record) => record.cache_key_mode)).toEqual([
+			"conversation",
+			"conversation",
 		]);
-		expect(records.map((record) => record.cache_key_assignment_source)).toEqual(
-			["canary", "canary"],
-		);
-		expect(records[0].cache_key_cohort_id).toMatch(/^[0-9a-f]{16}$/);
-		expect(records[1].cache_key_cohort_id).toBe(records[0].cache_key_cohort_id);
 		expect(records[0].conversation_id).toMatch(/^[0-9a-f]{16}$/);
 		expect(records[1].conversation_id).not.toBe(records[0].conversation_id);
-		expect(records.map((record) => record.cache_key_mode)).toEqual([
-			"session",
-			"session",
-		]);
-		expect(records[1].prompt_cache_key_id).toBe(records[0].prompt_cache_key_id);
+		expect(records[0].prompt_cache_key_id).toEqual(expect.any(String));
+		expect(records[1].prompt_cache_key_id).not.toBe(
+			records[0].prompt_cache_key_id,
+		);
 	});
 
-	test("traces conversation control and explicit session crossover", async () => {
+	test("traces the conversation key, then the explicit session override", async () => {
 		process.env[CODEX_TRACE_DIR_ENV] = dir;
 		process.env[CODEX_PROMPT_CACHE_KEY_ENV] = "1";
-		process.env[CODEX_CACHE_KEY_SESSION_PERCENT_ENV] = "0";
 		const metadata = {
 			user_id: JSON.stringify({
 				session_id: "22222222-2222-4222-8222-222222222222",
@@ -593,7 +600,7 @@ describe("Codex trace wiring (integration)", () => {
 		};
 		const provider = new CodexProvider();
 		await provider.transformRequestBody(
-			messagesRequest({ ...SAMPLE, metadata }, "control"),
+			messagesRequest({ ...SAMPLE, metadata }, "conversation"),
 		);
 		process.env[CODEX_CACHE_KEY_MODE_ENV] = "session";
 		await provider.transformRequestBody(
@@ -605,21 +612,22 @@ describe("Codex trace wiring (integration)", () => {
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line));
-		expect(records[0]).toMatchObject({
-			cache_key_assignment: "conversation",
-			cache_key_assignment_source: "canary",
-			cache_key_mode: "conversation",
-		});
-		expect(records[1]).toMatchObject({
-			cache_key_assignment: "conversation",
-			cache_key_assignment_source: "explicit_session_override",
-			cache_key_mode: "session",
-		});
-		expect(records[1].cache_key_cohort_id).toBe(records[0].cache_key_cohort_id);
+		expect(records.map((record) => record.cache_key_mode)).toEqual([
+			"conversation",
+			"session",
+		]);
 		expect(records[1].conversation_id).toBe(records[0].conversation_id);
+		expect(records[1].prompt_cache_key_id).not.toBe(
+			records[0].prompt_cache_key_id,
+		);
+		for (const record of records) {
+			for (const field of RETIRED_CACHE_KEY_FIELDS) {
+				expect(record).not.toHaveProperty(field);
+			}
+		}
 	});
 
-	test("traces null experiment fields for malformed or disabled metadata", async () => {
+	test("traces null cache-key fields for malformed or disabled metadata", async () => {
 		process.env[CODEX_TRACE_DIR_ENV] = dir;
 		const provider = new CodexProvider();
 		await provider.transformRequestBody(
@@ -643,13 +651,13 @@ describe("Codex trace wiring (integration)", () => {
 			.map((line) => JSON.parse(line));
 		for (const record of records) {
 			expect(record).toMatchObject({
-				cache_key_assignment: null,
-				cache_key_cohort_id: null,
 				conversation_id: null,
-				cache_key_assignment_source: null,
 				cache_key_mode: null,
 				prompt_cache_key_set: false,
 			});
+			for (const field of RETIRED_CACHE_KEY_FIELDS) {
+				expect(record).not.toHaveProperty(field);
+			}
 		}
 	});
 
@@ -855,7 +863,7 @@ describe("Codex trace wiring (integration)", () => {
 		expect(rawTrace).not.toContain("You are a helpful assistant");
 	});
 
-	test("traces canary arm and cohort digest, then strips both headers", async () => {
+	test("traces the pacing cohort, drops the retired canary headers, and strips all six", async () => {
 		process.env[CODEX_TRACE_DIR_ENV] = dir;
 		const transformed = await new CodexProvider().transformRequestBody(
 			messagesRequest(SAMPLE, "req_canary", {
@@ -870,9 +878,11 @@ describe("Codex trace wiring (integration)", () => {
 		);
 		const file = readdirSync(dir).find((f) => f.endsWith(".jsonl")) as string;
 		const rec = JSON.parse(readFileSync(join(dir, file), "utf8").trim());
-		expect(rec.pacing_canary).toBe("bypass");
+		// Schema 23 no longer records the retired canary arm or action, but the
+		// proxy still strips their headers so a stale client cannot leak them.
+		expect(rec).not.toHaveProperty("pacing_canary");
+		expect(rec).not.toHaveProperty("pacing_action");
 		expect(rec.pacing_cohort_id).toBe("0123456789abcdef");
-		expect(rec.pacing_action).toBe("paced");
 		expect(rec.pacing_role).toBe("follower");
 		expect(rec.pacing_wait_ms).toBe(60000);
 		expect(rec.pacing_release_reason).toBe("cap");

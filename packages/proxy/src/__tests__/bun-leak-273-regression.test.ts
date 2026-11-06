@@ -120,8 +120,12 @@ describe("issue #273 — Group A: helper contract", () => {
 // This is a census, not a ceiling: a new body-replacing retry legitimately adds
 // a site, and the count moves with it in the same commit. What the guard
 // catches is a site DISAPPEARING (a leak) or being added without the drain.
-// 22 helper invocations: one delegation from discardUpstreamBody plus 21
-// owned-response release sites. Three are recent additions:
+// 21 helper invocations: one delegation from discardUpstreamBody plus 20
+// owned-response release sites. The count was 22 until the GPT-5.6
+// explicit-cache-breakpoint retry was removed (Refs #730): its site drained
+// the rejected response only before that retry, so with the retry gone the
+// rejection flows through the ordinary response path instead. Three are
+// recent additions:
 //   - Advisor-result backstop (#439): when upstream rejects advisor results
 //     another account encrypted, the rejected response is drained before the
 //     same-account retry with every advisor result removed, the same
@@ -146,7 +150,7 @@ describe("issue #273 — Group A: helper contract", () => {
 //     in this file, not a double-drain of one response.
 // This specifically guards outer winner arbitration and request-budget
 // exits from regressing to Bun's ineffective direct body.cancel path.
-const EXPECTED_DRAIN_INVOCATION_COUNT = 22;
+const EXPECTED_DRAIN_INVOCATION_COUNT = 21;
 
 describe("issue #273 — Group B: call-site coverage in proxy-operations.ts", () => {
 	it("proxy-operations.ts has the expected drain-backed helper invocations", () => {

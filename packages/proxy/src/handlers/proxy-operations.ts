@@ -54,7 +54,6 @@ import {
 	resolveModelContextCapability,
 	resolveProviderForAccount,
 	stripCodexReasoningRetention,
-	suppressCodexExplicitCacheBreakpoint,
 	usageCache,
 } from "@better-ccflare/providers";
 import {
@@ -1927,67 +1926,6 @@ async function isCacheControlRejectionError(
 }
 
 /**
- * Match only a JSON 400 that explicitly rejects the experimental OpenAI
- * breakpoint field. Generic validation failures must not consume a replay.
- */
-async function isCodexExplicitCacheBreakpointRejectionError(
-	response: Response,
-	transformedRequestHadMarker: boolean,
-	readJson: ResponseJsonReader = readResponseCloneJson,
-): Promise<boolean> {
-	if (!transformedRequestHadMarker || response.status !== 400) return false;
-	const contentType = response.headers.get("content-type");
-	if (!contentType?.includes("application/json")) return false;
-	const json = (await readJson(response)) as {
-		error?: { message?: unknown; param?: unknown };
-		message?: unknown;
-	} | null;
-	const candidate = [json?.error?.message, json?.error?.param, json?.message]
-		.filter((value): value is string => typeof value === "string")
-		.join(" ")
-		.toLowerCase();
-	if (
-		!candidate.includes("prompt_cache_breakpoint") &&
-		!candidate.includes("prompt_cache_options")
-	) {
-		return false;
-	}
-	return (
-		candidate.includes("unknown") ||
-		candidate.includes("unsupported") ||
-		candidate.includes("not supported") ||
-		candidate.includes("extra input") ||
-		candidate.includes("invalid")
-	);
-}
-
-function hasCodexExplicitCacheBreakpoint(body: unknown): boolean {
-	if (!body || typeof body !== "object") return false;
-	const input = (body as Record<string, unknown>).input;
-	if (!Array.isArray(input)) return false;
-	for (const item of input) {
-		if (!item || typeof item !== "object") continue;
-		const content = (item as Record<string, unknown>).content;
-		if (!Array.isArray(content)) continue;
-		for (const block of content) {
-			if (!block || typeof block !== "object") continue;
-			if (!Object.hasOwn(block, "prompt_cache_breakpoint")) {
-				continue;
-			}
-			const marker = (block as Record<string, unknown>).prompt_cache_breakpoint;
-			if (
-				marker &&
-				typeof marker === "object" &&
-				(marker as Record<string, unknown>).mode === "explicit"
-			) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
-/**
  * Classify only Codex's authoritative Responses API capacity code or the
  * legacy message-only shape produced by CodexProvider. The legacy shape is
  * eligible only for a known-larger-model replay at its call site; generic
@@ -3752,7 +3690,6 @@ export async function proxyWithAccount(
 				| "thinking_retry"
 				| "reasoning_retry"
 				| "cache_control_retry"
-				| "prompt_cache_breakpoint_retry"
 				| "cache_lane_rescue"
 				| "precommit_sse_retry"
 				| "account_failover"
@@ -3826,11 +3763,11 @@ export async function proxyWithAccount(
 						requestMeta.agentAttributionSource,
 					) || isClaudeCodeSubagent(req.headers);
 				// Client-supplied copies are untrusted. Strip before attaching only
-				// server-derived experiment metadata so traces cannot be spoofed or
-				// retain arbitrary sensitive header content.
-				prepared.delete("x-better-ccflare-pacing-canary");
+				// server-derived pacing metadata so traces cannot be spoofed or
+				// retain arbitrary sensitive header content. (Codex prepareHeaders
+				// already drops every client x-better-ccflare-* header, including
+				// the retired pacing canary and action headers.)
 				prepared.delete("x-better-ccflare-pacing-cohort-id");
-				prepared.delete("x-better-ccflare-pacing-action");
 				prepared.delete("x-better-ccflare-pacing-role");
 				prepared.delete("x-better-ccflare-pacing-wait-ms");
 				prepared.delete("x-better-ccflare-pacing-release-reason");
@@ -3841,18 +3778,6 @@ export async function proxyWithAccount(
 					prepared.set("x-better-ccflare-attributed-agent", "true");
 				} else {
 					prepared.delete("x-better-ccflare-attributed-agent");
-				}
-				if (requestMeta.codexPacingCanary) {
-					prepared.set(
-						"x-better-ccflare-pacing-canary",
-						requestMeta.codexPacingCanary,
-					);
-				}
-				if (requestMeta.codexPacingAction) {
-					prepared.set(
-						"x-better-ccflare-pacing-action",
-						requestMeta.codexPacingAction,
-					);
 				}
 				if (requestMeta.codexPacingCohortId) {
 					prepared.set(
@@ -5499,73 +5424,6 @@ export async function proxyWithAccount(
 			} else {
 				log.warn(
 					"No clear_thinking context edits to strip or filtering failed, proceeding with original error response",
-				);
-			}
-		}
-
-		// GPT-5.6 explicit breakpoints are a dark canary on the private Codex
-		// subscription route as well as the documented public Responses route. If
-		// that exact field is rejected, always learn the account/model/endpoint
-		// capability. An attempt with a replayable source transparently retries the
-		// unchanged normalized source once; without one the rejection flows through
-		// while future turns skip the known-unsupported marker.
-		const transformedRequestHadExplicitBreakpoint =
-			hasCodexExplicitCacheBreakpoint(transformedBodyJson);
-		const explicitBreakpointRejection =
-			attemptPlan.providerName === "codex" &&
-			(await isCodexExplicitCacheBreakpointRejectionError(
-				rawResponse,
-				transformedRequestHadExplicitBreakpoint,
-				readAttemptBoundJson,
-			));
-		if (explicitBreakpointRejection && !irreversibleSearchDispatchCommitted()) {
-			suppressCodexExplicitCacheBreakpoint(
-				account.id,
-				transformedModel,
-				transformedRequest.url,
-			);
-			const replayBody = currentReplayBody;
-			if (replayBody !== null) {
-				log.info(
-					`Codex rejected prompt_cache_breakpoint for account=${account.name} model=${transformedModel}; retrying once without it`,
-				);
-				await finalizeCurrentCodexTransport(rawResponse);
-				await discardUpstreamBody(rawResponse);
-				const retryHeaders = new Headers(providerRequest.headers);
-				stampCodexAttempt(
-					retryHeaders,
-					"prompt_cache_breakpoint_retry",
-					currentTransportModel ?? undefined,
-				);
-				const retrySource = new Request(providerRequest.url, {
-					method: providerRequest.method,
-					headers: retryHeaders,
-					body: new Uint8Array(replayBody),
-				});
-				retrySourceRequest = retrySource.clone();
-				const retryTransformed = await transformWithCurrentAttemptPlan(
-					attemptPlan,
-					retrySource,
-					currentTransportModel,
-				);
-				// Materialize two independent requests. Reusing nested clone branches here
-				// can leave Bun waiting on tee bookkeeping after the compatibility probe.
-				const retryTransformedBody = await retryTransformed.text();
-				retryTransformedTemplate = new Request(retryTransformed.url, {
-					method: retryTransformed.method,
-					headers: retryTransformed.headers,
-					body: retryTransformedBody,
-				});
-				const retryTransport = new Request(retryTransformed.url, {
-					method: retryTransformed.method,
-					headers: retryTransformed.headers,
-					body: retryTransformedBody,
-				});
-				rawResponse = await executeCacheAwareProviderAttempt(
-					retryTransport,
-					replayBody,
-					currentCacheIdentityHasCacheControl,
-					currentTransportModel,
 				);
 			}
 		}

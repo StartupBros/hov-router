@@ -1931,6 +1931,7 @@ describe("proxyWithAccount — Codex count_tokens", () => {
 				makeMessagesRequest(bodyBuffer, {
 					"Content-Type": "application/json",
 					"x-better-ccflare-pacing-canary": "spoofed",
+					"x-better-ccflare-pacing-action": "spoofed",
 					"x-better-ccflare-pacing-cohort-id": "secret-value",
 					"x-better-ccflare-pacing-role": "leader",
 					"x-better-ccflare-pacing-wait-ms": "999",
@@ -1955,8 +1956,13 @@ describe("proxyWithAccount — Codex count_tokens", () => {
 			collectorSpy.mockRestore();
 			transformSpy.mockRestore();
 		}
+		// The retired canary and action headers are never set, and a client copy
+		// is stripped rather than passed through to the trace.
 		expect(
 			transformedHeaders?.get("x-better-ccflare-pacing-canary") ?? null,
+		).toBeNull();
+		expect(
+			transformedHeaders?.get("x-better-ccflare-pacing-action") ?? null,
 		).toBeNull();
 		expect(
 			transformedHeaders?.get("x-better-ccflare-pacing-cohort-id") ?? null,

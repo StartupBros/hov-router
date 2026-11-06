@@ -7,8 +7,8 @@
  * re-investigated from scratch: either it matches this file, or it shows up
  * in the drift report as a deviation that is either acknowledged (owned, by
  * issue number) or not (a real anomaly). See docs/configuration.md "Codex
- * cache parity ownership" for the KEEP/DEFER/RETIRE contract each default
- * below is drawn from.
+ * cache parity ownership" for the KEEP/DEFER/RETIRE/REMOVED contract each
+ * default below is drawn from.
  */
 
 import type {
@@ -26,20 +26,21 @@ import type {
  * the `explicitBreakpointSuppressedScopes` observed counter — see
  * CacheParityLeverKey). Values mirror docs/configuration.md:
  *
- * - promptCacheKeyEnabled / cacheKeyMode / pacingMs (60s) /
- *   cacheKeyContinuityPercent (100): KEEP — the proven production controls.
- *   pacingMs and cacheKeyContinuityPercent are recorded as their deployed
- *   values (2026-08-20 plan doc Sources block: `CCFLARE_CACHE_PACING_MS=60000`,
- *   `CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT=100`), not the env-unset
- *   code default, because the ownership table declares them KEPT ON.
- * - explicitBreakpointPercent: DEFER — 0 until the private ChatGPT
- *   subscription endpoint accepts the documented marker on natural traffic.
+ * - promptCacheKeyEnabled / cacheKeyMode / pacingMs (60s): KEEP — the proven
+ *   production controls. pacingMs is recorded as its deployed value
+ *   (2026-08-20 plan doc Sources block: `CCFLARE_CACHE_PACING_MS=60000`), not
+ *   the env-unset code default, because the ownership table declares it
+ *   KEPT ON.
+ * - cacheKeyContinuityPercent (100): KEEP — continuity is always on in code,
+ *   and the snapshot reports a fixed 100 for one release.
  * - cacheKeySessionPercent, cacheKeyPrefixShardPercent, codexSettleMs,
- *   turnStatePercent, webSocketPercent: RETIRE — measured worse than or no
- *   better than the KEEP baseline, so declared default is 0.
- * - pacingBypassPercent, globalKeepaliveTtlMinutes,
- *   xaiCacheKeepaliveTtlMinutes: default-off diagnostic/compatibility
- *   surfaces with no parity claim, declared default 0.
+ *   pacingBypassPercent, explicitBreakpointPercent, webSocketPercent:
+ *   REMOVED — the code is gone and the snapshot reports a fixed 0 for one
+ *   release.
+ * - turnStatePercent: RETIRE — measured no better than the KEEP baseline, so
+ *   declared default is 0.
+ * - globalKeepaliveTtlMinutes, xaiCacheKeepaliveTtlMinutes: default-off
+ *   diagnostic/compatibility surfaces with no parity claim, declared default 0.
  * - turnStateObserveOnly: declared false — moot while turnStatePercent's
  *   declared default is 0 (no cohort is ever eligible for treatment), and
  *   matches the code's own env-unset default.
