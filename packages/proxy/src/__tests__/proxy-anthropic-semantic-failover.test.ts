@@ -55,7 +55,7 @@ import {
 	getRateLimitProbeAdmission,
 	resetRateLimitProbeGatesForTests,
 } from "../handlers/rate-limit-cooldown";
-import { stampInternalAutoRefreshAuth } from "../internal-probe-auth";
+import { stampInternalSchedulerAuth } from "../internal-probe-auth";
 import type { UsageCollector } from "../usage-collector";
 
 // Loading proxy.ts in a focused unit test must not require ignored embedded
@@ -1337,7 +1337,7 @@ describe("downstream Anthropic Messages SSE routing", () => {
 		const request = makeAuthorizedCodexRequest();
 		if (scenario === "synthetic_internal") {
 			request.headers.set("x-better-ccflare-keepalive", "true");
-			stampInternalAutoRefreshAuth(request.headers);
+			stampInternalSchedulerAuth(request.headers);
 		}
 		const response = await handleProxy(request, new URL(request.url), ctx);
 		await response.text();

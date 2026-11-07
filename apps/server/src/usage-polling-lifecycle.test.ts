@@ -153,7 +153,7 @@ describe("UsagePollingLifecycle", () => {
 			unregisterRefreshClearer(serverId) {
 				calls.push(`refresh:${serverId}`);
 			},
-			unregisterAutoRefreshTrackingClearer(serverId) {
+			unregisterAccountRemovalTrackingClearer(serverId) {
 				calls.push(`tracking:${serverId}`);
 			},
 		});

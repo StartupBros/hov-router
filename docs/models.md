@@ -63,10 +63,10 @@ export const MODEL_SHORT_NAMES: Record<string, string> = {
 
 ```typescript
 // Default model for general use
-export const DEFAULT_MODEL = CLAUDE_MODEL_IDS.SONNET_4;
+export const DEFAULT_MODEL = CLAUDE_MODEL_IDS.SONNET_5;
 
 // Default model for agents
-export const DEFAULT_AGENT_MODEL = CLAUDE_MODEL_IDS.SONNET_4;
+export const DEFAULT_AGENT_MODEL = CLAUDE_MODEL_IDS.SONNET_5;
 ```
 
 ## Helper Functions

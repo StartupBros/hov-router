@@ -1113,9 +1113,9 @@ interface Account {
 
 ### Token Refresh Strategy
 
-1. **Proactive Refresh**: Refresh tokens 5 minutes before expiration
+1. **On-use Refresh**: Whenever a request, usage poll or other task needs a token, refresh it if it expires within 30 minutes (`TOKEN_SAFETY_WINDOW_MS`). There is no dedicated refresh job.
 2. **Reactive Refresh**: Refresh on 401 responses
-3. **Retry Logic**: Implement exponential backoff for refresh failures
+3. **Refresh Cooldown**: A failed refresh starts a 60-second cooldown for that account (`TOKEN_REFRESH_BACKOFF_MS`)
 4. **Concurrent Request Handling**: Prevent multiple simultaneous refreshes
 
 ## Adding New Providers

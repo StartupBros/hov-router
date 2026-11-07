@@ -117,7 +117,7 @@ import {
 	recordCodexUsageSnapshot,
 	refreshModelCatalog,
 	refreshTokenAfterRejectedRedemption,
-	registerAutoRefreshTrackingClearer,
+	registerAccountRemovalTrackingClearer,
 	registerCodexResetRedeemer,
 	registerCodexUsageRefresher,
 	registerPollingRestarter,
@@ -128,7 +128,7 @@ import {
 	startIntegrityScheduler,
 	startZaiPeakHoursPause,
 	stopGlobalTokenHealthChecks,
-	unregisterAutoRefreshTrackingClearer,
+	unregisterAccountRemovalTrackingClearer,
 	unregisterCodexResetRedeemer,
 	unregisterCodexUsageRefresher,
 	unregisterPollingRestarter,
@@ -2500,7 +2500,7 @@ export default async function startServer(options?: {
 	// Retire this server's usage polling when an account is removed. Capture the
 	// concrete polling owner in the deletion callback; consulting mutable module
 	// state here could clear a later server instance.
-	registerAutoRefreshTrackingClearer(
+	registerAccountRemovalTrackingClearer(
 		serverId,
 		createUsagePollingTrackingClearer(pollingLifecycle),
 	);
@@ -3424,7 +3424,7 @@ function stopPeriodicWork(): Promise<void> {
 				unregisterCodexUsageRefresher,
 				unregisterPollingRestarter,
 				unregisterRefreshClearer,
-				unregisterAutoRefreshTrackingClearer,
+				unregisterAccountRemovalTrackingClearer,
 			});
 			registeredServerId = null;
 		}

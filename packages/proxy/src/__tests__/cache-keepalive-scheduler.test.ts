@@ -79,8 +79,8 @@ import {
 } from "../cache-keepalive-scheduler";
 import { CACHE_REPLAY_MODEL_HEADER } from "../cache-transport-staging";
 import {
-	consumeInternalAutoRefreshAuth,
-	INTERNAL_AUTO_REFRESH_HEADER,
+	consumeInternalSchedulerAuth,
+	INTERNAL_SCHEDULER_AUTH_HEADER,
 } from "../internal-probe-auth";
 
 // ---------------------------------------------------------------------------
@@ -563,9 +563,9 @@ describe("CacheKeepaliveScheduler", () => {
 			expect(capturedHeaders.get(CACHE_REPLAY_MODEL_HEADER)).toBe(
 				"physical-fallback-model",
 			);
-			expect(capturedHeaders.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(true);
-			expect(consumeInternalAutoRefreshAuth(capturedHeaders)).toBe(true);
-			expect(capturedHeaders.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+			expect(capturedHeaders.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(true);
+			expect(consumeInternalSchedulerAuth(capturedHeaders)).toBe(true);
+			expect(capturedHeaders.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 			expect(capturedHeaders.has("authorization")).toBe(false);
 			expect(capturedHeaders.has("x-api-key")).toBe(false);
 			expect(capturedHeaders.has("x-better-ccflare-request-id")).toBe(false);

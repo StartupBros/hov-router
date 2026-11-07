@@ -12,7 +12,7 @@ const deleteUsageCache = spyOn(usageCache, "delete").mockImplementation(
 	() => {},
 );
 const clearAccountRefreshCache = mock(() => {});
-const clearAutoRefreshTrackingForAccount = mock(() => {});
+const clearAccountRemovalTrackingForAccount = mock(() => {});
 const clearCodexModelCacheForAccount = mock(() => {});
 const clearNativeAutoCatalogEvidence = mock(() => {});
 const clearOpenAICompatibleModelCacheForAccount = mock(() => {});
@@ -21,7 +21,7 @@ const clearPendingRotationForDeletedAccount = mock(() => {});
 mock.module("@better-ccflare/cli-commands", () => ({ removeAccountById }));
 mock.module("@better-ccflare/proxy", () => ({
 	clearAccountRefreshCache,
-	clearAutoRefreshTrackingForAccount,
+	clearAccountRemovalTrackingForAccount,
 	clearCodexModelCacheForAccount,
 	clearNativeAutoCatalogEvidence,
 	clearOpenAICompatibleModelCacheForAccount,
@@ -57,7 +57,7 @@ afterEach(() => {
 	stopPolling.mockClear();
 	deleteUsageCache.mockClear();
 	clearAccountRefreshCache.mockClear();
-	clearAutoRefreshTrackingForAccount.mockClear();
+	clearAccountRemovalTrackingForAccount.mockClear();
 	clearCodexModelCacheForAccount.mockClear();
 	clearNativeAutoCatalogEvidence.mockClear();
 	clearOpenAICompatibleModelCacheForAccount.mockClear();
@@ -75,8 +75,8 @@ describe("createAccountRemoveHandler cleanup contract", () => {
 		clearAccountRefreshCache.mockImplementationOnce(() =>
 			callOrder.push("clearRefreshCache"),
 		);
-		clearAutoRefreshTrackingForAccount.mockImplementationOnce(() =>
-			callOrder.push("clearAutoRefreshTracking"),
+		clearAccountRemovalTrackingForAccount.mockImplementationOnce(() =>
+			callOrder.push("clearAccountRemovalTracking"),
 		);
 		clearCodexModelCacheForAccount.mockImplementationOnce(() =>
 			callOrder.push("clearCodexModelCatalog"),
@@ -100,7 +100,7 @@ describe("createAccountRemoveHandler cleanup contract", () => {
 			"remove",
 			"stopPolling",
 			"clearRefreshCache",
-			"clearAutoRefreshTracking",
+			"clearAccountRemovalTracking",
 			"clearCodexModelCatalog",
 			"clearOpenAICompatibleModelCatalog",
 			"clearUsageCache",
@@ -118,7 +118,7 @@ describe("createAccountRemoveHandler cleanup contract", () => {
 		expect(stopPolling).toHaveBeenCalledTimes(1);
 		expect(stopPolling).toHaveBeenCalledWith("account-1");
 		expect(clearAccountRefreshCache).toHaveBeenCalledWith("account-1");
-		expect(clearAutoRefreshTrackingForAccount).toHaveBeenCalledWith(
+		expect(clearAccountRemovalTrackingForAccount).toHaveBeenCalledWith(
 			"account-1",
 		);
 		expect(clearCodexModelCacheForAccount).toHaveBeenCalledWith("account-1");
@@ -148,7 +148,7 @@ describe("createAccountRemoveHandler cleanup contract", () => {
 		expect(clearAccountRefreshCache).toHaveBeenCalledWith("account-1");
 		expect(deleteUsageCache).toHaveBeenCalledWith("account-1");
 		expect(stopPolling).not.toHaveBeenCalled();
-		expect(clearAutoRefreshTrackingForAccount).not.toHaveBeenCalled();
+		expect(clearAccountRemovalTrackingForAccount).not.toHaveBeenCalled();
 		expect(clearCodexModelCacheForAccount).not.toHaveBeenCalled();
 		expect(clearNativeAutoCatalogEvidence).not.toHaveBeenCalled();
 		expect(clearPendingRotationForDeletedAccount).not.toHaveBeenCalled();
@@ -179,7 +179,7 @@ describe("createAccountRemoveHandler cleanup contract", () => {
 
 		expect(stopPolling).not.toHaveBeenCalled();
 		expect(clearAccountRefreshCache).not.toHaveBeenCalled();
-		expect(clearAutoRefreshTrackingForAccount).not.toHaveBeenCalled();
+		expect(clearAccountRemovalTrackingForAccount).not.toHaveBeenCalled();
 		expect(clearCodexModelCacheForAccount).not.toHaveBeenCalled();
 		expect(clearNativeAutoCatalogEvidence).not.toHaveBeenCalled();
 		expect(clearPendingRotationForDeletedAccount).not.toHaveBeenCalled();

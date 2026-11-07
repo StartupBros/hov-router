@@ -20,7 +20,7 @@ export interface ServerLifecycleUnregistrars {
 	unregisterCodexUsageRefresher(serverId: string): void;
 	unregisterPollingRestarter(serverId: string): void;
 	unregisterRefreshClearer(serverId: string): void;
-	unregisterAutoRefreshTrackingClearer(serverId: string): void;
+	unregisterAccountRemovalTrackingClearer(serverId: string): void;
 }
 
 /** Unregister every server-keyed callback before stopping its local owners. */
@@ -32,7 +32,7 @@ export function unregisterServerLifecycleCallbacks(
 	unregistrars.unregisterCodexUsageRefresher(serverId);
 	unregistrars.unregisterPollingRestarter(serverId);
 	unregistrars.unregisterRefreshClearer(serverId);
-	unregistrars.unregisterAutoRefreshTrackingClearer(serverId);
+	unregistrars.unregisterAccountRemovalTrackingClearer(serverId);
 }
 
 /**

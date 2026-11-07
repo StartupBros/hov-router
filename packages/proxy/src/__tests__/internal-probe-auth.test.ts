@@ -21,9 +21,9 @@ import {
 import { CACHE_REPLAY_MODEL_HEADER } from "../cache-transport-staging";
 import type { ProxyContext } from "../handlers";
 import {
-	consumeInternalAutoRefreshAuth,
-	INTERNAL_AUTO_REFRESH_HEADER,
-	stampInternalAutoRefreshAuth,
+	consumeInternalSchedulerAuth,
+	INTERNAL_SCHEDULER_AUTH_HEADER,
+	stampInternalSchedulerAuth,
 } from "../internal-probe-auth";
 import { handleProxy } from "../proxy";
 import * as usageCollectorModule from "../usage-collector";
@@ -162,21 +162,21 @@ afterEach(() => {
 describe("internal auto-refresh authentication", () => {
 	it("uses an unguessable process credential and consumes its private header", () => {
 		const headers = new Headers();
-		stampInternalAutoRefreshAuth(headers);
-		const credential = headers.get(INTERNAL_AUTO_REFRESH_HEADER);
+		stampInternalSchedulerAuth(headers);
+		const credential = headers.get(INTERNAL_SCHEDULER_AUTH_HEADER);
 
 		expect(credential?.length).toBeGreaterThanOrEqual(32);
-		expect(consumeInternalAutoRefreshAuth(headers)).toBe(true);
-		expect(headers.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(consumeInternalSchedulerAuth(headers)).toBe(true);
+		expect(headers.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 	});
 
 	it("deletes an invalid private header without trusting it", () => {
 		const headers = new Headers({
-			[INTERNAL_AUTO_REFRESH_HEADER]: "caller-controlled",
+			[INTERNAL_SCHEDULER_AUTH_HEADER]: "caller-controlled",
 		});
 
-		expect(consumeInternalAutoRefreshAuth(headers)).toBe(false);
-		expect(headers.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(consumeInternalSchedulerAuth(headers)).toBe(false);
+		expect(headers.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 	});
 
 	it("gives the auto-refresh marker plus a valid private credential no bypass to a paused account", async () => {
@@ -192,14 +192,14 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-auto-refresh": "true",
 			"x-better-ccflare-bypass-session": "true",
 		});
-		stampInternalAutoRefreshAuth(headers);
+		stampInternalSchedulerAuth(headers);
 		const request = makeRequest(headers);
 
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(response.status).toBe(503);
 		expect(fetchMock).not.toHaveBeenCalled();
-		expect(request.headers.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(request.headers.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 		expect(request.headers.has("x-better-ccflare-auto-refresh")).toBe(false);
 	});
 
@@ -223,19 +223,19 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-auto-refresh": "true",
 			"x-better-ccflare-bypass-session": "true",
 		});
-		stampInternalAutoRefreshAuth(headers);
+		stampInternalSchedulerAuth(headers);
 		const request = makeRequest(headers);
 
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(response.status).toBe(200);
-		expect(request.headers.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(request.headers.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 		expect(request.headers.has("x-better-ccflare-auto-refresh")).toBe(false);
-		expect(preparedHeaders[0]?.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(preparedHeaders[0]?.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 		expect(preparedHeaders[0]?.has("x-better-ccflare-auto-refresh")).toBe(
 			false,
 		);
-		expect(upstreamHeaders?.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(upstreamHeaders?.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 		expect(upstreamHeaders?.has("x-better-ccflare-auto-refresh")).toBe(false);
 	});
 
@@ -259,15 +259,15 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-keepalive": "true",
 			"x-better-ccflare-bypass-session": "true",
 		});
-		stampInternalAutoRefreshAuth(headers);
+		stampInternalSchedulerAuth(headers);
 		const request = makeRequest(headers);
 
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(response.status).toBe(200);
-		expect(request.headers.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
-		expect(preparedHeaders[0]?.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
-		expect(upstreamHeaders?.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(request.headers.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
+		expect(preparedHeaders[0]?.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
+		expect(upstreamHeaders?.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 	});
 
 	it("reapplies a trusted keepalive fallback model after provider conversion and strips the directive upstream", async () => {
@@ -304,15 +304,15 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-keepalive": "true",
 			[CACHE_REPLAY_MODEL_HEADER]: "physical-fallback-model",
 		});
-		stampInternalAutoRefreshAuth(headers);
+		stampInternalSchedulerAuth(headers);
 		const request = makeRequest(headers);
 
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(response.status).toBe(200);
 		expect(upstreamBody?.model).toBe("physical-fallback-model");
-		expect(request.headers.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
-		expect(upstreamHeaders?.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(request.headers.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
+		expect(upstreamHeaders?.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 		expect(upstreamHeaders?.has(CACHE_REPLAY_MODEL_HEADER)).toBe(false);
 	});
 
@@ -364,7 +364,7 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-keepalive": "true",
 			[CACHE_REPLAY_MODEL_HEADER]: "physical-fallback-model",
 		});
-		stampInternalAutoRefreshAuth(headers);
+		stampInternalSchedulerAuth(headers);
 		const request = makeRequest(headers, "physical-fallback-model");
 
 		const response = await handleProxy(request, new URL(request.url), ctx);
@@ -375,7 +375,7 @@ describe("internal auto-refresh authentication", () => {
 		);
 		expect(upstreamBody?.model).toBeUndefined();
 		expect(upstreamBody?.anthropic_version).toBe("vertex-2023-10-16");
-		expect(upstreamHeaders?.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(upstreamHeaders?.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 		expect(upstreamHeaders?.has(CACHE_REPLAY_MODEL_HEADER)).toBe(false);
 	});
 
@@ -391,14 +391,14 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-keepalive": "true",
 			[CACHE_REPLAY_MODEL_HEADER]: "physical-fallback-model",
 		});
-		stampInternalAutoRefreshAuth(headers);
+		stampInternalSchedulerAuth(headers);
 		const request = makeRequest(headers);
 
 		const response = await handleProxy(request, new URL(request.url), ctx);
 
 		expect(response.status).toBe(503);
 		expect(fetchMock).not.toHaveBeenCalled();
-		expect(request.headers.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(request.headers.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 	});
 
 	it("does not honor a caller-forged cache replay model directive", async () => {
@@ -488,7 +488,7 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-bypass-session": "true",
 			"x-better-ccflare-auto-refresh": "true",
 		});
-		stampInternalAutoRefreshAuth(headers);
+		stampInternalSchedulerAuth(headers);
 		const request = makeRequest(headers, "claude-haiku-4-5", {
 			metadata: { user_id: "auto-refresh-pacing-session" },
 		});
@@ -518,7 +518,7 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-bypass-session": "true",
 			"x-better-ccflare-keepalive": "true",
 		});
-		stampInternalAutoRefreshAuth(headers);
+		stampInternalSchedulerAuth(headers);
 		const request = makeRequest(headers, "claude-haiku-4-5", {
 			metadata: { user_id: "keepalive-pacing-session" },
 		});
@@ -611,7 +611,7 @@ describe("internal auto-refresh authentication", () => {
 			"x-better-ccflare-bypass-session": "true",
 			"x-better-ccflare-keepalive": "true",
 		});
-		stampInternalAutoRefreshAuth(trustedHeaders);
+		stampInternalSchedulerAuth(trustedHeaders);
 		const trustedRequest = makeRequest(trustedHeaders);
 		const trustedResponse = await handleProxy(
 			trustedRequest,
@@ -637,7 +637,7 @@ describe("internal auto-refresh authentication", () => {
 				"x-better-ccflare-account-id": account.id,
 				"x-better-ccflare-auto-refresh": "true",
 				"x-better-ccflare-bypass-session": "true",
-				[INTERNAL_AUTO_REFRESH_HEADER]: "caller-controlled",
+				[INTERNAL_SCHEDULER_AUTH_HEADER]: "caller-controlled",
 			}),
 		);
 
@@ -645,7 +645,7 @@ describe("internal auto-refresh authentication", () => {
 
 		expect(response.status).toBe(503);
 		expect(fetchMock).not.toHaveBeenCalled();
-		expect(request.headers.has(INTERNAL_AUTO_REFRESH_HEADER)).toBe(false);
+		expect(request.headers.has(INTERNAL_SCHEDULER_AUTH_HEADER)).toBe(false);
 		expect(request.headers.has("x-better-ccflare-auto-refresh")).toBe(false);
 	});
 });

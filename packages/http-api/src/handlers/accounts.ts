@@ -41,7 +41,7 @@ import {
 } from "@better-ccflare/providers";
 import {
 	clearAccountRefreshCache,
-	clearAutoRefreshTrackingForAccount,
+	clearAccountRemovalTrackingForAccount,
 	clearCodexModelCacheForAccount,
 	clearNativeAutoCatalogEvidence,
 	clearOpenAICompatibleModelCacheForAccount,
@@ -1165,7 +1165,7 @@ export function createAccountRemoveHandler(dbOps: DatabaseOperations) {
 
 			// And retire every server's usage polling for the removed account —
 			// otherwise its timers keep firing until server shutdown.
-			clearAutoRefreshTrackingForAccount(accountId);
+			clearAccountRemovalTrackingForAccount(accountId);
 
 			// Retire catalog evidence and any in-flight discovery for this exact id.
 			// A same-ID replacement must fetch its own model list rather than inherit

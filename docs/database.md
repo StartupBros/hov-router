@@ -684,11 +684,6 @@ chmod 700 ~/.config/better-ccflare
 
 8. **Analytics Tables**: Create pre-aggregated tables for common analytics queries.
 
-9. **Strategies Table**: Implement the `strategies` table that is referenced in the codebase but not yet created in the schema. This table would store:
-   - Strategy configurations for load balancing algorithms
-   - Custom routing rules
-   - Performance tuning parameters
+9. **Streaming Backups**: Implement streaming backups to cloud storage providers.
 
-10. **Streaming Backups**: Implement streaming backups to cloud storage providers.
-
-11. **Request Archival**: Implement automatic archival of old request data to separate tables or external storage.
+10. **Request Archival**: Implement automatic archival of old request data to separate tables or external storage.

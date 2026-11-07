@@ -15,7 +15,6 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@better-ccflare/config": "workspace:*",
 		"@better-ccflare/logger": "workspace:*",
 		"@better-ccflare/security": "workspace:*",
 		"@better-ccflare/types": "workspace:*"

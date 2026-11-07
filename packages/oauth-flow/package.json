@@ -9,7 +9,6 @@
 	"dependencies": {
 		"@better-ccflare/config": "workspace:*",
 		"@better-ccflare/database": "workspace:*",
-		"@better-ccflare/providers": "workspace:*",
-		"@better-ccflare/types": "workspace:*"
+		"@better-ccflare/providers": "workspace:*"
 	}
 }

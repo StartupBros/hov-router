@@ -23,7 +23,7 @@ import {
 	applyCacheBodyStagingPolicy,
 	getCacheBodyStagingAction,
 } from "../cache-transport-staging";
-import { stampInternalAutoRefreshAuth } from "../internal-probe-auth";
+import { stampInternalSchedulerAuth } from "../internal-probe-auth";
 import * as usageCollectorModule from "../usage-collector";
 
 // ---------------------------------------------------------------------------
@@ -356,7 +356,7 @@ describe("proxy.ts — pool-exhausted path records requests carrying the auto-re
 			"Content-Type": "application/json",
 			"x-better-ccflare-auto-refresh": "true",
 		});
-		stampInternalAutoRefreshAuth(probeHeaders);
+		stampInternalSchedulerAuth(probeHeaders);
 		const probeRequest = new Request("https://proxy.local/v1/messages", {
 			method: "POST",
 			headers: probeHeaders,

@@ -6,7 +6,7 @@ import { type CachedRequestEntry, cacheBodyStore } from "./cache-body-store";
 import { resolveKeepaliveTtlMinutes } from "./cache-keepalive-policy";
 import { CACHE_REPLAY_MODEL_HEADER } from "./cache-transport-staging";
 import { INTERNAL_PROBE_SECRET_HEADER } from "./handlers";
-import { stampInternalAutoRefreshAuth } from "./internal-probe-auth";
+import { stampInternalSchedulerAuth } from "./internal-probe-auth";
 import type { ProxyContext } from "./proxy";
 
 const log = new Logger("CacheKeepaliveScheduler");
@@ -311,7 +311,7 @@ export class CacheKeepaliveScheduler {
 			}
 			// The model directive is privileged: authenticate this localhost hop so
 			// proxy ingress can distinguish it from a caller-forged header.
-			stampInternalAutoRefreshAuth(replayHeaders);
+			stampInternalSchedulerAuth(replayHeaders);
 			// Lets response-processor.ts recognize this synthetic keepalive burst
 			// and skip rate-limit-cooldown application on a benign per-IP 429.
 			replayHeaders.set(

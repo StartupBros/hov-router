@@ -23,7 +23,7 @@ mock.module("@better-ccflare/cli-commands", () => ({
 // the real module — which is exactly what CI's isolated-file pass is for.
 mock.module("@better-ccflare/proxy", () => ({
 	clearAccountRefreshCache: mock(() => {}),
-	clearAutoRefreshTrackingForAccount: mock(() => {}),
+	clearAccountRemovalTrackingForAccount: mock(() => {}),
 	clearCodexModelCacheForAccount: mock(() => {}),
 	clearNativeAutoCatalogEvidence: mock(() => {}),
 	clearOpenAICompatibleModelCacheForAccount: mock(() => {}),
