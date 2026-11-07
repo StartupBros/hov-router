@@ -1,5 +1,33 @@
 # Changelog
 
+## [5.0.0](https://github.com/StartupBros/hov-router/compare/v4.0.0...v5.0.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove the Default Agent Model setting ([#743](https://github.com/StartupBros/hov-router/issues/743))
+
+### Bug Fixes
+
+* correct docs and CLI output that cite commands, flags and routes that do not exist ([#741](https://github.com/StartupBros/hov-router/issues/741)) ([42e471f](https://github.com/StartupBros/hov-router/commit/42e471f9bd02f88f5adcc06be0b687bcf99e7fa7))
+* **dashboard:** show session-id attributions as sessions, not agents ([#742](https://github.com/StartupBros/hov-router/issues/742)) ([f274365](https://github.com/StartupBros/hov-router/commit/f274365da3be6312cb737a6a754c33a22ee24b20))
+* **deploy:** continue a backend handoff the server accepted without replying ([#744](https://github.com/StartupBros/hov-router/issues/744)) ([e890326](https://github.com/StartupBros/hov-router/commit/e890326f2dfe88b6c88501a8fa208308509a1fda)), refs [#743](https://github.com/StartupBros/hov-router/issues/743)
+* **deploy:** start a backend handoff only after the deploy acknowledges the prepared reply ([#746](https://github.com/StartupBros/hov-router/issues/746)) ([16097e5](https://github.com/StartupBros/hov-router/commit/16097e55ae271e7c4042ecb8efbe74f3fc892247)), refs [#745](https://github.com/StartupBros/hov-router/issues/745)
+
+
+### Improvements
+
+* delete the Codex HTTP turn-state replay ([#736](https://github.com/StartupBros/hov-router/issues/736)) ([ae31d54](https://github.com/StartupBros/hov-router/commit/ae31d544829016bd1c87566b6266eda87a961202))
+* drop the unused Codex cache parity floor ([#737](https://github.com/StartupBros/hov-router/issues/737)) ([4df7c76](https://github.com/StartupBros/hov-router/commit/4df7c7607139b14d3a5bd3ecb162f90f3bd18278))
+* drop unused workspace deps and auto-refresh-named leftovers ([#748](https://github.com/StartupBros/hov-router/issues/748)) ([c4884bc](https://github.com/StartupBros/hov-router/commit/c4884bc84e879324a0292cb113c6a621b4074f8e))
+* make Codex cache-key continuity always-on and retire dormant canaries ([#735](https://github.com/StartupBros/hov-router/issues/735)) ([3e4c8f2](https://github.com/StartupBros/hov-router/commit/3e4c8f2705bb7cf6ffa82e141cf2ddd23b4c4f00))
+* remove dead inherited code with no callers ([#731](https://github.com/StartupBros/hov-router/issues/731)) ([efd3205](https://github.com/StartupBros/hov-router/commit/efd32050800997aedc8f59909bb437cab98c5ac6)), refs [#725](https://github.com/StartupBros/hov-router/issues/725)
+* remove exported helpers nothing calls ([#739](https://github.com/StartupBros/hov-router/issues/739)) ([eabd4a5](https://github.com/StartupBros/hov-router/commit/eabd4a535d04afd793a0cb3f61f3399c18944db6))
+* remove the Codex WebSocket transport ([#734](https://github.com/StartupBros/hov-router/issues/734)) ([cc4d49b](https://github.com/StartupBros/hov-router/commit/cc4d49bed8bbc4e0a729c9bc533a555901fef9fc)), refs [#730](https://github.com/StartupBros/hov-router/issues/730)
+* remove the Default Agent Model setting ([#743](https://github.com/StartupBros/hov-router/issues/743)) ([8ab8636](https://github.com/StartupBros/hov-router/commit/8ab8636f8c37f3b3bc06e7c2c3383bbd1453ec30))
+* remove the inert probe-backoff tie-break ([#733](https://github.com/StartupBros/hov-router/issues/733)) ([5f55cd5](https://github.com/StartupBros/hov-router/commit/5f55cd561dfcadf76dda762ed1ef56d9130cf2d7)), refs [#725](https://github.com/StartupBros/hov-router/issues/725)
+* remove the orphaned Ollama transformer and more test-only helpers ([#740](https://github.com/StartupBros/hov-router/issues/740)) ([4bd34d2](https://github.com/StartupBros/hov-router/commit/4bd34d2679bcfb79cf180327c3626e9468b515ca))
+
 ## [4.0.0](https://github.com/StartupBros/hov-router/compare/v3.7.1...v4.0.0) (2026-11-05)
 
 
