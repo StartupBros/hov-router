@@ -10,7 +10,7 @@ import {
 import { usageCache } from "@better-ccflare/providers";
 import type { Account } from "@better-ccflare/types";
 import type { ProxyContext } from "../handlers";
-import { stampInternalAutoRefreshAuth } from "../internal-probe-auth";
+import { stampInternalSchedulerAuth } from "../internal-probe-auth";
 import { handleProxy } from "../proxy";
 import {
 	clearSession,
@@ -310,7 +310,7 @@ describe("KTD-5: clearSession on no-account-served exits", () => {
 		expect(getServedAccount(SESSION_ID)).toBe("healthy-account");
 
 		const request = makeRequest({ "x-better-ccflare-keepalive": "true" });
-		stampInternalAutoRefreshAuth(request.headers);
+		stampInternalSchedulerAuth(request.headers);
 
 		await handleProxy(
 			request,

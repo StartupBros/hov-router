@@ -31,8 +31,8 @@ import {
 	RESPONSES_ADAPTER_SECRET_HEADER,
 } from "../handlers/proxy-types";
 import {
-	INTERNAL_AUTO_REFRESH_HEADER,
-	stampInternalAutoRefreshAuth,
+	INTERNAL_SCHEDULER_AUTH_HEADER,
+	stampInternalSchedulerAuth,
 } from "../internal-probe-auth";
 import { fetchLiveModels, resetModelCatalogForTest } from "../model-catalog";
 import { handleProxy } from "../proxy";
@@ -449,7 +449,7 @@ describe("Claude Code background merge policy at ingress and provider transport"
 		const userAgent = captured.headers.get("user-agent") ?? "";
 		expect(userAgent).toStartWith("claude-cli/");
 		const headers = new Headers({ "x-better-ccflare-keepalive": "true" });
-		if (proof === "scheduler credential") stampInternalAutoRefreshAuth(headers);
+		if (proof === "scheduler credential") stampInternalSchedulerAuth(headers);
 		else
 			headers.set(INTERNAL_PROBE_SECRET_HEADER, "fixture-process-local-proof");
 		expect(
@@ -474,7 +474,7 @@ describe("Claude Code background merge policy at ingress and provider transport"
 			...(forgedProof
 				? {
 						[INTERNAL_PROBE_SECRET_HEADER]: "forged",
-						[INTERNAL_AUTO_REFRESH_HEADER]: "forged",
+						[INTERNAL_SCHEDULER_AUTH_HEADER]: "forged",
 					}
 				: {}),
 		};

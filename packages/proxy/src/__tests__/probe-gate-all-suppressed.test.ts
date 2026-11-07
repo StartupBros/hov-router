@@ -32,7 +32,7 @@ function stubUsageCollector() {
  * A fully-mocked, unregistered provider name ("test-provider") so
  * `getProvider(account.provider)` in proxy-operations.ts resolves to
  * `undefined` and falls back to `ctx.provider` — same trick as
- * auto-refresh-throttle-exemption.test.ts, giving the test full,
+ * usage-throttling-probe-exemption.test.ts, giving the test full,
  * deterministic control over header prep / response processing.
  */
 function makeAccount(overrides: Partial<Account> = {}): Account {

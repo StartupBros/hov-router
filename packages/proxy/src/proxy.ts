@@ -175,7 +175,7 @@ import {
 	createProtectedAnthropicOverloadResponse,
 	getAutomaticAccountCooldownUntil,
 } from "./handlers/routing-terminal";
-import { consumeInternalAutoRefreshAuth } from "./internal-probe-auth";
+import { consumeInternalSchedulerAuth } from "./internal-probe-auth";
 import { listModelRouteDiscoveryModels } from "./model-route-discovery";
 import {
 	isBoundedModelRouteProfile,
@@ -889,13 +889,13 @@ async function handleProxyCoreImpl(
 	// Consume the private scheduler credential before any request inspection,
 	// metadata construction, logging, cache staging, or upstream forwarding.
 	// Two internal-probe trust mechanisms currently coexist: our own
-	// randomBytes(32)/timingSafeEqual credential (consumeInternalAutoRefreshAuth,
+	// randomBytes(32)/timingSafeEqual credential (consumeInternalSchedulerAuth,
 	// delete-before-compare above) and isInternalProbe's process-local
 	// ctx.internalProbeSecret (a crypto.randomUUID() minted in server.ts),
 	// which request-handler.ts/response-processor.ts/proxy-operations.ts already
 	// rely on for the same schedulers' probe requests. Either one, backed by its
 	// matching secret, is sufficient here — an unverified marker alone never is.
-	const trustedInternalScheduler = consumeInternalAutoRefreshAuth(req.headers);
+	const trustedInternalScheduler = consumeInternalSchedulerAuth(req.headers);
 	const trustedInternalKeepalive =
 		(trustedInternalScheduler &&
 			req.headers.get("x-better-ccflare-keepalive") === "true") ||

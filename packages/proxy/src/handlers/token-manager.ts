@@ -1186,10 +1186,8 @@ export async function refreshAccessTokenSafe(
 const refreshClearers: Map<string, (accountId: string) => void> = new Map();
 
 // Global registry for per-server account-removal tracking clearers (each
-// server retires its usage polling for the removed account). The names keep
-// their auto-refresh prefix because the http-api account removal and the
-// proxy barrel import them.
-const autoRefreshTrackingClearers: Map<string, (accountId: string) => void> =
+// server retires its usage polling for the removed account).
+const accountRemovalTrackingClearers: Map<string, (accountId: string) => void> =
 	new Map();
 
 // Global registry for usage polling restart functions
@@ -1533,25 +1531,27 @@ export function clearAccountRefreshCache(accountId: string): void {
  * an account is removed. The server registers one that retires its usage
  * polling for that account.
  */
-export function registerAutoRefreshTrackingClearer(
+export function registerAccountRemovalTrackingClearer(
 	serverId: string,
 	clearer: (accountId: string) => void,
 ): void {
-	autoRefreshTrackingClearers.set(serverId, clearer);
+	accountRemovalTrackingClearers.set(serverId, clearer);
 }
 
 /**
  * Unregister a previously registered account-removal tracking clearer.
  */
-export function unregisterAutoRefreshTrackingClearer(serverId: string): void {
-	autoRefreshTrackingClearers.delete(serverId);
+export function unregisterAccountRemovalTrackingClearer(
+	serverId: string,
+): void {
+	accountRemovalTrackingClearers.delete(serverId);
 }
 
 /**
  * Clear a removed account's tracking state across all registered servers.
  */
-export function clearAutoRefreshTrackingForAccount(accountId: string): void {
-	for (const [serverId, clearer] of autoRefreshTrackingClearers) {
+export function clearAccountRemovalTrackingForAccount(accountId: string): void {
+	for (const [serverId, clearer] of accountRemovalTrackingClearers) {
 		try {
 			clearer(accountId);
 			log.info(
