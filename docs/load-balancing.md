@@ -52,7 +52,7 @@ export class SessionStrategy implements LoadBalancingStrategy {
     private store: StrategyStore | null = null;
     private log = new Logger("SessionStrategy");
 
-    constructor(sessionDurationMs: number = TIME_CONSTANTS.SESSION_DURATION_DEFAULT) {
+    constructor(sessionDurationMs: number = TIME_CONSTANTS.ANTHROPIC_SESSION_DURATION_DEFAULT) {
         this.sessionDurationMs = sessionDurationMs;
     }
 
@@ -384,7 +384,7 @@ The configuration file is automatically created at `~/.better-ccflare/config.jso
 ### Time Constants
 
 The following time constants are used throughout the system:
-- `SESSION_DURATION_DEFAULT`: 18000000ms (5 hours)
+- `ANTHROPIC_SESSION_DURATION_DEFAULT`: 18000000ms (5 hours)
 - `SESSION_DURATION_FALLBACK`: 3600000ms (1 hour) - used if configuration is invalid
 
 ### Dynamic Configuration

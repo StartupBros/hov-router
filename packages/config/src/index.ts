@@ -2832,7 +2832,7 @@ export class Config extends EventEmitter {
 				delayMs: TIME_CONSTANTS.RETRY_DELAY_DEFAULT,
 				backoff: 2,
 			},
-			sessionDurationMs: TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+			sessionDurationMs: TIME_CONSTANTS.ANTHROPIC_SESSION_DURATION_DEFAULT,
 			port: NETWORK.DEFAULT_PORT,
 			database: {
 				walMode: true,
@@ -2906,7 +2906,7 @@ export class Config extends EventEmitter {
 		});
 		defaults.sessionDurationMs = validateRuntimeSessionDuration(
 			defaults.sessionDurationMs,
-			TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+			TIME_CONSTANTS.ANTHROPIC_SESSION_DURATION_DEFAULT,
 		);
 
 		// Database configuration overrides
