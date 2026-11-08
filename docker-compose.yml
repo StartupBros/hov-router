@@ -11,6 +11,10 @@ services:
     image: hov-router:local
     container_name: better-ccflare
     restart: unless-stopped
+    # On stop the server finishes in-flight responses for up to 60 s
+    # (CCFLARE_SHUTDOWN_DRAIN_MS) plus 15 s of cleanup. Docker's default 10 s
+    # kills it mid-response; raise this if you raise the drain.
+    stop_grace_period: 90s
     ports:
       - "8080:8080"
     volumes:

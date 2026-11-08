@@ -141,6 +141,34 @@ describe("Docker guide reaches the install's real data volume", () => {
 	});
 });
 
+describe("Docker stop waits for the server's shutdown drain", () => {
+	// Docker sends SIGKILL 10 s after SIGTERM by default, while the server
+	// drains in-flight responses for up to its drain budget plus a cleanup
+	// margin. A shorter grace cuts long responses mid-stream.
+	const server = readFileSync(join(root, "apps/server/src/server.ts"), "utf8");
+	const constantMs = (name: string): number => {
+		const match = server.match(new RegExp(`const ${name} = ([\\d_]+);`));
+		expect(match, name).not.toBeNull();
+		return Number((match?.[1] ?? "").replaceAll("_", ""));
+	};
+	const shutdownMs =
+		constantMs("DEFAULT_SHUTDOWN_DRAIN_MS") +
+		constantMs("SHUTDOWN_WATCHDOG_MARGIN_MS");
+
+	it("gives the compose service a stop grace longer than drain plus cleanup", () => {
+		const grace = compose.match(/^\s*stop_grace_period:\s*(\d+)s\s*$/m);
+		expect(grace).not.toBeNull();
+		expect(Number(grace?.[1]) * 1000).toBeGreaterThan(shutdownMs);
+	});
+
+	it("gives the plain docker run example the same stop timeout", () => {
+		const guide = readFileSync(join(root, "docs/docker.md"), "utf8");
+		const timeout = guide.match(/--stop-timeout (\d+)/);
+		expect(timeout).not.toBeNull();
+		expect(Number(timeout?.[1]) * 1000).toBeGreaterThan(shutdownMs);
+	});
+});
+
 describe("Dockerfile provenance wiring", () => {
 	const wiring: ReadonlyArray<readonly [string, string]> = [
 		["CCFLARE_VERSION", "VERSION"],
