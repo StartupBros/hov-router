@@ -2,6 +2,11 @@
 
 Use your AI accounts from one place, and see which account handled each request. HoV Router connects Claude Code to your chosen providers, routes requests across available accounts, and shows usage, costs, and errors in a dashboard. Run one Router privately over Tailscale for several computers, or start with one local computer.
 
+[![Release](https://img.shields.io/github/v/release/StartupBros/hov-router)](https://github.com/StartupBros/hov-router/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+HoV Router is a fork of [tombii/better-ccflare](https://github.com/tombii/better-ccflare). Thanks to [tombii](https://github.com/tombii) and the better-ccflare contributors for the router it builds on. Since the fork it has added banked-reset tracking, Codex route pools that follow a model line, per-provider health reporting and a Linux binary with signed build provenance, and it moved SQLite's heavy reads and writes onto worker threads.
+
 ## Send this to your AI agent
 
 Copy this into **Claude Code or another coding agent with access to your computer and terminal**. A chat-only assistant can explain the steps, but can't install Router for you.
@@ -52,8 +57,12 @@ Issues and pull requests are welcome. For non-trivial changes, open an issue fir
 
 ## Acknowledgements
 
-A House of Vibe project from StartupBros, continuing [tombii/better-ccflare](https://github.com/tombii/better-ccflare) and its ancestor [snipeship/ccflare](https://github.com/snipeship/ccflare). Their work and the community's contributions remain credited in the [full acknowledgements](docs/acknowledgements.md), including upstream sponsors.
+HoV Router continues [tombii/better-ccflare](https://github.com/tombii/better-ccflare) and its ancestor [snipeship/ccflare](https://github.com/snipeship/ccflare). Their work and the community's contributions remain credited in the [full acknowledgements](docs/acknowledgements.md), including upstream sponsors.
 
-HoV Router and hovstack are independent sibling projects by House of Vibe; neither requires the other.
+Related: [hov-stack](https://github.com/StartupBros-com/hov-stack), the Claude Code setup House of Vibe works in. HoV Router and hov-stack are independent; neither requires the other.
 
 MIT - See [LICENSE](LICENSE) for details.
+
+---
+
+Maintained by [Will Mitchell](https://github.com/StartupBros) at [House of Vibe](https://houseofvibe.ai).
