@@ -56,6 +56,11 @@ export interface AnthropicSseFrameClassification {
 	kind: AnthropicSseFrameKind;
 	/** True only for a complete, parsed Anthropic protocol event. */
 	validProtocolActivity?: true;
+	/**
+	 * True for a content block start the model produced (#643). A server-side
+	 * fallback block marks a model switch, not output, so it never sets this.
+	 */
+	generationStart?: true;
 	/** Sanitized nested `error.type`; upstream messages are never retained. */
 	errorType?: string;
 	/** Sanitized nested machine identifiers; arbitrary values are discarded. */
@@ -227,9 +232,14 @@ export function classifyAnthropicSseFrame(
 		case "ping":
 			return { kind: "keepalive", validProtocolActivity: true };
 		case "content_block_start":
-			return isRecord(parsed.content_block)
+			if (!isRecord(parsed.content_block)) return { kind: "malformed" };
+			return parsed.content_block.type === "fallback"
 				? { kind: "structural", validProtocolActivity: true }
-				: { kind: "malformed" };
+				: {
+						kind: "structural",
+						validProtocolActivity: true,
+						generationStart: true,
+					};
 		case "content_block_stop":
 			return { kind: "structural", validProtocolActivity: true };
 		case "message_start": {

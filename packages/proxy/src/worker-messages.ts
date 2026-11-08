@@ -4,6 +4,7 @@
  */
 
 import type { CacheFlightCohortSealReceipt } from "@better-ccflare/core";
+import type { GenerationStart } from "@better-ccflare/providers/stream-evidence";
 import type {
 	AgentAttributionSource,
 	ProjectAttributionSource,
@@ -163,6 +164,14 @@ export interface EndMessage {
 		| "truncated"
 		| "client_cancelled"
 		| null;
+	/**
+	 * When generation began, measured by the layer that saw real network reads
+	 * (#643). The precommit gate and the Codex translator can deliver a
+	 * response's first output long after the model produced it, so the usage
+	 * collector's own first-token stamp would inflate tokens per second.
+	 * Absent when nothing measured the stream.
+	 */
+	generationStart?: GenerationStart | null;
 }
 
 export interface ControlMessage {

@@ -101,6 +101,7 @@ import {
 	AnthropicPreCommitAbortedError,
 	AnthropicPreCommitStallError,
 	gateAnthropicSsePreCommit,
+	gateReadsAreNetworkReads,
 	getAnthropicStreamRuntimeConfig,
 	isDownstreamAnthropicMessagesSse,
 	isNativeAnthropicMessagesSse,
@@ -2480,6 +2481,10 @@ export async function proxyUnauthenticated(
 				terminalGraceMs: streamConfig.terminalGraceMs,
 				maxBufferedBytes: streamConfig.maxBufferedBytes,
 				signal: routingSignal,
+				measureGenerationStart: gateReadsAreNetworkReads(
+					ctx.provider.name,
+					req.headers,
+				),
 			});
 			response = wrapAnthropicPrecommitGatedResponse(response, gatedBody);
 		}
@@ -7450,6 +7455,10 @@ export async function proxyWithAccount(
 						requireAuthoritativeContextOverflow:
 							codexContextOverflowFallbackModel === null,
 						signal: activeAttemptCommitment?.signal ?? currentTransportSignal(),
+						measureGenerationStart: gateReadsAreNetworkReads(
+							attemptPlan.providerName,
+							req.headers,
+						),
 					},
 				);
 				response = wrapAnthropicPrecommitGatedResponse(response, gatedBody);

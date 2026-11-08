@@ -7,6 +7,28 @@ import {
 } from "../anthropic-sse-frame-classifier";
 
 describe("classifyAnthropicSseFrame protocol activity", () => {
+	it("marks a real block start as the start of generation, never a fallback seam (#643)", () => {
+		expect(
+			classifyAnthropicSseFrame(
+				'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t","name":"Read","input":{}}}\n\n',
+			),
+		).toEqual({
+			kind: "structural",
+			validProtocolActivity: true,
+			generationStart: true,
+		});
+		expect(
+			classifyAnthropicSseFrame(
+				'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"fallback","from":{"model":"a"},"to":{"model":"b"}}}\n\n',
+			),
+		).toEqual({ kind: "structural", validProtocolActivity: true });
+		expect(
+			classifyAnthropicSseFrame(
+				'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+			).generationStart,
+		).toBeUndefined();
+	});
+
 	it("accepts only complete parsed protocol events as idle-refresh evidence", () => {
 		for (const frame of [
 			'event: ping\ndata: {"type":"ping"}\n\n',
