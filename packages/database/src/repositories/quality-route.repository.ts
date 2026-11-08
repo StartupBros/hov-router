@@ -220,8 +220,9 @@ function supersedeRoot(
 
 /** A bounded session aggregate is the transaction boundary. Intent, homes,
  * controls and unresolved settlements remain separate logical records, but a
- * single database row CAS commits them together on both adapters. The generic
- * async adapter.transaction is NOT used (it is non-atomic on SQLite).
+ * single database row CAS commits them together. The adapter has no general
+ * transaction, so a multi-record write must fit one statement or one
+ * runBatchWithChanges batch.
  * Digests alone are stored for controls; no credential, prompt or request body.
  */
 export class QualityRouteRepository extends BaseRepository<never> {

@@ -47,8 +47,14 @@ export { BatchExpectedChangesError, type BatchStatement };
 /**
  * SQL adapter over bun:sqlite, wrapping the existing synchronous Database.
  *
- * The `query`, `get`, `run`, `runWithChanges`, and `runReturningOne` methods
- * return Promises that resolve synchronously under the hood.
+ * `query` and `get` read on this connection; `queryOffThread` and
+ * `getOffThread` read on a reader thread when one is attached. The `run*`
+ * methods write through the off-thread writer when one is attached, and on
+ * this connection otherwise.
+ *
+ * `runBatchWithChanges` is the only atomic multi-statement write. There is no
+ * general transaction: while a writer is attached this connection is
+ * `query_only`, so a transaction opened here could not write.
  */
 export class BunSqlAdapter {
 	private readonly offThreadReaders: Partial<
@@ -303,26 +309,6 @@ export class BunSqlAdapter {
 					})(),
 				),
 		);
-	}
-
-	/**
-	 * Execute a function within a transaction.
-	 * Uses bun:sqlite's synchronous transaction API.
-	 */
-	async transaction<T>(fn: () => Promise<T>): Promise<T> {
-		// bun:sqlite transactions are sync; wrap fn result
-		let _result!: T;
-		const tx = this.sqliteDb.transaction(() => {
-			// Execute async fn synchronously (SQLite Bun.SQL resolves immediately)
-			_result = undefined as unknown as T;
-			// For SQLite we need to handle this differently — run as sync transaction
-			// The fn is expected to use adapter methods which for SQLite execute synchronously
-			return null;
-		});
-		tx();
-		// Actually run fn outside transaction for SQLite compatibility
-		// Note: Real transactional safety for SQLite uses the sync API
-		return fn();
 	}
 
 	/**
