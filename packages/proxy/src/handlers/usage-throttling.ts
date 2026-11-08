@@ -1015,33 +1015,6 @@ export function getWeeklyQuotaPressure(
 	return best;
 }
 
-/**
- * Compare pressure bands only when provider, plan class, and weekly-window kind
- * are positively known and identical. Positive means the left side is preferred.
- */
-export function compareQuotaPressure(
-	left: WeeklyQuotaPressure | null,
-	right: WeeklyQuotaPressure | null,
-): -1 | 0 | 1 | null {
-	if (left === null || right === null) return null;
-	const a = left.comparator;
-	const b = right.comparator;
-	if (
-		a.provider === null ||
-		a.billingClass === null ||
-		b.provider === null ||
-		b.billingClass === null ||
-		a.provider !== b.provider ||
-		a.billingClass !== b.billingClass ||
-		a.windowKind !== b.windowKind
-	) {
-		return null;
-	}
-	const difference =
-		PRESSURE_BAND_RANK[left.band] - PRESSURE_BAND_RANK[right.band];
-	return difference === 0 ? 0 : difference > 0 ? 1 : -1;
-}
-
 export function getUsageThrottleStatus(
 	data: AnyUsageData | null,
 	settings: UsageThrottleSettings,

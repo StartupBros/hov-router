@@ -182,28 +182,6 @@ export function buildAccountSetupRoutingDraft(
 	});
 }
 
-export interface AccountSetupRoutingReview {
-	previewDraftKey: string | null;
-	reviewed: boolean;
-}
-
-export function accountSetupRoutingReviewIsCurrent(
-	review: AccountSetupRoutingReview,
-	currentDraftKey: string,
-): boolean {
-	return review.reviewed && review.previewDraftKey === currentDraftKey;
-}
-
-export function invalidateAccountSetupRoutingReview(
-	review: AccountSetupRoutingReview,
-	currentDraftKey: string,
-): AccountSetupRoutingReview {
-	return review.previewDraftKey === null ||
-		review.previewDraftKey === currentDraftKey
-		? review
-		: { previewDraftKey: null, reviewed: false };
-}
-
 export interface AccountRoutingSelection {
 	family: ComboFamily;
 	proposalId: string;

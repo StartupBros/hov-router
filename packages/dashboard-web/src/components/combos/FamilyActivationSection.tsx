@@ -71,13 +71,6 @@ export function buildManualFamilyPolicyUpdate(
 	return { family, membershipMode: "manual" };
 }
 
-export function runManualFamilyRollback(
-	family: ComboFamily,
-	update: FamilyPolicyUpdater,
-): Promise<unknown> {
-	return update(buildManualFamilyPolicyUpdate(family));
-}
-
 export function runSerializedFamilyPolicyUpdate(
 	lock: { current: boolean },
 	family: ComboFamily,

@@ -429,15 +429,6 @@ function inspectHostedToolCandidate(
 	return hasTypedTool ? { body, tools: inspectedTools } : undefined;
 }
 
-/** Detect typed provider-owned tools without matching display names. */
-export function hasCodexServerToolDeclaration(body: unknown): boolean {
-	try {
-		return inspectHostedToolCandidate(body) !== undefined;
-	} catch {
-		return true;
-	}
-}
-
 interface JsonSnapshotState {
 	readonly ancestors: WeakSet<object>;
 	nodes: number;

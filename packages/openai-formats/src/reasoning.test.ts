@@ -9,7 +9,6 @@ import {
 	getSupportedReasoningEfforts,
 	isGpt56SolModel,
 	resolveReasoningEffort,
-	validateReasoningEffort,
 } from "./reasoning";
 
 describe("reasoning effort support", () => {
@@ -67,15 +66,6 @@ describe("reasoning effort support", () => {
 		}
 	});
 
-	it("accepts valid reasoning effort for supported Claude and Codex models", () => {
-		expect(
-			validateReasoningEffort("xhigh", {
-				sourceModel: "claude-sonnet-4-6",
-				targetModel: "gpt-5.3-codex",
-			}),
-		).toBe("xhigh");
-	});
-
 	it("downgrades unsupported effort to nearest lower supported level", () => {
 		const resolved = resolveReasoningEffort("xhigh", {
 			sourceModel: "claude-sonnet-4-6",
@@ -89,27 +79,6 @@ describe("reasoning effort support", () => {
 				to: "medium",
 			},
 		]);
-	});
-
-	it("rejects unsupported reasoning effort values", () => {
-		expect(() =>
-			validateReasoningEffort("extreme", {
-				sourceModel: "claude-sonnet-4-6",
-				targetModel: "gpt-5.3-codex",
-			}),
-		).toThrow(
-			"reasoning.effort must be one of: minimal, low, medium, high, xhigh, max",
-		);
-	});
-
-	it("keeps ultra invalid for GPT-5.6", () => {
-		expect(() =>
-			validateReasoningEffort("ultra", {
-				targetModel: "gpt-5.6-sol",
-			}),
-		).toThrow(
-			"reasoning.effort must be one of: minimal, low, medium, high, xhigh, max",
-		);
 	});
 
 	it("honors only advertised reasoning effort for an exact target without inventing ultra", () => {

@@ -244,10 +244,3 @@ export function resolveAnthropicReasoningEffort(
 		source: hasOfficialEffort ? "output_config" : "reasoning",
 	};
 }
-
-export function validateReasoningEffort(
-	effort: unknown,
-	models: ReasoningEffortModels,
-): ReasoningEffort | undefined {
-	return resolveReasoningEffort(effort, models).effort;
-}

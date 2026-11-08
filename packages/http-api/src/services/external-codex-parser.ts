@@ -331,10 +331,3 @@ export function suppressCodexReplay(
 	}
 	return session.events.slice(index);
 }
-export function codexEventDedupeKey(event: ParsedCodexEvent): string {
-	return JSON.stringify([
-		event.timestamp,
-		event.model,
-		...keys.map((k) => event[k]),
-	]);
-}

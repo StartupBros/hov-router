@@ -1,43 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-	normalizeCodexCacheWriteTokens,
 	normalizeCodexCacheWriteUsage,
 	normalizeCodexResponseInputUsage,
 } from "./usage";
-
-describe("normalizeCodexCacheWriteTokens", () => {
-	test("reads the current OpenAI cache_write_tokens field", () => {
-		expect(
-			normalizeCodexCacheWriteTokens({
-				cache_write_tokens: 123,
-			}),
-		).toBe(123);
-	});
-
-	test("preserves the legacy cache_creation_input_tokens alias", () => {
-		expect(
-			normalizeCodexCacheWriteTokens({
-				cache_creation_input_tokens: 45,
-			}),
-		).toBe(45);
-	});
-
-	test("prefers a valid current field and safely falls back to the legacy alias", () => {
-		expect(
-			normalizeCodexCacheWriteTokens({
-				cache_write_tokens: 0,
-				cache_creation_input_tokens: 99,
-			}),
-		).toBe(0);
-		expect(
-			normalizeCodexCacheWriteTokens({
-				cache_write_tokens: Number.NaN,
-				cache_creation_input_tokens: 17,
-			}),
-		).toBe(17);
-		expect(normalizeCodexCacheWriteTokens(null)).toBe(0);
-	});
-});
 
 describe("normalizeCodexCacheWriteUsage", () => {
 	test("distinguishes an explicit zero write count from an unavailable measurement", () => {

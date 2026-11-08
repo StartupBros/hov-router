@@ -1,9 +1,5 @@
 import { expect, test } from "bun:test";
-import {
-	codexEventDedupeKey,
-	parseCodexLines,
-	suppressCodexReplay,
-} from "../external-codex-parser";
+import { parseCodexLines, suppressCodexReplay } from "../external-codex-parser";
 
 const usage = (input_tokens: number, cached_input_tokens = 0) => ({
 	input_tokens,
@@ -204,23 +200,6 @@ test("no burst preserves own events and self parent has no lookup path", async (
 	]);
 	expect(self.parentId).toBeNull();
 	expect(suppressCodexReplay(self)).toHaveLength(0);
-});
-test("global dedupe key ignores home and session", async () => {
-	const a = await parseCodexLines([
-		meta("a"),
-		event(t("00"), { last_token_usage: usage(100) }),
-	]);
-	const b = await parseCodexLines([
-		meta("b"),
-		event(t("00"), { last_token_usage: usage(100) }),
-	]);
-	const first = a.events[0];
-	const second = b.events[0];
-	if (!first || !second) throw new Error("Expected both source events");
-	expect(codexEventDedupeKey(first)).toBe(codexEventDedupeKey(second));
-	expect(codexEventDedupeKey({ ...first, reasoningOutputTokens: 3 })).not.toBe(
-		codexEventDedupeKey(first),
-	);
 });
 
 test("partial parent match stops suppression at the first mismatch", async () => {

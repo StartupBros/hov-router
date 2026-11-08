@@ -18,7 +18,6 @@ import {
 	isValidModelId,
 	isWellFormedConcreteClaudeModelId,
 	LATEST_MODEL_BY_FAMILY,
-	normalizeProviderUsageWindows,
 	type RequestEvt,
 	requestEvents,
 } from "@better-ccflare/core";
@@ -324,31 +323,6 @@ export function buildRunawayLoopAlertId(
 		`${loop.account}:${loop.model}:${loop.project ?? ""}:${loop.agentUsed ?? ""}`,
 		loop.windowEndMs,
 		cooldownMinutes,
-	);
-}
-
-/** One usage window as reported by a provider's usage payload (mirrors the
- * `{ utilization, resets_at }` shape recognized by usage-history.repository.ts's
- * isWindow, so a window that lands in usage_snapshots is exactly the set this
- * also evaluates). `resetsAtMs` is null when `resets_at` is absent, null, or
- * unparseable. */
-export interface ExtractedUsageWindow {
-	windowKey: string;
-	utilization: number;
-	resetsAtMs: number | null;
-}
-
-/** Compatibility wrapper for callers that still provide an Anthropic payload. */
-export function extractUsageWindows(
-	usage: Record<string, unknown>,
-	provider = "anthropic",
-): ExtractedUsageWindow[] {
-	return normalizeProviderUsageWindows(usage, provider).map(
-		({ windowKey, utilization, resetsAtMs }) => ({
-			windowKey,
-			utilization,
-			resetsAtMs,
-		}),
 	);
 }
 

@@ -27,17 +27,6 @@ export interface NormalizedCodexCacheWriteUsage {
 }
 
 /**
- * Normalize OpenAI Responses cache-write usage to Anthropic's legacy cache
- * creation field. Current Responses payloads use `cache_write_tokens`; older
- * endpoints and fixtures used `cache_creation_input_tokens`.
- */
-export function normalizeCodexCacheWriteTokens(
-	inputTokenDetails: unknown,
-): number {
-	return normalizeCodexCacheWriteUsage(inputTokenDetails).tokens;
-}
-
-/**
  * Preserve the difference between an explicit zero and an absent cache-write
  * field. Anthropic compatibility still needs a numeric zero, while cache
  * diagnostics must not mislabel missing telemetry as a measured zero.

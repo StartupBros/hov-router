@@ -335,15 +335,6 @@ export async function observeCachePacing(opts: {
 	return { key, role: "leader", waitedMs: 0, releaseReason: null, slot };
 }
 
-/** Compatibility wrapper for existing callers and tests. */
-export async function acquireCachePacing(opts: {
-	sessionKey: string | null | undefined;
-	model?: string | null;
-	now?: () => number;
-}): Promise<CachePacingSlot | null> {
-	return (await observeCachePacing(opts))?.slot ?? null;
-}
-
 export function finishPacing(
 	slot: CachePacingSlot | null,
 	response: Response,
