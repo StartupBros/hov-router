@@ -5262,9 +5262,20 @@ describe("UsageCollector request lifecycle", () => {
 			return savedUsages.get(requestId)?.tokensPerSecond;
 		}
 
-		it("keeps today's own-stamp window when nothing upstream measured", async () => {
-			// The inflated value this fix targets: 100 tokens over 5 ms.
-			expect(await heldToolTurnRate("held-unmeasured", undefined)).toBe(20_000);
+		it("uses the whole response time when the only window is too short to measure", async () => {
+			// 100 tokens over the collector's own 5 ms window would read 20,000
+			// tok/s; that window timed a flushed buffer, not the model.
+			const rate = await heldToolTurnRate("held-unmeasured", undefined);
+			expect(rate).toBeCloseTo(100 / 10.01, 6);
+		});
+
+		it("measures a window that reaches the floor", async () => {
+			const rate = await heldToolTurnRate("floor-window", undefined, {
+				firstAt: 10_000,
+				lastAt: 10_100,
+				endAt: 10_110,
+			});
+			expect(rate).toBeCloseTo(1_000, 6);
 		});
 
 		it("starts the window when the held block actually arrived", async () => {
