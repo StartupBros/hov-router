@@ -25,17 +25,24 @@ describe("classifyAnthropicSseFrame protocol activity", () => {
 				contentBlock: "tool_use_start",
 			});
 		}
-		// Text and thinking starts can arrive before the block's first token.
+		// The model is already thinking when a thinking block starts, though
+		// its summarized text arrives later in one burst.
 		for (const block of [
-			{ type: "text", text: "" },
 			{ type: "thinking", thinking: "" },
+			{ type: "redacted_thinking", data: "opaque" },
 		]) {
 			expect(blockStart(block)).toEqual({
 				kind: "structural",
 				validProtocolActivity: true,
-				contentBlock: "start",
+				contentBlock: "thinking_start",
 			});
 		}
+		// A text start can arrive before the block's first token.
+		expect(blockStart({ type: "text", text: "" })).toEqual({
+			kind: "structural",
+			validProtocolActivity: true,
+			contentBlock: "start",
+		});
 		expect(
 			blockStart({
 				type: "fallback",
