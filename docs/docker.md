@@ -26,10 +26,13 @@ The compose file keeps the service, container and volume names `better-ccflare` 
 docker build -t hov-router:local .
 
 docker run -d --name hov-router \
+  --stop-timeout 90 \
   -p 8080:8080 \
   -v hov-router-data:/data \
   hov-router:local
 ```
+
+`--stop-timeout 90` gives the server time to finish in-flight responses when the container stops; [Stopping the container](#stopping-the-container) explains why.
 
 To label the build with its commit, pass the SHA. `/health` then reports it as `git_sha`:
 
@@ -38,6 +41,12 @@ docker build --build-arg GIT_SHA="$(git rev-parse HEAD)" -t hov-router:local .
 ```
 
 Pass settings with `-e NAME=value` or `--env-file .env`. The container runs `--serve --port 8080`; append other flags after the image name, for example `hov-router:local --serve --port 8080 --help`. Both `hov-router` and `better-ccflare` are on the container's `PATH`.
+
+## Stopping the container
+
+On `docker compose stop`, `docker stop` or an upgrade, the server stops taking new requests and finishes the responses already in flight. It waits up to 60 seconds for them, then takes up to 15 seconds more to flush the database before it exits. Docker kills a container 10 seconds after asking it to stop unless told otherwise, which would cut most long model responses off mid-stream. So the compose file sets `stop_grace_period: 90s`, and the `docker run` example passes `--stop-timeout 90`.
+
+To change how long the server waits, set `CCFLARE_SHUTDOWN_DRAIN_MS` (milliseconds, up to 900000). Keep the stop grace longer than that value plus 15 seconds.
 
 ## What the image contains
 
