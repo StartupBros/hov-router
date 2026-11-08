@@ -333,6 +333,41 @@ describe("RoutingAttemptLedger", () => {
 		});
 	});
 
+	it("records a forwarded upstream HTTP failure as upstream_error (#756)", () => {
+		const ledger = new RoutingAttemptLedger();
+		ledger.recordPhysicalAttempt({
+			accountId: "account-a",
+			provider: "openai-compatible",
+			physicalModel: "chat",
+		});
+		ledger.observePhysicalResponse(500);
+		const summary = ledger.terminalSummary({
+			success: false,
+			error: "upstream_http_500 type=api_error code=server_error",
+			nativeStatus: 500,
+			wireStatus: 500,
+		});
+		expect(summary?.attempts[0]).toMatchObject({
+			outcome: "failed",
+			cause: "upstream_error",
+			nativeStatus: 500,
+		});
+		expect(summary?.terminalCause).toBe("upstream_error");
+	});
+
+	it("keeps an unrecognised failure error as an unknown cause", () => {
+		const ledger = new RoutingAttemptLedger();
+		ledger.recordPhysicalAttempt({ accountId: "account-a" });
+		const summary = ledger.terminalSummary({
+			success: false,
+			error: "upstream body interrupted",
+			nativeStatus: 200,
+			wireStatus: 200,
+		});
+		expect(summary?.attempts[0]?.cause).toBe("unknown");
+		expect(summary?.terminalCause).toBe("unknown");
+	});
+
 	it("caps observations without losing true send count or a winner beyond the cap", () => {
 		const ledger = new RoutingAttemptLedger();
 		for (let n = 0; n < 32; n++)

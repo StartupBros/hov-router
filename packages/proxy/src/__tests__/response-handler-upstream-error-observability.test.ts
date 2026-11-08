@@ -89,6 +89,14 @@ describe("forwardToClient non-streaming upstream error observability", () => {
 			expect(JSON.stringify(observation)).not.toContain("private prompt");
 			expect(starts).toHaveLength(1);
 			expect(ends).toHaveLength(1);
+			// #756: the failed row records why it failed, never the message text.
+			expect(ends[0]).toMatchObject({
+				success: false,
+				error: "upstream_http_403 type=permission_error code=login_required",
+			});
+			expect((ends[0] as { error?: string }).error ?? "").not.toContain(
+				"private prompt",
+			);
 		} finally {
 			logBus.off("log", onLog);
 			collectorSpy.mockRestore();
@@ -182,6 +190,105 @@ describe("forwardToClient non-streaming upstream error observability", () => {
 			logBus.off("log", onLog);
 			collectorSpy.mockRestore();
 		}
+	});
+
+	async function endsForNonStreaming(
+		requestId: string,
+		upstream: Response,
+	): Promise<{ ends: unknown[]; clientBody: string; status: number }> {
+		const ends: unknown[] = [];
+		const collector = {
+			handleStart: mock(),
+			handleChunk: mock(),
+			handleEnd: mock((message: unknown) => {
+				ends.push(message);
+				return Promise.resolve();
+			}),
+		};
+		const collectorSpy = spyOn(
+			usageCollectorModule,
+			"getUsageCollector",
+		).mockReturnValue(
+			collector as unknown as usageCollectorModule.UsageCollector,
+		);
+		try {
+			const response = await forwardToClient(
+				{
+					requestId,
+					method: "POST",
+					path: "/v1/messages",
+					account: null,
+					requestHeaders: new Headers({
+						"content-type": "application/json",
+					}),
+					requestBody: new TextEncoder().encode("{}"),
+					response: upstream,
+					timestamp: Date.now(),
+					retryAttempt: 0,
+					failoverAttempts: 0,
+				},
+				{
+					strategy: {},
+					dbOps: {},
+					runtime: { port: 8080, tlsEnabled: false },
+					config: { getStorePayloads: () => false },
+					provider: {
+						name: "openai-compatible",
+						isStreamingResponse: () => false,
+					},
+					refreshInFlight: new Map<string, Promise<string>>(),
+					asyncWriter: {},
+				} as unknown as import("../handlers").ProxyContext,
+			);
+			const clientBody = await response.text();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			return { ends, clientBody, status: response.status };
+		} finally {
+			collectorSpy.mockRestore();
+		}
+	}
+
+	it("records the upstream status as the cause of a plain-text 500", async () => {
+		const { ends, clientBody, status } = await endsForNonStreaming(
+			"req-upstream-500-plain",
+			new Response("Internal Server Error", {
+				status: 500,
+				headers: { "content-type": "text/plain" },
+			}),
+		);
+		expect(status).toBe(500);
+		expect(clientBody).toBe("Internal Server Error");
+		expect(ends).toHaveLength(1);
+		expect(ends[0]).toMatchObject({
+			success: false,
+			error: "upstream_http_500",
+		});
+	});
+
+	it("records the upstream status when a failed response has no body", async () => {
+		const { ends, status } = await endsForNonStreaming(
+			"req-upstream-502-empty",
+			new Response(null, { status: 502 }),
+		);
+		expect(status).toBe(502);
+		expect(ends).toHaveLength(1);
+		expect(ends[0]).toMatchObject({
+			success: false,
+			error: "upstream_http_502",
+		});
+	});
+
+	it("leaves a successful non-streaming response without an error", async () => {
+		const { ends } = await endsForNonStreaming(
+			"req-upstream-200",
+			new Response(JSON.stringify({ type: "message" }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		expect(ends).toHaveLength(1);
+		expect(ends[0]).toMatchObject({ success: true });
+		expect(ends[0]).not.toHaveProperty("error");
 	});
 
 	it("keeps midstream Anthropic error telemetry bounded and separate from client bytes", async () => {

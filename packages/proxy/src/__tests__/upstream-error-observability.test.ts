@@ -1,8 +1,79 @@
 import { describe, expect, it } from "bun:test";
 import {
+	describeUpstreamFailure,
 	extractUpstreamErrorTelemetry,
 	MAX_UPSTREAM_ERROR_OBSERVATION_BYTES,
 } from "../upstream-error-observability";
+
+describe("describeUpstreamFailure", () => {
+	it("names the upstream status when there is no body", () => {
+		expect(describeUpstreamFailure(null, 500)).toBe("upstream_http_500");
+		expect(describeUpstreamFailure(undefined, 502)).toBe("upstream_http_502");
+	});
+
+	it("appends the bounded error type and code without the message", () => {
+		const result = describeUpstreamFailure(
+			new TextEncoder().encode(
+				JSON.stringify({
+					type: "error",
+					error: {
+						type: "api_error",
+						code: "server_error",
+						message: "private prompt and account detail",
+					},
+				}),
+			),
+			500,
+		);
+		expect(result).toBe("upstream_http_500 type=api_error code=server_error");
+		expect(result).not.toContain("private");
+	});
+
+	it("reads root-level fields but ignores a root envelope type of error", () => {
+		expect(
+			describeUpstreamFailure(
+				JSON.stringify({ type: "rate_limit_error", code: "too_many" }),
+				429,
+			),
+		).toBe("upstream_http_429 type=rate_limit_error code=too_many");
+		expect(
+			describeUpstreamFailure(
+				JSON.stringify({ type: "error", message: "private detail" }),
+				500,
+			),
+		).toBe("upstream_http_500");
+	});
+
+	it("keeps only the status for unsafe fields, plain text and oversized bodies", () => {
+		expect(
+			describeUpstreamFailure(
+				JSON.stringify({
+					error: {
+						type: "api error\nforged-log-line",
+						code: "bad code\nwith controls",
+					},
+				}),
+				500,
+			),
+		).toBe("upstream_http_500");
+		expect(describeUpstreamFailure("Internal Server Error", 500)).toBe(
+			"upstream_http_500",
+		);
+		const oversized = `${JSON.stringify({
+			error: { type: "api_error", code: "server_error" },
+		})}${"x".repeat(MAX_UPSTREAM_ERROR_OBSERVATION_BYTES)}`;
+		expect(describeUpstreamFailure(oversized, 500)).toBe("upstream_http_500");
+	});
+
+	it("keeps only the code when the type is absent", () => {
+		expect(
+			describeUpstreamFailure(
+				JSON.stringify({ error: { code: "context_length_exceeded" } }),
+				400,
+			),
+		).toBe("upstream_http_400 code=context_length_exceeded");
+	});
+});
 
 describe("extractUpstreamErrorTelemetry", () => {
 	it("extracts bounded type/code and transport status without retaining the message", () => {

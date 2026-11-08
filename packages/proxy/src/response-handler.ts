@@ -55,7 +55,10 @@ import {
 	sessionIdForObservation,
 } from "./session-account-observer";
 import { combineChunks, teeStream } from "./stream-tee";
-import { extractUpstreamErrorTelemetry } from "./upstream-error-observability";
+import {
+	describeUpstreamFailure,
+	extractUpstreamErrorTelemetry,
+} from "./upstream-error-observability";
 import { getUsageCollector } from "./usage-collector";
 import {
 	type EndMessage,
@@ -1529,7 +1532,16 @@ export async function forwardToClient(
 					requestId,
 					...(terminalError ? {} : { responseBody: null }),
 					success,
-					...(!success && terminalError ? { error: terminalError } : {}),
+					// A forwarded upstream failure records its status as the cause
+					// (#756); payload storage is off in production, so without it
+					// the row says nothing about why it failed.
+					...(!success
+						? {
+								error:
+									terminalError ??
+									describeUpstreamFailure(null, response.status),
+							}
+						: {}),
 				},
 				lifecycleCoordinator,
 			);
@@ -1661,7 +1673,13 @@ export async function forwardToClient(
 										: null,
 							}),
 					success,
-					...(!success && terminalError ? { error: terminalError } : {}),
+					...(!success
+						? {
+								error:
+									terminalError ??
+									describeUpstreamFailure(cappedBuf, response.status),
+							}
+						: {}),
 				},
 				lifecycleCoordinator,
 			);

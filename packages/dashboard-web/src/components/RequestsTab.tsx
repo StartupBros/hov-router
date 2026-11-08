@@ -27,6 +27,7 @@ import {
 	describeRequestAgent,
 	groupAgentFilterOptions,
 } from "../lib/attribution";
+import { requestModelLabel } from "../lib/request-model-label";
 import { isAnthropicPeakHour, isZaiPeakHour } from "../utils/provider-utils";
 import { CopyButton } from "./CopyButton";
 import { RequestAgentBadge } from "./RequestAgentBadge";
@@ -777,6 +778,7 @@ export function RequestsTab() {
 							const isError = request.error || !request.meta.success;
 							const statusCode = request.response?.status;
 							const summary = data?.summaries.get(request.id);
+							const modelLabel = requestModelLabel(summary);
 							const method = request.meta.method || summary?.method;
 							const path = request.meta.path || summary?.path;
 							const accountLabel =
@@ -913,7 +915,7 @@ export function RequestsTab() {
 									</div>
 
 									{/* Badges row: wraps freely, holds all the non-essential context */}
-									{(summary?.model ||
+									{(modelLabel ||
 										summary?.project ||
 										agentView ||
 										summary?.comboName ||
@@ -927,9 +929,22 @@ export function RequestsTab() {
 										isZaiPeak ||
 										isAnthropicPeak) && (
 										<div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 pl-9 text-xs">
-											{summary?.model && (
+											{modelLabel?.kind === "response" && (
 												<Badge variant="secondary" className="text-xs">
-													{summary.model}
+													{modelLabel.model}
+												</Badge>
+											)}
+											{modelLabel && modelLabel.kind !== "response" && (
+												<Badge
+													variant="outline"
+													className="text-xs"
+													title="No response model: this is the model the request asked for"
+												>
+													{modelLabel.kind === "requested"
+														? "Requested: "
+														: "Routed: "}
+													{modelLabel.model}
+													{modelLabel.routedTo && ` → ${modelLabel.routedTo}`}
 												</Badge>
 											)}
 											{summary?.project && (

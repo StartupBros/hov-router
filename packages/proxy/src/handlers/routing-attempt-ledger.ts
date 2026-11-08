@@ -15,6 +15,19 @@ import type {
 	DegradedModeRequestTracker,
 } from "../anthropic-degraded-observability";
 
+/**
+ * The routing cause for a terminal END error. A forwarded upstream HTTP
+ * failure (`upstream_http_<status>…`, written by the response handler, #756)
+ * is an upstream error; anything else keeps the closed-enum mapping.
+ */
+function terminalErrorCause(
+	error: string | undefined,
+): NonNullable<RoutingPhysicalAttempt["cause"]> {
+	return error?.startsWith("upstream_http_")
+		? "upstream_error"
+		: toRoutingAttemptCause(error);
+}
+
 function normalizeConcreteModel(
 	model: string | null | undefined,
 ): string | null {
@@ -317,9 +330,9 @@ export class RoutingAttemptLedger {
 				? last.cause
 				: this.routingDecisionObservation !== null &&
 						this.physicalAttempts === 0 &&
-						toRoutingAttemptCause(input.error) === "unknown"
+						terminalErrorCause(input.error) === "unknown"
 					? "routing_rejected"
-					: toRoutingAttemptCause(input.error);
+					: terminalErrorCause(input.error);
 		if (last?.outcome === "pending")
 			this.recordPhysicalOutcome(
 				input.success ? null : selectedCause,
