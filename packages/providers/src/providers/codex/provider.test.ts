@@ -2392,7 +2392,9 @@ describe("CodexProvider.processResponse", () => {
 
 	it("throttles response.in_progress pings, reopens after one second, and resets per stream", async () => {
 		const provider = new CodexProvider();
-		const nowValues = [10_000, 10_999, 11_000, 11_100];
+		// One clock read per event, in order: each stream's response.created
+		// stamps once (#643), then each response.in_progress.
+		const nowValues = [9_500, 10_000, 10_999, 11_000, 11_050, 11_100];
 		const nowSpy = spyOn(Date, "now").mockImplementation(
 			() => nowValues.shift() ?? 11_100,
 		);

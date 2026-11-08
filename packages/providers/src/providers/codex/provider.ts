@@ -863,6 +863,9 @@ interface StreamState {
 	/** When the read carrying the first response.output_item.added arrived. */
 	generationStartedAt: number | null;
 	generationStartRead: number;
+	/** When the read carrying response.created arrived (#643). */
+	responseCreatedAt: number | null;
+	responseCreatedRead: number;
 	argumentDeltaBytes: number;
 	functionCallBytesPeak: number;
 	pendingReasoningBytes: number;
@@ -4542,6 +4545,8 @@ export class CodexProvider extends BaseProvider {
 			rawValueReads: 0,
 			generationStartedAt: null,
 			generationStartRead: 0,
+			responseCreatedAt: null,
+			responseCreatedRead: 0,
 			argumentDeltaBytes: 0,
 			functionCallBytesPeak: 0,
 			pendingReasoningBytes: 0,
@@ -5112,12 +5117,24 @@ export class CodexProvider extends BaseProvider {
 		// The translator emits a reasoning block only at output_item.done and a
 		// function call's arguments as one delta there, so its own output starts
 		// late; report when the model's first output item actually arrived.
+		// A turn that reasoned is the exception: output_tokens counts its hidden
+		// reasoning, generated before any output item arrived, so date it from
+		// response.created. That start includes prefill, which an anthropic
+		// thinking block dated from its content_block_start does not, so such a
+		// turn's rate reads slightly low instead of several times too high.
 		attachGenerationStartReader(readable, () =>
-			generationStartFromReads(
-				state.generationStartedAt,
-				state.generationStartRead,
-				state.rawValueReads,
-			),
+			state.traceReasoningOutputItemCount > 0 &&
+			state.responseCreatedAt !== null
+				? generationStartFromReads(
+						state.responseCreatedAt,
+						state.responseCreatedRead,
+						state.rawValueReads,
+					)
+				: generationStartFromReads(
+						state.generationStartedAt,
+						state.generationStartRead,
+						state.rawValueReads,
+					),
 		);
 		void processEvents().catch((error) => {
 			log.error("Unhandled Codex SSE processing failure:", error);
@@ -5312,6 +5329,10 @@ export class CodexProvider extends BaseProvider {
 			}
 
 			case "response.created": {
+				if (state.responseCreatedAt === null) {
+					state.responseCreatedAt = Date.now();
+					state.responseCreatedRead = state.rawValueReads;
+				}
 				const resp = data.response as Record<string, unknown> | undefined;
 				const usage = resp?.usage as
 					| {

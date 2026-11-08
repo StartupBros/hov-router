@@ -217,6 +217,10 @@ const MAX_PENDING_DROPPED_MARKERS = 1024;
 // Debounce window before the buffered dropped-marker map is flushed. Keeps
 // the write off the request path entirely; drain() flushes immediately.
 const PENDING_DROPPED_MARKER_FLUSH_MS = 250;
+// #643: a streaming window shorter than this timed a buffer being flushed,
+// not the model generating. After #758 every such window in production was
+// under 25 ms, and the shortest real one was 247 ms.
+const MIN_RATE_WINDOW_MS = 100;
 
 const UNIFIED_RATELIMIT_HEADER_PREFIX = "anthropic-ratelimit-unified-";
 const MAX_UNIFIED_RATELIMIT_HEADERS = 32;
@@ -1812,7 +1816,7 @@ export class UsageCollector {
 								state.lastTokenTimestamp - windowStart;
 							const streamingDurationSec = streamingDurationMs / 1000;
 
-							if (streamingDurationMs > 0) {
+							if (streamingDurationMs >= MIN_RATE_WINDOW_MS) {
 								// Use streaming duration for generation speed
 								state.usage.tokensPerSecond =
 									finalOutputTokens / streamingDurationSec;
@@ -1826,7 +1830,8 @@ export class UsageCollector {
 									);
 								}
 							} else {
-								// Fallback to total response time
+								// Too short to measure generation, like a burst:
+								// fall back to total response time
 								state.usage.tokensPerSecond =
 									finalOutputTokens / totalDurationSec;
 								if (

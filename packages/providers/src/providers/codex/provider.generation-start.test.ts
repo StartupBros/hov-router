@@ -9,7 +9,9 @@ import { CODEX_TRACE_DIR_ENV } from "./trace";
 
 // #643: the translator emits a reasoning block only at output_item.done and a
 // function call's arguments as one delta at done, so downstream frames start
-// late. The first response.output_item.added marks when generation began.
+// late. The first response.output_item.added marks when generation began,
+// except in a turn that reasoned: output_tokens counts its hidden reasoning,
+// generated before any output item arrived, so it dates from response.created.
 
 const enc = new TextEncoder();
 const frame = (name: string, data: Record<string, unknown>) =>
@@ -102,9 +104,21 @@ async function translate(
 }
 
 describe("Codex translator generation start (#643)", () => {
-	it("dates generation from the read that carried the first output item", async () => {
+	it("dates a turn without reasoning from the read that carried its first output item", async () => {
 		const body = await translate([
-			{ at: T0 + 1_000, text: created + reasoningAdded },
+			{ at: T0 + 1_000, text: created },
+			{ at: T0 + 3_000, text: messageAdded + partAdded },
+			{ at: T0 + 3_200, text: textDelta + completed },
+		]);
+		await new Response(body).text();
+
+		expect(readGenerationStart(body)).toEqual({ startedAt: T0 + 3_000 });
+	});
+
+	it("dates a reasoning turn from response.created, before its first output item", async () => {
+		const body = await translate([
+			{ at: T0 + 1_000, text: created },
+			{ at: T0 + 4_000, text: reasoningAdded },
 			{ at: T0 + 5_000, text: reasoningDone + messageAdded + partAdded },
 			{ at: T0 + 5_200, text: textDelta + completed },
 		]);
@@ -118,13 +132,7 @@ describe("Codex translator generation start (#643)", () => {
 			{ at: T0 + 1_000, text: created },
 			{
 				at: T0 + 4_000,
-				text:
-					reasoningAdded +
-					reasoningDone +
-					messageAdded +
-					partAdded +
-					textDelta +
-					completed,
+				text: messageAdded + partAdded + textDelta + completed,
 			},
 		]);
 		await new Response(body).text();
@@ -144,7 +152,8 @@ describe("Codex translator generation start (#643)", () => {
 
 	it("survives the precommit gate, which forwards it instead of measuring", async () => {
 		const body = await translate([
-			{ at: T0 + 1_000, text: created + reasoningAdded },
+			{ at: T0 + 1_000, text: created },
+			{ at: T0 + 4_000, text: reasoningAdded },
 			{ at: T0 + 5_000, text: reasoningDone + messageAdded + partAdded },
 			{ at: T0 + 5_200, text: textDelta + completed },
 		]);
