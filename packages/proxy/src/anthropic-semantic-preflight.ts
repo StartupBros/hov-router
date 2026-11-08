@@ -585,11 +585,15 @@ export async function gateAnthropicSsePreCommit(
 	let terminalDeadline: number | undefined;
 	let cancelPromise: Promise<void> | null = null;
 	// #643: upstream value reads, before and after release, and the read that
-	// carried the first output block.
+	// carried the first generated output. A tool call's start carries its
+	// generated name. Any other block counts from its first visible token, or
+	// from its start when it closes with none (hidden or redacted thinking).
 	let valueReads = 0;
 	let currentReadAt = startedAt;
 	let generationStartedAt: number | null = null;
 	let generationStartRead = 0;
+	let openBlockStartedAt: number | null = null;
+	let openBlockStartRead = 0;
 	const countValueRead = (): void => {
 		valueReads = Math.min(Number.MAX_SAFE_INTEGER, valueReads + 1);
 	};
@@ -729,12 +733,23 @@ export async function gateAnthropicSsePreCommit(
 		framesSeen = Math.min(Number.MAX_SAFE_INTEGER, framesSeen + 1);
 		const classification = classifyAnthropicSseFrame(frame);
 		incrementAnthropicSseFrameKindCount(frameKindCounts, classification.kind);
-		if (
-			generationStartedAt === null &&
-			(classification.generationStart || classification.kind === "meaningful")
-		) {
-			generationStartedAt = currentReadAt;
-			generationStartRead = valueReads;
+		if (generationStartedAt === null) {
+			if (
+				classification.kind === "meaningful" ||
+				classification.contentBlock === "tool_use_start"
+			) {
+				generationStartedAt = currentReadAt;
+				generationStartRead = valueReads;
+			} else if (classification.contentBlock === "start") {
+				openBlockStartedAt = currentReadAt;
+				openBlockStartRead = valueReads;
+			} else if (
+				classification.contentBlock === "stop" &&
+				openBlockStartedAt !== null
+			) {
+				generationStartedAt = openBlockStartedAt;
+				generationStartRead = openBlockStartRead;
+			}
 		}
 		if (
 			classification.validProtocolActivity &&

@@ -54,6 +54,19 @@ const fallbackStart = sse("content_block_start", {
 	},
 });
 const blockStop = (index: number) => sse("content_block_stop", { index });
+const thinkingStart = sse("content_block_start", {
+	index: 0,
+	content_block: { type: "thinking", thinking: "" },
+});
+const thinkingDelta = sse("content_block_delta", {
+	index: 0,
+	delta: { type: "thinking_delta", thinking: "Let me check." },
+});
+// Hidden thinking streams only its integrity signature, never thinking text.
+const signatureDelta = sse("content_block_delta", {
+	index: 0,
+	delta: { type: "signature_delta", signature: "opaque" },
+});
 const messageDelta = sse("message_delta", {
 	delta: { stop_reason: "end_turn" },
 	usage: { output_tokens: 12 },
@@ -154,6 +167,53 @@ describe("precommit gate generation start (#643)", () => {
 				},
 				{ at: T0 + 3_000, text: textDelta(0, "b") + blockStop(0) },
 				{ at: T0 + 3_100, text: messageDelta + messageStop },
+			]),
+			{ measureGenerationStart: true },
+		);
+
+		expect(readGenerationStart(released)).toEqual({ startedAt: T0 + 1_000 });
+	});
+
+	it("dates streamed text from its first token, not an early block start", async () => {
+		const released = await gateAndDrain(
+			timedUpstream([
+				{ at: T0 + 1_000, text: messageStart + textStart(0) },
+				{ at: T0 + 3_000, text: textDelta(0, "a") },
+				{ at: T0 + 3_100, text: blockStop(0) + messageDelta + messageStop },
+			]),
+			{ measureGenerationStart: true },
+		);
+
+		expect(readGenerationStart(released)).toEqual({ startedAt: T0 + 3_000 });
+	});
+
+	it("dates visible thinking from its first thinking token", async () => {
+		const released = await gateAndDrain(
+			timedUpstream([
+				{ at: T0 + 1_000, text: messageStart + thinkingStart },
+				{ at: T0 + 2_500, text: thinkingDelta },
+				{
+					at: T0 + 4_000,
+					text: blockStop(0) + textStart(1) + textDelta(1, "a"),
+				},
+				{ at: T0 + 4_100, text: blockStop(1) + messageDelta + messageStop },
+			]),
+			{ measureGenerationStart: true },
+		);
+
+		expect(readGenerationStart(released)).toEqual({ startedAt: T0 + 2_500 });
+	});
+
+	it("dates hidden thinking from its block start once the block closes unseen", async () => {
+		const released = await gateAndDrain(
+			timedUpstream([
+				{ at: T0 + 1_000, text: messageStart + thinkingStart },
+				{
+					at: T0 + 7_000,
+					text:
+						signatureDelta + blockStop(0) + textStart(1) + textDelta(1, "a"),
+				},
+				{ at: T0 + 7_100, text: blockStop(1) + messageDelta + messageStop },
 			]),
 			{ measureGenerationStart: true },
 		);

@@ -7,26 +7,51 @@ import {
 } from "../anthropic-sse-frame-classifier";
 
 describe("classifyAnthropicSseFrame protocol activity", () => {
-	it("marks a real block start as the start of generation, never a fallback seam (#643)", () => {
-		expect(
+	it("reports content block boundaries, never for a fallback seam's start (#643)", () => {
+		const blockStart = (contentBlock: Record<string, unknown>) =>
 			classifyAnthropicSseFrame(
-				'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t","name":"Read","input":{}}}\n\n',
-			),
-		).toEqual({
-			kind: "structural",
-			validProtocolActivity: true,
-			generationStart: true,
-		});
+				`event: content_block_start\ndata: ${JSON.stringify({
+					type: "content_block_start",
+					index: 0,
+					content_block: contentBlock,
+				})}\n\n`,
+			);
+
+		// A tool call's start carries its name, so generation has begun.
+		for (const type of ["tool_use", "server_tool_use"]) {
+			expect(blockStart({ type, id: "t", name: "Read", input: {} })).toEqual({
+				kind: "structural",
+				validProtocolActivity: true,
+				contentBlock: "tool_use_start",
+			});
+		}
+		// Text and thinking starts can arrive before the block's first token.
+		for (const block of [
+			{ type: "text", text: "" },
+			{ type: "thinking", thinking: "" },
+		]) {
+			expect(blockStart(block)).toEqual({
+				kind: "structural",
+				validProtocolActivity: true,
+				contentBlock: "start",
+			});
+		}
 		expect(
-			classifyAnthropicSseFrame(
-				'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"fallback","from":{"model":"a"},"to":{"model":"b"}}}\n\n',
-			),
+			blockStart({
+				type: "fallback",
+				from: { model: "a" },
+				to: { model: "b" },
+			}),
 		).toEqual({ kind: "structural", validProtocolActivity: true });
 		expect(
 			classifyAnthropicSseFrame(
 				'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
-			).generationStart,
-		).toBeUndefined();
+			),
+		).toEqual({
+			kind: "structural",
+			validProtocolActivity: true,
+			contentBlock: "stop",
+		});
 	});
 
 	it("accepts only complete parsed protocol events as idle-refresh evidence", () => {
