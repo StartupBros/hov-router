@@ -709,7 +709,7 @@ Waits on: PR1 merged first (merge order only). No deployment must be live first.
 
 ### PR3: Member notices
 
-> **Delivery superseded 2026-11-03.** PR3 shipped as #708. Its last hop, a Discord webhook into the members' channel, is replaced by a signed event to BroBot, which publishes after founder review: `docs/plans/2026-11-03-2103-feat-member-notices-via-brobot-plan.md`. Detection, the claim ledger and retries below stay. KTD13's destination now means BroBot's intake URL. KTD14 and the Discord body in KTD15 and U13 are replaced.
+> **Delivery superseded 2026-11-03.** PR3 shipped as #708. Its last hop, a Discord webhook into the members' channel, is replaced by a signed event to a separate receiver, which publishes after review (#720). Detection, the claim ledger and retries below stay. KTD13's destination now means the receiver's intake URL. KTD14 and the Discord body in KTD15 and U13 are replaced.
 
 Waits on: PR1 and PR2 merged first (merge order only; PR3 reads credits, waves and redemptions). No deployment must be live first.
 

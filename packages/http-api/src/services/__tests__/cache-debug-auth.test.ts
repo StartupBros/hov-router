@@ -10,10 +10,7 @@ function makeDbOps(activeKeys: number): DatabaseOperations {
 	} as unknown as DatabaseOperations;
 }
 
-const paths = [
-	["POST", "/api/debug/cache-diagnosis"],
-	["GET", "/api/debug/cache-pacing"],
-] as const;
+const paths = [["GET", "/api/debug/cache-pacing"]] as const;
 
 describe("cache debug endpoint authentication", () => {
 	test("rejects unauthenticated requests when API-key auth is enabled", async () => {

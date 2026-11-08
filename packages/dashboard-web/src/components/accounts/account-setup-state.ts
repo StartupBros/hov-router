@@ -67,22 +67,6 @@ export type AccountSetupEvent =
 	| { type: "done" }
 	| { type: "device-job-updated"; job: DeviceSetupJobView };
 
-export const ACCOUNT_SETUP_EVENT_TYPES = [
-	"preview-loaded",
-	"review-consent-changed",
-	"draft-changed",
-	"creation-started",
-	"finalization-started",
-	"identity-created",
-	"finalization-completed",
-	"creation-failed",
-	"error-changed",
-	"back-to-details",
-	"cancelled",
-	"done",
-	"device-job-updated",
-] as const satisfies readonly AccountSetupEvent["type"][];
-
 export interface DeviceSetupAttemptKeyStore {
 	get(provider: DeviceSetupProvider): string;
 	reset(provider?: DeviceSetupProvider): void;
@@ -409,36 +393,5 @@ export async function finalizeAccountSetup(params: {
 		outcomes,
 		error: reportedErrors.at(-1) ?? null,
 		reportedErrors,
-	};
-}
-
-export interface DeviceFlowPollGuard {
-	tryBegin: () => boolean;
-	release: () => void;
-	finish: () => void;
-	reset: () => void;
-}
-
-/** Keep interval callbacks single-flight and terminal completion exactly once. */
-export function createDeviceFlowPollGuard(): DeviceFlowPollGuard {
-	let inFlight = false;
-	let terminal = false;
-
-	return {
-		tryBegin: () => {
-			if (inFlight || terminal) return false;
-			inFlight = true;
-			return true;
-		},
-		release: () => {
-			inFlight = false;
-		},
-		finish: () => {
-			terminal = true;
-		},
-		reset: () => {
-			inFlight = false;
-			terminal = false;
-		},
 	};
 }

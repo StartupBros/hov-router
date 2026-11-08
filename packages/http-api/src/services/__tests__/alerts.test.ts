@@ -19,7 +19,6 @@ import {
 	buildThresholdAlertId,
 	buildUnknownModelDriftAlert,
 	buildUsageWindowAlertId,
-	extractUsageWindows,
 	shouldFireAlert,
 } from "../alerts";
 
@@ -208,49 +207,6 @@ describe("usage-window alert helpers", () => {
 				1_800_000_000_000,
 			),
 		).not.toBe(base);
-	});
-
-	test("extractUsageWindows reads utilization + resets_at shaped windows and skips everything else", () => {
-		const windows = extractUsageWindows({
-			five_hour: { utilization: 42, resets_at: "2026-07-24T15:00:00.000Z" },
-			seven_day: { utilization: 10, resets_at: null },
-			// Not window-shaped: no numeric `utilization`.
-			extra_usage: { enabled: true },
-			// Not window-shaped: no `resets_at` key at all.
-			spend: { percent: 12 },
-			limits: [{ kind: "session", percent: 5 }],
-		});
-
-		expect(windows).toContainEqual({
-			windowKey: "five_hour",
-			utilization: 42,
-			resetsAtMs: new Date("2026-07-24T15:00:00.000Z").getTime(),
-		});
-		expect(windows).toContainEqual({
-			windowKey: "seven_day",
-			utilization: 10,
-			resetsAtMs: null,
-		});
-		expect(windows).toHaveLength(2);
-	});
-
-	test("extractUsageWindows drops a window whose resets_at is unparseable", () => {
-		// A malformed reset is rejected by the canonical normalizer rather than
-		// coerced to null, which would make it indistinguishable from a window
-		// that legitimately has no cycle boundary (and from NaN arithmetic).
-		const windows = extractUsageWindows({
-			five_hour: { utilization: 42, resets_at: "not-a-date" },
-		});
-		expect(windows).toEqual([]);
-	});
-
-	test("extractUsageWindows keeps a window whose resets_at is explicitly null", () => {
-		const windows = extractUsageWindows({
-			five_hour: { utilization: 42, resets_at: null },
-		});
-		expect(windows).toEqual([
-			{ windowKey: "five_hour", utilization: 42, resetsAtMs: null },
-		]);
 	});
 });
 

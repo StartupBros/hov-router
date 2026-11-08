@@ -31,7 +31,7 @@ tags:
 
 ## Context
 
-Member notices (PR #720 here; BroBot's intake in StartupBros-com/pushbot #5531 and #5548) are
+Member notices (PR #720 here; the receiver lives in a separate, private repository) are
 switched on in production by two new host files: an EnvironmentFile holding `MEMBER_NOTICE_WEBHOOK_URL` and
 `MEMBER_NOTICE_SIGNING_SECRET`, and a drop-in under
 `/etc/systemd/system/ccflare-stack.service.d/` that names it. Planning that activation turned up

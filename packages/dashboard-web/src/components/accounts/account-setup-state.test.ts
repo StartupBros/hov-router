@@ -5,13 +5,10 @@ import type {
 	AccountRoutingSelection,
 } from "./account-routing";
 import {
-	ACCOUNT_SETUP_EVENT_TYPES,
 	ACCOUNT_SETUP_STAGES,
-	type AccountSetupEvent,
 	accountCreationIdentityFromTerminalStatus,
 	accountSetupCanCancel,
 	accountSetupCanCreate,
-	createDeviceFlowPollGuard,
 	createDeviceSetupAttemptKeyStore,
 	createInitialAccountSetupState,
 	finalizeAccountSetup,
@@ -436,34 +433,7 @@ describe("account setup state", () => {
 		expect(notificationCount).toBe(0);
 	});
 
-	it("allows only one device-flow poll to own terminal completion", async () => {
-		const guard = createDeviceFlowPollGuard();
-		let releaseStatus: (() => void) | undefined;
-		const statusReady = new Promise<void>((resolve) => {
-			releaseStatus = resolve;
-		});
-		let terminalCompletions = 0;
-
-		const poll = async () => {
-			if (!guard.tryBegin()) return;
-			try {
-				await statusReady;
-				guard.finish();
-				terminalCompletions += 1;
-			} finally {
-				guard.release();
-			}
-		};
-
-		const first = poll();
-		await poll();
-		releaseStatus?.();
-		await first;
-		await poll();
-		expect(terminalCompletions).toBe(1);
-	});
-
-	it("keeps stage and event coverage intentional", () => {
+	it("keeps stage coverage intentional", () => {
 		expect(ACCOUNT_SETUP_STAGES).toEqual([
 			"details",
 			"review",
@@ -471,21 +441,5 @@ describe("account setup state", () => {
 			"finalizing",
 			"outcome",
 		]);
-		const coveredEventTypes = [
-			"preview-loaded",
-			"review-consent-changed",
-			"draft-changed",
-			"creation-started",
-			"finalization-started",
-			"identity-created",
-			"finalization-completed",
-			"creation-failed",
-			"error-changed",
-			"back-to-details",
-			"cancelled",
-			"done",
-			"device-job-updated",
-		] satisfies AccountSetupEvent["type"][];
-		expect(coveredEventTypes).toEqual([...ACCOUNT_SETUP_EVENT_TYPES]);
 	});
 });

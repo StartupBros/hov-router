@@ -577,11 +577,6 @@ export class CircuitBreaker {
 		return out;
 	}
 
-	/** Test hook: clear all tracked state. */
-	resetAll(): void {
-		this.entries.clear();
-	}
-
 	private resetEntry(entry: CircuitEntry): void {
 		entry.state = "closed";
 		entry.failureCount = 0;

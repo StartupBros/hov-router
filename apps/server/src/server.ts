@@ -3645,11 +3645,6 @@ process.on("SIGTERM", () => {
 	handleGracefulShutdown("SIGTERM");
 });
 
-// Export helper to get the current protocol
-export function getProtocol(): string {
-	return tlsEnabled ? "https" : "http";
-}
-
 // Run server if this is the main entry point
 if (import.meta.main) {
 	// Parse command line arguments

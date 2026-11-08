@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { Account } from "@better-ccflare/types";
 import {
-	compareQuotaPressure,
 	createUsageThrottledResponse,
 	evaluateAutoCapacity,
 	evaluateHardCapacity,
@@ -1090,43 +1089,6 @@ describe("model-relevant weekly quota pressure", () => {
 				baseOptions,
 			),
 		).toBeNull();
-	});
-
-	it("compares only matching provider, billing class, and weekly window kind", () => {
-		const critical = pressureAt(4);
-		const urgent = pressureAt(2);
-		expect(compareQuotaPressure(critical, urgent)).toBe(1);
-		expect(compareQuotaPressure(urgent, critical)).toBe(-1);
-		expect(compareQuotaPressure(critical, pressureAt(5))).toBe(0);
-
-		const data = {
-			limits: [
-				{
-					kind: "weekly_all",
-					percent: 96,
-					resets_at: new Date(NOW + 60 * 60 * 1000).toISOString(),
-					scope: null,
-				},
-			],
-		} as never;
-		const otherWindow = getWeeklyQuotaPressure(data, baseOptions);
-		const otherProvider = getWeeklyQuotaPressure(data, {
-			...baseOptions,
-			provider: "anthropic",
-		});
-		const otherBilling = getWeeklyQuotaPressure(data, {
-			...baseOptions,
-			billingClass: "pro",
-		});
-		const unknownBilling = getWeeklyQuotaPressure(data, {
-			...baseOptions,
-			billingClass: null,
-		});
-
-		expect(compareQuotaPressure(critical, otherWindow)).toBeNull();
-		expect(compareQuotaPressure(otherWindow, otherProvider)).toBeNull();
-		expect(compareQuotaPressure(otherWindow, otherBilling)).toBeNull();
-		expect(compareQuotaPressure(unknownBilling, unknownBilling)).toBeNull();
 	});
 });
 

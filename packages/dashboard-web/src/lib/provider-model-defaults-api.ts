@@ -257,13 +257,6 @@ export async function fetchProviderModelDefaultsResponse(): Promise<ProviderMode
 	return response;
 }
 
-/** Default model map for all providers. Malformed input becomes an empty list. */
-export async function fetchProviderModelDefaults(): Promise<
-	ProviderModelDefaults[]
-> {
-	return (await fetchProviderModelDefaultsResponse()).providers;
-}
-
 /**
  * Saves overrides in one operation, triggered by explicit action (the Save
  * button): this card does not save on every keystroke. A field with

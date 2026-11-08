@@ -1,7 +1,4 @@
-import { Logger } from "@better-ccflare/logger";
 import { BaseRepository } from "./base.repository";
-
-const log = new Logger("ModelTranslationRepository");
 
 export interface ModelTranslation {
 	client_name: string;
@@ -23,89 +20,6 @@ export interface SimilarModel {
  * while the proxy translates to Bedrock format (e.g., "us.anthropic.claude-3-5-sonnet-20241022-v2:0").
  */
 export class ModelTranslationRepository extends BaseRepository<ModelTranslation> {
-	/**
-	 * Get Bedrock model ID for a client-facing model name
-	 * @param clientName - The client-facing model name (e.g., "claude-3-5-sonnet")
-	 * @returns Bedrock model ID if found, null otherwise
-	 */
-	async getBedrockModelId(clientName: string): Promise<string | null> {
-		const result = await this.get<{ bedrock_model_id: string }>(
-			`SELECT bedrock_model_id FROM model_translations WHERE client_name = ?`,
-			[clientName],
-		);
-
-		if (result) {
-			log.debug(
-				`Found translation: ${clientName} → ${result.bedrock_model_id}`,
-			);
-			return result.bedrock_model_id;
-		}
-
-		log.debug(`No translation found for: ${clientName}`);
-		return null;
-	}
-
-	/**
-	 * Add a new model translation mapping
-	 * @param clientName - The client-facing model name
-	 * @param bedrockModelId - The Bedrock model ID
-	 * @param autoDiscovered - Whether this mapping was learned from passthrough (default: false)
-	 */
-	async addTranslation(
-		clientName: string,
-		bedrockModelId: string,
-		autoDiscovered = false,
-	): Promise<void> {
-		const now = Date.now();
-		const id = `model-trans-${now}-${Math.random().toString(36).substring(2, 9)}`;
-
-		try {
-			await this.run(
-				`INSERT INTO model_translations (id, client_name, bedrock_model_id, is_default, auto_discovered, created_at, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?)
-				 ON CONFLICT (client_name, bedrock_model_id) DO NOTHING`,
-				[
-					id,
-					clientName,
-					bedrockModelId,
-					autoDiscovered ? 0 : 1,
-					autoDiscovered ? 1 : 0,
-					now,
-					now,
-				],
-			);
-			log.info(
-				`Added model translation: ${clientName} → ${bedrockModelId}${autoDiscovered ? " (auto-discovered)" : ""}`,
-			);
-		} catch (error) {
-			log.error(`Failed to add model translation: ${(error as Error).message}`);
-		}
-	}
-
-	/**
-	 * List all model translation mappings
-	 * @returns Array of all translations ordered by client name
-	 */
-	async listTranslations(): Promise<ModelTranslation[]> {
-		const rows = await this.query<{
-			client_name: string;
-			bedrock_model_id: string;
-			is_default: number;
-			auto_discovered: number;
-		}>(
-			`SELECT client_name, bedrock_model_id, is_default, auto_discovered
-			 FROM model_translations
-			 ORDER BY client_name`,
-		);
-
-		return rows.map((row) => ({
-			client_name: row.client_name,
-			bedrock_model_id: row.bedrock_model_id,
-			is_default: row.is_default === 1,
-			auto_discovered: row.auto_discovered === 1,
-		}));
-	}
-
 	/**
 	 * Find similar model names for "Did you mean?" suggestions
 	 * Uses simple substring matching for fuzzy search

@@ -112,12 +112,6 @@ export const isAuthError = (error: unknown): boolean =>
 export const isRateLimitError = (error: unknown): boolean =>
 	getErrorType(error) === ERROR_TYPES.RATE_LIMIT;
 
-export const isValidationError = (error: unknown): boolean =>
-	getErrorType(error) === ERROR_TYPES.VALIDATION;
-
-export const isServerError = (error: unknown): boolean =>
-	getErrorType(error) === ERROR_TYPES.SERVER;
-
 // Default error messages
 const DEFAULT_ERROR_MESSAGES: Record<ErrorType, string> = {
 	[ERROR_TYPES.NETWORK]:

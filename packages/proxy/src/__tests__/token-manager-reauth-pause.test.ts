@@ -1,21 +1,7 @@
-/**
- * Tests for pausing an account for re-authentication when its OAuth refresh
- * token is permanently revoked/invalid (invalid_grant, refresh_token_reused,
- * etc), instead of burning failed requests until the generic
- * failure_threshold pause trips.
- *
- * Covers:
- *  - pauseAccountForReauthIfInvalidGrant classifies typed OAuthRefreshTokenError
- *    and message-based invalid_grant markers, and ignores transient failures.
- *  - refreshAccessTokenSafe (the token-refresh chokepoint) pauses the account
- *    for reauth when the provider's refreshToken throws a terminal OAuth
- *    error, but does NOT pause on a transient/network refresh failure.
- */
+/** Tests for upstream auth quarantine and terminal refresh handling. */
 
 import { describe, expect, it, mock } from "bun:test";
 import {
-	type AuthFailureEvt,
-	authFailureEvents,
 	OAuthRefreshTokenError,
 	TokenRefreshError,
 } from "@better-ccflare/core";
@@ -27,7 +13,6 @@ import {
 	clearStaleTokenRefreshState,
 	isStaleTokenRefreshCoolingDown,
 	isTerminalTokenRefreshFailure,
-	pauseAccountForReauthIfInvalidGrant,
 	pauseAccountForUpstreamAuthFailure,
 	refreshAccessTokenSafe,
 	tryAcquireStaleTokenRefresh,
@@ -74,11 +59,6 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
 	};
 }
 
-function makeDbOps(pauseResult = true) {
-	const pauseAccountIfActive = mock(async () => pauseResult);
-	return { pauseAccountIfActive };
-}
-
 class ReceiverBoundDbOps {
 	calls: Array<[string, string, string | undefined]> = [];
 
@@ -92,7 +72,7 @@ class ReceiverBoundDbOps {
 	}
 }
 
-describe("pauseAccountForReauthIfInvalidGrant", () => {
+describe("upstream auth quarantine and terminal refresh classification", () => {
 	it("invokes receiver-bound database pause methods with their owner", async () => {
 		const dbOps = new ReceiverBoundDbOps();
 		const account = makeAccount({
@@ -101,22 +81,10 @@ describe("pauseAccountForReauthIfInvalidGrant", () => {
 		});
 
 		await expect(
-			pauseAccountForReauthIfInvalidGrant(
-				new OAuthRefreshTokenError(
-					"acc-1",
-					"invalid_grant: refresh token expired",
-				),
-				account,
-				dbOps,
-				"rt-revoked",
-			),
-		).resolves.toBe(true);
-		await expect(
 			pauseAccountForUpstreamAuthFailure(account, dbOps, "rt-revoked"),
 		).resolves.toBe(true);
 
 		expect(dbOps.calls).toEqual([
-			[account.id, "oauth_invalid_grant", "rt-revoked"],
 			[account.id, "oauth_invalid_grant", "rt-revoked"],
 		]);
 	});
@@ -308,200 +276,6 @@ describe("pauseAccountForReauthIfInvalidGrant", () => {
 		await expect(pauseAccountForUpstreamAuthFailure(account, {})).resolves.toBe(
 			false,
 		);
-	});
-
-	it("publishes exactly one auth-failure event after winning the canonical pause guard", async () => {
-		const dbOps = makeDbOps(true);
-		const account = {
-			id: "acc-1",
-			name: "test",
-			provider: "anthropic",
-			refresh_token: "rt-1",
-		};
-		const events: AuthFailureEvt[] = [];
-		const listener = (event: AuthFailureEvt) => events.push(event);
-		authFailureEvents.on("event", listener);
-
-		try {
-			const paused = await pauseAccountForReauthIfInvalidGrant(
-				new OAuthRefreshTokenError("acc-1"),
-				account,
-				dbOps as never,
-			);
-
-			expect(paused).toBe(true);
-			expect(dbOps.pauseAccountIfActive).toHaveBeenCalledTimes(1);
-			expect(dbOps.pauseAccountIfActive.mock.calls[0]).toEqual([
-				"acc-1",
-				"oauth_invalid_grant",
-				"rt-1",
-			]);
-			expect(events).toEqual([
-				{
-					accountId: "acc-1",
-					accountName: "test",
-					provider: "anthropic",
-					reason: "oauth_invalid_grant",
-				},
-			]);
-		} finally {
-			authFailureEvents.off("event", listener);
-		}
-	});
-
-	it("does not pause on a message-only invalid_grant marker", async () => {
-		const dbOps = makeDbOps(true);
-		const account = {
-			id: "acc-2",
-			name: "test",
-			provider: "codex",
-			refresh_token: "rt-2",
-		};
-
-		const paused = await pauseAccountForReauthIfInvalidGrant(
-			new Error("Failed to refresh Codex token: refresh_token_reused"),
-			account,
-			dbOps as never,
-		);
-
-		expect(paused).toBe(false);
-		expect(dbOps.pauseAccountIfActive).not.toHaveBeenCalled();
-	});
-
-	it("pauses on a structured invalid_grant payload", async () => {
-		const dbOps = makeDbOps(true);
-		const account = {
-			id: "acc-structured",
-			name: "test",
-			provider: "codex",
-			refresh_token: "rt-structured",
-		};
-
-		const paused = await pauseAccountForReauthIfInvalidGrant(
-			{ error: { code: "invalid_grant", message: "expired" } },
-			account,
-			dbOps as never,
-		);
-
-		expect(paused).toBe(true);
-		expect(dbOps.pauseAccountIfActive).toHaveBeenCalledTimes(1);
-	});
-
-	it("does not pause on a structured prose-only invalid_grant mention", async () => {
-		const dbOps = makeDbOps(true);
-		const account = {
-			id: "acc-structured-prose",
-			name: "test",
-			provider: "codex",
-			refresh_token: "rt-structured-prose",
-		};
-
-		const paused = await pauseAccountForReauthIfInvalidGrant(
-			{ error: { message: "provider mentioned invalid_grant in prose" } },
-			account,
-			dbOps as never,
-		);
-
-		expect(paused).toBe(false);
-		expect(dbOps.pauseAccountIfActive).not.toHaveBeenCalled();
-	});
-
-	it("does not pause when nested JSON prose merely mentions invalid_grant", async () => {
-		const dbOps = makeDbOps(true);
-		const account = {
-			id: "acc-json-prose",
-			name: "test",
-			provider: "codex",
-			refresh_token: "rt-json-prose",
-		};
-
-		const paused = await pauseAccountForReauthIfInvalidGrant(
-			new Error(
-				JSON.stringify({
-					error: { message: "provider mentioned invalid_grant in prose" },
-				}),
-			),
-			account,
-			dbOps as never,
-		);
-
-		expect(paused).toBe(false);
-		expect(dbOps.pauseAccountIfActive).not.toHaveBeenCalled();
-	});
-
-	it("does not publish when another writer wins the pause guard", async () => {
-		const dbOps = makeDbOps(false);
-		const account = {
-			id: "acc-guard-lost",
-			name: "test",
-			provider: "anthropic",
-			refresh_token: "rt-guard-lost",
-		};
-		const events: AuthFailureEvt[] = [];
-		const listener = (event: AuthFailureEvt) => events.push(event);
-		authFailureEvents.on("event", listener);
-
-		try {
-			const paused = await pauseAccountForReauthIfInvalidGrant(
-				new OAuthRefreshTokenError("acc-guard-lost"),
-				account,
-				dbOps as never,
-			);
-
-			expect(paused).toBe(false);
-			expect(events).toEqual([]);
-		} finally {
-			authFailureEvents.off("event", listener);
-		}
-	});
-
-	it("does NOT pause on a transient network failure", async () => {
-		const dbOps = makeDbOps(true);
-		const account = {
-			id: "acc-3",
-			name: "test",
-			provider: "anthropic",
-			refresh_token: "rt-3",
-		};
-		const events: AuthFailureEvt[] = [];
-		const listener = (event: AuthFailureEvt) => events.push(event);
-		authFailureEvents.on("event", listener);
-
-		try {
-			const paused = await pauseAccountForReauthIfInvalidGrant(
-				new Error("fetch failed: ETIMEDOUT"),
-				account,
-				dbOps as never,
-			);
-
-			expect(paused).toBe(false);
-			expect(dbOps.pauseAccountIfActive).not.toHaveBeenCalled();
-			expect(events).toEqual([]);
-		} finally {
-			authFailureEvents.off("event", listener);
-		}
-	});
-
-	it("returns false and does not throw when the pause call itself throws", async () => {
-		const dbOps = {
-			pauseAccountIfActive: mock(async () => {
-				throw new Error("db locked");
-			}),
-		};
-		const account = {
-			id: "acc-4",
-			name: "test",
-			provider: "anthropic",
-			refresh_token: "rt-4",
-		};
-
-		const paused = await pauseAccountForReauthIfInvalidGrant(
-			new OAuthRefreshTokenError("acc-4"),
-			account,
-			dbOps as never,
-		);
-
-		expect(paused).toBe(false);
 	});
 });
 

@@ -185,7 +185,7 @@ The four questions deferred to planning are resolved in the Planning Contract: w
 - Dashboard: `packages/dashboard-web/src/components/accounts/AccountListItem.tsx` (auto-refresh toggle near `:679-684`, zai toggle near `:735`).
 - `packages/database/src/multi-instance-guard.ts:15-17` lists the scheduler's in-process state.
 - Docs that mention auto-refresh or the zai pause: `docs/auto-refresh.md`, `docs/index.md`, `docs/reference.md`, `docs/configuration.md`, `docs/providers.md`, `docs/database.md`, `docs/routing-architecture.md`.
-- Idea 1 of the 2026-11-03 upstream-teardown ideation (machine-local, best effort; this plan governs if they disagree): `/home/will/.claude/deliverables/ce-ideate/2026-11-03-1847-hov-router-upstream-teardown-ideation.html`.
+- Idea 1 of the 2026-11-03 upstream-teardown ideation (machine-local, best effort; this plan governs if they disagree): `~/.claude/deliverables/ce-ideate/2026-11-03-1847-hov-router-upstream-teardown-ideation.html`.
 
 ---
 

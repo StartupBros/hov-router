@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import { HttpError } from "@better-ccflare/errors";
 import { api } from "../api";
 import {
-	fetchProviderModelDefaults,
 	fetchProviderModelDefaultsResponse,
 	saveProviderModelDefaultOverrides,
 } from "./provider-model-defaults-api";
@@ -144,11 +143,6 @@ describe("fetchProviderModelDefaultsResponse", () => {
 			"/api/config/provider-model-defaults",
 		);
 		expect(result).toEqual(HAPPY_BODY);
-	});
-
-	it("fetchProviderModelDefaults returns only the providers list", async () => {
-		mockResponse(HAPPY_BODY);
-		expect(await fetchProviderModelDefaults()).toEqual(HAPPY_BODY.providers);
 	});
 
 	describe("normalizeProvider / normalizeField rejection paths", () => {

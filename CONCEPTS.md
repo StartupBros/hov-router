@@ -223,8 +223,8 @@ provider's own early reset (shown as a "bonus reset") unless the redemption is r
 
 A notice for House of Vibe members about a provider event: a banked-reset grant wave, a wave
 nearing its expiry, or limits that appear to have reset early. The router detects it and sends
-a signed, account-free event to BroBot's intake, never to the alert webhook; BroBot reviews it
-and posts the member-facing card in #ai-alerts. The event never names an account or carries
+a signed, account-free event to a separate receiver, never to the alert webhook; House of Vibe's
+receiver holds it for review, then posts the member-facing message. The event never names an account or carries
 per-account counts or fleet totals. Operational alerts are the opposite: they go to the
 operator and name accounts.
 
