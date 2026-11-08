@@ -3,7 +3,12 @@ import {
 	SseFrameBuffer,
 	SseLimitError,
 } from "@better-ccflare/core";
-import { readStreamEvidence } from "@better-ccflare/providers/stream-evidence";
+import {
+	attachGenerationStartReader,
+	generationStartFromReads,
+	readGenerationStart,
+	readStreamEvidence,
+} from "@better-ccflare/providers/stream-evidence";
 import {
 	type RoutingStreamEvidence,
 	sanitizeRoutingStreamEvidence,
@@ -372,6 +377,30 @@ export interface AnthropicSemanticPreflightOptions {
 	requireAuthoritativeContextOverflow?: boolean;
 	/** Cancel preflight without reporting a provider/account route failure. */
 	signal?: AbortSignal;
+	/**
+	 * Date the start of generation from this gate's own reads (#643). Set it
+	 * only when each upstream read is a network read (see
+	 * gateReadsAreNetworkReads); otherwise the gate forwards whatever reading
+	 * the upstream layer attached, because a translator's synchronous writes
+	 * would make every response look like a burst.
+	 */
+	measureGenerationStart?: boolean;
+}
+
+/**
+ * True when the gate receives the provider's network reads unchanged: the
+ * anthropic provider passes the body through for Anthropic SDK clients, which
+ * always send anthropic-version. For other clients it rewrites the stream line
+ * by line, and other providers translate or rewrite it, so one network read
+ * can reach the gate as many reads.
+ */
+export function gateReadsAreNetworkReads(
+	providerName: string,
+	requestHeaders: Headers,
+): boolean {
+	return (
+		providerName === "anthropic" && requestHeaders.has("anthropic-version")
+	);
 }
 
 type ByteReadResult = Awaited<
@@ -396,6 +425,7 @@ function boundedAgeMs(timestamp: number | null): number | null {
 function createReleasedStream(
 	reader: ReadableStreamDefaultReader<Uint8Array>,
 	bufferedChunks: Uint8Array[],
+	onUpstreamValueRead: () => void,
 ): ReadableStream<Uint8Array> {
 	let bufferedIndex = 0;
 	let finalized = false;
@@ -427,6 +457,7 @@ function createReleasedStream(
 					controller.close();
 					return;
 				}
+				onUpstreamValueRead();
 				controller.enqueue(value);
 			} catch (error) {
 				if (finalized) return;
@@ -553,6 +584,19 @@ export async function gateAnthropicSsePreCommit(
 	let terminalEvidenceSeen = false;
 	let terminalDeadline: number | undefined;
 	let cancelPromise: Promise<void> | null = null;
+	// #643: upstream value reads, before and after release, and the read that
+	// carried the first generated output. A tool call's start carries its
+	// generated name. Any other block counts from its first visible token, or
+	// from its start when it closes with none (hidden or redacted thinking).
+	let valueReads = 0;
+	let currentReadAt = startedAt;
+	let generationStartedAt: number | null = null;
+	let generationStartRead = 0;
+	let openBlockStartedAt: number | null = null;
+	let openBlockStartRead = 0;
+	const countValueRead = (): void => {
+		valueReads = Math.min(Number.MAX_SAFE_INTEGER, valueReads + 1);
+	};
 
 	let observationPublished = false;
 	const observe = (gateOutcome: RoutingStreamEvidence["gateOutcome"]): void => {
@@ -689,6 +733,24 @@ export async function gateAnthropicSsePreCommit(
 		framesSeen = Math.min(Number.MAX_SAFE_INTEGER, framesSeen + 1);
 		const classification = classifyAnthropicSseFrame(frame);
 		incrementAnthropicSseFrameKindCount(frameKindCounts, classification.kind);
+		if (generationStartedAt === null) {
+			if (
+				classification.kind === "meaningful" ||
+				classification.contentBlock === "tool_use_start"
+			) {
+				generationStartedAt = currentReadAt;
+				generationStartRead = valueReads;
+			} else if (classification.contentBlock === "start") {
+				openBlockStartedAt = currentReadAt;
+				openBlockStartRead = valueReads;
+			} else if (
+				classification.contentBlock === "stop" &&
+				openBlockStartedAt !== null
+			) {
+				generationStartedAt = openBlockStartedAt;
+				generationStartRead = openBlockStartRead;
+			}
+		}
 		if (
 			classification.validProtocolActivity &&
 			(keepaliveIsProtocolActivity || classification.kind !== "keepalive")
@@ -785,6 +847,8 @@ export async function gateAnthropicSsePreCommit(
 			return fail("upstream_eof");
 		}
 
+		countValueRead();
+		currentReadAt = Date.now();
 		bufferedBytes += readResult.value.byteLength;
 		if (bufferedBytes > maxBufferedBytes) {
 			return fail("buffer_limit", maxBufferedBytes);
@@ -803,7 +867,21 @@ export async function gateAnthropicSsePreCommit(
 
 		if (frames.some(applyFrameDecision)) {
 			observe("committed");
-			return createReleasedStream(reader, bufferedChunks);
+			const released = createReleasedStream(
+				reader,
+				bufferedChunks,
+				countValueRead,
+			);
+			attachGenerationStartReader(released, () =>
+				options.measureGenerationStart
+					? generationStartFromReads(
+							generationStartedAt,
+							generationStartRead,
+							valueReads,
+						)
+					: readGenerationStart(upstream),
+			);
+			return released;
 		}
 	}
 }

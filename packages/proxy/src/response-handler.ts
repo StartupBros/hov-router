@@ -12,6 +12,7 @@ import {
 } from "@better-ccflare/http-common";
 import { Logger } from "@better-ccflare/logger";
 import { usageCache } from "@better-ccflare/providers";
+import { readGenerationStart } from "@better-ccflare/providers/stream-evidence";
 import {
 	type Account,
 	type AgentAttributionSource,
@@ -1062,6 +1063,9 @@ export async function forwardToClient(
 	 *  STREAMING RESPONSES — wrap body with teeStream for inline analytics
 	 *********************************************************************/
 	if (isStream && response.body) {
+		// The gate or translator keys its generation-start reading (#643) on
+		// this exact stream; the wrappers below replace it.
+		const generationStartBody = response.body;
 		// Mid-stream rate-limit detection for issue #114 Fix 1.2. Only
 		// create a sniffer when we know which account to mark — anonymous
 		// or unauthenticated requests can't be failed over.
@@ -1409,6 +1413,8 @@ export async function forwardToClient(
 					// purely additive observability for the new DB column.
 					streamTerminalState: streamTerminalState ?? null,
 				};
+				const generationStart = readGenerationStart(generationStartBody);
+				if (generationStart) endMsg.generationStart = generationStart;
 				// Fire-and-forget: handleEnd is async for DB writes but we don't block streaming
 				fireAndForgetEnd(endMsg, lifecycleCoordinator);
 			}

@@ -1788,10 +1788,28 @@ export class UsageCollector {
 							);
 						}
 					} else {
-						// For other providers (like Anthropic), use streaming duration if available
-						if (state.firstTokenTimestamp && state.lastTokenTimestamp) {
+						// For other providers (like Anthropic), use streaming duration if available.
+						// #643: the precommit gate and the Codex translator can deliver
+						// the first output long after the model produced it, so this
+						// collector's own first stamp lands late and the rate inflates.
+						// A start measured upstream moves the window earlier, never
+						// before the request itself; a burst has no window to measure.
+						const generationStart = msg.generationStart ?? null;
+						const windowStart =
+							generationStart === null
+								? state.firstTokenTimestamp
+								: "burst" in generationStart
+									? undefined
+									: Math.min(
+											state.firstTokenTimestamp ?? Number.POSITIVE_INFINITY,
+											Math.max(
+												generationStart.startedAt,
+												startMessage.timestamp,
+											),
+										);
+						if (windowStart && state.lastTokenTimestamp) {
 							const streamingDurationMs =
-								state.lastTokenTimestamp - state.firstTokenTimestamp;
+								state.lastTokenTimestamp - windowStart;
 							const streamingDurationSec = streamingDurationMs / 1000;
 
 							if (streamingDurationMs > 0) {

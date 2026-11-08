@@ -41,7 +41,11 @@ import {
 } from "@better-ccflare/types";
 import type { RoutingProviderTerminal } from "@better-ccflare/types/request";
 import { BaseProvider } from "../../base";
-import { attachStreamEvidenceReader } from "../../utils/stream-evidence";
+import {
+	attachGenerationStartReader,
+	attachStreamEvidenceReader,
+	generationStartFromReads,
+} from "../../utils/stream-evidence";
 import {
 	type CodexClientIdentity,
 	resolveCodexClientIdentity,
@@ -854,6 +858,11 @@ interface StreamState {
 	rawVisibleEvents: number;
 	rawEventCounts: Record<CodexStreamEventCategory, number>;
 	rawBytes: number;
+	/** Upstream value reads, for dating the start of generation (#643). */
+	rawValueReads: number;
+	/** When the read carrying the first response.output_item.added arrived. */
+	generationStartedAt: number | null;
+	generationStartRead: number;
 	argumentDeltaBytes: number;
 	functionCallBytesPeak: number;
 	pendingReasoningBytes: number;
@@ -4530,6 +4539,9 @@ export class CodexProvider extends BaseProvider {
 				CODEX_STREAM_EVENT_CATEGORIES.map((k) => [k, 0]),
 			) as Record<CodexStreamEventCategory, number>,
 			rawBytes: 0,
+			rawValueReads: 0,
+			generationStartedAt: null,
+			generationStartRead: 0,
 			argumentDeltaBytes: 0,
 			functionCallBytesPeak: 0,
 			pendingReasoningBytes: 0,
@@ -4841,6 +4853,7 @@ export class CodexProvider extends BaseProvider {
 					// StreamResourceLimitError (SseLimitError), which is handled by
 					// the dedicated branch in the catch below.
 					state.rawBytes = saturatingAdd(state.rawBytes, value.byteLength);
+					state.rawValueReads = saturatingAdd(state.rawValueReads);
 					const frames = sseFrameBuffer.push(value);
 
 					// Process complete SSE events extracted from this chunk
@@ -5096,6 +5109,16 @@ export class CodexProvider extends BaseProvider {
 			rawVisibleEvents: state.rawVisibleEvents,
 			providerTerminal: state.providerTerminal,
 		}));
+		// The translator emits a reasoning block only at output_item.done and a
+		// function call's arguments as one delta there, so its own output starts
+		// late; report when the model's first output item actually arrived.
+		attachGenerationStartReader(readable, () =>
+			generationStartFromReads(
+				state.generationStartedAt,
+				state.generationStartRead,
+				state.rawValueReads,
+			),
+		);
 		void processEvents().catch((error) => {
 			log.error("Unhandled Codex SSE processing failure:", error);
 		});
@@ -5344,6 +5367,12 @@ export class CodexProvider extends BaseProvider {
 			}
 
 			case "response.output_item.added": {
+				// Before release the precommit gate drains this stream eagerly, so
+				// handling runs at read time; one clock read per stream.
+				if (state.generationStartedAt === null) {
+					state.generationStartedAt = Date.now();
+					state.generationStartRead = state.rawValueReads;
+				}
 				const item = data.item as Record<string, unknown> | undefined;
 				const outputIndex = data.output_index as number | undefined;
 

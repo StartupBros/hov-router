@@ -11,7 +11,7 @@ import type { CacheFlightCohortSealReceipt } from "@better-ccflare/core";
 import { logBus } from "@better-ccflare/logger";
 import type { LogEvent } from "@better-ccflare/types";
 import { cacheBodyStore } from "../cache-body-store";
-import type { StartMessage } from "../worker-messages";
+import type { EndMessage, StartMessage } from "../worker-messages";
 
 interface PricingTokens {
 	inputTokens?: number;
@@ -5218,6 +5218,81 @@ describe("UsageCollector request lifecycle", () => {
 			// there and must not be rewritten as "unknown".
 			expect(savedUsages.get("local-free")?.costUsd).toBe(0);
 			expect(isModelPriced).not.toHaveBeenCalled();
+		});
+	});
+
+	// #643. The precommit gate holds a tool_use or hidden-thinking block start
+	// until meaningful output arrives, then replays its buffer at once, so the
+	// collector's own first stamp lands at release and the window collapses to
+	// a few milliseconds (thousands of tok/s). The gate or the Codex translator
+	// reports when generation really began; a burst means it was unobservable.
+	describe("generation start reported by the upstream layer (#643)", () => {
+		const T0 = 1_700_000_000_000;
+		const encoder = new TextEncoder();
+		const releasedToolBlock =
+			'event: message_start\ndata: {"type":"message_start","message":{"model":"claude-sonnet-test","usage":{"input_tokens":5,"output_tokens":0}}}\n\n' +
+			'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"Read","input":{}}}\n\n' +
+			'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"file_path\\":\\"/a\\"}"}}\n\n';
+		const finalDelta =
+			'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":100}}\n\n';
+
+		async function heldToolTurnRate(
+			requestId: string,
+			generationStart: EndMessage["generationStart"],
+			timing: { firstAt: number; lastAt: number; endAt: number } = {
+				firstAt: 10_000,
+				lastAt: 10_005,
+				endAt: 10_010,
+			},
+		): Promise<number | undefined> {
+			const { collector, savedUsages } = harness();
+			collector.handleStart(makeStartMessage(requestId));
+			now = T0 + timing.firstAt;
+			collector.handleChunk(requestId, encoder.encode(releasedToolBlock));
+			now = T0 + timing.lastAt;
+			collector.handleChunk(requestId, encoder.encode(finalDelta));
+			now = T0 + timing.endAt;
+			await collector.handleEnd({
+				type: "end",
+				requestId,
+				success: true,
+				...(generationStart ? { generationStart } : {}),
+			});
+			await collector.drain();
+			return savedUsages.get(requestId)?.tokensPerSecond;
+		}
+
+		it("keeps today's own-stamp window when nothing upstream measured", async () => {
+			// The inflated value this fix targets: 100 tokens over 5 ms.
+			expect(await heldToolTurnRate("held-unmeasured", undefined)).toBe(20_000);
+		});
+
+		it("starts the window when the held block actually arrived", async () => {
+			const rate = await heldToolTurnRate("held-measured", {
+				startedAt: T0 + 2_000,
+			});
+			expect(rate).toBeCloseTo(100 / 8.005, 6);
+		});
+
+		it("never starts the window before the request itself", async () => {
+			const rate = await heldToolTurnRate("held-before-request", {
+				startedAt: T0 - 5_000,
+			});
+			expect(rate).toBeCloseTo(100 / 10.005, 6);
+		});
+
+		it("keeps the collector's own start when it is the earlier one", async () => {
+			const rate = await heldToolTurnRate(
+				"own-start-earlier",
+				{ startedAt: T0 + 3_000 },
+				{ firstAt: 1_000, lastAt: 5_000, endAt: 5_010 },
+			);
+			expect(rate).toBe(25);
+		});
+
+		it("uses the whole response time for a burst with no observable window", async () => {
+			const rate = await heldToolTurnRate("burst", { burst: true });
+			expect(rate).toBeCloseTo(100 / 10.01, 6);
 		});
 	});
 });

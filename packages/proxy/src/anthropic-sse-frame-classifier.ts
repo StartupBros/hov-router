@@ -56,6 +56,14 @@ export interface AnthropicSseFrameClassification {
 	kind: AnthropicSseFrameKind;
 	/** True only for a complete, parsed Anthropic protocol event. */
 	validProtocolActivity?: true;
+	/**
+	 * Content block boundary (#643). "tool_use_start" is a tool call's start,
+	 * which carries the generated tool name; "start" is any other block's
+	 * start, which can arrive before that block's first token. A server-side
+	 * fallback block marks a model switch, not output, so its start reports
+	 * nothing.
+	 */
+	contentBlock?: "tool_use_start" | "start" | "stop";
 	/** Sanitized nested `error.type`; upstream messages are never retained. */
 	errorType?: string;
 	/** Sanitized nested machine identifiers; arbitrary values are discarded. */
@@ -227,11 +235,30 @@ export function classifyAnthropicSseFrame(
 		case "ping":
 			return { kind: "keepalive", validProtocolActivity: true };
 		case "content_block_start":
-			return isRecord(parsed.content_block)
-				? { kind: "structural", validProtocolActivity: true }
-				: { kind: "malformed" };
+			if (!isRecord(parsed.content_block)) return { kind: "malformed" };
+			switch (parsed.content_block.type) {
+				case "fallback":
+					return { kind: "structural", validProtocolActivity: true };
+				case "tool_use":
+				case "server_tool_use":
+					return {
+						kind: "structural",
+						validProtocolActivity: true,
+						contentBlock: "tool_use_start",
+					};
+				default:
+					return {
+						kind: "structural",
+						validProtocolActivity: true,
+						contentBlock: "start",
+					};
+			}
 		case "content_block_stop":
-			return { kind: "structural", validProtocolActivity: true };
+			return {
+				kind: "structural",
+				validProtocolActivity: true,
+				contentBlock: "stop",
+			};
 		case "message_start": {
 			const message = isRecord(parsed.message) ? parsed.message : undefined;
 			if (!message) return { kind: "malformed" };

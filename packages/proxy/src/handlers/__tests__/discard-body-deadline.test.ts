@@ -138,6 +138,9 @@ describe("discarded response drain deadline", () => {
 		const gated = wrapAnthropicPrecommitGatedResponse(source, gatedBody);
 
 		expect(getResponseDrainTransport(gated)).toBe(transportAbort);
+		// The gate keys its generation-start reading (#643) on this exact
+		// stream, so the wrap must hand the same object to the response handler.
+		expect(gated.body).toBe(gatedBody);
 		expect(bodyAccesses).toBe(0);
 		expect(gated.status).toBe(202);
 		expect(gated.statusText).toBe("Accepted");
