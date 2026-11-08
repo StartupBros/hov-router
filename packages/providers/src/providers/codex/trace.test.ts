@@ -1,11 +1,20 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
+import {
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	CODEX_TRACE_DIR_ENV,
 	CODEX_TRACE_HMAC_KEY_ENV,
+	CODEX_TRACE_RETENTION_DAYS_ENV,
 	contextUtilizationPct,
+	pruneCodexTraceFiles,
+	resolveCodexTraceRetentionDays,
 	summarizeCodexResponse,
 	summarizeCodexTransform,
 	writeCodexAbortedAttemptTrace,
@@ -16,6 +25,116 @@ import {
 afterEach(() => {
 	delete process.env[CODEX_TRACE_DIR_ENV];
 	delete process.env[CODEX_TRACE_HMAC_KEY_ENV];
+	delete process.env[CODEX_TRACE_RETENTION_DAYS_ENV];
+	setSystemTime();
+});
+
+function seedTraceDir(names: readonly string[]): string {
+	const dir = mkdtempSync(join(tmpdir(), "codex-trace-retention-"));
+	for (const name of names) writeFileSync(join(dir, name), "{}\n");
+	return dir;
+}
+
+describe("Codex trace retention", () => {
+	test("resolves the retention window from the environment", () => {
+		expect(resolveCodexTraceRetentionDays(undefined)).toBe(7);
+		expect(resolveCodexTraceRetentionDays("")).toBe(7);
+		expect(resolveCodexTraceRetentionDays("30")).toBe(30);
+		expect(resolveCodexTraceRetentionDays(" 14 ")).toBe(14);
+		expect(resolveCodexTraceRetentionDays("0")).toBe(0);
+		// Anything that is not a whole number falls back to the default rather
+		// than disabling retention by accident.
+		expect(resolveCodexTraceRetentionDays("-1")).toBe(7);
+		expect(resolveCodexTraceRetentionDays("1.5")).toBe(7);
+		expect(resolveCodexTraceRetentionDays("week")).toBe(7);
+	});
+
+	test("deletes only daily trace files older than the window", () => {
+		const dir = seedTraceDir([
+			"codex-trace-2026-10-01.jsonl",
+			"codex-trace-2026-10-30.jsonl",
+			"codex-trace-2026-10-31.jsonl",
+			"codex-trace-2026-11-06.jsonl",
+			"codex-trace-2026-11-07.jsonl",
+			"codex-trace-2026-11-09.jsonl",
+			"codex-trace-2026-10-01.jsonl.bak",
+			"codex-trace-latest.jsonl",
+			"notes.txt",
+		]);
+		try {
+			expect(pruneCodexTraceFiles(dir, "2026-11-07", 7)).toBe(2);
+			expect(readdirSync(dir).sort()).toEqual([
+				"codex-trace-2026-10-01.jsonl.bak",
+				// Exactly seven days old is still inside the window.
+				"codex-trace-2026-10-31.jsonl",
+				"codex-trace-2026-11-06.jsonl",
+				"codex-trace-2026-11-07.jsonl",
+				"codex-trace-2026-11-09.jsonl",
+				"codex-trace-latest.jsonl",
+				"notes.txt",
+			]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a zero window keeps everything and a missing directory is harmless", () => {
+		const dir = seedTraceDir(["codex-trace-2020-01-01.jsonl"]);
+		try {
+			expect(pruneCodexTraceFiles(dir, "2026-11-07", 0)).toBe(0);
+			expect(readdirSync(dir)).toEqual(["codex-trace-2020-01-01.jsonl"]);
+			expect(pruneCodexTraceFiles(join(dir, "missing"), "2026-11-07", 7)).toBe(
+				0,
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("the writer prunes once per day, on the first record after rollover", () => {
+		const dir = seedTraceDir(["codex-trace-2026-10-01.jsonl"]);
+		process.env[CODEX_TRACE_DIR_ENV] = dir;
+		try {
+			setSystemTime(new Date("2026-11-07T12:00:00Z"));
+			writeCodexAbortedAttemptTrace({ attemptId: "a1" });
+			expect(readdirSync(dir).sort()).toEqual(["codex-trace-2026-11-07.jsonl"]);
+
+			// Later records on the same day do not rescan the directory.
+			writeFileSync(join(dir, "codex-trace-2026-10-02.jsonl"), "{}\n");
+			writeCodexAbortedAttemptTrace({ attemptId: "a2" });
+			expect(readdirSync(dir)).toContain("codex-trace-2026-10-02.jsonl");
+
+			setSystemTime(new Date("2026-11-08T00:00:01Z"));
+			writeCodexAbortedAttemptTrace({ attemptId: "a3" });
+			expect(readdirSync(dir).sort()).toEqual([
+				"codex-trace-2026-11-07.jsonl",
+				"codex-trace-2026-11-08.jsonl",
+			]);
+			const today = readFileSync(
+				join(dir, "codex-trace-2026-11-08.jsonl"),
+				"utf8",
+			);
+			expect(JSON.parse(today.trim()).attempt_id).toBe("a3");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("the writer honours a zero window from the environment", () => {
+		const dir = seedTraceDir(["codex-trace-2020-01-01.jsonl"]);
+		process.env[CODEX_TRACE_DIR_ENV] = dir;
+		process.env[CODEX_TRACE_RETENTION_DAYS_ENV] = "0";
+		try {
+			setSystemTime(new Date("2026-11-07T12:00:00Z"));
+			writeCodexAbortedAttemptTrace({ attemptId: "a1" });
+			expect(readdirSync(dir).sort()).toEqual([
+				"codex-trace-2020-01-01.jsonl",
+				"codex-trace-2026-11-07.jsonl",
+			]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("Codex aborted-attempt telemetry (schema 24)", () => {

@@ -14,12 +14,13 @@
  * Enable:
  *   CCFLARE_CODEX_TRACE_DIR=/path/to/dir     # summaries only, no prompt content
  *   CCFLARE_CODEX_TRACE_FULL=1               # also embed full request bodies
+ *   CCFLARE_CODEX_TRACE_RETENTION_DAYS=7     # delete daily files older than this; 0 keeps all
  *
  * Tracing is best-effort and MUST never affect the request path: all I/O is
  * wrapped so a trace failure is swallowed.
  */
 import { createHmac } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { Logger } from "@better-ccflare/logger";
 import type {
@@ -35,6 +36,9 @@ import type {
 export const CODEX_TRACE_DIR_ENV = "CCFLARE_CODEX_TRACE_DIR";
 export const CODEX_TRACE_FULL_ENV = "CCFLARE_CODEX_TRACE_FULL";
 export const CODEX_TRACE_HMAC_KEY_ENV = "CCFLARE_CODEX_TRACE_HMAC_KEY";
+export const CODEX_TRACE_RETENTION_DAYS_ENV =
+	"CCFLARE_CODEX_TRACE_RETENTION_DAYS";
+export const DEFAULT_CODEX_TRACE_RETENTION_DAYS = 7;
 /** Warn when one response spawns at least this many subagents (0 disables). */
 export const CODEX_FANOUT_WARN_ENV = "CCFLARE_CODEX_FANOUT_WARN";
 
@@ -625,6 +629,64 @@ function privacyHmac(
 		.digest("hex");
 }
 
+const TRACE_FILE_PATTERN = /^codex-trace-(\d{4}-\d{2}-\d{2})\.jsonl$/;
+const DAY_MS = 86_400_000;
+/** Directory and UTC day of the last prune, so each day scans the directory once. */
+let lastPruneKey: string | null = null;
+
+/**
+ * Retention window in days. Unset, empty or not a whole number means the
+ * default; `0` keeps every file.
+ */
+export function resolveCodexTraceRetentionDays(
+	raw: string | undefined = process.env[CODEX_TRACE_RETENTION_DAYS_ENV],
+): number {
+	const value = raw?.trim();
+	if (!value || !/^\d+$/.test(value)) {
+		return DEFAULT_CODEX_TRACE_RETENTION_DAYS;
+	}
+	const days = Number(value);
+	return Number.isSafeInteger(days) ? days : DEFAULT_CODEX_TRACE_RETENTION_DAYS;
+}
+
+/**
+ * Delete `codex-trace-<day>.jsonl` files dated more than `retentionDays`
+ * before `today` (both UTC `YYYY-MM-DD`). A window of at least one day puts
+ * the cutoff before today, so today's file is never deleted; anything that
+ * does not match the daily name is never touched. Best-effort: returns the
+ * number of files removed and never throws.
+ */
+export function pruneCodexTraceFiles(
+	dir: string,
+	today: string,
+	retentionDays: number,
+): number {
+	if (retentionDays <= 0) return 0;
+	const todayMs = Date.parse(`${today}T00:00:00Z`);
+	if (!Number.isFinite(todayMs)) return 0;
+	const cutoff = new Date(todayMs - retentionDays * DAY_MS)
+		.toISOString()
+		.slice(0, 10);
+	let names: string[];
+	try {
+		names = readdirSync(dir);
+	} catch {
+		return 0;
+	}
+	let removed = 0;
+	for (const name of names) {
+		const day = TRACE_FILE_PATTERN.exec(name)?.[1];
+		if (!day || day >= cutoff) continue;
+		try {
+			unlinkSync(join(dir, name));
+			removed++;
+		} catch {
+			// best-effort: a file another process removed or locked is skipped
+		}
+	}
+	return removed;
+}
+
 function appendTraceRecord(record: Record<string, unknown>): void {
 	const dir = process.env[CODEX_TRACE_DIR_ENV];
 	if (!dir) return;
@@ -635,6 +697,11 @@ function appendTraceRecord(record: Record<string, unknown>): void {
 			join(dir, `codex-trace-${day}.jsonl`),
 			`${JSON.stringify(record)}\n`,
 		);
+		const pruneKey = `${dir}\0${day}`;
+		if (lastPruneKey !== pruneKey) {
+			lastPruneKey = pruneKey;
+			pruneCodexTraceFiles(dir, day, resolveCodexTraceRetentionDays());
+		}
 	} catch {
 		// best-effort: tracing must never break the request path
 	}
