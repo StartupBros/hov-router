@@ -58,12 +58,14 @@ export interface AnthropicSseFrameClassification {
 	validProtocolActivity?: true;
 	/**
 	 * Content block boundary (#643). "tool_use_start" is a tool call's start,
-	 * which carries the generated tool name; "start" is any other block's
-	 * start, which can arrive before that block's first token. A server-side
-	 * fallback block marks a model switch, not output, so its start reports
-	 * nothing.
+	 * which carries the generated tool name. "thinking_start" is a thinking or
+	 * redacted-thinking block's start: the model is already thinking, though a
+	 * summarized block's text arrives later in one burst. "start" is any other
+	 * block's start, which can arrive before that block's first token. A
+	 * server-side fallback block marks a model switch, not output, so its
+	 * start reports nothing.
 	 */
-	contentBlock?: "tool_use_start" | "start" | "stop";
+	contentBlock?: "tool_use_start" | "thinking_start" | "start" | "stop";
 	/** Sanitized nested `error.type`; upstream messages are never retained. */
 	errorType?: string;
 	/** Sanitized nested machine identifiers; arbitrary values are discarded. */
@@ -245,6 +247,13 @@ export function classifyAnthropicSseFrame(
 						kind: "structural",
 						validProtocolActivity: true,
 						contentBlock: "tool_use_start",
+					};
+				case "thinking":
+				case "redacted_thinking":
+					return {
+						kind: "structural",
+						validProtocolActivity: true,
+						contentBlock: "thinking_start",
 					};
 				default:
 					return {

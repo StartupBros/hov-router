@@ -9,10 +9,10 @@ import {
 	gateReadsAreNetworkReads,
 } from "../anthropic-semantic-preflight";
 
-// #643: the precommit gate holds a block start (tool_use, hidden thinking)
-// until the first meaningful frame, then replays the buffer at once, so the
-// collector's own first-token stamp lands at release time. The gate reports
-// when the read carrying the first output block actually arrived.
+// #643: the precommit gate holds a block start (tool_use, thinking) until the
+// first meaningful frame, then replays the buffer at once, so the collector's
+// own first-token stamp lands at release time. The gate reports when the read
+// carrying the first output block actually arrived.
 
 const encoder = new TextEncoder();
 
@@ -187,21 +187,44 @@ describe("precommit gate generation start (#643)", () => {
 		expect(readGenerationStart(released)).toEqual({ startedAt: T0 + 3_000 });
 	});
 
-	it("dates visible thinking from its first thinking token", async () => {
+	it("dates summarized thinking from its block start, not the late burst of its text", async () => {
+		// Anthropic sends a thinking block's summarized text in one burst when
+		// the thinking ends, so its first thinking token arrives late while the
+		// output tokens count all of the thinking.
 		const released = await gateAndDrain(
 			timedUpstream([
 				{ at: T0 + 1_000, text: messageStart + thinkingStart },
-				{ at: T0 + 2_500, text: thinkingDelta },
 				{
-					at: T0 + 4_000,
-					text: blockStop(0) + textStart(1) + textDelta(1, "a"),
+					at: T0 + 9_000,
+					text: thinkingDelta + thinkingDelta + signatureDelta + blockStop(0),
 				},
-				{ at: T0 + 4_100, text: blockStop(1) + messageDelta + messageStop },
+				{ at: T0 + 9_050, text: textStart(1) + textDelta(1, "a") },
+				{ at: T0 + 9_100, text: blockStop(1) + messageDelta + messageStop },
 			]),
 			{ measureGenerationStart: true },
 		);
 
-		expect(readGenerationStart(released)).toEqual({ startedAt: T0 + 2_500 });
+		expect(readGenerationStart(released)).toEqual({ startedAt: T0 + 1_000 });
+	});
+
+	it("dates redacted thinking from its block start", async () => {
+		const redactedStart = sse("content_block_start", {
+			index: 0,
+			content_block: { type: "redacted_thinking", data: "opaque" },
+		});
+		const released = await gateAndDrain(
+			timedUpstream([
+				{ at: T0 + 1_000, text: messageStart + redactedStart },
+				{
+					at: T0 + 5_000,
+					text: blockStop(0) + textStart(1) + textDelta(1, "a"),
+				},
+				{ at: T0 + 5_100, text: blockStop(1) + messageDelta + messageStop },
+			]),
+			{ measureGenerationStart: true },
+		);
+
+		expect(readGenerationStart(released)).toEqual({ startedAt: T0 + 1_000 });
 	});
 
 	it("dates hidden thinking from its block start once the block closes unseen", async () => {

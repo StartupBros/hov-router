@@ -586,8 +586,10 @@ export async function gateAnthropicSsePreCommit(
 	let cancelPromise: Promise<void> | null = null;
 	// #643: upstream value reads, before and after release, and the read that
 	// carried the first generated output. A tool call's start carries its
-	// generated name. Any other block counts from its first visible token, or
-	// from its start when it closes with none (hidden or redacted thinking).
+	// generated name. A thinking block counts from its start, because its
+	// summarized text arrives in one burst when the thinking ends. Any other
+	// block counts from its first visible token, or from its start when it
+	// closes with none.
 	let valueReads = 0;
 	let currentReadAt = startedAt;
 	let generationStartedAt: number | null = null;
@@ -736,7 +738,8 @@ export async function gateAnthropicSsePreCommit(
 		if (generationStartedAt === null) {
 			if (
 				classification.kind === "meaningful" ||
-				classification.contentBlock === "tool_use_start"
+				classification.contentBlock === "tool_use_start" ||
+				classification.contentBlock === "thinking_start"
 			) {
 				generationStartedAt = currentReadAt;
 				generationStartRead = valueReads;
