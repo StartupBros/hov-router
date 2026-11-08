@@ -645,11 +645,6 @@ export function ensureSchema(db: Database): void {
 		`CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp DESC)`,
 	);
 
-	// Index for JOIN performance with accounts table
-	db.run(
-		`CREATE INDEX IF NOT EXISTS idx_requests_account_used ON requests(account_used)`,
-	);
-
 	// Composite index for the main requests query (timestamp DESC with account_used for JOIN)
 	db.run(
 		`CREATE INDEX IF NOT EXISTS idx_requests_timestamp_account ON requests(timestamp DESC, account_used)`,
@@ -972,11 +967,9 @@ export function ensureSchema(db: Database): void {
 			active INTEGER NOT NULL DEFAULT 1
 		)
 	`);
-	db.run(
-		`CREATE INDEX IF NOT EXISTS idx_usage_snapshots_acct_win_time ON usage_snapshots(account_id, window_key, timestamp DESC)`,
-	);
 	// Existing databases do not gain append_order until runMigrations() rebuilds
-	// the table below, so avoid creating an index that references it here.
+	// the table, which creates this index there; avoid referencing the column
+	// here before it exists.
 	if (tableHasColumn(db, "usage_snapshots", "append_order")) {
 		db.run(
 			`CREATE INDEX IF NOT EXISTS idx_usage_snapshots_acct_win_time_append_order ON usage_snapshots(account_id, window_key, timestamp DESC, append_order DESC)`,
@@ -1829,6 +1822,36 @@ export function ensurePublicValueLabelUniqueIndex(db: Database): void {
 	create();
 }
 
+/**
+ * Indexes that earlier releases created and a wider index now makes
+ * redundant: the wider one starts with the same columns (and, for the partial
+ * api-key index, carries the same WHERE clause), so it serves every lookup the
+ * narrow one did, while each extra index costs a write on every insert.
+ * Dropping an index loses no data and is undone by recreating it, so it does
+ * not set `willMutate` and takes no pre-migration backup.
+ */
+const REDUNDANT_INDEXES = [
+	// Covered by idx_requests_account_timestamp (account_used, timestamp DESC).
+	"idx_requests_account_used",
+	// Covered by idx_requests_api_key_timestamp (api_key_id, timestamp DESC),
+	// with the same WHERE api_key_id IS NOT NULL.
+	"idx_requests_api_key",
+	// Covered by idx_usage_snapshots_acct_win_time_append_order
+	// (account_id, window_key, timestamp DESC, append_order DESC).
+	"idx_usage_snapshots_acct_win_time",
+] as const;
+
+function dropRedundantIndexes(db: Database): void {
+	for (const name of REDUNDANT_INDEXES) {
+		const existed = db
+			.query("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?")
+			.get(name);
+		if (!existed) continue;
+		db.run(`DROP INDEX ${name}`);
+		log.info(`Dropped redundant index ${name}`);
+	}
+}
+
 export function runMigrations(db: Database, dbPath?: string): void {
 	ensureQualityRouteSchema(db);
 	// Ensure base schema exists first (outside transaction as it creates tables)
@@ -2109,10 +2132,6 @@ export function runMigrations(db: Database, dbPath?: string): void {
 			db.prepare("DROP TABLE usage_snapshots").run();
 			db.prepare(
 				"ALTER TABLE usage_snapshots_new RENAME TO usage_snapshots",
-			).run();
-			db.prepare(
-				`CREATE INDEX IF NOT EXISTS idx_usage_snapshots_acct_win_time
-				 ON usage_snapshots(account_id, window_key, timestamp DESC)`,
 			).run();
 			db.prepare(
 				`CREATE INDEX IF NOT EXISTS idx_usage_snapshots_acct_win_time_append_order
@@ -3143,6 +3162,12 @@ export function runMigrations(db: Database, dbPath?: string): void {
 		// Must follow every accounts-table rebuild above (they drop and recreate
 		// the table with a fixed index list), so it runs on every startup.
 		ensurePublicValueLabelUniqueIndex(db);
+
+		// Last, so every covering index already exists: ensureSchema creates
+		// idx_requests_account_timestamp, addPerformanceIndexes creates
+		// idx_requests_api_key_timestamp, and ensureSchema or the usage_snapshots
+		// rebuild above creates the append_order index.
+		dropRedundantIndexes(db);
 	});
 
 	// Execute the migration transaction
