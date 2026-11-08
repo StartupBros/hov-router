@@ -28,10 +28,10 @@
   },
   "targets": {
     "sqlite": {
-      "source": "/home/will/.claude/jobs/74bb8f87/tmp/ccflare-u6-test-20260825b-source.sqlite",
-      "candidate": "/home/will/.claude/jobs/74bb8f87/tmp/ccflare-u6-test-20260825b-candidate.sqlite",
-      "generatedChild": "/home/will/.claude/jobs/74bb8f87/tmp/ccflare-u6-test-20260825b-candidate-child.sqlite",
-      "rollback": "/home/will/.claude/jobs/74bb8f87/tmp/ccflare-u6-test-20260825b-rollback.sqlite"
+      "source": "~/.claude/jobs/74bb8f87/tmp/ccflare-u6-test-20260825b-source.sqlite",
+      "candidate": "~/.claude/jobs/74bb8f87/tmp/ccflare-u6-test-20260825b-candidate.sqlite",
+      "generatedChild": "~/.claude/jobs/74bb8f87/tmp/ccflare-u6-test-20260825b-candidate-child.sqlite",
+      "rollback": "~/.claude/jobs/74bb8f87/tmp/ccflare-u6-test-20260825b-rollback.sqlite"
     },
     "postgres": {
       "source": "postgresql://***:***@localhost:55467/ccflare_u6_source_test_b",

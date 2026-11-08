@@ -923,12 +923,12 @@ Any other URL keeps the original body shape, `{ "type": "alert", "alert": { ... 
 
 ### Member notices
 
-Member notices are reset events for HoV members: new banked resets, a wave of banked resets about to expire, and weekly limits that appear to have reset early. The router detects them and sends each one to BroBot's intake. BroBot stores the event, an operator reviews it, and BroBot posts the member card with the vendor's help link. The router never posts to Discord itself. An event names only its kind, the provider (`codex` or `claude`), when it was detected, the wave's expiry and the lead time. It never names an account, an email, a count or an address.
+Member notices are reset events for HoV members: new banked resets, a wave of banked resets about to expire, and weekly limits that appear to have reset early. The router detects them and sends each one, signed, to a receiver you run. House of Vibe's receiver stores the event, holds it for an operator's review, and then posts the member message with the vendor's help link. The router never posts to Discord itself. An event names only its kind, the provider (`codex` or `claude`), when it was detected, the wave's expiry and the lead time. It never names an account, an email, a count or an address.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `MEMBER_NOTICE_WEBHOOK_URL` | `https` address of BroBot's intake route, `/api/internal/ai-alerts/router-events`. Unset or empty means member notices are off. The config file key is `member_notice_webhook_url` | unset |
-| `MEMBER_NOTICE_SIGNING_SECRET` | The secret each request is signed with. BroBot holds the same value as `AI_ALERTS_ROUTER_SIGNING_SECRET`. The config file key is `member_notice_signing_secret` | unset |
+| `MEMBER_NOTICE_WEBHOOK_URL` | `https` address of the receiver's intake route. Unset or empty means member notices are off. The config file key is `member_notice_webhook_url` | unset |
+| `MEMBER_NOTICE_SIGNING_SECRET` | The secret each request is signed with. The receiver holds the same value. The config file key is `member_notice_signing_secret` | unset |
 
 For both, the environment variable wins over the config file key, including when it is set to an empty value. Neither has an API or dashboard setter, and the settings API never returns either value. `GET /api/insights/alerts/config` reports only `memberNotices.state`:
 
@@ -939,7 +939,7 @@ For both, the environment variable wins over the config file key, including when
 
 In the `invalid_address` and `missing_secret` states the server logs one warning at startup, which names neither value.
 
-A background pass runs every minute, starting 30 seconds after startup. It does nothing while the state is not `on`, so no notice is claimed while BroBot could not receive it.
+A background pass runs every minute, starting 30 seconds after startup. It does nothing while the state is not `on`, so no notice is claimed while the receiver could not receive it.
 
 | Notice | Sent when | Sent at most |
 |--------|-----------|--------------|
@@ -952,16 +952,16 @@ Each event is a JSON object with these fields, in this order:
 | Field | Value |
 |-------|-------|
 | `version` | `1` |
-| `noticeKey` | `grant:<wave id>`, `remind:<wave id>:<3d or 1d>` or `early:<codex or claude>:after:<minute or none>`. BroBot stores one event per key |
+| `noticeKey` | `grant:<wave id>`, `remind:<wave id>:<3d or 1d>` or `early:<codex or claude>:after:<minute or none>`. The receiver should store one event per key |
 | `kind` | `grant`, `reminder` or `early_reset` |
 | `provider` | `codex` or `claude`. New banked resets and expiry reminders are always `codex` |
 | `detectedAt` | ISO 8601 time the router claimed the notice |
 | `waveExpiresAt` | ISO 8601 expiry of the wave, or `null`. Always set for a reminder; `null` for an early reset and for a wave with no expiry |
 | `lead` | `3d` or `1d` for a reminder, otherwise `null` |
 
-The router builds the body when it claims the notice, so every retry sends the same bytes. Each request is signed with BroBot's v1 scheme. `X-Request-Signature` is `v1=` followed by the hex HMAC-SHA256, under the signing secret, of five lines: the method, the address's path, the timestamp, the request id, and the body's SHA-256 in hex. `X-Request-Timestamp` is in milliseconds, `X-Request-Id` is a fresh UUID, and `X-Key-Version` is `1`. A request is signed when it is sent, so a retry carries a new timestamp and request id. The secret itself is never sent. BroBot refuses a request more than 5 minutes old, so the router's clock must be within 5 minutes of BroBot's. Each request carries the same `User-Agent` as alert webhooks and a ten-second timeout.
+The router builds the body when it claims the notice, so every retry sends the same bytes. Each request is signed with a v1 HMAC scheme. `X-Request-Signature` is `v1=` followed by the hex HMAC-SHA256, under the signing secret, of five lines: the method, the address's path, the timestamp, the request id, and the body's SHA-256 in hex. `X-Request-Timestamp` is in milliseconds, `X-Request-Id` is a fresh UUID, and `X-Key-Version` is `1`. A request is signed when it is sent, so a retry carries a new timestamp and request id. The secret itself is never sent. House of Vibe's receiver refuses a request more than 5 minutes old, so the router's clock must be within 5 minutes of the receiver's. Each request carries the same `User-Agent` as alert webhooks and a ten-second timeout.
 
-Each notice is sent once. A pass leases a due notice for 60 seconds, so two passes never send the same one. A `5xx` answer or a network error retries after 1 minute, doubling to at most 30 minutes; BroBot answers `503` until its own secret is set. A `429` waits for its `Retry-After` value. Redirects are not followed. Any other answer stops retrying and raises one `member_notice_delivery_failed` alert (severity `warning`) on the operator alert webhook. That includes a `3xx`, a `400` (BroBot rejected the body) and a `401` (BroBot refused the signature, usually because the two secrets differ). That alert carries the status code or a fixed reason, never the address, the secret or a response body. It is delivered when `ALERT_WEBHOOK_TYPES` is empty; a non-empty allowlist must name it. A notice that is still undelivered when it expires is dropped without an alert: 24 hours after a new-resets notice is claimed, at the end of a reminder's 6-hour window, and 1 hour after an early-reset notice is claimed. On shutdown the pass starts no further send and waits for a send already in flight to record its result, so a restart does not send that notice again. Logs never contain the address, the secret, an error message or a response body.
+Each notice is sent once. A pass leases a due notice for 60 seconds, so two passes never send the same one. A `5xx` answer or a network error retries after 1 minute, doubling to at most 30 minutes; House of Vibe's receiver answers `503` until its own secret is set. A `429` waits for its `Retry-After` value. Redirects are not followed. Any other answer stops retrying and raises one `member_notice_delivery_failed` alert (severity `warning`) on the operator alert webhook. That includes a `3xx`, a `400` (the receiver rejected the body) and a `401` (the receiver refused the signature, usually because the two secrets differ). That alert carries the status code or a fixed reason, never the address, the secret or a response body. It is delivered when `ALERT_WEBHOOK_TYPES` is empty; a non-empty allowlist must name it. A notice that is still undelivered when it expires is dropped without an alert: 24 hours after a new-resets notice is claimed, at the end of a reminder's 6-hour window, and 1 hour after an early-reset notice is claimed. On shutdown the pass starts no further send and waits for a send already in flight to record its result, so a restart does not send that notice again. Logs never contain the address, the secret, an error message or a response body.
 
 The early-reset notice is an inference from usage polls, not a provider announcement, and it misses some resets:
 

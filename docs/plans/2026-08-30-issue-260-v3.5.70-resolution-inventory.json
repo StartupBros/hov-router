@@ -280,7 +280,7 @@
     "u3-discard-deadline-worktree-blocker": {
       "type": "test",
       "summary": "An additional discard-body caller suite is blocked by cross-worktree package resolution",
-      "details": "The non-mandated `bun test packages/proxy/src/handlers/__tests__/discard-body-deadline.test.ts` ran 3 tests with 2 passes, 1 failure, 0 skips, and 14 assertions; the focused retry ran 1 failure with 2 filtered and 3 assertions. Root `import.meta.resolve('@better-ccflare/providers/stream-drain')` points to /home/will/SITES/better-ccflare while relative provider imports point to this worktree, creating separate response-to-transport WeakMaps. A localhost-only diagnostic reproduced firstTransport=true but transformedOwnsFirst=false. This is the known missing-local-node_modules worktree artifact, not a U3 production regression; all mandated ownership suites pass."
+      "details": "The non-mandated `bun test packages/proxy/src/handlers/__tests__/discard-body-deadline.test.ts` ran 3 tests with 2 passes, 1 failure, 0 skips, and 14 assertions; the focused retry ran 1 failure with 2 filtered and 3 assertions. Root `import.meta.resolve('@better-ccflare/providers/stream-drain')` points to ~/SITES/better-ccflare while relative provider imports point to this worktree, creating separate response-to-transport WeakMaps. A localhost-only diagnostic reproduced firstTransport=true but transformedOwnsFirst=false. This is the known missing-local-node_modules worktree artifact, not a U3 production regression; all mandated ownership suites pass."
     },
     "u3-build-cli-deferred": {
       "type": "command",

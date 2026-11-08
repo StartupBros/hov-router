@@ -631,7 +631,7 @@
       "status": "passed",
       "exitCode": 0,
       "commands": [
-        "git clone --no-local --no-tags --branch worktree-plan-upstream-v3.5.70-sync /home/will/SITES/better-ccflare/.claude/worktrees/plan-upstream-v3.5.70-sync /tmp/ccflare-v3570-clean-replay-20260831-b84e7d/repo",
+        "git clone --no-local --no-tags --branch worktree-plan-upstream-v3.5.70-sync ~/SITES/better-ccflare/.claude/worktrees/plan-upstream-v3.5.70-sync /tmp/ccflare-v3570-clean-replay-20260831-b84e7d/repo",
         "git -C /tmp/ccflare-v3570-clean-replay-20260831-b84e7d/repo apply /tmp/ccflare-v3570-clean-replay-20260831-b84e7d/audit.patch",
         "git fetch --no-tags https://github.com/tombii/better-ccflare.git refs/tags/v3.5.70:refs/tags/v3.5.70",
         "bun scripts/verify-upstream-sync-ledger.ts check --repo . --inventory docs/plans/2026-08-30-issue-260-v3.5.70-resolution-inventory.json --ledger docs/plans/2026-08-30-issue-260-v3.5.70-resolution-ledger.md --rerere-capture docs/plans/2026-08-30-issue-260-v3.5.70-rerere-capture.json"

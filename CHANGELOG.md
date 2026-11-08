@@ -10,7 +10,7 @@
 ### Features
 
 * **database:** name the database worker threads after their lanes ([#716](https://github.com/StartupBros/hov-router/issues/716)) ([db9da86](https://github.com/StartupBros/hov-router/commit/db9da86dad899bd0da8442ec414dbda070264568)), refs [#709](https://github.com/StartupBros/hov-router/issues/709) [#712](https://github.com/StartupBros/hov-router/issues/712)
-* deliver member notices to BroBot as signed events ([#720](https://github.com/StartupBros/hov-router/issues/720)) ([8a0e571](https://github.com/StartupBros/hov-router/commit/8a0e571dd2450fb2400893273ec2466ef124505f)), refs [#691](https://github.com/StartupBros/hov-router/issues/691)
+* deliver member notices to a receiver as signed events ([#720](https://github.com/StartupBros/hov-router/issues/720)) ([8a0e571](https://github.com/StartupBros/hov-router/commit/8a0e571dd2450fb2400893273ec2466ef124505f)), refs [#691](https://github.com/StartupBros/hov-router/issues/691)
 * deploy origin/main from any checkout and report the restart verdict in --check ([#727](https://github.com/StartupBros/hov-router/issues/727)) ([f137b5b](https://github.com/StartupBros/hov-router/commit/f137b5b86fcad8a6cb57c179c23144d22a0fcacd))
 * **deploy:** overlap backend handoff so new requests skip the drain ([#612](https://github.com/StartupBros/hov-router/issues/612)) ([6b27a65](https://github.com/StartupBros/hov-router/commit/6b27a655d5be6b075a66cec847ba209fa789a1f3))
 * drop PostgreSQL support; SQLite is the only database ([#723](https://github.com/StartupBros/hov-router/issues/723)) ([b6f4c8b](https://github.com/StartupBros/hov-router/commit/b6f4c8b4f0f0ef2bd83c5b0b6599b535cfb44d4b))
