@@ -404,7 +404,7 @@ curl -X PUT http://localhost:8080/api/config/strategy \
 curl http://localhost:8080/api/config
 
 # Get available strategies
-curl http://localhost:8080/api/config/strategies
+curl http://localhost:8080/api/strategies
 ```
 
 ## Account Selection Process

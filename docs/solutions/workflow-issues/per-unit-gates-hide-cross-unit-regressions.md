@@ -32,6 +32,8 @@ tags:
   - pre-existing-failure
 ---
 
+> **Superseded in part (2026-11-03):** PostgreSQL support was removed in #723, so the PostgreSQL-specific steps below no longer apply. The general lesson about cross-unit regressions stands. Body kept as history.
+
 # Per-unit green gates hide cross-unit regressions
 
 ## Context
