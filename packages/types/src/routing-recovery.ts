@@ -15,10 +15,6 @@ export type RecoverableRoutingCode =
 	| "model_pool_exhausted"
 	| "route_unavailable";
 
-export function isRecoveryScope(value: unknown): value is RecoveryScope {
-	return value === "pool" || value === "model" || value === "route";
-}
-
 export function recoveryScopeForCode(code: unknown): RecoveryScope | undefined {
 	if (code === "pool_exhausted") return "pool";
 	if (code === "model_pool_exhausted") return "model";
