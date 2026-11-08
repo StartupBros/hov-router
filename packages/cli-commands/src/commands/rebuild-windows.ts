@@ -67,11 +67,10 @@ interface DryRunClone {
  * the real write path (the ledger genuinely opens/updates/closes/prices
  * windows) without ever touching the source database.
  *
- * VACUUM INTO instead of a transaction rollback: BunSqlAdapter.transaction()
- * is a documented no-op for SQLite — it runs its callback entirely outside
- * any real transaction — so a rollback-based approach would provide no
- * isolation here. VACUUM INTO works from both a file-backed and an
- * in-memory source database.
+ * VACUUM INTO instead of a transaction rollback: the rebuild writes once per
+ * replayed snapshot through the usage-window ledger, and the adapter has no
+ * transaction that spans those writes, so there is nothing to roll back.
+ * VACUUM INTO works from both a file-backed and an in-memory source database.
  */
 async function cloneForDryRun(
 	source: DatabaseOperations,
