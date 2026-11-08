@@ -25,12 +25,14 @@ import { BunSqlAdapter } from "../../adapters/bun-sql-adapter";
 import { runMigrations } from "../../migrations";
 import { RequestRepository } from "../request.repository";
 
-/** sqlite_stat1 rows for `requests`, copied from production on 2026-11-04. */
+/**
+ * sqlite_stat1 rows for `requests`, copied from production on 2026-11-04,
+ * less the rows for idx_requests_account_used and idx_requests_api_key:
+ * migrations now drop those indexes, and DROP INDEX deletes their rows.
+ */
 const PRODUCTION_REQUESTS_STAT1: Array<[string, string]> = [
 	["idx_requests_account_timestamp", "2125429 401 1"],
-	["idx_requests_account_used", "2125429 401"],
 	["idx_requests_analytics_covering", "2125429 1 1 1 1 1 1 1 1 1 1 1 1 1"],
-	["idx_requests_api_key", "1515834 210"],
 	["idx_requests_api_key_timestamp", "1515834 210 1"],
 	["idx_requests_billing_type_timestamp", "2123332 401 1"],
 	["idx_requests_cleanup", "2125429 1 1"],

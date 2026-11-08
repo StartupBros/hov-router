@@ -167,11 +167,10 @@ The `requests` table logs all proxied requests for analytics and debugging.
 - `idx_requests_cost_model` on `cost_usd, model, timestamp DESC` WHERE `cost_usd > 0 AND model IS NOT NULL` for cost analysis
 - `idx_requests_response_time` on `model, response_time_ms` WHERE `response_time_ms IS NOT NULL AND model IS NOT NULL` for response time analysis
 - `idx_requests_tokens` on `timestamp DESC, total_tokens` WHERE `total_tokens > 0` for token usage analysis
-- `idx_requests_api_key` on `api_key_id` WHERE `api_key_id IS NOT NULL` for API key filtering
-- `idx_requests_api_key_timestamp` on `api_key_id, timestamp DESC` WHERE `api_key_id IS NOT NULL` for API key analytics
-- `idx_requests_api_key` on `api_key_id` WHERE `api_key_id IS NOT NULL` for API key filtering
-- `idx_requests_api_key_timestamp` on `api_key_id, timestamp DESC` WHERE `api_key_id IS NOT NULL` for API key analytics with time-based queries
+- `idx_requests_api_key_timestamp` on `api_key_id, timestamp DESC` WHERE `api_key_id IS NOT NULL` for API key filtering and time-based API key analytics
 - `idx_requests_project_timestamp` on `project, timestamp DESC` WHERE `project IS NOT NULL` for project-scoped analytics
+
+Migrations drop `idx_requests_account_used` (on `account_used`) and `idx_requests_api_key` (on `api_key_id`), which earlier releases created: the `account_used, timestamp DESC` and `api_key_id, timestamp DESC` indexes start with the same column and serve every query they did.
 
 ### request_payloads Table
 

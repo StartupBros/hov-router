@@ -253,7 +253,9 @@ describe("UsageHistoryRepository.getFleetUsageHistory", () => {
 		);
 		const snapshotSearches = plan
 			.map((row) => row.detail)
-			.filter((detail) => detail.includes("idx_usage_snapshots_acct_win_time"));
+			.filter((detail) =>
+				detail.includes("idx_usage_snapshots_acct_win_time_append_order"),
+			);
 		expect(snapshotSearches.length).toBeGreaterThanOrEqual(2);
 		expect(
 			snapshotSearches.every((detail) =>
