@@ -191,3 +191,71 @@ describe("RequestsTab SSE modal retention", () => {
 		expect(modal().props.summary).toBeUndefined();
 	});
 });
+
+function textOf(node: unknown): string {
+	if (typeof node === "string" || typeof node === "number") return String(node);
+	if (Array.isArray(node)) return node.map(textOf).join("");
+	if (!React.isValidElement(node)) return "";
+	return textOf((node as Element).props.children);
+}
+
+describe("RequestsTab model badge", () => {
+	it("shows the requested and routed model on a failed row with no response model (#756)", () => {
+		const failed = {
+			...request("failed"),
+			response: { status: 500, headers: {}, body: null },
+			meta: { ...request("failed").meta, pending: false, success: false },
+		};
+		data = {
+			requests: [failed],
+			detailsMap: new Map([
+				[
+					"failed",
+					makeRequestSummary({
+						id: "failed",
+						statusCode: 500,
+						success: false,
+						errorMessage: "upstream_http_500",
+						routeProvenance: {
+							profileId: "ai-gateway-chat",
+							requestedModel: "claude-sonnet-5-5",
+							routedProvider: "openai-compatible",
+							routedModel: "chat",
+							fallbackRung: null,
+							homeAction: "none",
+							repinReason: null,
+							candidateId: null,
+						},
+					}),
+				],
+			]),
+		};
+		const badge = find(render(), (element) =>
+			textOf(element.props.children).startsWith("Requested:"),
+		);
+		expect(badge).toBeDefined();
+		expect(textOf(badge?.props.children)).toBe(
+			"Requested: claude-sonnet-5-5 → chat",
+		);
+	});
+
+	it("keeps the plain response model badge when the row has one", () => {
+		const completed = {
+			...request("first"),
+			meta: { ...request("first").meta, pending: false },
+		};
+		data = {
+			requests: [completed],
+			detailsMap: new Map([["first", summary("first", 200)]]),
+		};
+		const tree = render();
+		expect(
+			find(tree, (element) => textOf(element.props.children) === "test-model"),
+		).toBeDefined();
+		expect(
+			find(tree, (element) =>
+				textOf(element.props.children).startsWith("Requested:"),
+			),
+		).toBeUndefined();
+	});
+});
