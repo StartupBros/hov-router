@@ -304,14 +304,6 @@ function getCanonicalActiveWeeklyWindow(
 	);
 }
 
-/** Utilization of the valid, active, account-wide weekly window only. */
-export function extractWeeklyUtilization(
-	data: AnyUsageData,
-	provider: string,
-): number | null {
-	return getCanonicalActiveWeeklyWindow(data, provider)?.utilization ?? null;
-}
-
 /**
  * Fetch usage data from Anthropic's OAuth usage endpoint
  */

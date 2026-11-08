@@ -124,35 +124,6 @@ export function successResponse(
 }
 
 /**
- * Create a paginated response
- */
-export function paginatedResponse<T>(
-	items: T[],
-	page: number,
-	perPage: number,
-	total: number,
-	headers?: HeadersInit,
-): Response {
-	const totalPages = Math.ceil(total / perPage);
-
-	return jsonResponse(
-		{
-			items,
-			pagination: {
-				page,
-				perPage,
-				total,
-				totalPages,
-				hasNext: page < totalPages,
-				hasPrev: page > 1,
-			},
-		},
-		200,
-		headers,
-	);
-}
-
-/**
  * Create a streaming response for Server-Sent Events
  */
 export function sseResponse(

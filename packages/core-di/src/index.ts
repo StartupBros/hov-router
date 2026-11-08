@@ -10,8 +10,3 @@ export const SERVICE_KEYS = {
 	PricingLogger: Symbol("PricingLogger"),
 	AsyncWriter: Symbol("AsyncWriter"),
 } as const;
-
-// Type-safe service resolution helper
-export function getService<T>(key: keyof typeof SERVICE_KEYS): T {
-	return container.resolve<T>(SERVICE_KEYS[key]);
-}

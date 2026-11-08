@@ -32,7 +32,6 @@ import {
 } from "./server-tool-attempt-plan";
 import {
 	CodexServerToolConversionError,
-	hasCodexServerToolDeclaration,
 	mapCodexServerToolRequest,
 } from "./server-tools";
 
@@ -899,7 +898,6 @@ describe("Codex strict hosted-search request mapper", () => {
 				},
 			],
 		};
-		expect(hasCodexServerToolDeclaration(body)).toBe(false);
 		expect(mapCodexServerToolRequest(body)).toBeUndefined();
 	});
 

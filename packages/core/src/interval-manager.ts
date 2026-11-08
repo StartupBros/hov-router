@@ -17,7 +17,6 @@ export interface IntervalConfig {
 interface ActiveInterval {
 	config: IntervalConfig;
 	intervalId: NodeJS.Timeout;
-	lastRun: number;
 	isRunning: boolean;
 	runCount: number;
 }
@@ -52,7 +51,6 @@ export class IntervalManager {
 		const activeInterval: ActiveInterval = {
 			config,
 			intervalId,
-			lastRun: 0,
 			isRunning: false,
 			runCount: 0,
 		};
@@ -89,27 +87,6 @@ export class IntervalManager {
 	}
 
 	/**
-	 * Get information about all registered intervals
-	 */
-	getIntervalInfo(): Array<{
-		id: string;
-		intervalMs: number;
-		lastRun: number;
-		isRunning: boolean;
-		runCount: number;
-		description?: string;
-	}> {
-		return Array.from(this.intervals.entries()).map(([id, interval]) => ({
-			id,
-			intervalMs: interval.config.intervalMs,
-			lastRun: interval.lastRun,
-			isRunning: interval.isRunning,
-			runCount: interval.runCount,
-			description: interval.config.description,
-		}));
-	}
-
-	/**
 	 * Check if an interval is registered
 	 */
 	has(id: string): boolean {
@@ -135,7 +112,6 @@ export class IntervalManager {
 			return false;
 		}
 		interval.isRunning = true;
-		interval.lastRun = Date.now();
 		interval.runCount++;
 		try {
 			await interval.config.callback();
@@ -143,13 +119,6 @@ export class IntervalManager {
 			interval.isRunning = false;
 		}
 		return true;
-	}
-
-	/**
-	 * Get the number of active intervals
-	 */
-	getActiveCount(): number {
-		return this.intervals.size;
 	}
 
 	/**
@@ -187,7 +156,6 @@ export class IntervalManager {
 			}
 
 			interval.isRunning = true;
-			interval.lastRun = Date.now();
 			interval.runCount++;
 
 			try {
@@ -198,27 +166,6 @@ export class IntervalManager {
 				interval.isRunning = false;
 			}
 		};
-	}
-
-	/**
-	 * Update interval timing
-	 */
-	updateInterval(id: string, newIntervalMs: number): boolean {
-		const interval = this.intervals.get(id);
-		if (!interval) {
-			return false;
-		}
-
-		// Stop current interval
-		clearInterval(interval.intervalId);
-
-		// Start new interval with updated timing
-		const wrappedCallback = this.createWrappedCallback(interval.config);
-		interval.intervalId = setInterval(wrappedCallback, newIntervalMs);
-		interval.config.intervalMs = newIntervalMs;
-
-		log.debug(`Updated interval ${id} to ${newIntervalMs}ms`);
-		return true;
 	}
 }
 

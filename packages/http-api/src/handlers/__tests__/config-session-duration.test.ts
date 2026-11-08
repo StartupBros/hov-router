@@ -52,7 +52,7 @@ describe("GET /api/config session duration", () => {
 	it("reports the 5-hour default when nothing is configured", async () => {
 		delete process.env.SESSION_DURATION_MS;
 		expect(await reported(configWith({}))).toBe(
-			TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+			TIME_CONSTANTS.ANTHROPIC_SESSION_DURATION_DEFAULT,
 		);
 	});
 

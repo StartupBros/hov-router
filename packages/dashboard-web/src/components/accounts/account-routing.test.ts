@@ -13,12 +13,10 @@ import {
 	type AccountSetupMode,
 	type AccountSetupRoutingMetadata,
 	accountSetupRoutingMetadata,
-	accountSetupRoutingReviewIsCurrent,
 	buildAccountRoutingDraft,
 	buildAccountSetupRoutingDraft,
 	defaultRoutingSelections,
 	getAccountFamilyRoutingStates,
-	invalidateAccountSetupRoutingReview,
 	missingAccountIdentityOutcomes,
 	reconcileAccountRoutingSelections,
 	routingOutcomeReasonLabel,
@@ -276,23 +274,6 @@ describe("account routing draft and selection", () => {
 		const serialized = JSON.stringify(draft);
 		expect(serialized).not.toContain("must-not-leak");
 		expect(serialized).not.toContain("secret.example");
-	});
-
-	it("blocks creation before review and invalidates consent when the draft changes", () => {
-		const review = { previewDraftKey: "draft-a", reviewed: true };
-
-		expect(accountSetupRoutingReviewIsCurrent(review, "draft-a")).toBeTrue();
-		expect(
-			accountSetupRoutingReviewIsCurrent(
-				{ previewDraftKey: "draft-a", reviewed: false },
-				"draft-a",
-			),
-		).toBeFalse();
-		expect(accountSetupRoutingReviewIsCurrent(review, "draft-b")).toBeFalse();
-		expect(invalidateAccountSetupRoutingReview(review, "draft-b")).toEqual({
-			previewDraftKey: null,
-			reviewed: false,
-		});
 	});
 
 	it("turns a missing created identity into visible action-required outcomes", () => {

@@ -51,7 +51,6 @@ export {
 	trackDegradedResponseTerminal,
 } from "./anthropic-degraded-runtime";
 export { CacheAffinityOrderer } from "./cache-affinity-orderer";
-export { handleCacheDiagnosisRequest } from "./cache-diagnosis";
 export {
 	COHORT_SEAL_CONTRACT_VERSION,
 	COHORT_SEAL_PROFILE_CONFIG_KEYS,

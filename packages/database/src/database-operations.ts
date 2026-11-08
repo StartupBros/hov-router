@@ -22,8 +22,6 @@ import type {
 	AgentAttributionSource,
 	Combo,
 	ComboEnrollmentRule,
-	ComboEnrollmentRuleCreateInput,
-	ComboEnrollmentRuleUpdateInput,
 	ComboFamily,
 	ComboFamilyAssignment,
 	ComboFamilyPolicyApplyResult,
@@ -1056,13 +1054,6 @@ OAuth tokens will need to be re-authenticated.
 `.trim();
 	}
 
-	/**
-	 * Get the current retry configuration
-	 */
-	getRetryConfig(): DatabaseRetryConfig {
-		return this.retryConfig;
-	}
-
 	// Account operations delegated to repository with retry logic
 	async getAllAccounts(): Promise<Account[]> {
 		return withDatabaseRetry(
@@ -1433,10 +1424,6 @@ OAuth tokens will need to be re-authenticated.
 		return this.usageWindows.listWindows(options);
 	}
 
-	getCacheFlightRecorderRepository(): CacheFlightRecorderRepository {
-		return this.cacheFlightRecorder;
-	}
-
 	async appendCacheFlightRecorderTurn(
 		recorderConversationId: string,
 		turn: TurnEvidence,
@@ -1449,10 +1436,6 @@ OAuth tokens will need to be re-authenticated.
 			recordedAt,
 			sealReceipt,
 		);
-	}
-
-	async loadCacheFlightRecorderTimeline(recorderConversationId: string) {
-		return this.cacheFlightRecorder.loadTimeline(recorderConversationId);
 	}
 
 	async lookupCacheFlightRecorderTimeline(recorderConversationId: string) {
@@ -2770,13 +2753,6 @@ OAuth tokens will need to be re-authenticated.
 	}
 
 	/**
-	 * Get the API key repository for direct access
-	 */
-	getApiKeyRepository(): ApiKeyRepository {
-		return this.apiKeys;
-	}
-
-	/**
 	 * Get the stats repository for consolidated stats access
 	 */
 	getStatsRepository(): StatsRepository {
@@ -2898,23 +2874,6 @@ OAuth tokens will need to be re-authenticated.
 		return this.combo.applyFamilyPolicyChanges(changes);
 	}
 
-	async createComboEnrollmentRule(
-		input: ComboEnrollmentRuleCreateInput,
-	): Promise<ComboEnrollmentRule> {
-		return this.combo.createEnrollmentRule(input);
-	}
-
-	async updateComboEnrollmentRule(
-		id: string,
-		fields: ComboEnrollmentRuleUpdateInput,
-	): Promise<ComboEnrollmentRule> {
-		return this.combo.updateEnrollmentRule(id, fields);
-	}
-
-	async deleteComboEnrollmentRule(id: string): Promise<void> {
-		await this.combo.deleteEnrollmentRule(id);
-	}
-
 	async getComboEnrollmentRules(
 		family: ComboFamily,
 		comboId?: string,
@@ -2926,10 +2885,6 @@ OAuth tokens will need to be re-authenticated.
 		input: ComboMembershipExclusionCreateInput,
 	): Promise<ComboMembershipExclusion> {
 		return this.combo.createMembershipExclusion(input);
-	}
-
-	async deleteComboMembershipExclusion(id: string): Promise<void> {
-		await this.combo.deleteMembershipExclusion(id);
 	}
 
 	async restoreComboMembership(

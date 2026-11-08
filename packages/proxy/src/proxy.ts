@@ -57,7 +57,6 @@ import {
 	markAnthropicContextOverflowTerminal,
 } from "./anthropic-precommit-rescue";
 import { cacheBodyStore } from "./cache-body-store";
-import { recordDiagnosisCandidate } from "./cache-diagnosis";
 import {
 	type CachePacingObservation,
 	derivePacingCohortKey,
@@ -2197,11 +2196,6 @@ async function handleProxyCoreImpl(
 	if (pacingEligible) {
 		pacingObservation = await observeAndRecordPacing();
 		warnOnLookbackRisk(parsedBody, requestMeta.clientSessionId);
-		recordDiagnosisCandidate(
-			requestMeta.clientSessionId,
-			finalBodyBuffer,
-			req.headers,
-		);
 	}
 
 	// 6. Select after pacing.

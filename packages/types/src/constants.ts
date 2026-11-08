@@ -51,35 +51,3 @@ export function usesApiKey(provider: string): boolean {
 	}
 	return !supportsOAuth(provider);
 }
-
-/**
- * Get provider name from account mode
- */
-export function getProviderFromMode(mode: AccountMode): ProviderName {
-	switch (mode) {
-		case ACCOUNT_MODES.CLAUDE_OAUTH:
-			return PROVIDER_NAMES.ANTHROPIC;
-		case ACCOUNT_MODES.CONSOLE:
-			return PROVIDER_NAMES.CLAUDE_CONSOLE_API;
-		case ACCOUNT_MODES.ZAI:
-			return PROVIDER_NAMES.ZAI;
-		case ACCOUNT_MODES.MINIMAX:
-			return PROVIDER_NAMES.MINIMAX;
-		case ACCOUNT_MODES.DEEPSEEK:
-			return PROVIDER_NAMES.DEEPSEEK;
-		case ACCOUNT_MODES.ANTHROPIC_COMPATIBLE:
-			return PROVIDER_NAMES.ANTHROPIC_COMPATIBLE;
-		case ACCOUNT_MODES.OPENAI_COMPATIBLE:
-			return PROVIDER_NAMES.OPENAI_COMPATIBLE;
-		case ACCOUNT_MODES.NANOGPT:
-			return PROVIDER_NAMES.NANOGPT;
-		case ACCOUNT_MODES.XAI:
-			return PROVIDER_NAMES.XAI;
-		case ACCOUNT_MODES.OLLAMA:
-			return PROVIDER_NAMES.OLLAMA;
-		case ACCOUNT_MODES.META:
-			return PROVIDER_NAMES.META;
-		default:
-			return PROVIDER_NAMES.ANTHROPIC;
-	}
-}

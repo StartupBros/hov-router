@@ -1747,11 +1747,6 @@ export class Config extends EventEmitter {
 		return 90; // default: keep 90 days of usage-window history
 	}
 
-	setUsageHistoryRetentionDays(days: number): void {
-		const clamped = this.clamp(days, 1, 3650);
-		this.set("usage_history_retention_days", clamped);
-	}
-
 	getCacheFlightRecorderRetentionHours(): number {
 		const fromEnv = process.env.CACHE_FLIGHT_RECORDER_RETENTION_HOURS;
 		if (fromEnv) {
@@ -1763,13 +1758,6 @@ export class Config extends EventEmitter {
 			return this.clamp(fromFile, 1, 14 * 24);
 		}
 		return 72;
-	}
-
-	setCacheFlightRecorderRetentionHours(hours: number): void {
-		this.set(
-			"cache_flight_recorder_retention_hours",
-			this.clamp(hours, 1, 14 * 24),
-		);
 	}
 
 	getStorePayloads(): boolean {
@@ -1796,11 +1784,6 @@ export class Config extends EventEmitter {
 		if (typeof fromFile === "number")
 			return this.clamp(fromFile, 10000, 3600000);
 		return 90000; // default: 90 seconds
-	}
-
-	setUsagePollIntervalMs(ms: number): void {
-		const clamped = this.clamp(ms, 10000, 3600000);
-		this.set("usage_poll_interval_ms", clamped);
 	}
 
 	getCacheKeepaliveTtlMinutes(): number {
@@ -2849,7 +2832,7 @@ export class Config extends EventEmitter {
 				delayMs: TIME_CONSTANTS.RETRY_DELAY_DEFAULT,
 				backoff: 2,
 			},
-			sessionDurationMs: TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+			sessionDurationMs: TIME_CONSTANTS.ANTHROPIC_SESSION_DURATION_DEFAULT,
 			port: NETWORK.DEFAULT_PORT,
 			database: {
 				walMode: true,
@@ -2923,7 +2906,7 @@ export class Config extends EventEmitter {
 		});
 		defaults.sessionDurationMs = validateRuntimeSessionDuration(
 			defaults.sessionDurationMs,
-			TIME_CONSTANTS.SESSION_DURATION_DEFAULT,
+			TIME_CONSTANTS.ANTHROPIC_SESSION_DURATION_DEFAULT,
 		);
 
 		// Database configuration overrides

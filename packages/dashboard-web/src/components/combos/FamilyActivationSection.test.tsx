@@ -18,7 +18,6 @@ import {
 	getManagedModelOptions,
 	previewMatchesPendingConversion,
 	resolveAuthoritativeManagedModel,
-	runManualFamilyRollback,
 	runSerializedFamilyPolicyUpdate,
 } from "./FamilyActivationSection";
 
@@ -139,13 +138,7 @@ describe("FamilyActivationSection managed policy controls", () => {
 		);
 	});
 
-	it("rolls back with a mode-only partial policy update", async () => {
-		const update = mock(async () => assignment({ membership_mode: "manual" }));
-
-		await runManualFamilyRollback("opus", update);
-
-		expect(update).toHaveBeenCalledTimes(1);
-		expect(update).toHaveBeenCalledWith(buildManualFamilyPolicyUpdate("opus"));
+	it("builds a mode-only partial policy update for rollback", () => {
 		expect(buildManualFamilyPolicyUpdate("opus")).toEqual({
 			family: "opus",
 			membershipMode: "manual",
