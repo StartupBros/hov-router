@@ -14,7 +14,7 @@ import { describe, expect, it } from "bun:test";
 import type { BankedResets, FullUsageData } from "@better-ccflare/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Account } from "../../api";
-import { AccountList } from "./AccountList";
+import { AccountList, accountListItems } from "./AccountList";
 import {
 	AccountListItem,
 	CodexCreditDrainControl,
@@ -25,6 +25,93 @@ import type { AccountFamilyRoutingState } from "./account-routing";
 
 function noop() {}
 async function noopAsync() {}
+
+describe("account scan layout", () => {
+	it("distinguishes unavailable data from an empty collection", () => {
+		const unavailable = renderToStaticMarkup(
+			<AccountList accounts={undefined} {...requiredHandlers} />,
+		);
+		expect(unavailable).toContain("Account data unavailable");
+		expect(unavailable).not.toContain("No accounts yet");
+		expect(
+			renderToStaticMarkup(<AccountList accounts={[]} {...requiredHandlers} />),
+		).toContain("No accounts yet");
+	});
+	it("renders labeled scan controls and result count", () => {
+		const html = renderToStaticMarkup(
+			<AccountList accounts={[makeAccount()]} {...requiredHandlers} />,
+		);
+		for (const text of [
+			"Search accounts",
+			"All providers",
+			"Needs attention",
+			"Paused",
+			"Showing 1 of 1 accounts",
+			'aria-pressed="true"',
+		])
+			expect(html).toContain(text);
+	});
+	it("collapses routine settings and family details while keeping recovery visible", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({ provider: "codex", requiresReauth: true })}
+				{...requiredHandlers}
+				onCodexReauth={noop}
+				onCodexCreditDrainToggle={noop}
+				routingStates={[
+					routingState({ reason: "ambiguous", reasonLabel: "Ambiguous" }),
+				]}
+			/>,
+		);
+		const disclosures =
+			html.match(/<details\b[^>]*>[\s\S]*?<\/details>/g) ?? [];
+		expect(disclosures.length).toBe(2);
+		expect(disclosures.every((d) => !/^<details[^>]*\bopen/.test(d))).toBe(
+			true,
+		);
+		expect(
+			disclosures.find((d) => d.includes("Settings &amp; account details")),
+		).toContain("Drain credits");
+		const visible = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, "");
+		expect(visible).toContain("Re-authenticate");
+		expect(visible).toContain("Action required");
+		expect(visible).not.toContain("No account block reported");
+	});
+	it("uses the reported normal state without a duplicate fallback label", () => {
+		const allowed = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({ paused: false, rateLimitStatus: "allowed" })}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(allowed).toContain("Allowed");
+		expect(allowed).not.toContain("No account block reported");
+		const unspecified = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({ paused: false })}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(unspecified).toContain("No account block reported");
+	});
+	it("keeps force reset outside disclosures and missing quota explicit", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({
+					paused: false,
+					rateLimitedUntil: Date.now() + 60000,
+					usageUtilization: 20,
+				})}
+				{...requiredHandlers}
+			/>,
+		);
+		const visible = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, "");
+		expect(visible).toContain("Force Reset");
+		expect(visible).toContain("Stale lock detected");
+		expect(visible).not.toContain("No account block reported");
+		expect(visible).toContain("Usage data unavailable");
+	});
+});
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
 	return {
@@ -118,6 +205,12 @@ describe("account model mapping edits", () => {
 	});
 });
 
+function reauthButton(html: string): string | undefined {
+	return (html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? []).find(
+		(button) => button.includes(">Re-authenticate</button>"),
+	);
+}
+
 describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 	it("renders the derived requiresReauth signal as the same primary recovery action", () => {
 		const account = makeAccount({
@@ -135,7 +228,8 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		expect(html).toContain("Re-authentication required");
 		expect(html).toContain("Refresh token invalid — re-authenticate");
 		expect(html).toContain(">Re-authenticate<");
-		expect(html).toContain("bg-primary text-primary-foreground");
+		expect(reauthButton(html)).toContain(" bg-primary ");
+		expect(reauthButton(html)).toContain("text-black");
 	});
 
 	it("renders reauth-required copy and a primary Re-authenticate button for oauth_invalid_grant", () => {
@@ -154,14 +248,10 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		// regardless of pause reason) -- ">Re-authenticate<" only appears when
 		// pauseStatus.reauthRequired renders the label text inside the button.
 		expect(html).toContain(">Re-authenticate<");
-		// variant="default" (primary) styling on the reauth button, not the
-		// muted "ghost" styling it gets for a non-terminal/unknown reason. The
-		// full cva class combination is asserted (rather than the bare
-		// "bg-primary" substring) because the unrelated Auto-fallback
-		// <Switch> elements always statically include
-		// "data-[state=checked]:bg-primary" in their class list regardless of
-		// pause reason, which would make a bare "bg-primary" check meaningless.
-		expect(html).toContain("bg-primary text-primary-foreground");
+		// Assert the recovery button itself, not unrelated switches that also
+		// carry bg-primary. Dark ink keeps the primary orange action readable.
+		expect(reauthButton(html)).toContain(" bg-primary ");
+		expect(reauthButton(html)).toContain("text-black");
 	});
 
 	it("renders generic Paused copy with no reauth emphasis for a manual pause", () => {
@@ -177,7 +267,7 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		expect(html).toContain("Paused");
 		expect(html).not.toContain("Re-authentication required");
 		expect(html).not.toContain(">Re-authenticate<");
-		expect(html).not.toContain("bg-primary text-primary-foreground");
+		expect(reauthButton(html)).toBeUndefined();
 	});
 
 	it("shows a human-readable known automatic pause reason", () => {
@@ -210,7 +300,7 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		);
 		expect(html).not.toContain("Re-authentication required");
 		expect(html).not.toContain(">Re-authenticate<");
-		expect(html).not.toContain("bg-primary text-primary-foreground");
+		expect(reauthButton(html)).toBeUndefined();
 	});
 });
 
@@ -343,7 +433,7 @@ describe("AccountListItem authoritative family routing", () => {
 	it("keys cards and resolves routing state by immutable account ID", () => {
 		const firstRouting = [routingState({ family: "opus" })];
 		const secondRouting = [routingState({ family: "fable" })];
-		const tree = AccountList({
+		const children = accountListItems({
 			accounts: [
 				makeAccount({ id: "account-a", name: "duplicate-name" }),
 				makeAccount({ id: "account-b", name: "duplicate-name" }),
@@ -353,12 +443,7 @@ describe("AccountListItem authoritative family routing", () => {
 				"account-b": secondRouting,
 			},
 			...requiredHandlers,
-		}) as React.ReactElement<{
-			children: React.ReactElement<{
-				routingStates?: readonly AccountFamilyRoutingState[];
-			}>[];
-		}>;
-		const children = tree.props.children;
+		});
 
 		expect(children.map((child) => child.key)).toEqual([
 			"account-a",

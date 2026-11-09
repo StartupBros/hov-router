@@ -769,11 +769,16 @@ export function AccountsTab() {
 
 	if (loading) {
 		return (
-			<Card>
-				<CardContent className="pt-6">
-					<p className="text-muted-foreground">Loading accounts...</p>
-				</CardContent>
-			</Card>
+			<div role="status" aria-label="Loading accounts" className="space-y-4">
+				<p className="text-muted-foreground">Loading accounts...</p>
+				{[0, 1, 2].map((index) => (
+					<div
+						key={index}
+						aria-hidden="true"
+						className="h-36 animate-pulse rounded-lg border bg-muted/40"
+					/>
+				))}
+			</div>
 		);
 	}
 
@@ -782,35 +787,41 @@ export function AccountsTab() {
 	return (
 		<div className="space-y-4">
 			{displayError && (
-				<Card className="border-destructive">
+				<Card role="alert" className="border-destructive">
 					<CardContent className="pt-6">
 						<div className="flex items-center gap-2">
 							<AlertCircle className="h-4 w-4 text-destructive" />
-							<p className="text-destructive">{displayError}</p>
+							<p className="min-w-0 break-words text-destructive">
+								{displayError}
+							</p>
 						</div>
 					</CardContent>
 				</Card>
 			)}
 
-			<Card>
-				{/* Tighter padding on phones: rows are cards inside this card. */}
-				<CardHeader className="p-4 sm:p-6">
-					<div className="flex items-center justify-between gap-4">
+			<Card className="min-w-0 border-0 bg-transparent shadow-none hover:shadow-none">
+				{/* Rows provide their own surfaces; the section stays visually open. */}
+				<CardHeader className="px-0 pb-4 pt-0">
+					<div className="flex flex-wrap items-center justify-between gap-4">
 						<div>
-							<CardTitle>Accounts</CardTitle>
+							<CardTitle className="text-xl">Accounts</CardTitle>
 							<CardDescription>
 								Every provider account the router can send requests to
 							</CardDescription>
 						</div>
 						{!adding && (
-							<Button onClick={() => setAdding(true)} size="sm">
+							<Button
+								onClick={() => setAdding(true)}
+								size="sm"
+								className="min-h-11 text-black hover:text-black"
+							>
 								<Plus className="mr-2 h-4 w-4" />
 								Add Account
 							</Button>
 						)}
 					</div>
 				</CardHeader>
-				<CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+				<CardContent className="space-y-4 p-0">
 					{adding && (
 						<AccountAddForm
 							onAddAccount={handleAddAccount}

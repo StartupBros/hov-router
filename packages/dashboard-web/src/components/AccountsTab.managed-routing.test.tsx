@@ -320,6 +320,43 @@ describe("account routing overview query", () => {
 });
 
 describe("AccountsTab production routing prop", () => {
+	it("shows loading placeholders before accounts arrive", () => {
+		const queryClient = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		const html = renderToStaticMarkup(
+			<QueryClientProvider client={queryClient}>
+				<AccountsTab />
+			</QueryClientProvider>,
+		);
+		expect(html).toContain("Loading accounts");
+		expect(html).toContain("animate-pulse");
+		expect(html).not.toContain("No accounts yet");
+	});
+	it("keeps initial fetch failure distinct from an empty collection", () => {
+		const queryClient = new QueryClient({
+			defaultOptions: { queries: { retry: false, retryOnMount: false } },
+		});
+		const query = queryClient
+			.getQueryCache()
+			.build(queryClient, { queryKey: queryKeys.accounts() });
+		query.setState({
+			status: "error",
+			error: new Error("Accounts fetch failed"),
+			fetchStatus: "idle",
+		});
+		const html = renderToStaticMarkup(
+			<QueryClientProvider client={queryClient}>
+				<AccountsTab />
+			</QueryClientProvider>,
+		);
+		expect(html).toContain('role="alert"');
+		expect(html).toContain(
+			"Network error. Please check your connection and try again.",
+		);
+		expect(html).toContain("Account data unavailable");
+		expect(html).not.toContain("No accounts yet");
+	});
 	it("renders AccountList family routing from the overview cache", () => {
 		const queryClient = new QueryClient({
 			defaultOptions: { queries: { retry: false } },

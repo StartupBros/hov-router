@@ -170,6 +170,22 @@ describe("BankedResetsSummary", () => {
 		expect(howto(html)).toBeNull();
 	});
 
+	it("keeps an empty fresh balance compact without hiding stale-value warnings", () => {
+		const empty = render(
+			summary({ totalAvailable: 0, soonestExpiresAt: null }),
+		);
+		expect(empty).toStartWith("<details");
+		expect(empty).not.toMatch(/^<details[^>]*\bopen/);
+		const header = empty.slice(0, empty.indexOf("</summary>"));
+		expect(header).toContain("Banked resets");
+		expect(header).toContain("No banked resets held.");
+		const stale = render(
+			summary({ totalAvailable: 0, soonestExpiresAt: null, anyStale: true }),
+		);
+		expect(stale).toStartWith("<section");
+		expect(stale).toContain("Includes last known values");
+	});
+
 	it("says when the expiry was not reported", () => {
 		expect(text(render(summary({ soonestExpiresAt: null })))).toContain(
 			"Expiry not reported",

@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
 	AlertCircle,
+	ChevronDown,
 	Edit2,
 	Ellipsis,
 	Globe,
@@ -85,7 +86,7 @@ function rateLimitStatusTone(status: string): StatusTone {
 const EMPTY_SESSION_INFO = new Set(["", "-", "No active session"]);
 
 /** Label + switch pair used in the per-account settings row. */
-const SETTING_CLASS = "flex items-center gap-2 whitespace-nowrap";
+const SETTING_CLASS = "flex min-h-11 min-w-0 flex-wrap items-center gap-2";
 
 /**
  * Codex-only usage extras (plan_type, credits_balance) come from the free
@@ -124,6 +125,14 @@ function routingAvailabilityOverlay(
 	}
 }
 
+function routingNeedsNotice(state: AccountFamilyRoutingState) {
+	return (
+		state.reason === "ambiguous" ||
+		state.reason === "new_billing_class" ||
+		state.managedRouteAvailable ||
+		(state.availability !== null && state.availability !== "available")
+	);
+}
 interface AccountListItemProps {
 	account: Account;
 	routingStates?: readonly AccountFamilyRoutingState[];
@@ -165,6 +174,7 @@ export function CodexCreditDrainControl({
 		<div className={SETTING_CLASS}>
 			<span className="text-xs text-muted-foreground">Drain credits:</span>
 			<Switch
+				className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
 				checked={account.codexCreditDrainEnabled ?? false}
 				aria-label={`Drain credits for ${account.name}`}
 				onCheckedChange={() => onToggle(account)}
@@ -201,6 +211,7 @@ export function PublicValueControl({
 		<div className={SETTING_CLASS}>
 			<span className="text-xs text-muted-foreground">Public value:</span>
 			<Switch
+				className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
 				checked={enabled}
 				aria-label={`Public value for ${account.name}`}
 				onCheckedChange={() => onToggle(account)}
@@ -218,7 +229,7 @@ export function PublicValueControl({
 				<Button
 					variant="ghost"
 					size="sm"
-					className="h-6 px-1"
+					className="h-11 min-w-11 px-2"
 					onClick={() => onEditLabel(account)}
 					aria-label="Edit public label"
 					title="Edit public label"
@@ -293,6 +304,9 @@ export function AccountListItem({
 	const isUsageThrottled =
 		typeof account.usageThrottledUntil === "number" &&
 		account.usageThrottledUntil > Date.now();
+	const isUsageLimited =
+		typeof account.usageRateLimitedUntil === "number" &&
+		account.usageRateLimitedUntil > Date.now();
 	const codexUsageExtras = getCodexUsageExtras(account);
 	const codexCreditsBalance =
 		typeof codexUsageExtras?.credits_balance === "number" &&
@@ -364,23 +378,23 @@ export function AccountListItem({
 	return (
 		<article
 			aria-label={account.name}
-			className={`space-y-3 rounded-lg border p-4 transition-colors ${
+			className={`min-w-0 space-y-3 rounded-lg border bg-card p-4 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.7fr)_8.5rem] xl:items-start xl:gap-4 xl:space-y-0 xl:[&>*]:col-span-full ${
 				isPrimary
-					? "border-primary bg-primary/5 shadow-sm"
+					? "border-border border-l-2 border-l-primary"
 					: "border-border hover:border-muted-foreground/50"
 			}`}
 		>
 			{/* Identity on the left, actions on the right. The identity column claims
 			    8rem first, so on a narrow card the actions drop below the name
 			    instead of squeezing it into a sliver. */}
-			<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-				<div className="min-w-0 flex-[1_1_8rem] space-y-1">
+			<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 xl:contents">
+				<div className="min-w-0 flex-[1_1_8rem] space-y-1 xl:col-start-1 xl:row-start-1">
 					<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
 						<h3 className="min-w-0 break-words font-medium leading-tight">
 							{account.name}
 						</h3>
 						{isPrimary && (
-							<span className="px-2 py-0.5 text-xs font-medium bg-primary text-primary-foreground rounded-full">
+							<span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground">
 								Primary
 							</span>
 						)}
@@ -400,51 +414,14 @@ export function AccountListItem({
 					{/* No bullet separators: they strand at line ends when this wraps. */}
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
 						<span>{account.provider}</span>
-						{account.provider === "bedrock" && bedrockProfile && (
-							<>
-								<span className="whitespace-nowrap">
-									Profile: {bedrockProfile}
-								</span>
-								{bedrockRegion && (
-									<span
-										className="inline-flex items-center gap-1 whitespace-nowrap"
-										title={`Region: ${bedrockRegion}`}
-									>
-										<Globe className="h-3 w-3" />
-										{bedrockRegion}
-									</span>
-								)}
-								{bedrockCrossRegionMode && (
-									<span title="Cross-region inference mode">
-										{bedrockCrossRegionMode}
-									</span>
-								)}
-							</>
-						)}
-						{account.provider !== "bedrock" && account.customEndpoint && (
-							<span
-								className="inline-flex items-center gap-1 whitespace-nowrap"
-								title={`Custom endpoint: ${account.customEndpoint}`}
-							>
-								<Globe className="h-3 w-3" />
-								custom endpoint
-							</span>
-						)}
-						{modelMappingCount > 0 && (
-							<span className="inline-flex items-center gap-1 whitespace-nowrap">
-								<Hash className="h-3 w-3" />
-								{modelMappingCount} model{" "}
-								{modelMappingCount === 1 ? "mapping" : "mappings"}
-							</span>
-						)}
 					</div>
 				</div>
-				<div className="ml-auto flex shrink-0 flex-wrap items-center gap-1">
+				<div className="ml-auto flex shrink-0 flex-wrap items-center gap-1 xl:col-start-4 xl:row-start-1">
 					{showForceReset && (
 						<Button
 							variant="outline"
 							size="sm"
-							className="h-8 gap-1 text-xs"
+							className="min-h-11 gap-1 text-xs"
 							onClick={() => onForceResetRateLimit(account)}
 							title={
 								staleLockDetected
@@ -460,7 +437,7 @@ export function AccountListItem({
 						<Button
 							variant="default"
 							size="sm"
-							className="gap-1 text-xs"
+							className="min-h-11 gap-1 text-xs text-black hover:text-black"
 							onClick={() => reauth.handler(account)}
 							title={reauth.title}
 						>
@@ -472,7 +449,7 @@ export function AccountListItem({
 						<Button
 							variant="ghost"
 							size="sm"
-							className="h-8 w-8 p-0"
+							className="h-11 w-11 p-0"
 							disabled={isRefreshingUsage}
 							onClick={async () => {
 								setIsRefreshingUsage(true);
@@ -497,7 +474,7 @@ export function AccountListItem({
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-8 w-8 p-0"
+						className="h-11 w-11 p-0"
 						onClick={() => onPauseToggle(account)}
 						aria-label={account.paused ? "Resume account" : "Pause account"}
 						title={account.paused ? "Resume account" : "Pause account"}
@@ -515,7 +492,7 @@ export function AccountListItem({
 							<Button
 								variant="ghost"
 								size="sm"
-								className="h-8 w-8 p-0"
+								className="h-11 w-11 p-0"
 								aria-label={`More actions for ${account.name}`}
 								title="More actions"
 							>
@@ -524,14 +501,14 @@ export function AccountListItem({
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="w-52">
 							<DropdownMenuItem
-								className="gap-2"
+								className="min-h-11 gap-2"
 								onSelect={() => onRename(account)}
 							>
 								<Edit2 className="h-4 w-4" />
 								Rename…
 							</DropdownMenuItem>
 							<DropdownMenuItem
-								className="gap-2"
+								className="min-h-11 gap-2"
 								onSelect={() => onPriorityChange(account)}
 							>
 								<Zap className="h-4 w-4" />
@@ -539,7 +516,7 @@ export function AccountListItem({
 							</DropdownMenuItem>
 							{onCustomEndpointChange && (
 								<DropdownMenuItem
-									className="gap-2"
+									className="min-h-11 gap-2"
 									onSelect={() => onCustomEndpointChange(account)}
 								>
 									<Globe className="h-4 w-4" />
@@ -548,7 +525,7 @@ export function AccountListItem({
 							)}
 							{onModelMappingsChange && (
 								<DropdownMenuItem
-									className="gap-2"
+									className="min-h-11 gap-2"
 									onSelect={() => onModelMappingsChange(account)}
 								>
 									<Hash className="h-4 w-4" />
@@ -557,7 +534,7 @@ export function AccountListItem({
 							)}
 							{reauth && !reauthRequired && (
 								<DropdownMenuItem
-									className="gap-2"
+									className="min-h-11 gap-2"
 									onSelect={() => reauth.handler(account)}
 								>
 									<KeyRound className="h-4 w-4" />
@@ -566,7 +543,7 @@ export function AccountListItem({
 							)}
 							<DropdownMenuSeparator />
 							<DropdownMenuItem
-								className="gap-2 text-destructive focus:text-destructive"
+								className="min-h-11 gap-2 text-destructive focus:text-destructive"
 								onSelect={() => onRemove(account)}
 							>
 								<Trash2 className="h-4 w-4" />
@@ -578,7 +555,27 @@ export function AccountListItem({
 			</div>
 
 			{/* Status first, then counters. */}
-			<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+			<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm xl:!col-span-1 xl:col-start-2 xl:row-start-1 xl:flex-col xl:items-start">
+				<span className="text-xs font-medium text-muted-foreground">
+					Operational state
+				</span>
+				{!reauthRequired &&
+					!presenter.isPaused &&
+					!isHardLimited &&
+					!isBlockedByLegacyLock &&
+					!isUsageThrottled &&
+					!isUsageLimited &&
+					!presenter.isRateLimited &&
+					!showRateLimitStatus && (
+						<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
+							No account block reported
+						</span>
+					)}
+				{isBlockedByLegacyLock && !isHardLimited && (
+					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}>
+						Rate limited
+					</span>
+				)}
 				{reauthRequired ? (
 					<Badge
 						variant="destructive"
@@ -634,106 +631,132 @@ export function AccountListItem({
 						Usage throttled
 					</span>
 				)}
+				{isUsageLimited && (
+					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}>
+						Usage rate limited
+					</span>
+				)}
 				<span className="whitespace-nowrap tabular-nums text-muted-foreground">
 					{presenter.requestCount.toLocaleString()} requests
 				</span>
-				{showSessionInfo && (
-					<span className="whitespace-nowrap tabular-nums text-muted-foreground">
-						{sessionInfo}
-					</span>
-				)}
+
 				{codexCreditsBalance !== null && (
 					<span className="whitespace-nowrap tabular-nums text-muted-foreground">
 						{codexCreditsBalance.toLocaleString()} credits
 					</span>
 				)}
+				{account.codexCreditDrainServing && account.provider === "codex" && (
+					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}>
+						Serving from purchased credits
+					</span>
+				)}
 			</div>
 
+			<div className="min-w-0 border-t pt-3 xl:!col-span-1 xl:col-start-3 xl:row-start-1 xl:border-t-0 xl:pt-0">
+				<p className="mb-2 text-xs font-medium text-muted-foreground">
+					Capacity &amp; resets
+				</p>{" "}
+				{(account.rateLimitReset ||
+					account.usageData ||
+					account.usageRateLimitedUntil ||
+					// Codex quota data only arrives piggybacked on real traffic (no usage
+					// polling endpoint), so gaps are routine. Mount the bar anyway: it
+					// renders the weekly window as "Data unavailable" instead of
+					// disappearing, and a missing quota bar reads as "no limit".
+					account.provider === "codex" ||
+					providerShowsCreditsBalance(account.provider)) && (
+					<RateLimitProgress
+						resetIso={account.rateLimitReset}
+						usageUtilization={account.usageUtilization}
+						usageWindow={account.usageWindow}
+						usageData={account.usageData}
+						usageRateLimitedUntil={account.usageRateLimitedUntil}
+						usageThrottledUntil={account.usageThrottledUntil}
+						usageThrottledWindows={account.usageThrottledWindows}
+						provider={account.provider}
+						showWeekly={providerShowsWeeklyUsage(account.provider)}
+					/>
+				)}
+				{!(
+					account.rateLimitReset ||
+					account.usageData ||
+					account.usageRateLimitedUntil ||
+					account.provider === "codex" ||
+					providerShowsCreditsBalance(account.provider)
+				) && (
+					<p className="text-xs text-muted-foreground">
+						Usage data unavailable
+					</p>
+				)}
+			</div>
 			{account.provider === "codex" && account.bankedResets && (
-				<BankedResetsStatus
-					resets={account.bankedResets}
-					accountName={account.name}
-					onUseReset={onUseReset ? () => onUseReset(account) : undefined}
-				/>
+				<div className="[&_button]:min-h-11">
+					<BankedResetsStatus
+						resets={account.bankedResets}
+						accountName={account.name}
+						onUseReset={onUseReset ? () => onUseReset(account) : undefined}
+					/>
+				</div>
 			)}
 
-			{hasSettings && (
-				<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-					{showAutoFeatures && (
-						<div className={SETTING_CLASS}>
-							<span className="text-xs text-muted-foreground">
-								Auto-fallback:
-							</span>
-							<Switch
-								checked={account.autoFallbackEnabled}
-								aria-label={`Auto-fallback for ${account.name}`}
-								onCheckedChange={() => onAutoFallbackToggle(account)}
-								title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
-							/>
-						</div>
-					)}
-					{showPlanBilling && (
-						<div className={SETTING_CLASS}>
-							<span className="text-xs text-muted-foreground">
-								Plan billing:
-							</span>
-							<Switch
-								checked={account.billingType === "plan"}
-								aria-label={`Plan billing for ${account.name}`}
-								onCheckedChange={() => onBillingTypeToggle(account)}
-								title="Toggle plan billing for this account"
-							/>
-						</div>
-					)}
-					{showAutoPause && onAutoPauseOnOverageToggle && (
-						<div className={SETTING_CLASS}>
-							<span className="text-xs text-muted-foreground">
-								Auto-pause on overage:
-							</span>
-							<Switch
-								checked={account.autoPauseOnOverageEnabled ?? false}
-								aria-label={`Auto-pause on overage for ${account.name}`}
-								onCheckedChange={() => onAutoPauseOnOverageToggle(account)}
-								title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if auto-fallback is on."
-							/>
-						</div>
-					)}
-					{showCreditDrain && onCodexCreditDrainToggle && (
-						<CodexCreditDrainControl
-							account={account}
-							onToggle={onCodexCreditDrainToggle}
-						/>
-					)}
-					{onPublicValueToggle && (
-						<PublicValueControl
-							account={account}
-							onToggle={onPublicValueToggle}
-							onEditLabel={onPublicValueEditLabel}
-						/>
-					)}
-					{showPeakHoursPause && onPeakHoursPauseToggle && (
-						<div className={SETTING_CLASS}>
-							<span className="text-xs text-muted-foreground">
-								Peak hours pause:
-							</span>
-							<Switch
-								checked={account.peakHoursPauseEnabled ?? false}
-								aria-label={`Peak hours pause for ${account.name}`}
-								onCheckedChange={() => onPeakHoursPauseToggle(account)}
-								title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
-							/>
-						</div>
+			{routingStates.some(routingNeedsNotice) && (
+				<section className="space-y-1 text-sm" aria-label="Routing notices">
+					{routingStates.filter(routingNeedsNotice).map((state) => (
+						<p
+							key={`${state.family}:${state.comboId}`}
+							className="text-amber-700 dark:text-amber-400"
+						>
+							{formatRoutingFamily(state.family)}:{" "}
+							{state.reason === "ambiguous" ||
+							state.reason === "new_billing_class"
+								? `Action required — ${state.reasonLabel}. Review in Combos. `
+								: ""}
+							{state.managedRouteAvailable
+								? "Managed route available — Review in Combos. "
+								: ""}
+							{routingAvailabilityOverlay(state)?.label}
+						</p>
+					))}
+				</section>
+			)}
+
+			{bindingConstraint && (
+				// Deliberately NOT a replacement for the routing utilization badge
+				// above: routing asks how much account-wide capacity is left, this
+				// asks what is actually stopping you. Collapsing the two is what let
+				// a 100% model-scoped cap hide behind a 64% account-wide badge.
+				<div
+					className="text-xs text-muted-foreground"
+					data-testid="binding-constraint"
+				>
+					{bindingConstraint.divergesFromRouting ? (
+						<>
+							Binding limit: {bindingConstraint.label}{" "}
+							{Math.round(bindingConstraint.utilization)}%
+							{bindingConstraint.scope === "family"
+								? " — model-scoped, not counted in the routing % above"
+								: " — not the window shown above"}
+						</>
+					) : (
+						<>
+							Binding limit: {bindingConstraint.label}{" "}
+							{Math.round(bindingConstraint.utilization)}% — account-wide
+						</>
 					)}
 				</div>
 			)}
 			{routingStates.length > 0 && (
-				<section
+				<details
 					aria-label={`Family routing for ${account.name}`}
-					className="space-y-2"
+					className="group space-y-2"
 				>
-					<p className="text-xs font-medium text-muted-foreground">
+					<summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
+						<ChevronDown
+							aria-hidden="true"
+							className="h-4 w-4 shrink-0 group-open:rotate-180"
+						/>
 						Family routing
-					</p>
+					</summary>
 					<div className="flex flex-wrap gap-2">
 						{routingStates.map((state) => {
 							const availability = routingAvailabilityOverlay(state);
@@ -756,7 +779,7 @@ export function AccountListItem({
 										<Badge
 											variant={
 												state.membershipLabel === "Managed"
-													? "success"
+													? "outline"
 													: "secondary"
 											}
 										>
@@ -798,76 +821,161 @@ export function AccountListItem({
 							);
 						})}
 					</div>
-				</section>
+				</details>
 			)}
-			{account.sessionStats && (
-				<div className="text-xs text-muted-foreground">
-					Session: {account.sessionStats.requests} req
-					{" · "}↑{formatTokenCount(account.sessionStats.inputTokens)} in
-					{" · "}✦
-					{formatTokenCount(account.sessionStats.cacheCreationInputTokens)}{" "}
-					cache↑
-					{" · "}✦{formatTokenCount(account.sessionStats.cacheReadInputTokens)}{" "}
-					cache↓
-					{" · "}↓{formatTokenCount(account.sessionStats.outputTokens)} out
-					{account.sessionStats.planCostUsd > 0 && (
-						<>
-							{" · "}${account.sessionStats.planCostUsd.toFixed(2)} plan
-						</>
+			<details className="group border-t pt-1">
+				<summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
+					<ChevronDown
+						aria-hidden="true"
+						className="h-4 w-4 shrink-0 group-open:rotate-180"
+					/>
+					Settings &amp; account details
+				</summary>
+				<div className="space-y-4 py-2">
+					{" "}
+					{hasSettings && (
+						<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+							{showAutoFeatures && (
+								<div className={SETTING_CLASS}>
+									<span className="text-xs text-muted-foreground">
+										Auto-fallback:
+									</span>
+									<Switch
+										className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+										checked={account.autoFallbackEnabled}
+										aria-label={`Auto-fallback for ${account.name}`}
+										onCheckedChange={() => onAutoFallbackToggle(account)}
+										title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
+									/>
+								</div>
+							)}
+							{showPlanBilling && (
+								<div className={SETTING_CLASS}>
+									<span className="text-xs text-muted-foreground">
+										Plan billing:
+									</span>
+									<Switch
+										className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+										checked={account.billingType === "plan"}
+										aria-label={`Plan billing for ${account.name}`}
+										onCheckedChange={() => onBillingTypeToggle(account)}
+										title="Toggle plan billing for this account"
+									/>
+								</div>
+							)}
+							{showAutoPause && onAutoPauseOnOverageToggle && (
+								<div className={SETTING_CLASS}>
+									<span className="text-xs text-muted-foreground">
+										Auto-pause on overage:
+									</span>
+									<Switch
+										className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+										checked={account.autoPauseOnOverageEnabled ?? false}
+										aria-label={`Auto-pause on overage for ${account.name}`}
+										onCheckedChange={() => onAutoPauseOnOverageToggle(account)}
+										title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if auto-fallback is on."
+									/>
+								</div>
+							)}
+							{showCreditDrain && onCodexCreditDrainToggle && (
+								<CodexCreditDrainControl
+									account={account}
+									onToggle={onCodexCreditDrainToggle}
+								/>
+							)}
+							{onPublicValueToggle && (
+								<PublicValueControl
+									account={account}
+									onToggle={onPublicValueToggle}
+									onEditLabel={onPublicValueEditLabel}
+								/>
+							)}
+							{showPeakHoursPause && onPeakHoursPauseToggle && (
+								<div className={SETTING_CLASS}>
+									<span className="text-xs text-muted-foreground">
+										Peak hours pause:
+									</span>
+									<Switch
+										className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+										checked={account.peakHoursPauseEnabled ?? false}
+										aria-label={`Peak hours pause for ${account.name}`}
+										onCheckedChange={() => onPeakHoursPauseToggle(account)}
+										title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
+									/>
+								</div>
+							)}
+						</div>
 					)}
-					{account.sessionStats.apiCostUsd > 0 && (
-						<>
-							{" · "}${account.sessionStats.apiCostUsd.toFixed(2)} api
-						</>
+					<div className="flex min-w-0 flex-wrap gap-3 text-xs text-muted-foreground">
+						{" "}
+						{account.provider === "bedrock" && bedrockProfile && (
+							<>
+								<span className="whitespace-nowrap">
+									Profile: {bedrockProfile}
+								</span>
+								{bedrockRegion && (
+									<span
+										className="inline-flex items-center gap-1 whitespace-nowrap"
+										title={`Region: ${bedrockRegion}`}
+									>
+										<Globe className="h-3 w-3" />
+										{bedrockRegion}
+									</span>
+								)}
+								{bedrockCrossRegionMode && (
+									<span title="Cross-region inference mode">
+										{bedrockCrossRegionMode}
+									</span>
+								)}
+							</>
+						)}
+						{account.provider !== "bedrock" && account.customEndpoint && (
+							<span
+								className="inline-flex items-center gap-1 whitespace-nowrap"
+								title={`Custom endpoint: ${account.customEndpoint}`}
+							>
+								<Globe className="h-3 w-3" />
+								custom endpoint
+							</span>
+						)}
+						{modelMappingCount > 0 && (
+							<span className="inline-flex items-center gap-1 whitespace-nowrap">
+								<Hash className="h-3 w-3" />
+								{modelMappingCount} model{" "}
+								{modelMappingCount === 1 ? "mapping" : "mappings"}
+							</span>
+						)}
+					</div>{" "}
+					{showSessionInfo && (
+						<span className="whitespace-nowrap tabular-nums text-muted-foreground">
+							{sessionInfo}
+						</span>
+					)}{" "}
+					{account.sessionStats && (
+						<div className="text-xs text-muted-foreground">
+							Session: {account.sessionStats.requests} req
+							{" · "}↑{formatTokenCount(account.sessionStats.inputTokens)} in
+							{" · "}✦
+							{formatTokenCount(account.sessionStats.cacheCreationInputTokens)}{" "}
+							cache↑
+							{" · "}✦
+							{formatTokenCount(account.sessionStats.cacheReadInputTokens)}{" "}
+							cache↓
+							{" · "}↓{formatTokenCount(account.sessionStats.outputTokens)} out
+							{account.sessionStats.planCostUsd > 0 && (
+								<>
+									{" · "}${account.sessionStats.planCostUsd.toFixed(2)} plan
+								</>
+							)}
+							{account.sessionStats.apiCostUsd > 0 && (
+								<>
+									{" · "}${account.sessionStats.apiCostUsd.toFixed(2)} api
+								</>
+							)}
+						</div>
 					)}
 				</div>
-			)}
-			{bindingConstraint && (
-				// Deliberately NOT a replacement for the routing utilization badge
-				// above: routing asks how much account-wide capacity is left, this
-				// asks what is actually stopping you. Collapsing the two is what let
-				// a 100% model-scoped cap hide behind a 64% account-wide badge.
-				<div
-					className="text-xs text-muted-foreground"
-					data-testid="binding-constraint"
-				>
-					{bindingConstraint.divergesFromRouting ? (
-						<>
-							Binding limit: {bindingConstraint.label}{" "}
-							{Math.round(bindingConstraint.utilization)}%
-							{bindingConstraint.scope === "family"
-								? " — model-scoped, not counted in the routing % above"
-								: " — not the window shown above"}
-						</>
-					) : (
-						<>
-							Binding limit: {bindingConstraint.label}{" "}
-							{Math.round(bindingConstraint.utilization)}% — account-wide
-						</>
-					)}
-				</div>
-			)}
-			{(account.rateLimitReset ||
-				account.usageData ||
-				account.usageRateLimitedUntil ||
-				// Codex quota data only arrives piggybacked on real traffic (no usage
-				// polling endpoint), so gaps are routine. Mount the bar anyway: it
-				// renders the weekly window as "Data unavailable" instead of
-				// disappearing, and a missing quota bar reads as "no limit".
-				account.provider === "codex" ||
-				providerShowsCreditsBalance(account.provider)) && (
-				<RateLimitProgress
-					resetIso={account.rateLimitReset}
-					usageUtilization={account.usageUtilization}
-					usageWindow={account.usageWindow}
-					usageData={account.usageData}
-					usageRateLimitedUntil={account.usageRateLimitedUntil}
-					usageThrottledUntil={account.usageThrottledUntil}
-					usageThrottledWindows={account.usageThrottledWindows}
-					provider={account.provider}
-					showWeekly={providerShowsWeeklyUsage(account.provider)}
-				/>
-			)}
+			</details>
 		</article>
 	);
 }

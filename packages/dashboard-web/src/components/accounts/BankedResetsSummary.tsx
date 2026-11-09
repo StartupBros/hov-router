@@ -1,4 +1,5 @@
 import type { BankedResetsSummary as BankedResetsSummaryData } from "@better-ccflare/types";
+import { ChevronDown } from "lucide-react";
 import { formatRelativeReset } from "../../lib/pool-usage";
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from "./status-tones";
 
@@ -71,6 +72,40 @@ export function BankedResetsSummary({
 	const { totalAvailable, soonestExpiresAt, appliesNow, anyStale } = summary;
 	const allUsableStale =
 		appliesNow.length > 0 && appliesNow.every((entry) => entry.stale);
+	const explanation = (
+		<p className="max-w-prose text-sm text-muted-foreground">
+			A banked reset is a saved reset that restores an account's usage limits
+			ahead of schedule. Each account's limit also resets on its own timer.
+			Using a banked reset is always your choice.
+		</p>
+	);
+
+	// An empty, fresh balance should not push the accounts below a help panel.
+	// Keep held resets, expiry information and stale observations fully visible.
+	if (
+		totalAvailable === 0 &&
+		!anyStale &&
+		soonestExpiresAt === null &&
+		appliesNow.length === 0
+	) {
+		return (
+			<details
+				aria-label="Banked resets"
+				className="group rounded-lg border bg-card px-4"
+			>
+				<summary className="flex min-h-14 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm [&::-webkit-details-marker]:hidden">
+					<span className="font-medium">Banked resets</span>
+					<span className="tabular-nums">0</span>
+					<span className="text-muted-foreground">No banked resets held.</span>
+					<ChevronDown
+						aria-hidden="true"
+						className="ml-auto h-4 w-4 shrink-0 group-open:rotate-180"
+					/>
+				</summary>
+				<div className="pb-4">{explanation}</div>
+			</details>
+		);
+	}
 
 	return (
 		<section
@@ -89,11 +124,7 @@ export function BankedResetsSummary({
 					</span>
 				)}
 			</div>
-			<p className="max-w-prose text-sm text-muted-foreground">
-				A banked reset is a saved reset that restores an account's usage limits
-				ahead of schedule. Each account's limit also resets on its own timer.
-				Using a banked reset is always your choice.
-			</p>
+			{explanation}
 			<p className="text-sm text-muted-foreground">
 				{soonestExpiresAt !== null ? (
 					<span title={describeBankedResetExpiry(soonestExpiresAt)}>
