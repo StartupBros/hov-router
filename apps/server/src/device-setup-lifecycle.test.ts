@@ -133,6 +133,7 @@ mock.module("@better-ccflare/proxy", () => {
 		registerCodexUsageRefresher: () => {},
 		registerPollingRestarter: () => {},
 		registerRefreshClearer: () => {},
+		restoreModelRouteBindings: async () => {},
 		restorePendingRotations,
 		startGlobalTokenHealthChecks: () => {},
 		startExternalCodexScheduler,
