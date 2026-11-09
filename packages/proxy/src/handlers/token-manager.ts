@@ -1419,25 +1419,6 @@ export function clearAccountRemovalTrackingForAccount(accountId: string): void {
 }
 
 /**
- * Internal function to clear refresh cache with specific context
- * This is what the server registers as its clearer function
- */
-function _clearAccountRefreshCacheWithContext(
-	accountId: string,
-	ctx: ProxyContext,
-): void {
-	// Clear any in-flight refresh for this account
-	ctx.refreshInFlight.delete(accountId);
-
-	// Clear refresh failure records and backoff
-	refreshFailures.delete(accountId);
-	backoffCounters.delete(accountId);
-	clearStaleTokenRefreshState(accountId);
-
-	log.info(`Cleared refresh cache for account ${accountId}`);
-}
-
-/**
  * Gets a valid access token for an account, refreshing if necessary
  * @param account - The account to get token for
  * @param ctx - The proxy context

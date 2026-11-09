@@ -133,24 +133,6 @@ function SortableManualMemberRow({
 	);
 }
 
-/**
- * Help line under the model field — must state the rule that applies TO THE
- * SELECTED ACCOUNT, not a universal "Empty = passthrough" that only holds
- * on the Anthropic provider.
- */
-function _modelFieldHint(
-	provider: string | null,
-	passthroughAllowed: boolean,
-): string {
-	if (!provider) {
-		return "Pick an account first: whether the model is required depends on the provider.";
-	}
-	if (passthroughAllowed) {
-		return "Empty = passthrough: the model sent by the client goes upstream untouched.";
-	}
-	return `Required for ${provider}: this provider does not serve Claude model ids, so there is no passthrough.`;
-}
-
 interface ComboSlotBuilderProps {
 	combo: ComboWithSlots;
 }

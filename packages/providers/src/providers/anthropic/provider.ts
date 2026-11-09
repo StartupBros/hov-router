@@ -27,16 +27,14 @@ import {
 } from "../../utils/stream-drain";
 import { parseAnthropicRateLimitResetAt } from "./rate-limit-reset";
 
-// Hard rate limit statuses that should block account usage
+// Hard rate limit statuses that should block account usage. Soft warnings
+// (allowed_warning, queueing_soft) are left out on purpose: they do not block.
 const HARD_LIMIT_STATUSES = new Set([
 	"rate_limited",
 	"blocked",
 	"queueing_hard",
 	"payment_required",
 ]);
-
-// Soft warning statuses that should not block account usage
-const _SOFT_WARNING_STATUSES = new Set(["allowed_warning", "queueing_soft"]);
 
 /**
  * Anthropic returns this header value (via

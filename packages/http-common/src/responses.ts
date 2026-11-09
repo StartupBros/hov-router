@@ -113,17 +113,6 @@ export function errorResponse(error: unknown): Response {
 }
 
 /**
- * Create a success response with optional data
- */
-export function successResponse(
-	data?: unknown,
-	message = "Success",
-	status = 200,
-): Response {
-	return jsonResponse({ message, data }, status);
-}
-
-/**
  * Create a streaming response for Server-Sent Events
  */
 export function sseResponse(

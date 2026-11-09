@@ -495,9 +495,9 @@ classDiagram
     }
     
     class RequestRepository {
-        +logRequest(request): void
-        +getRequests(filters): Request[]
-        +getRequestStats(): Stats
+        +save(request): void
+        +getRecentRequests(limit): Request[]
+        +getPayload(id): Payload
     }
     
     class AgentPreferenceRepository {

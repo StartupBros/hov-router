@@ -521,7 +521,6 @@ The dashboard exposes a "Compact database" button that runs these for you. Expec
 - `updateRequestUsage(requestId, usage)`: Update token usage after request completion
 - `saveRequestPayload(id, data)`: Store request/response JSON
 - `getRequestPayload(id)`: Retrieve specific payload
-- `listRequestPayloads(limit?)`: List recent payloads
 - `listRequestPayloadsWithAccountNames(limit?)`: List payloads with account names
 
 #### OAuth Session Management
@@ -538,11 +537,8 @@ The dashboard exposes a "Compact database" button that runs these for you. Expec
 
 #### Analytics and Reporting
 - `getRecentRequests(limit?)`: Get recent request history
-- `getRequestStats(since?)`: Get aggregate request statistics
-- `aggregateStats(rangeMs?)`: Get comprehensive analytics data
-- `getRecentErrors(limit?)`: List recent error messages
-- `getTopModels(limit?)`: Get most used models
-- `getRequestsByAccount(since?)`: Get per-account request breakdown
+
+Dashboard statistics (aggregates, top models, recent errors) come from `StatsRepository` and the `/api/stats` handlers, not from `DatabaseOperations`.
 
 ## CLI Commands
 

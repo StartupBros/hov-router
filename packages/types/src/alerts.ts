@@ -177,12 +177,6 @@ export interface AlertEvent {
 	acknowledged: boolean;
 }
 
-/** Full response of GET /api/alerts. */
-export interface AlertHistoryResponse {
-	alerts: AlertEvent[];
-	unacknowledgedCount: number;
-}
-
 /**
  * Whether member notices (signed reset events sent to BroBot's intake) run.
  * The address and the signing secret never leave the server: `off` when no

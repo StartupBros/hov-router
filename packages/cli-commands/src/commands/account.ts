@@ -86,30 +86,6 @@ export function toCreatedAccountIdentity(
 // Re-export AccountListItem from types for backward compatibility
 export type { AccountListItem } from "@better-ccflare/types";
 
-// Add mode property to AccountListItem for CLI display
-export interface AccountListItemWithMode extends AccountListItem {
-	mode:
-		| "claude-oauth"
-		| "console"
-		| "zai"
-		| "minimax"
-		| "deepseek"
-		| "anthropic-compatible"
-		| "openai-compatible"
-		| "nanogpt"
-		| "vertex-ai"
-		| "bedrock"
-		| "kilo"
-		| "openrouter"
-		| "alibaba-coding-plan"
-		| "codex"
-		| "qwen"
-		| "xai"
-		| "ollama"
-		| "ollama-cloud"
-		| "meta";
-}
-
 /**
  * Create a Console account with direct API key in the database
  */

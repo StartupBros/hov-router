@@ -97,19 +97,6 @@ export interface QualitySuccessorTarget {
 	readonly successorModel: string;
 }
 
-/**
- * Produced by the later evidence adapter, never by a name/rank heuristic.
- * Even release evidence must establish support on this enrolled account.
- * An approved successor does not evict a healthy exact predecessor home.
- */
-export interface QualitySameLineEvidence extends QualitySuccessorTarget {
-	readonly provider: QualityProvider;
-	readonly source: "provider-catalog" | "authoritative-release";
-	readonly catalogRevision: QualityCatalogRevision;
-	readonly evidenceRef: string;
-	readonly supported: boolean;
-}
-
 export type QualityRequestIntent =
 	| Readonly<{ kind: "main"; preference: QualityRootPreference }>
 	| Readonly<{ kind: "worker"; role: QualityWorkerRole }>;
@@ -446,16 +433,6 @@ export interface QualityVerifiedSession {
 	readonly principalId: string;
 	readonly sessionId: string;
 }
-
-export type QualityControlRequest =
-	| Readonly<{ action: "status"; session: QualityVerifiedSession }>
-	| Readonly<{
-			action: "retry";
-			session: QualityVerifiedSession;
-			incarnation: string;
-			expectedIntentRevision: number;
-			idempotencyToken: string;
-	  }>;
 
 /** Status/retry never performs inference or grants spend. Duplicates return the original outcome. */
 export interface QualityControlOutcome {

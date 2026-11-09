@@ -151,9 +151,3 @@ export type ServerToolCapabilityDecision =
 				| "invalid_requirement"
 				| "unsupported_requirement";
 	  };
-
-/** Pure, candidate-scoped provider seam. Implementations must not perform I/O. */
-export type ServerToolCapabilityResolver = (
-	requirement: ServerToolRequirements,
-	tuple: ServerToolCapabilityTuple,
-) => ServerToolCapabilityDecision;

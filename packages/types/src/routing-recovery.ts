@@ -10,11 +10,6 @@ export const RECOVERY_SCOPE_HEADER = "x-better-ccflare-recovery-scope" as const;
 export const RECOVERY_SCOPES = ["pool", "model", "route"] as const;
 export type RecoveryScope = (typeof RECOVERY_SCOPES)[number];
 
-export type RecoverableRoutingCode =
-	| "pool_exhausted"
-	| "model_pool_exhausted"
-	| "route_unavailable";
-
 export function recoveryScopeForCode(code: unknown): RecoveryScope | undefined {
 	if (code === "pool_exhausted") return "pool";
 	if (code === "model_pool_exhausted") return "model";

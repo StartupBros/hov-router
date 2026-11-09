@@ -1,5 +1,4 @@
 import { getModelFamily } from "@better-ccflare/core";
-import { Logger } from "@better-ccflare/logger";
 import type { OpenAIRequest } from "@better-ccflare/openai-formats";
 import type { Account, LogicalModelCapability } from "@better-ccflare/types";
 import {
@@ -9,9 +8,6 @@ import {
 import type { RateLimitInfo } from "../../types";
 import { OpenAICompatibleProvider } from "../openai/provider";
 
-const _log = new Logger("QwenProvider");
-
-const _DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const QWEN_USER_AGENT = "QwenCode/sdk-typescript-v0.1.7 (darwin; arm64)";
 
 type OpenAIMessage = OpenAIRequest["messages"][number];
