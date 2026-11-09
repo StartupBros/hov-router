@@ -156,8 +156,8 @@ describe("priceTokensAtListPrice long-context tier", () => {
 });
 
 describe("priceTokensAtListPrice", () => {
-	it("advances VALUE_PRICING_VERSION for the GPT-6 price table", () => {
-		expect(VALUE_PRICING_VERSION).toBe("2026-10-18.2");
+	it("advances VALUE_PRICING_VERSION for the Fable 5.2 list-price era", () => {
+		expect(VALUE_PRICING_VERSION).toBe("2026-11-09.1");
 	});
 
 	describe("OpenAI GPT-6 and GPT-5.6 Sol eras", () => {
@@ -519,6 +519,23 @@ describe("priceTokensAtListPrice", () => {
 				},
 			);
 			expect(result).toBeCloseTo(10 + 50 + 0.25 + 12.5, 10);
+		});
+
+		it("prices Fable 5.2 at its published launch rates, including windows that opened before launch day", () => {
+			// Ledger windows are valued per window, and the windows open on
+			// 2026-11-09 began days earlier. An era starting on launch day would
+			// leave their Fable 5.2 advisor tokens unpriced.
+			const result = priceTokensAtListPrice(
+				CLAUDE_MODEL_IDS.FABLE_5_2,
+				Date.parse("2026-11-05T17:59:59Z"),
+				{
+					inputTokens: 1_000_000,
+					outputTokens: 1_000_000,
+					cacheReadInputTokens: 1_000_000,
+					cacheCreationInputTokens: 1_000_000,
+				},
+			);
+			expect(result).toBeCloseTo(8 + 40 + 0.2 + 10, 10);
 		});
 	});
 });

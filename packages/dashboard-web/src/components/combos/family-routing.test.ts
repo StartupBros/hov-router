@@ -286,7 +286,7 @@ describe("family model options", () => {
 			{ id: "provider-unclassified-model", displayName: "Other" },
 		];
 		const latestDisplayNames: Record<ComboFamily, string> = {
-			fable: "Claude Fable 5.1",
+			fable: "Claude Fable 5.2",
 			opus: "Claude Opus 5.5",
 			sonnet: "Claude Sonnet 5.5",
 			haiku: "Claude Haiku 5.5",
