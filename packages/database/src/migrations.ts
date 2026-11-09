@@ -1823,10 +1823,14 @@ export function ensurePublicValueLabelUniqueIndex(db: Database): void {
 }
 
 /**
- * Indexes that earlier releases created and a wider index now makes
- * redundant: the wider one starts with the same columns (and, for the partial
- * api-key index, carries the same WHERE clause), so it serves every lookup the
- * narrow one did, while each extra index costs a write on every insert.
+ * Indexes that earlier releases created and no query needs. Some a wider
+ * index makes redundant: the wider one starts with the same columns (and, for
+ * the partial api-key index, carries the same WHERE clause), so it serves
+ * every lookup the narrow one did. Others no query uses: EXPLAIN QUERY PLAN
+ * over every query in the repository that reads `requests` (76 statements),
+ * against production's schema and sqlite_stat1, chose none of them outside a
+ * dev script (#762). Each one costs a write on every insert and disk for
+ * every row.
  * Dropping an index loses no data and is undone by recreating it, so it does
  * not set `willMutate` and takes no pre-migration backup.
  */
@@ -1839,6 +1843,18 @@ const REDUNDANT_INDEXES = [
 	// Covered by idx_usage_snapshots_acct_win_time_append_order
 	// (account_id, window_key, timestamp DESC, append_order DESC).
 	"idx_usage_snapshots_acct_win_time",
+	// Unused: no query filters or sorts on cost_usd first.
+	"idx_requests_cost_model",
+	// Unused: the model-performance p95 query reads a MATERIALIZED window
+	// (handlers/analytics.ts); only the dev script analyze-performance.ts chose it.
+	"idx_requests_response_time",
+	// Unused: no query filters on total_tokens > 0, and time ranges already
+	// have idx_requests_timestamp (timestamp DESC).
+	"idx_requests_tokens",
+	// Unused since #722: its only user was the planner tie in #710, which
+	// COALESCE(billing_type, '') = 'plan' removed by moving that query onto
+	// idx_requests_account_timestamp.
+	"idx_requests_billing_type_timestamp",
 ] as const;
 
 function dropRedundantIndexes(db: Database): void {

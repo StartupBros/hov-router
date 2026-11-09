@@ -16,8 +16,13 @@
  * index.
  *
  * This test plans each statement the repository sends under production's
- * statistics. The steer does not depend on them: the old predicate takes the
+ * statistics. The steer did not depend on them: the old predicate took the
  * billing_type index on a fresh schema too.
+ *
+ * Migrations have dropped idx_requests_billing_type_timestamp since #762, as no
+ * query uses it any more. The test still pins the account-index SEARCH, so a
+ * predicate change or a new low-cardinality index cannot move this query back
+ * onto a walk unnoticed.
  */
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -27,24 +32,21 @@ import { RequestRepository } from "../request.repository";
 
 /**
  * sqlite_stat1 rows for `requests`, copied from production on 2026-11-04,
- * less the rows for idx_requests_account_used and idx_requests_api_key:
- * migrations now drop those indexes, and DROP INDEX deletes their rows.
+ * less the rows for the indexes migrations now drop (idx_requests_account_used,
+ * idx_requests_api_key, and the four unused ones from #762): DROP INDEX deletes
+ * their rows.
  */
 const PRODUCTION_REQUESTS_STAT1: Array<[string, string]> = [
 	["idx_requests_account_timestamp", "2125429 401 1"],
 	["idx_requests_analytics_covering", "2125429 1 1 1 1 1 1 1 1 1 1 1 1 1"],
 	["idx_requests_api_key_timestamp", "1515834 210 1"],
-	["idx_requests_billing_type_timestamp", "2123332 401 1"],
 	["idx_requests_cleanup", "2125429 1 1"],
-	["idx_requests_cost_model", "1995836 2 2 1"],
 	["idx_requests_model_timestamp", "2019371 201 1"],
 	["idx_requests_project_timestamp", "193990 401 1"],
-	["idx_requests_response_time", "2019371 201 2"],
 	["idx_requests_success_timestamp", "2125429 401 1"],
 	["idx_requests_summary_covering", "2125429 1 1 1 1 1 1 1 1 1 1 1 1 1 1"],
 	["idx_requests_timestamp", "2125429 1"],
 	["idx_requests_timestamp_account", "2125429 1 1"],
-	["idx_requests_tokens", "2009012 1 1"],
 	["sqlite_autoindex_requests_1", "2125429 1"],
 ];
 
@@ -106,6 +108,7 @@ describe("RequestRepository.aggregateTokensByModel query plan", () => {
 			expect(plan).toContain(
 				"SEARCH requests USING INDEX idx_requests_account_timestamp (account_used=? AND timestamp>? AND timestamp<?)",
 			);
+			// Migrations drop this index (#762); this only bites if it comes back.
 			expect(plan).not.toContain("idx_requests_billing_type_timestamp");
 		}
 	});

@@ -31,40 +31,27 @@ This document describes the database indexes added to improve query performance 
 - **Purpose**: Optimizes queries for individual account performance
 - **Used by**: Account performance dashboards
 
-### 6. Cost Analysis
-- **Index**: `idx_requests_cost_model` on `requests(cost_usd, model, timestamp DESC)`
-- **Purpose**: Speeds up cost analysis queries by model
-- **Used by**: Cost tracking and billing analytics
-
-### 7. Response Time Analysis
-- **Index**: `idx_requests_response_time` on `requests(model, response_time_ms)`
-- **Purpose**: Optimizes p95 percentile calculations
-- **Used by**: Performance metrics, SLA monitoring
-
-### 8. Token Usage
-- **Index**: `idx_requests_tokens` on `requests(timestamp DESC, total_tokens)`
-- **Purpose**: Speeds up token usage analytics
-- **Used by**: Usage tracking, quota monitoring
-
-### 9. Account Name Lookups
+### 6. Account Name Lookups
 - **Index**: `idx_accounts_name` on `accounts(name)`
 - **Purpose**: Optimizes joins between requests and accounts tables
 - **Used by**: Analytics queries that filter by account name
 
-### 10. Rate Limit Checks
+### 7. Rate Limit Checks
 - **Index**: `idx_accounts_rate_limited` on `accounts(rate_limited_until)`
 - **Purpose**: Quickly identify rate-limited accounts
 - **Used by**: Load balancer account selection
 
-### 11. Session Management
+### 8. Session Management
 - **Index**: `idx_accounts_session` on `accounts(session_start, session_request_count)`
 - **Purpose**: Optimizes session-based load balancing
 - **Used by**: Session strategy implementation
 
-### 12. Request Count Ordering
+### 9. Request Count Ordering
 - **Index**: `idx_accounts_request_count` on `accounts(request_count DESC, last_used)`
 - **Purpose**: Speeds up account ordering for load balancing
 - **Used by**: Various load balancing strategies
+
+Earlier releases also created `idx_requests_cost_model`, `idx_requests_response_time`, `idx_requests_tokens` and `idx_requests_billing_type_timestamp`. No live query used them, so migrations drop them (#762). The only query that picked one was the illustrative p95 query in `bun run analyze`, which now reads `idx_requests_model_timestamp` instead.
 
 ## Query Optimizations
 

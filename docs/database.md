@@ -164,13 +164,12 @@ The `requests` table logs all proxied requests for analytics and debugging.
 - `idx_requests_model_timestamp` on `model, timestamp DESC` WHERE `model IS NOT NULL` for model analytics
 - `idx_requests_success_timestamp` on `success, timestamp DESC` for success rate calculations
 - `idx_requests_account_timestamp` on `account_used, timestamp DESC` for per-account analytics
-- `idx_requests_cost_model` on `cost_usd, model, timestamp DESC` WHERE `cost_usd > 0 AND model IS NOT NULL` for cost analysis
-- `idx_requests_response_time` on `model, response_time_ms` WHERE `response_time_ms IS NOT NULL AND model IS NOT NULL` for response time analysis
-- `idx_requests_tokens` on `timestamp DESC, total_tokens` WHERE `total_tokens > 0` for token usage analysis
 - `idx_requests_api_key_timestamp` on `api_key_id, timestamp DESC` WHERE `api_key_id IS NOT NULL` for API key filtering and time-based API key analytics
 - `idx_requests_project_timestamp` on `project, timestamp DESC` WHERE `project IS NOT NULL` for project-scoped analytics
 
 Migrations drop `idx_requests_account_used` (on `account_used`) and `idx_requests_api_key` (on `api_key_id`), which earlier releases created: the `account_used, timestamp DESC` and `api_key_id, timestamp DESC` indexes start with the same column and serve every query they did.
+
+Migrations also drop four indexes earlier releases created that no query uses: `idx_requests_cost_model` (`cost_usd, model, timestamp DESC`), `idx_requests_response_time` (`model, response_time_ms`), `idx_requests_tokens` (`timestamp DESC, total_tokens`) and `idx_requests_billing_type_timestamp` (`billing_type, timestamp DESC`). Planning every query in the repository that reads `requests` against production's schema and statistics chose none of them, apart from one illustrative query in the `bun run analyze` dev script (#762).
 
 ### request_payloads Table
 
@@ -412,9 +411,6 @@ The database includes comprehensive performance indexes that are automatically a
 - `idx_requests_model_timestamp` on `model, timestamp DESC` WHERE `model IS NOT NULL` - For model analytics
 - `idx_requests_success_timestamp` on `success, timestamp DESC` - For success rate calculations
 - `idx_requests_account_timestamp` on `account_used, timestamp DESC` - For per-account analytics
-- `idx_requests_cost_model` on `cost_usd, model, timestamp DESC` WHERE `cost_usd > 0 AND model IS NOT NULL` - For cost analysis
-- `idx_requests_response_time` on `model, response_time_ms` WHERE `response_time_ms IS NOT NULL AND model IS NOT NULL` - For response time analysis (p95 calculations)
-- `idx_requests_tokens` on `timestamp DESC, total_tokens` WHERE `total_tokens > 0` - For token usage analysis
 
 **OAuth Sessions Table Indexes:**
 - `idx_oauth_sessions_expires` on `expires_at` - For efficient cleanup of expired sessions

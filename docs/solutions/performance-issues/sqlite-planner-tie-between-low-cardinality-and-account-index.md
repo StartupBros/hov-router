@@ -61,7 +61,7 @@ Measured on the production database, read-only, 2026-11-04, running Bun's SQLite
 Both indexes serve "equality on the leading column plus a timestamp range":
 
 - `idx_requests_account_timestamp` on `(account_used, timestamp DESC)`.
-- `idx_requests_billing_type_timestamp` on `(billing_type, timestamp DESC) WHERE billing_type IS NOT NULL`, a partial index (`packages/database/src/performance-indexes.ts`).
+- `idx_requests_billing_type_timestamp` on `(billing_type, timestamp DESC) WHERE billing_type IS NOT NULL`, a partial index that `packages/database/src/performance-indexes.ts` created. After the fix no query used it, and migrations have dropped it since #762. The lesson still applies to any new index led by a low-cardinality column.
 
 The planner chose the same way under three kinds of statistics:
 

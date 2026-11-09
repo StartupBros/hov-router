@@ -19,11 +19,32 @@ const DROPPED_AND_COVERING = [
 	],
 ] as const;
 
+/**
+ * Dropped indexes no live query uses: EXPLAIN QUERY PLAN over every query in
+ * the repository that reads `requests`, against production's schema and
+ * sqlite_stat1, chose none of them outside a dev script (#762).
+ */
+const DROPPED_UNUSED = [
+	"idx_requests_cost_model",
+	"idx_requests_response_time",
+	"idx_requests_tokens",
+	"idx_requests_billing_type_timestamp",
+] as const;
+
 /** The definitions earlier binaries created, to rebuild a database they migrated. */
 const PRIOR_BINARY_INDEX_SQL = [
 	"CREATE INDEX idx_requests_account_used ON requests(account_used)",
 	"CREATE INDEX idx_requests_api_key ON requests(api_key_id) WHERE api_key_id IS NOT NULL",
 	"CREATE INDEX idx_usage_snapshots_acct_win_time ON usage_snapshots(account_id, window_key, timestamp DESC)",
+	"CREATE INDEX idx_requests_cost_model ON requests(cost_usd, model, timestamp DESC) WHERE cost_usd > 0 AND model IS NOT NULL",
+	"CREATE INDEX idx_requests_response_time ON requests(model, response_time_ms) WHERE response_time_ms IS NOT NULL AND model IS NOT NULL",
+	"CREATE INDEX idx_requests_tokens ON requests(timestamp DESC, total_tokens) WHERE total_tokens > 0",
+	"CREATE INDEX idx_requests_billing_type_timestamp ON requests(billing_type, timestamp DESC) WHERE billing_type IS NOT NULL",
+];
+
+const ALL_DROPPED = [
+	...DROPPED_AND_COVERING.map(([dropped]) => dropped),
+	...DROPPED_UNUSED,
 ];
 
 function indexNames(db: Database): string[] {
@@ -39,6 +60,9 @@ function expectDroppedAndCovered(db: Database): void {
 	for (const [dropped, covering] of DROPPED_AND_COVERING) {
 		expect(names).not.toContain(dropped);
 		expect(names).toContain(covering);
+	}
+	for (const dropped of DROPPED_UNUSED) {
+		expect(names).not.toContain(dropped);
 	}
 }
 
@@ -93,9 +117,14 @@ describe("redundant index drops", () => {
 			expectDroppedAndCovered(db);
 
 			// addPerformanceIndexes needs columns runMigrations adds, so it is
-			// checked after the drop has already run.
+			// checked after the drop has already run: an index it still created
+			// would reappear here, though runMigrations' last step drops it again.
 			addPerformanceIndexes(db);
-			expect(indexNames(db)).not.toContain("idx_requests_api_key");
+			const afterPerformance = indexNames(db);
+			expect(afterPerformance).not.toContain("idx_requests_api_key");
+			for (const dropped of DROPPED_UNUSED) {
+				expect(afterPerformance).not.toContain(dropped);
+			}
 		} finally {
 			db.close();
 		}
@@ -106,7 +135,7 @@ describe("redundant index drops", () => {
 		try {
 			seedRows(db);
 			for (const sql of PRIOR_BINARY_INDEX_SQL) db.run(sql);
-			for (const [dropped] of DROPPED_AND_COVERING) {
+			for (const dropped of ALL_DROPPED) {
 				expect(indexNames(db)).toContain(dropped);
 			}
 
