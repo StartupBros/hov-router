@@ -409,11 +409,6 @@ export type RedeemResetOutcome =
  */
 export type RedeemResetSpend = "spent" | "not_spent" | "not_confirmed";
 
-export interface RedeemResetRequest {
-	/** UUID v4 minted when the confirmation opens; reused on every retry. */
-	requestId: string;
-}
-
 /** 200 body of `POST /api/accounts/:id/redeem-reset`. */
 export interface RedeemResetResponse {
 	requestId: string;
@@ -595,25 +590,6 @@ export interface AccountListItem {
 	crossRegionMode?: string | null; // Bedrock cross-region inference mode
 }
 
-// Account creation types
-export interface AddAccountOptions {
-	name: string;
-	mode?:
-		| "claude-oauth"
-		| "console"
-		| "zai"
-		| "minimax"
-		| "deepseek"
-		| "anthropic-compatible"
-		| "openai-compatible"
-		| "bedrock"
-		| "openrouter"
-		| "xai"
-		| "meta";
-	priority?: number;
-	customEndpoint?: string;
-}
-
 export interface AccountDeleteRequest {
 	confirm: string;
 }
@@ -772,42 +748,6 @@ export function toAccountResponse(account: Account): AccountResponse {
 		billingType: account.billing_type,
 		sessionStats: null,
 		isPrimary: false,
-	};
-}
-
-export function toAccountDisplay(account: Account): AccountDisplay {
-	const tokenStatus = account.access_token ? "valid" : "expired";
-	const isRateLimited =
-		account.rate_limited_until && account.rate_limited_until > Date.now();
-	const rateLimitStatus =
-		isRateLimited && account.rate_limited_until
-			? `Rate limited until ${new Date(account.rate_limited_until).toLocaleString()}`
-			: "OK";
-
-	const sessionInfo = account.session_start
-		? `Session: ${account.session_request_count} requests`
-		: "No active session";
-
-	return {
-		id: account.id,
-		name: account.name,
-		provider: account.provider,
-		created: new Date(account.created_at),
-		lastUsed: account.last_used ? new Date(account.last_used) : null,
-		requestCount: account.request_count,
-		totalRequests: account.total_requests,
-		tokenStatus,
-		rateLimitStatus,
-		sessionInfo,
-		paused: account.paused,
-		rate_limited_until: account.rate_limited_until,
-		session_start: account.session_start,
-		session_request_count: account.session_request_count,
-		access_token: account.access_token,
-		priority: account.priority,
-		autoFallbackEnabled: account.auto_fallback_enabled,
-		// Auto-refresh was removed; the field stays and always reads false.
-		autoRefreshEnabled: false,
 	};
 }
 

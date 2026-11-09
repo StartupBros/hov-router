@@ -51,19 +51,6 @@ export interface ApiKeyGenerationResult {
 	role: ApiKeyRole;
 }
 
-// Input for creating API keys
-export interface CreateApiKeyInput {
-	name: string;
-	role?: ApiKeyRole; // Optional, defaults to 'api-only'
-}
-
-// Validation result
-export interface ApiKeyValidationResult {
-	isValid: boolean;
-	apiKey?: ApiKey;
-	error?: string;
-}
-
 // Crypto interface for dependency injection
 export interface CryptoUtils {
 	generateApiKey(): Promise<string>;

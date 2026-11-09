@@ -212,9 +212,6 @@ function installCountingCodexAttemptPlanner(
 			inputReplayMode: context.inputReplayMode,
 			outputReplayMode: context.outputReplayMode,
 			dataRetryPolicy: { mode: "none", maxAttempts: 0 },
-			classifyNoExecution: async () => ({
-				decision: "executing_or_ambiguous",
-			}),
 			cacheReplayModelStrategy:
 				provider.cacheReplayModelStrategy ?? "normalized-source",
 			prepareHeaders: (headers, accessToken, apiKey) =>

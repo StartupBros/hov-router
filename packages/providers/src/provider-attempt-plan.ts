@@ -3,8 +3,6 @@ import type {
 	CacheReplayModelStrategy,
 	Provider,
 	ProviderAttemptDataRetryPolicy,
-	ProviderAttemptNoExecutionDecision,
-	ProviderAttemptNoExecutionSnapshot,
 	ProviderAttemptPlan,
 	ProviderAttemptPlanContext,
 	ProviderPathCapability,
@@ -60,13 +58,6 @@ const REPLAY_ATOMS = new Set<ServerToolReplayAtom>([
 	"proxy-evidence-v1",
 ]);
 const MAX_CUSTOM_RETRY_ATTEMPTS = 16;
-export const MAX_PROVIDER_NO_EXECUTION_BODY_BYTES = 64 * 1024;
-const PROVIDER_NO_EXECUTION_SNAPSHOT_BRAND = Symbol(
-	"ProviderAttemptNoExecutionSnapshot",
-);
-const PROVIDER_NO_EXECUTION_SNAPSHOTS = new WeakSet<object>();
-const EXECUTING_OR_AMBIGUOUS: ProviderAttemptNoExecutionDecision =
-	Object.freeze({ decision: "executing_or_ambiguous" });
 const NO_DATA_RETRY: ProviderAttemptDataRetryPolicy = Object.freeze({
 	mode: "none",
 	maxAttempts: 0,
@@ -345,103 +336,6 @@ function normalizeTargetUrl(
 		throw new TypeError("Invalid provider attempt plan targetUrl");
 	}
 	return targetUrl;
-}
-
-function normalizeNoExecutionDecision(
-	value: unknown,
-): ProviderAttemptNoExecutionDecision {
-	if (!isRecord(value)) {
-		throw new TypeError("Invalid provider no-execution decision");
-	}
-	if (value.decision === "executing_or_ambiguous") {
-		return EXECUTING_OR_AMBIGUOUS;
-	}
-	if (value.decision === "proven_no_execution") {
-		return Object.freeze({
-			decision: "proven_no_execution",
-			reason: requireNonEmptyString(value.reason, "no-execution reason"),
-		});
-	}
-	throw new TypeError("Invalid provider no-execution decision");
-}
-
-function normalizeNoExecutionHeaders(
-	headersInit: HeadersInit,
-): readonly (readonly [name: string, value: string])[] {
-	const headers = new Headers(headersInit);
-	const entries: Array<readonly [string, string]> = [];
-	headers.forEach((value, name) => {
-		entries.push(Object.freeze([name, value] as const));
-	});
-	entries.sort(([leftName, leftValue], [rightName, rightValue]) => {
-		const nameOrder = leftName.localeCompare(rightName);
-		return nameOrder === 0 ? leftValue.localeCompare(rightValue) : nameOrder;
-	});
-	return Object.freeze(entries);
-}
-
-/**
- * Canonicalize already-bounded response metadata without retaining or reading
- * a live Response. Callers must choose and record truncation before invoking
- * provider-owned classification.
- */
-export function createProviderAttemptNoExecutionSnapshot(input: {
-	readonly status: number;
-	readonly headers: HeadersInit;
-	readonly bodyText: string;
-	readonly bodyTruncated: boolean;
-}): ProviderAttemptNoExecutionSnapshot {
-	if (!isRecord(input)) {
-		throw new TypeError("Invalid provider no-execution snapshot");
-	}
-	if (
-		!Number.isInteger(input.status) ||
-		input.status < 100 ||
-		input.status > 599
-	) {
-		throw new TypeError("Invalid provider no-execution snapshot status");
-	}
-	if (typeof input.bodyText !== "string") {
-		throw new TypeError("Invalid provider no-execution snapshot body");
-	}
-	if (
-		new TextEncoder().encode(input.bodyText).byteLength >
-		MAX_PROVIDER_NO_EXECUTION_BODY_BYTES
-	) {
-		throw new TypeError("Provider no-execution snapshot body exceeds limit");
-	}
-	if (typeof input.bodyTruncated !== "boolean") {
-		throw new TypeError("Invalid provider no-execution snapshot truncation");
-	}
-
-	const snapshot = {
-		status: input.status,
-		headers: normalizeNoExecutionHeaders(input.headers),
-		bodyText: input.bodyText,
-		bodyTruncated: input.bodyTruncated,
-		[PROVIDER_NO_EXECUTION_SNAPSHOT_BRAND]: true,
-	};
-	PROVIDER_NO_EXECUTION_SNAPSHOTS.add(snapshot);
-	return Object.freeze(
-		snapshot,
-	) as unknown as ProviderAttemptNoExecutionSnapshot;
-}
-
-function requireNoExecutionSnapshot(
-	value: unknown,
-): asserts value is ProviderAttemptNoExecutionSnapshot {
-	if (
-		!isRecord(value) ||
-		(
-			value as UnknownRecord & {
-				[PROVIDER_NO_EXECUTION_SNAPSHOT_BRAND]?: unknown;
-			}
-		)[PROVIDER_NO_EXECUTION_SNAPSHOT_BRAND] !== true ||
-		!PROVIDER_NO_EXECUTION_SNAPSHOTS.has(value) ||
-		!Object.isFrozen(value)
-	) {
-		throw new TypeError("Invalid provider no-execution snapshot brand");
-	}
 }
 
 function isThenable(value: unknown): boolean {
@@ -794,9 +688,6 @@ function materializeCustomPlan(
 		throw new TypeError("Provider attempt plan context mismatch");
 	}
 
-	const rawClassifier = requireFunction<
-		(snapshot: ProviderAttemptNoExecutionSnapshot) => unknown
-	>(candidate.classifyNoExecution, "classifyNoExecution");
 	const rawPrepareHeaders = requireFunction<
 		(headers: Headers, accessToken?: string, apiKey?: string) => Headers
 	>(candidate.prepareHeaders, "prepareHeaders");
@@ -835,12 +726,6 @@ function materializeCustomPlan(
 		inputReplayMode,
 		outputReplayMode,
 		dataRetryPolicy: normalizeDataRetryPolicy(candidate.dataRetryPolicy),
-		classifyNoExecution: async (snapshot) => {
-			requireNoExecutionSnapshot(snapshot);
-			return normalizeNoExecutionDecision(
-				await Reflect.apply(rawClassifier, plan, [snapshot]),
-			);
-		},
 		cacheReplayModelStrategy: normalizeCacheReplayModelStrategy(
 			candidate.cacheReplayModelStrategy,
 		),
@@ -961,10 +846,6 @@ function materializeLegacyPlan(
 		inputReplayMode: context.inputReplayMode,
 		outputReplayMode: context.outputReplayMode,
 		dataRetryPolicy: NO_DATA_RETRY,
-		classifyNoExecution: async (snapshot) => {
-			requireNoExecutionSnapshot(snapshot);
-			return EXECUTING_OR_AMBIGUOUS;
-		},
 		cacheReplayModelStrategy: providerDescriptor.cacheReplayModelStrategy,
 		prepareHeaders: (headers, accessToken, apiKey) =>
 			Reflect.apply(prepareHeaders, provider, [

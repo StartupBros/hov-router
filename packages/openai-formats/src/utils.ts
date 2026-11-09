@@ -1,7 +1,3 @@
-import { Logger } from "@better-ccflare/logger";
-
-const _log = new Logger("openai-formats/utils");
-
 /**
  * Attempt to repair truncated tool-call JSON that was cut off mid-stream.
  * Mirrors the recovery logic in qwen-code's StreamingToolCallParser.

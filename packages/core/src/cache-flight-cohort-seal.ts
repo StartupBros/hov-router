@@ -33,11 +33,6 @@ export type CacheFlightCohortBlockerDimension =
 	| "turn_gap"
 	| "historical_unsealed";
 
-export type CacheFlightCohortBlockerKind =
-	| "changed"
-	| "unknown"
-	| "not_comparable";
-
 /**
  * Disambiguates a `changed` or `not_comparable` blocker when both can appear
  * for the same dimension at once: observations spanning more than one

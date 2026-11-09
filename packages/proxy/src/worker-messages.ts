@@ -212,9 +212,3 @@ export interface SummaryMessage {
 	type: "summary";
 	summary: import("@better-ccflare/types").RequestResponse;
 }
-
-export type OutgoingWorkerMessage =
-	| ReadyMessage
-	| AckMessage
-	| ShutdownCompleteMessage
-	| SummaryMessage;

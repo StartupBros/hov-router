@@ -378,9 +378,6 @@ function makeAttemptPlanningProvider(
 				inputReplayMode: context.inputReplayMode,
 				outputReplayMode: context.outputReplayMode,
 				dataRetryPolicy: { mode: "reuse-same-plan", maxAttempts: 3 },
-				classifyNoExecution: async () => ({
-					decision: "executing_or_ambiguous",
-				}),
 				cacheReplayModelStrategy: "transformed-body",
 				prepareHeaders(headers, accessToken, apiKey) {
 					options.onPlanHook?.("prepareHeaders", this);

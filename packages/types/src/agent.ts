@@ -71,8 +71,6 @@ export interface Agent {
  */
 export type AgentModelSource = "preference" | "frontmatter" | "inherit";
 
-export type AgentResponse = Agent[];
-
 // Pattern-based validation - accepts any string (validation done at runtime)
 export type AllowedModel = string;
 

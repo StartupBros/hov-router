@@ -47,12 +47,6 @@ function isUniqueConstraintError(error: unknown): boolean {
 	return error.message.includes("UNIQUE constraint failed");
 }
 
-export interface OAuthFlowResult {
-	success: boolean;
-	message: string;
-	data?: AccountCreated;
-}
-
 /**
  * Handles the Anthropic OAuth flow for both "claude-oauth" and "console" authentication modes.
  *

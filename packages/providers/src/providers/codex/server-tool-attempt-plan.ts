@@ -192,9 +192,6 @@ const NO_DATA_RETRY = Object.freeze({
 	mode: "none" as const,
 	maxAttempts: 0 as const,
 });
-const EXECUTING_OR_AMBIGUOUS = Object.freeze({
-	decision: "executing_or_ambiguous" as const,
-});
 
 export interface CodexHostedSearchPlanDelegates {
 	readonly prepareHeaders: (
@@ -878,7 +875,6 @@ export function createCodexHostedSearchAttemptPlan(
 		inputReplayMode: Object.freeze([...context.inputReplayMode]),
 		outputReplayMode: Object.freeze([...context.outputReplayMode]),
 		dataRetryPolicy: NO_DATA_RETRY,
-		classifyNoExecution: async () => EXECUTING_OR_AMBIGUOUS,
 		cacheReplayModelStrategy: "transformed-body",
 		prepareHeaders: delegates.prepareHeaders,
 		transformRequestBody: (request) =>

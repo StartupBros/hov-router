@@ -1,11 +1,8 @@
-import { Logger } from "@better-ccflare/logger";
 import type { Account } from "@better-ccflare/types";
 import {
 	type AnthropicCompatibleConfig,
 	BaseAnthropicCompatibleProvider,
 } from "../base-anthropic-compatible";
-
-const _log = new Logger("AnthropicCompatibleProvider");
 
 // Re-export the config type
 export type { AnthropicCompatibleConfig };
