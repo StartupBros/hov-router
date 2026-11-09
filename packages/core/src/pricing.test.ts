@@ -591,6 +591,32 @@ describe("getModelRates", () => {
 	// Offline mode still falls back to the shared on-disk models.dev cache, which
 	// a server on this host may have refreshed; hide it so these assert the
 	// bundled table rather than whatever the live catalogue lists.
+	it("returns the Fable 5.2 bundled rates published at launch, below Fable 5.1's", async () => {
+		const rates = await withDiskCache(null, () =>
+			getModelRates("claude-fable-5-2"),
+		);
+
+		expect(rates).toEqual({
+			input: 8,
+			output: 40,
+			cacheRead: 0.2,
+			cacheWrite: 10,
+		});
+	});
+
+	it("estimates Fable 5.2 aggregate cache creation at its published 5-minute write rate", async () => {
+		const cost = await withDiskCache(null, () =>
+			estimateCostUSD("claude-fable-5-2", {
+				inputTokens: 1_000_000,
+				outputTokens: 1_000_000,
+				cacheReadInputTokens: 1_000_000,
+				cacheCreationInputTokens: 1_000_000,
+			}),
+		);
+
+		expect(cost).toBeCloseTo(8 + 40 + 0.2 + 10, 10);
+	});
+
 	it("returns the Sonnet 5.5 bundled rates published at launch", async () => {
 		const rates = await withDiskCache(null, () =>
 			getModelRates("claude-sonnet-5-5"),

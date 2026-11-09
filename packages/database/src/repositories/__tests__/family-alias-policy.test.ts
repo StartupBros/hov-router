@@ -254,7 +254,7 @@ describe("ComboRepository family alias policy conversion", () => {
 					family: "fable",
 					current_value: "claude-fable-5",
 					alias: "fable",
-					latest_target: "claude-fable-5-1",
+					latest_target: LATEST_MODEL_BY_FAMILY.fable,
 					candidate_kind: "stale_pinned_family_value",
 					reason: "same_family_stale_pin",
 				}),
@@ -291,7 +291,7 @@ describe("ComboRepository family alias policy conversion", () => {
 					.managed_model ?? "",
 				"fable",
 			),
-		).toBe("claude-fable-5-1");
+		).toBe(LATEST_MODEL_BY_FAMILY.fable);
 		for (const id of [
 			"slot-fable-native",
 			"slot-fable-codex",

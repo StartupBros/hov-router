@@ -49,18 +49,47 @@ describe("Fable 5.1 registry metadata", () => {
 		expect(getModelShortName(CLAUDE_MODEL_IDS.FABLE_5_1)).toBe(
 			"claude-fable-5.1",
 		);
-		expect(BUNDLED_MODELS_AS_OF).toBe("2026-10-15");
+	});
+});
+
+describe("Fable 5.2 registry metadata", () => {
+	test("registers Fable 5.2 while preserving the explicit Fable 5.1 and 5 pins", () => {
+		expect(CLAUDE_MODEL_IDS.FABLE_5_2).toBe("claude-fable-5-2");
+		expect(CLAUDE_MODEL_IDS.FABLE_5_1).toBe("claude-fable-5-1");
+		expect(CLAUDE_MODEL_IDS.FABLE_5).toBe("claude-fable-5");
+		expect(getModelDisplayName(CLAUDE_MODEL_IDS.FABLE_5_2)).toBe(
+			"Claude Fable 5.2",
+		);
+		expect(getModelShortName(CLAUDE_MODEL_IDS.FABLE_5_2)).toBe(
+			"claude-fable-5.2",
+		);
+		expect(BUNDLED_MODELS_AS_OF).toBe("2026-11-09");
 	});
 
 	test("advances bare Fable aliases without rewriting concrete legacy pins", () => {
-		expect(LATEST_FABLE_MODEL).toBe(CLAUDE_MODEL_IDS.FABLE_5_1);
-		expect(LATEST_MODEL_BY_FAMILY.fable).toBe(CLAUDE_MODEL_IDS.FABLE_5_1);
+		expect(LATEST_FABLE_MODEL).toBe(CLAUDE_MODEL_IDS.FABLE_5_2);
+		expect(LATEST_MODEL_BY_FAMILY.fable).toBe(CLAUDE_MODEL_IDS.FABLE_5_2);
 		expect(resolveFamilyAliasModel("fable", "fable")).toBe(
+			CLAUDE_MODEL_IDS.FABLE_5_2,
+		);
+		expect(resolveFamilyAliasModel(CLAUDE_MODEL_IDS.FABLE_5_1, "fable")).toBe(
 			CLAUDE_MODEL_IDS.FABLE_5_1,
 		);
 		expect(resolveFamilyAliasModel(CLAUDE_MODEL_IDS.FABLE_5, "fable")).toBe(
 			CLAUDE_MODEL_IDS.FABLE_5,
 		);
+	});
+
+	test("records that Fable 5.2 rejects forced tool choice", () => {
+		expect(supportsForcedToolChoice(CLAUDE_MODEL_IDS.FABLE_5_2)).toBe(false);
+	});
+
+	test("classifies Fable 5.2 into the fable family for routing", () => {
+		expect(getModelFamily(CLAUDE_MODEL_IDS.FABLE_5_2)).toBe("fable");
+		expect(getStrictClaudeModelFamily(CLAUDE_MODEL_IDS.FABLE_5_2)).toBe(
+			"fable",
+		);
+		expect(isValidClaudeModel(CLAUDE_MODEL_IDS.FABLE_5_2)).toBe(true);
 	});
 });
 
@@ -122,6 +151,7 @@ describe("Sonnet 5.5 registry metadata", () => {
 			CLAUDE_MODEL_IDS.SONNET_5_5,
 			CLAUDE_MODEL_IDS.OPUS_5_5,
 			CLAUDE_MODEL_IDS.FABLE_5_1,
+			CLAUDE_MODEL_IDS.FABLE_5_2,
 		]) {
 			expect(supportsForcedToolChoice(modelId)).toBe(false);
 		}
@@ -191,6 +221,7 @@ describe("Haiku 5.5 registry metadata", () => {
 			CLAUDE_MODEL_IDS.SONNET_5_5,
 			CLAUDE_MODEL_IDS.OPUS_5_5,
 			CLAUDE_MODEL_IDS.FABLE_5_1,
+			CLAUDE_MODEL_IDS.FABLE_5_2,
 		]) {
 			expect(supportsForcedToolChoice(modelId)).toBe(false);
 		}
