@@ -105,15 +105,6 @@ export interface RecentErrorGroup {
 	rateLimitedAt: number | null;
 }
 
-export interface StatsWithAccounts extends Stats {
-	accounts: Array<{
-		name: string;
-		requestCount: number;
-		successRate: number;
-	}>;
-	recentErrors: RecentErrorGroup[];
-}
-
 // Analytics types
 export interface TimePoint {
 	ts: number; // period start (ms)

@@ -51,11 +51,6 @@ export {
 
 // Export types for model mappings - defined inline in model-mappings.ts
 export type ModelMapping = { [anthropicModel: string]: string | string[] };
-export type ModelMappingData = {
-	endpoint?: string;
-	modelMappings?: ModelMapping;
-};
-export type ModelFallback = { [modelFamily: string]: string };
 export * from "./alert-events";
 export * from "./auth-failure-events";
 export * from "./build-provenance";

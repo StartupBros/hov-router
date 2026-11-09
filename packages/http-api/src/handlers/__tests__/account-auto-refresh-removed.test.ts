@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { Config } from "@better-ccflare/config";
 import { DatabaseOperations } from "@better-ccflare/database";
-import { toAccountDisplay, toAccountResponse } from "@better-ccflare/types";
+import { toAccountResponse } from "@better-ccflare/types";
 import {
 	createAccountAutoRefreshHandler,
 	createAccountsListHandler,
@@ -173,6 +173,5 @@ describe("account read mappers after the removal", () => {
 
 		expect(account.auto_refresh_enabled).toBe(true);
 		expect(toAccountResponse(account).autoRefreshEnabled).toBe(false);
-		expect(toAccountDisplay(account).autoRefreshEnabled).toBe(false);
 	});
 });

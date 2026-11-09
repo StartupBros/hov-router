@@ -7,6 +7,7 @@ import {
 	type RoutingAttemptData,
 	RoutingAttemptRepository,
 } from "../routing-attempt.repository";
+import { StatsRepository } from "../stats.repository";
 
 const now = Date.now();
 
@@ -56,6 +57,7 @@ describe("RoutingAttemptRepository", () => {
 	let db: Database;
 	let attempts: RoutingAttemptRepository;
 	let requests: RequestRepository;
+	let stats: StatsRepository;
 
 	beforeEach(() => {
 		db = new Database(":memory:");
@@ -64,6 +66,7 @@ describe("RoutingAttemptRepository", () => {
 		const adapter = new BunSqlAdapter(db);
 		attempts = new RoutingAttemptRepository(adapter);
 		requests = new RequestRepository(adapter);
+		stats = new StatsRepository(adapter);
 	});
 
 	afterEach(() => db.close());
@@ -335,7 +338,7 @@ describe("RoutingAttemptRepository", () => {
 		await requests.save(terminal("terminal-success", true));
 		await requests.save(terminal("terminal-failure", false));
 		await attempts.append(attempt({ parentRequestId: "terminal-success" }));
-		const aggregate = await requests.aggregateStats(24 * 60 * 60 * 1000);
+		const aggregate = await stats.getAggregatedStats(now - 24 * 60 * 60 * 1000);
 		expect(aggregate.totalRequests).toBe(2);
 		expect(aggregate.successfulRequests).toBe(1);
 		expect(aggregate.totalRequests - aggregate.successfulRequests).toBe(1);

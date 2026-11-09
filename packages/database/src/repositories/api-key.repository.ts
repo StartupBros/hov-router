@@ -50,24 +50,6 @@ export class ApiKeyRepository extends BaseRepository<ApiKey> {
 	}
 
 	/**
-	 * Find API key by hashed key (for authentication)
-	 */
-	async findByHashedKey(hashedKey: string): Promise<ApiKey | null> {
-		const row = await this.get<ApiKeyRow>(
-			`
-			SELECT
-				id, name, hashed_key, prefix_last_8, created_at,
-				last_used, usage_count, is_active, role
-			FROM api_keys
-			WHERE hashed_key = ? AND is_active = 1
-		`,
-			[hashedKey],
-		);
-
-		return row ? toApiKey(row) : null;
-	}
-
-	/**
 	 * Find API key by name
 	 */
 	async findByName(name: string): Promise<ApiKey | null> {

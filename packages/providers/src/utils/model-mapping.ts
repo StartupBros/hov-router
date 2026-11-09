@@ -9,11 +9,6 @@ import {
 
 const log = new Logger("ModelMappingUtils");
 
-// Enhanced TypeScript interfaces for type safety
-export interface ProviderAccount extends Account {
-	mode?: string;
-}
-
 export interface TransformRequestBody {
 	model?: string;
 	messages?: Array<{
