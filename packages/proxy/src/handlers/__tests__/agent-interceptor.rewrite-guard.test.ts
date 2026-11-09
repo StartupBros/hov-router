@@ -377,7 +377,7 @@ describe("interceptAndModifyRequest - rewrite guard integration", () => {
 	});
 });
 
-// Opus 5.5, Sonnet 5.5 and Fable 5.1 answer a forced tool_choice with HTTP
+// Opus 5.5, Sonnet 5.5, Fable 5.1 and Fable 5.2 answer a forced tool_choice with HTTP
 // 400. A rewrite that moves a forced-tool request onto one of them turns a
 // working request into a failing one, so the interceptor must decline it.
 describe("interceptAndModifyRequest - forced tool_choice guard", () => {

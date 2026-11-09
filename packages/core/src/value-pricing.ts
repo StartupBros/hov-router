@@ -39,7 +39,7 @@ import type { TokenBreakdown } from "./pricing";
  * (UsageWindowLedger.revalueStaleClosedWindows), so history follows the
  * current rates instead of keeping the price it was closed at.
  */
-export const VALUE_PRICING_VERSION = "2026-10-18.2";
+export const VALUE_PRICING_VERSION = "2026-11-09.1";
 
 /**
  * Prompt-token threshold (input + cache read + cache creation, per request)
@@ -449,6 +449,19 @@ export const LIST_PRICE_ERAS: Record<string, ListPriceEra[]> = {
 			// Published 5-minute write rate applied to aggregate cache creation until TTL buckets are preserved end-to-end.
 			cacheCreationPerM: 12.5,
 			outputPerM: 50,
+			// source: https://platform.claude.com/docs/en/about-claude/pricing
+		},
+	],
+	// Floor era, as for Fable 5.1: windows are valued per window, and the
+	// windows open at launch (2026-11-09) started days earlier.
+	[CLAUDE_MODEL_IDS.FABLE_5_2]: [
+		{
+			sinceMs: INITIAL_ERA_FLOOR_MS,
+			inputPerM: 8,
+			cacheReadPerM: 0.2,
+			// Published 5-minute write rate applied to aggregate cache creation until TTL buckets are preserved end-to-end.
+			cacheCreationPerM: 10,
+			outputPerM: 40,
 			// source: https://platform.claude.com/docs/en/about-claude/pricing
 		},
 	],

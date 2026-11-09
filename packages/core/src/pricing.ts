@@ -262,6 +262,18 @@ const BUNDLED_PRICING: ApiResponse = {
 					// Source: https://platform.claude.com/docs/en/about-claude/pricing
 				},
 			},
+			[CLAUDE_MODEL_IDS.FABLE_5_2]: {
+				id: CLAUDE_MODEL_IDS.FABLE_5_2,
+				name: MODEL_DISPLAY_NAMES[CLAUDE_MODEL_IDS.FABLE_5_2],
+				cost: {
+					input: 8,
+					output: 40,
+					cache_read: 0.2,
+					// Published 5-minute write rate applied to aggregate cache creation until TTL buckets are preserved end-to-end.
+					cache_write: 10,
+					// Source: https://platform.claude.com/docs/en/about-claude/pricing
+				},
+			},
 		},
 	},
 };
