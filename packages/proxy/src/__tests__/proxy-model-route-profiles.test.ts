@@ -24,6 +24,10 @@ import {
 import { DegradedOwnerOverlay } from "../degraded-owner-overlay";
 import type { ProxyContext } from "../handlers";
 import {
+	type RouteBindingHistoryReader,
+	restoreModelRouteBindings,
+} from "../model-route-binding-restore";
+import {
 	ModelRouteSessionRegistry,
 	parseModelRouteProfiles,
 } from "../model-route-profiles";
@@ -2396,6 +2400,60 @@ describe("Claude Code gateway model route profiles", () => {
 		});
 		expect(harness.getAllAccounts).not.toHaveBeenCalled();
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("holds a picker child until the startup binding restore settles, then routes it to the restored profile", async () => {
+		const registry = makeRegistry();
+		const fallback = makeAccount("normal-route");
+		const harness = makeContext(registry, {
+			accounts: [makeAccount(), fallback],
+			normalAccountId: fallback.id,
+		});
+		const { fetchMock, requests } = installJsonUpstream();
+		type History = Awaited<
+			ReturnType<RouteBindingHistoryReader["listRouteBindingSessionsSince"]>
+		>;
+		let deliver!: (history: History) => void;
+		const reader: RouteBindingHistoryReader = {
+			listRouteBindingSessionsSince: () =>
+				new Promise<History>((resolve) => {
+					deliver = resolve;
+				}),
+		};
+		const restoring = restoreModelRouteBindings({ registry, reader });
+		// The same child the previous test refuses as unbound, sent by the
+		// session the replaced process had bound before the deploy.
+		const child = apiRequest("/v1/messages", PROFILE_MODEL, {
+			"x-claude-code-session-id": "restored-session",
+			"x-claude-code-agent-id": "child-after-deploy",
+		});
+		const pending = handleProxy(
+			child,
+			new URL(child.url),
+			harness.ctx,
+			"key-1",
+		);
+		for (let turn = 0; turn < 20; turn++)
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		expect(harness.getAllAccounts).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		deliver({
+			sessions: [
+				{
+					apiKeyId: "key-1",
+					sessionId: "restored-session",
+					routeProfileId: "pro-primary-sol",
+					lastStartedAt: Date.now() - 60_000,
+				},
+			],
+			capReached: false,
+		});
+		expect((await restoring)?.bindingsRestored).toBe(1);
+		const response = await pending;
+		expect(response.status).toBe(200);
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.url).toContain(`/${ROUTE_ACCOUNT_ID}/`);
 	});
 
 	it("isolates identical Claude sessions by authenticated api key id", async () => {

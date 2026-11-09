@@ -1325,6 +1325,29 @@ describe("startServer() wiring guards", () => {
 		);
 	});
 
+	// Without this call a deploy drops every picker session's binding, and the
+	// next subagent request gets 503 unbound_child_profile (#768).
+	it("starts route binding restore once at boot, without awaiting it, before the server listens", () => {
+		const body = readStartServerBody();
+		expect(body).toMatch(
+			/void restoreModelRouteBindings\(\{\s*registry: modelRouteSessionRegistry,\s*reader: dbOps,\s*now: Date\.now,?\s*\}\);/,
+		);
+		expect([...body.matchAll(/restoreModelRouteBindings\s*\(/g)].length).toBe(
+			1,
+		);
+		const restoreAt = body.indexOf("restoreModelRouteBindings(");
+		// After the affinity restore: the bulk reader runs reads one at a time,
+		// and the older restore's budget must not wait behind this read.
+		expect(restoreAt).toBeGreaterThan(body.indexOf("restoreAffinityPins("));
+		expect(restoreAt).toBeGreaterThan(
+			body.indexOf("const modelRouteSessionRegistry ="),
+		);
+		expect(restoreAt).toBeLessThan(body.indexOf("serve(serverConfig)"));
+		expect(body.slice(body.indexOf('config.on("change"'))).not.toContain(
+			"restoreModelRouteBindings(",
+		);
+	});
+
 	// Without this call a VALUE_PRICING_VERSION bump never reaches closed
 	// usage windows, and every ledger test would still pass.
 	it("re-prices stale closed usage windows on the ledger it constructs", () => {

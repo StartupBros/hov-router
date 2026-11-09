@@ -177,6 +177,7 @@ import {
 import { consumeInternalSchedulerAuth } from "./internal-probe-auth";
 import { listModelRouteDiscoveryModels } from "./model-route-discovery";
 import {
+	apiKeyRouteCallerIdentity,
 	isBoundedModelRouteProfile,
 	MODEL_ROUTE_PROFILE_MODEL_PREFIX,
 	type ModelRouteProfile,
@@ -315,7 +316,8 @@ function routeCallerIdentity(
 	req: Request,
 	apiKeyId?: string | null,
 ): string | null {
-	if (apiKeyId?.trim()) return `api-key-id:${apiKeyId.trim()}`;
+	const byApiKey = apiKeyRouteCallerIdentity(apiKeyId);
+	if (byApiKey) return byApiKey;
 	const credential =
 		req.headers.get("authorization") ?? req.headers.get("x-api-key");
 	if (credential?.trim()) {
@@ -1218,6 +1220,11 @@ async function handleProxyCoreImpl(
 	const requestModel = requestBodyContext.getModel();
 	const normalizedRequestModel = requestModel?.trim() ?? null;
 	const modelRouteRegistry = ctx.modelRouteSessionRegistry;
+	// After a process replacement, wait for bindings restored from request
+	// history before any route resolution reads them (bounded by the restore
+	// budget; null once settled).
+	const bindingRestoreGate = modelRouteRegistry?.bindingRestoreGate() ?? null;
+	if (bindingRestoreGate !== null) await bindingRestoreGate;
 	const isSubagent = isClaudeCodeSubagent(req.headers);
 	requestMeta.routeLineage = deriveClaudeCodeRouteLineage(req.headers, {
 		callerIdentity: routeCallerIdentity(req, apiKeyId),

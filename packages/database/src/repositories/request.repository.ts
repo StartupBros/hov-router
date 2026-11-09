@@ -271,6 +271,71 @@ export class RequestRepository extends BaseRepository<RequestData> {
 		};
 	}
 
+	/**
+	 * Each Claude Code session's newest committed request inside the window, for
+	 * restoring route-profile bindings at startup. "Newest" is by start time
+	 * (`timestamp` is written at completion), and only rows that selected an
+	 * account count, because only those can commit a binding. Sessions whose
+	 * newest such row carried no route profile are omitted: they were native.
+	 * SQLite returns the bare `route_profile_id` from the row holding MAX(started).
+	 */
+	async listRouteBindingSessionsSince(
+		sinceMs: number,
+		limit: number,
+	): Promise<{
+		sessions: Array<{
+			apiKeyId: string;
+			sessionId: string;
+			routeProfileId: string;
+			lastStartedAt: number;
+		}>;
+		capReached: boolean;
+	}> {
+		const rows = await this.queryOffThread<{
+			api_key_id: string;
+			session_id: string;
+			route_profile_id: string;
+			last_started: number;
+		}>(
+			`SELECT api_key_id, session_id, route_profile_id, last_started FROM (
+				SELECT api_key_id, session_id, route_profile_id, MAX(started) AS last_started
+				FROM (
+					SELECT api_key_id,
+						CASE WHEN json_valid(client_session_id) THEN
+							CASE WHEN json_type(client_session_id, '$.session_id') = 'text'
+								THEN json_extract(client_session_id, '$.session_id') END
+						END AS session_id,
+						route_profile_id,
+						timestamp - COALESCE(response_time_ms, 0) AS started
+					FROM requests
+					WHERE timestamp >= ?
+					  -- An expression, not "api_key_id IS NOT NULL": that column test
+					  -- lets the planner read the partial api-key index for every key
+					  -- and all of history instead of the timestamp range.
+					  AND COALESCE(api_key_id, '') <> ''
+					  AND client_session_id IS NOT NULL
+					  AND account_used IS NOT NULL
+					  AND path = '/v1/messages'
+					  AND COALESCE(internal_origin, 0) = 0
+				)
+				WHERE session_id IS NOT NULL AND session_id <> ''
+				GROUP BY api_key_id, session_id
+			)
+			WHERE route_profile_id IS NOT NULL AND route_profile_id <> ''
+			ORDER BY last_started DESC LIMIT ?`,
+			[sinceMs, limit + 1],
+		);
+		return {
+			sessions: rows.slice(0, limit).map((row) => ({
+				apiKeyId: row.api_key_id,
+				sessionId: row.session_id,
+				routeProfileId: row.route_profile_id,
+				lastStartedAt: Number(row.last_started),
+			})),
+			capReached: rows.length > limit,
+		};
+	}
+
 	async save(data: RequestData): Promise<void> {
 		const { usage } = data;
 		const decision = sanitizeQualityDecision(data.qualityDecision);
