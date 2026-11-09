@@ -2123,14 +2123,6 @@ export default async function startServer(options?: {
 	if (modelRouteProfiles.length > 0) {
 		log.info(`Model route profiles configured: ${modelRouteProfiles.length}`);
 	}
-	// Picker sessions bound by the replaced process keep their route: requests
-	// wait on the registry's restore gate (bounded by its budget) until this
-	// settles. Boot only; the registry is never rebuilt on config change.
-	void restoreModelRouteBindings({
-		registry: modelRouteSessionRegistry,
-		reader: dbOps,
-		now: Date.now,
-	});
 
 	// Now create the strategy with runtime config
 	const strategy = buildStrategy(
@@ -2162,6 +2154,16 @@ export default async function startServer(options?: {
 	currentStrategy = strategy;
 
 	await initProxy(() => config.getStorePayloads());
+	// Picker sessions bound by the replaced process keep their route: requests
+	// wait on the registry's restore gate (bounded by its budget) until this
+	// settles. Boot only; the registry is never rebuilt on config change.
+	// Started after the affinity restore so its read queues behind that one on
+	// the serial bulk reader and never spends the affinity restore's budget.
+	void restoreModelRouteBindings({
+		registry: modelRouteSessionRegistry,
+		reader: dbOps,
+		now: Date.now,
+	});
 
 	// Proxy context
 	const guardCorrelationVerifier = createGuardCorrelationVerifier(

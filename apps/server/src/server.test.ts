@@ -1336,6 +1336,9 @@ describe("startServer() wiring guards", () => {
 			1,
 		);
 		const restoreAt = body.indexOf("restoreModelRouteBindings(");
+		// After the affinity restore: the bulk reader runs reads one at a time,
+		// and the older restore's budget must not wait behind this read.
+		expect(restoreAt).toBeGreaterThan(body.indexOf("restoreAffinityPins("));
 		expect(restoreAt).toBeGreaterThan(
 			body.indexOf("const modelRouteSessionRegistry ="),
 		);
