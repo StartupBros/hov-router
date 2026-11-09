@@ -15,12 +15,11 @@ HoV Router (formerly better-ccflare) is a load balancer proxy for Claude API acc
    - [Bun Binary Compilation](#bun-binary-compilation)
    - [Process Management](#process-management)
 4. [Docker Deployment](#docker-deployment)
-5. [Cloudflare Pages (Dashboard Only)](#cloudflare-pages-dashboard-only)
-6. [Reverse Proxy Setup](#reverse-proxy-setup)
-7. [Monitoring and Logging](#monitoring-and-logging)
-8. [Performance Tuning](#performance-tuning)
-9. [Scaling Considerations](#scaling-considerations)
-10. [Environment Variables Reference](#environment-variables-reference)
+5. [Reverse Proxy Setup](#reverse-proxy-setup)
+6. [Monitoring and Logging](#monitoring-and-logging)
+7. [Performance Tuning](#performance-tuning)
+8. [Scaling Considerations](#scaling-considerations)
+9. [Environment Variables Reference](#environment-variables-reference)
 
 ## Deployment Options Overview
 
@@ -37,18 +36,14 @@ graph TB
     
     subgraph "Frontend Options"
         EMBEDDED[Embedded Dashboard<br/>Served by server]
-        CF_PAGES[Cloudflare Pages<br/>Static hosting]
-        NGINX_STATIC[Nginx Static<br/>Separate frontend]
     end
     
     DEV --> EMBEDDED
     BINARY --> EMBEDDED
-    BINARY --> CF_PAGES
     DOCKER --> EMBEDDED
     PM2 --> EMBEDDED
     SYSTEMD --> EMBEDDED
-    K8S --> CF_PAGES
-    K8S --> NGINX_STATIC
+    K8S --> EMBEDDED
 ```
 
 ## Local Development Setup
@@ -274,45 +269,6 @@ docker compose up -d --build
 
 See [Run HoV Router in Docker](docker.md) for plain `docker run`, the data volume and backups, environment variables, health and provenance, and upgrades.
 
-## Cloudflare Pages (Dashboard Only)
-
-Deploy the dashboard as a static site on Cloudflare Pages while running the API server elsewhere:
-
-### Build Configuration
-
-```bash
-# Build script for Cloudflare Pages
-cd packages/dashboard-web
-bun install
-bun run build
-
-# Output directory: packages/dashboard-web/dist
-```
-
-### Cloudflare Pages Configuration
-
-1. Connect your GitHub repository
-2. Set build configuration:
-   - Build command: `cd packages/dashboard-web && bun install && bun run build`
-   - Build output directory: `packages/dashboard-web/dist`
-   - Root directory: `/`
-
-### Environment Variables
-
-```bash
-# Set in Cloudflare Pages dashboard
-VITE_API_URL=https://api.your-domain.com
-```
-
-### Dashboard API Configuration
-
-Update the dashboard to use external API:
-
-```typescript
-// packages/dashboard-web/src/lib/api-client.ts
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
-```
-
 ## Reverse Proxy Setup
 
 ### Nginx Configuration
@@ -488,41 +444,6 @@ graph TB
     CLOUDWATCH --> GRAFANA
 ```
 
-### Prometheus Metrics (Future Enhancement)
-
-> **Note**: Prometheus metrics support is planned but not yet implemented. The following is an example of how metrics could be integrated:
-
-```typescript
-// Example: packages/http-api/src/metrics.ts
-import { register, Counter, Histogram, Gauge } from 'prom-client';
-
-export const metrics = {
-  requestsTotal: new Counter({
-    name: 'better-ccflare_requests_total',
-    help: 'Total number of requests',
-    labelNames: ['method', 'status', 'account']
-  }),
-  
-  requestDuration: new Histogram({
-    name: 'better-ccflare_request_duration_seconds',
-    help: 'Request duration in seconds',
-    labelNames: ['method', 'status'],
-    buckets: [0.1, 0.5, 1, 2, 5, 10]
-  }),
-  
-  activeAccounts: new Gauge({
-    name: 'better-ccflare_active_accounts',
-    help: 'Number of active accounts',
-    labelNames: ['priority']
-  }),
-  
-  rateLimitedAccounts: new Gauge({
-    name: 'better-ccflare_rate_limited_accounts',
-    help: 'Number of rate limited accounts'
-  })
-};
-```
-
 ### Monitoring Stack
 
 ```yaml
@@ -530,17 +451,6 @@ export const metrics = {
 version: '3.8'
 
 services:
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-    ports:
-      - "9090:9090"
-
   grafana:
     image: grafana/grafana:latest
     environment:
@@ -570,7 +480,6 @@ services:
     command: -config.file=/etc/promtail/config.yml
 
 volumes:
-  prometheus_data:
   grafana_data:
   loki_data:
 ```

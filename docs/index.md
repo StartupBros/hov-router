@@ -21,6 +21,7 @@ Router 3.7.1 publishes a Linux x86_64 binary only. The [platform notes](referenc
 - [Provider system](providers.md) and [model mappings](models.md).
 - [Account routing architecture](routing-architecture.md), [load-balancing strategies](load-balancing.md), and [Combos](combos.md).
 - [Auto-fallback](auto-fallback.md).
+- [OAuth re-authentication](oauth-reauthentication.md): renew an expired sign-in without losing the account's settings or history.
 - [Troubleshooting](troubleshooting.md), including [database repair](reference.md#troubleshooting-database-issues).
 - [Deployment](deployment.md), [systemd](systemd.md), and [Docker](docker.md), built from source (no prebuilt image is published).
 - [Security](security.md), [database schema](database.md), and [v2-to-v3 migration](migration-v2-to-v3.md).
