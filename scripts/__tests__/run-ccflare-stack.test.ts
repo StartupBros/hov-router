@@ -453,7 +453,15 @@ async function stopRunner(
 ): Promise<void> {
 	if (runner.child.exitCode === null && runner.child.signalCode === null) {
 		runner.child.kill("SIGTERM");
-		await waitForExit(runner.child, 5_000);
+		try {
+			await waitForExit(runner.child, 5_000);
+		} catch (error) {
+			// Show where the runner stopped so a CI timeout is diagnosable.
+			const { stdout, stderr } = runner.getOutput();
+			throw new Error(
+				`${(error as Error).message} after SIGTERM; runner output tail: ${JSON.stringify({ stdout: stdout.slice(-2_000), stderr: stderr.slice(-2_000) })}`,
+			);
+		}
 	}
 }
 

@@ -261,9 +261,19 @@ NODE
  "$NODE_BIN" "$TRANSACTION_MODULE" serve "$TRANSACTION_DIR" "$initial" &
  deployment_pid=$!
 }
+# Signal an owned helper and reap it only if the signal reached it. A TERM
+# that interrupts this shell's own `wait` on the helper can leave bash 5.2
+# with a stale record of a child it already reaped; waiting on that pid again
+# blocks until another child exits, and the guard never does because it has
+# not been signalled yet. A failed kill means the helper is already gone.
+stop_owned_helper() {
+	[[ -n "$1" ]] || return 0
+	if kill "$1" 2>/dev/null; then wait "$1" 2>/dev/null || true; fi
+}
+
 stop_stack_children() {
- if [[ -n "$deployment_pid" ]]; then kill "$deployment_pid" 2>/dev/null || true; wait "$deployment_pid" 2>/dev/null || true; deployment_pid=""; fi
- if [[ -n "$reaper_pid" ]]; then kill "$reaper_pid" 2>/dev/null || true; wait "$reaper_pid" 2>/dev/null || true; reaper_pid=""; fi
+ stop_owned_helper "$deployment_pid"; deployment_pid=""
+ stop_owned_helper "$reaper_pid"; reaper_pid=""
 	# A retiring backend serves the guard's retiring generation, so it stops
 	# only after the guard drained, alongside the current backend.
 	if (($# == 0)); then
@@ -497,7 +507,7 @@ cleanup() {
 	fi
 	cleanup_ran=1
 	trap - EXIT TERM INT
-	if [[ -n "$control_pid" ]]; then kill "$control_pid" 2>/dev/null || true; wait "$control_pid" 2>/dev/null || true; control_pid=""; fi
+	stop_owned_helper "$control_pid"; control_pid=""
 	log "stopping ccflare stack"
 	stop_stack_children
 	if [[ -n "$control_dir" ]]; then rm -f -- "$control_dir/control.sock" "$control_dir/deploy.sock" "$control_dir/deploy-credential"; rmdir -- "$control_dir" 2>/dev/null || true; fi
