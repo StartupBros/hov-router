@@ -197,8 +197,17 @@ export {
 	validateNativeAutoCatalogCredentials,
 } from "./model-catalog";
 export {
+	ROUTE_BINDING_RESTORE_BUDGET_MS,
+	type RouteBindingHistoryReader,
+	type RouteBindingRestoreOutcome,
+	restoreModelRouteBindings,
+} from "./model-route-binding-restore";
+export {
+	apiKeyRouteCallerIdentity,
 	MODEL_ROUTE_PROFILE_MODEL_PREFIX,
 	MODEL_ROUTE_PROFILES_ENV,
+	type ModelRouteBindingRecord,
+	type ModelRouteBindingRestoreSession,
 	type ModelRouteEffort,
 	type ModelRouteProfile,
 	type ModelRouteResolution,
