@@ -120,16 +120,20 @@ describe("issue #273 — Group A: helper contract", () => {
 // This is a census, not a ceiling: a new body-replacing retry legitimately adds
 // a site, and the count moves with it in the same commit. What the guard
 // catches is a site DISAPPEARING (a leak) or being added without the drain.
-// 21 helper invocations: one delegation from discardUpstreamBody plus 20
+// 18 helper invocations: one delegation from discardUpstreamBody plus 17
 // owned-response release sites. The count was 22 until the GPT-5.6
 // explicit-cache-breakpoint retry was removed (Refs #730): its site drained
 // the rejected response only before that retry, so with the retry gone the
-// rejection flows through the ordinary response path instead. Three are
-// recent additions:
+// rejection flows through the ordinary response path instead. It fell from
+// 21 to 18 when the four same-account replays (advisor results, thinking
+// signatures, Codex reasoning, clear_thinking edits) were folded into
+// replaySameAccountWithBody: each still drains the rejected response before
+// its replay, now through that helper's single call site. Three are recent
+// additions:
 //   - Advisor-result backstop (#439): when upstream rejects advisor results
 //     another account encrypted, the rejected response is drained before the
-//     same-account retry with every advisor result removed, the same
-//     finalize-then-discard pair as the clear_thinking retry.
+//     same-account retry with every advisor result removed, through the
+//     finalize-then-discard pair in replaySameAccountWithBody.
 //   - Zai in-stream 1305 overload detection: mirrors the pre-existing 529
 //     veto-catch pattern, discarding the current raw response before a
 //     physical-attempt budget veto escapes the 1305 in-place retry loop.
@@ -150,7 +154,7 @@ describe("issue #273 — Group A: helper contract", () => {
 //     in this file, not a double-drain of one response.
 // This specifically guards outer winner arbitration and request-budget
 // exits from regressing to Bun's ineffective direct body.cancel path.
-const EXPECTED_DRAIN_INVOCATION_COUNT = 21;
+const EXPECTED_DRAIN_INVOCATION_COUNT = 18;
 
 describe("issue #273 — Group B: call-site coverage in proxy-operations.ts", () => {
 	it("proxy-operations.ts has the expected drain-backed helper invocations", () => {

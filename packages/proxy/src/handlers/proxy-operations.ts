@@ -5175,6 +5175,44 @@ export async function proxyWithAccount(
 			}
 		}
 
+		// The four reactive repairs below (advisor results, thinking signatures,
+		// Codex reasoning, clear_thinking edits) each replay this physical attempt
+		// once on the same account with a repaired body. The rejected response is
+		// drained before the replay is built; stampCodexAttempt must run before
+		// the Request copies the headers.
+		const replaySameAccountWithBody = async (
+			body: NonNullable<typeof currentReplayBody>,
+			cause: "other_retry" | "thinking_retry" | "reasoning_retry",
+		): Promise<void> => {
+			const retryRequestInit: RequestInit & { duplex?: "half" } = {
+				method: req.method,
+				headers,
+				body: new Uint8Array(body),
+				duplex: "half",
+				signal: req.signal,
+			};
+			await finalizeCurrentCodexTransport(rawResponse);
+			await discardUpstreamBody(rawResponse);
+			stampCodexAttempt(headers, cause);
+			const retryProviderRequest = new Request(targetUrl, retryRequestInit);
+			retrySourceRequest = retryProviderRequest.clone();
+			const retryTransformedRequest = await transformWithCurrentAttemptPlan(
+				attemptPlan,
+				retryProviderRequest,
+				currentTransportModel,
+			);
+			retryTransformedTemplate = retryTransformedRequest.clone();
+			const retryTransportRequest = retryTransformedTemplate.clone();
+			currentReplayBody = body;
+			currentCacheIdentityHasCacheControl = undefined;
+			rawResponse = await executeCacheAwareProviderAttempt(
+				retryTransportRequest,
+				currentReplayBody,
+				currentCacheIdentityHasCacheControl,
+				currentTransportModel,
+			);
+		};
+
 		// Reactive backstop for advisor results the proactive strip could not
 		// attribute (unknown owner): upstream rejects them with a 400. Drop every
 		// advisor result and replay once on the same account.
@@ -5204,36 +5242,7 @@ export async function proxyWithAccount(
 				log.info(
 					`Upstream rejected advisor tool results for account ${account.name}, retrying with ${advisorStripped?.strippedResults ?? 0} advisor result(s) removed`,
 				);
-				const retryRequestInit: RequestInit & { duplex?: "half" } = {
-					method: req.method,
-					headers,
-					body: new Uint8Array(strippedBodyBuffer),
-					duplex: "half",
-					signal: req.signal,
-				};
-
-				await finalizeCurrentCodexTransport(rawResponse);
-				await discardUpstreamBody(rawResponse);
-				stampCodexAttempt(headers, "other_retry");
-				const retryProviderRequest = new Request(targetUrl, retryRequestInit);
-				retrySourceRequest = retryProviderRequest.clone();
-
-				const retryTransformedRequest = await transformWithCurrentAttemptPlan(
-					attemptPlan,
-					retryProviderRequest,
-					currentTransportModel,
-				);
-				retryTransformedTemplate = retryTransformedRequest.clone();
-
-				const retryTransportRequest = retryTransformedTemplate.clone();
-				currentReplayBody = strippedBodyBuffer;
-				currentCacheIdentityHasCacheControl = undefined;
-				rawResponse = await executeCacheAwareProviderAttempt(
-					retryTransportRequest,
-					currentReplayBody,
-					currentCacheIdentityHasCacheControl,
-					currentTransportModel,
-				);
+				await replaySameAccountWithBody(strippedBodyBuffer, "other_retry");
 			} else {
 				log.warn(
 					"No advisor results to strip or filtering failed, proceeding with original error response",
@@ -5255,40 +5264,7 @@ export async function proxyWithAccount(
 			const filteredBodyBuffer = filterThinkingBlocks(currentReplayBody);
 
 			if (filteredBodyBuffer && filteredBodyBuffer !== currentReplayBody) {
-				// Retry the request with filtered body
-				const retryRequestInit: RequestInit & { duplex?: "half" } = {
-					method: req.method,
-					headers,
-					body: new Uint8Array(filteredBodyBuffer),
-					duplex: "half",
-					signal: req.signal,
-				};
-
-				await finalizeCurrentCodexTransport(rawResponse);
-				await discardUpstreamBody(rawResponse);
-				stampCodexAttempt(headers, "thinking_retry");
-				const retryProviderRequest = new Request(targetUrl, retryRequestInit);
-				retrySourceRequest = retryProviderRequest.clone();
-
-				const retryTransformedRequest = await transformWithCurrentAttemptPlan(
-					attemptPlan,
-					retryProviderRequest,
-					currentTransportModel,
-				);
-				retryTransformedTemplate = retryTransformedRequest.clone();
-
-				const retryTransportRequest = retryTransformedTemplate.clone();
-				currentReplayBody = filteredBodyBuffer;
-				currentCacheIdentityHasCacheControl = undefined;
-				// Make the retry request (or unwrap a synthetic provider response).
-				// The prior rawResponse body was already drained above via
-				// discardUpstreamBody before this retry request was built.
-				rawResponse = await executeCacheAwareProviderAttempt(
-					retryTransportRequest,
-					currentReplayBody,
-					currentCacheIdentityHasCacheControl,
-					currentTransportModel,
-				);
+				await replaySameAccountWithBody(filteredBodyBuffer, "thinking_retry");
 			} else {
 				log.warn(
 					"Failed to filter thinking blocks or no changes made, proceeding with original error response",
@@ -5314,36 +5290,7 @@ export async function proxyWithAccount(
 				log.info(
 					`Codex rejected retained encrypted reasoning for account ${account.name}, retrying with proxy-minted reasoning blocks removed`,
 				);
-				const retryRequestInit: RequestInit & { duplex?: "half" } = {
-					method: req.method,
-					headers,
-					body: new Uint8Array(strippedBodyBuffer),
-					duplex: "half",
-					signal: req.signal,
-				};
-
-				await finalizeCurrentCodexTransport(rawResponse);
-				await discardUpstreamBody(rawResponse);
-				stampCodexAttempt(headers, "reasoning_retry");
-				const retryProviderRequest = new Request(targetUrl, retryRequestInit);
-				retrySourceRequest = retryProviderRequest.clone();
-
-				const retryTransformedRequest = await transformWithCurrentAttemptPlan(
-					attemptPlan,
-					retryProviderRequest,
-					currentTransportModel,
-				);
-				retryTransformedTemplate = retryTransformedRequest.clone();
-
-				const retryTransportRequest = retryTransformedTemplate.clone();
-				currentReplayBody = strippedBodyBuffer;
-				currentCacheIdentityHasCacheControl = undefined;
-				rawResponse = await executeCacheAwareProviderAttempt(
-					retryTransportRequest,
-					currentReplayBody,
-					currentCacheIdentityHasCacheControl,
-					currentTransportModel,
-				);
+				await replaySameAccountWithBody(strippedBodyBuffer, "reasoning_retry");
 			} else {
 				log.warn(
 					"No proxy-minted Codex reasoning blocks to strip or filtering failed, proceeding with original error response",
@@ -5371,35 +5318,7 @@ export async function proxyWithAccount(
 				log.info(
 					`Claude rejected clear_thinking context edit without thinking enabled for account ${account.name}, retrying with the edit removed`,
 				);
-				const retryRequestInit: RequestInit & { duplex?: "half" } = {
-					method: req.method,
-					headers,
-					body: new Uint8Array(strippedBodyBuffer),
-					duplex: "half",
-				};
-
-				await finalizeCurrentCodexTransport(rawResponse);
-				await discardUpstreamBody(rawResponse);
-				stampCodexAttempt(headers, "other_retry");
-				const retryProviderRequest = new Request(targetUrl, retryRequestInit);
-				retrySourceRequest = retryProviderRequest.clone();
-
-				const retryTransformedRequest = await transformWithCurrentAttemptPlan(
-					attemptPlan,
-					retryProviderRequest,
-					currentTransportModel,
-				);
-				retryTransformedTemplate = retryTransformedRequest.clone();
-
-				const retryTransportRequest = retryTransformedTemplate.clone();
-				currentReplayBody = strippedBodyBuffer;
-				currentCacheIdentityHasCacheControl = undefined;
-				rawResponse = await executeCacheAwareProviderAttempt(
-					retryTransportRequest,
-					currentReplayBody,
-					currentCacheIdentityHasCacheControl,
-					currentTransportModel,
-				);
+				await replaySameAccountWithBody(strippedBodyBuffer, "other_retry");
 			} else {
 				log.warn(
 					"No clear_thinking context edits to strip or filtering failed, proceeding with original error response",
