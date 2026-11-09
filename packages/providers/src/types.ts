@@ -197,21 +197,6 @@ export type ProviderAttemptDataRetryPolicy =
 	| Readonly<{ mode: "none"; maxAttempts: 0 }>
 	| Readonly<{ mode: "reuse-same-plan"; maxAttempts: number }>;
 
-export type ProviderAttemptNoExecutionDecision =
-	| Readonly<{ decision: "proven_no_execution"; reason: string }>
-	| Readonly<{ decision: "executing_or_ambiguous" }>;
-
-declare const providerAttemptNoExecutionSnapshotBrand: unique symbol;
-
-/** Canonical bounded response metadata safe for provider classification. */
-export interface ProviderAttemptNoExecutionSnapshot {
-	readonly status: number;
-	readonly headers: readonly (readonly [name: string, value: string])[];
-	readonly bodyText: string;
-	readonly bodyTruncated: boolean;
-	readonly [providerAttemptNoExecutionSnapshotBrand]: true;
-}
-
 export interface ProviderAttemptPlan {
 	readonly providerName: string;
 	readonly targetUrl: string;
@@ -221,9 +206,6 @@ export interface ProviderAttemptPlan {
 	readonly inputReplayMode: readonly ServerToolReplayAtom[];
 	readonly outputReplayMode: readonly ServerToolReplayAtom[];
 	readonly dataRetryPolicy: ProviderAttemptDataRetryPolicy;
-	readonly classifyNoExecution: (
-		snapshot: ProviderAttemptNoExecutionSnapshot,
-	) => Promise<ProviderAttemptNoExecutionDecision>;
 	readonly cacheReplayModelStrategy: CacheReplayModelStrategy;
 	readonly prepareHeaders: (
 		headers: Headers,

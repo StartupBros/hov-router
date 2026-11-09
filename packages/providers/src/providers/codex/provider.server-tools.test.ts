@@ -4,10 +4,7 @@ import type {
 	ServerToolCapabilityTuple,
 	ServerToolRequirements,
 } from "@better-ccflare/types";
-import {
-	createProviderAttemptNoExecutionSnapshot,
-	materializeProviderAttemptPlan,
-} from "../../provider-attempt-plan";
+import { materializeProviderAttemptPlan } from "../../provider-attempt-plan";
 import {
 	captureCodexModelContextSnapshot,
 	clearCodexAccountModelContextMetadata,
@@ -1220,7 +1217,7 @@ describe("Codex exact hosted-search attempt plan", () => {
 		expect(mapped.include).not.toContain("web_search_call.action.sources");
 	});
 
-	test("materializes only the exact hosted transport and delegates stable policy", async () => {
+	test("materializes only the exact hosted transport and delegates stable policy", () => {
 		const plan = materializeHostedPlan(hostedRequestBody());
 		expect(plan).toMatchObject({
 			providerName: "codex",
@@ -1233,16 +1230,6 @@ describe("Codex exact hosted-search attempt plan", () => {
 			dataRetryPolicy: { mode: "none", maxAttempts: 0 },
 			cacheReplayModelStrategy: "transformed-body",
 		});
-		expect(
-			await plan.classifyNoExecution(
-				createProviderAttemptNoExecutionSnapshot({
-					status: 400,
-					headers: {},
-					bodyText: "",
-					bodyTruncated: false,
-				}),
-			),
-		).toEqual({ decision: "executing_or_ambiguous" });
 	});
 
 	test("removes the non-official sources include while preserving ordinary includes", async () => {

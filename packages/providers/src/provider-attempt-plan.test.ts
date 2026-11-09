@@ -3,15 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Account, ServerToolReplayAtom } from "@better-ccflare/types";
-import {
-	createProviderAttemptNoExecutionSnapshot,
-	MAX_PROVIDER_NO_EXECUTION_BODY_BYTES,
-	materializeProviderAttemptPlan,
-} from "./provider-attempt-plan";
+import { materializeProviderAttemptPlan } from "./provider-attempt-plan";
 import { CodexProvider } from "./providers/codex/provider";
 import type {
 	Provider,
-	ProviderAttemptNoExecutionSnapshot,
 	ProviderAttemptPlan,
 	ProviderAttemptPlanContext,
 	ProviderServerToolHistoryProjector,
@@ -135,10 +130,6 @@ function customPlan(
 		inputReplayMode: ["proxy-evidence-v1"],
 		outputReplayMode: ["proxy-evidence-v1"],
 		dataRetryPolicy: { mode: "reuse-same-plan", maxAttempts: 2 },
-		classifyNoExecution: async () => ({
-			decision: "proven_no_execution",
-			reason: "fixture_rejection",
-		}),
 		cacheReplayModelStrategy: "transformed-body",
 		prepareHeaders: (headers) => new Headers(headers),
 		transformRequestBody: async (request) => request,
@@ -952,19 +943,6 @@ describe("materializeProviderAttemptPlan", () => {
 		expect(legacyHookCalls).toBe(0);
 		expect(plan.targetUrl).toBe("https://custom.invalid/v1/responses");
 		expect(plan.cacheReplayModelStrategy).toBe("transformed-body");
-		expect(
-			await plan.classifyNoExecution(
-				createProviderAttemptNoExecutionSnapshot({
-					status: 400,
-					headers: {},
-					bodyText: "unsupported",
-					bodyTruncated: false,
-				}),
-			),
-		).toEqual({
-			decision: "proven_no_execution",
-			reason: "fixture_rejection",
-		});
 		expectDeeplyFrozen(plan);
 	});
 
@@ -1270,110 +1248,7 @@ describe("materializeProviderAttemptPlan", () => {
 		}
 	});
 
-	test("creates canonical deeply frozen snapshots at the UTF-8 body limit", () => {
-		const bodyText = "a".repeat(MAX_PROVIDER_NO_EXECUTION_BODY_BYTES);
-		const snapshot = createProviderAttemptNoExecutionSnapshot({
-			status: 400,
-			headers: [
-				["X-Zeta", " two "],
-				["x-alpha", "one"],
-			],
-			bodyText,
-			bodyTruncated: false,
-		});
-
-		expect(snapshot).toMatchObject({
-			status: 400,
-			headers: [
-				["x-alpha", "one"],
-				["x-zeta", "two"],
-			],
-			bodyText,
-			bodyTruncated: false,
-		});
-		expectDeeplyFrozen(snapshot);
-		expect(() =>
-			createProviderAttemptNoExecutionSnapshot({
-				status: 400,
-				headers: {},
-				bodyText: `${bodyText}a`,
-				bodyTruncated: true,
-			}),
-		).toThrow();
-		for (const invalid of [
-			{ status: 99, bodyTruncated: false },
-			{ status: 600, bodyTruncated: false },
-			{ status: 400.5, bodyTruncated: false },
-			{ status: 400, bodyTruncated: "false" },
-		]) {
-			expect(() =>
-				createProviderAttemptNoExecutionSnapshot({
-					status: invalid.status,
-					headers: {},
-					bodyText: "invalid",
-					bodyTruncated: invalid.bodyTruncated as boolean,
-				}),
-			).toThrow();
-		}
-	});
-
-	test("rejects unbranded classifier metadata before custom hooks and never consumes a Response", async () => {
-		let classifierCalls = 0;
-		let classifierInput: ProviderAttemptNoExecutionSnapshot | undefined;
-		const provider = baseProvider({
-			name: "custom",
-			createAttemptPlan: () =>
-				customPlan({
-					classifyNoExecution: async (snapshot) => {
-						classifierCalls += 1;
-						classifierInput = snapshot;
-						return {
-							decision: "proven_no_execution",
-							reason: snapshot.bodyText,
-						};
-					},
-				}),
-		});
-		const plan = materializeProviderAttemptPlan(
-			provider,
-			context(accountFixture(), {
-				physicalModel: "gpt-5.6-sol",
-				capabilityProofKey: "proof:custom",
-				inputReplayMode: ["proxy-evidence-v1"],
-				outputReplayMode: ["proxy-evidence-v1"],
-			}),
-		);
-		const forged = Object.freeze({
-			status: 400,
-			headers: Object.freeze([]),
-			bodyText: "forged",
-			bodyTruncated: false,
-		}) as unknown as ProviderAttemptNoExecutionSnapshot;
-
-		await expect(plan.classifyNoExecution(forged)).rejects.toThrow();
-		expect(classifierCalls).toBe(0);
-
-		const response = new Response("still-readable", {
-			status: 400,
-			headers: { "x-fixture": "yes" },
-		});
-		const snapshot = createProviderAttemptNoExecutionSnapshot({
-			status: response.status,
-			headers: response.headers,
-			bodyText: "still-readable",
-			bodyTruncated: false,
-		});
-		expect(await plan.classifyNoExecution(snapshot)).toEqual({
-			decision: "proven_no_execution",
-			reason: "still-readable",
-		});
-		expect(classifierCalls).toBe(1);
-		expect(classifierInput).toBe(snapshot);
-		expect(response.bodyUsed).toBe(false);
-		expect(await response.text()).toBe("still-readable");
-	});
-
-	test("uses conservative legacy retry and no-execution defaults", async () => {
+	test("uses a conservative legacy retry default", () => {
 		const plan = materializeProviderAttemptPlan(
 			baseProvider(),
 			context(accountFixture(), {
@@ -1383,35 +1258,5 @@ describe("materializeProviderAttemptPlan", () => {
 		);
 
 		expect(plan.dataRetryPolicy).toEqual({ mode: "none", maxAttempts: 0 });
-		for (const snapshot of [
-			createProviderAttemptNoExecutionSnapshot({
-				status: 400,
-				headers: {},
-				bodyText: "unsupported tool",
-				bodyTruncated: false,
-			}),
-			createProviderAttemptNoExecutionSnapshot({
-				status: 429,
-				headers: {},
-				bodyText: "rate limited",
-				bodyTruncated: false,
-			}),
-			createProviderAttemptNoExecutionSnapshot({
-				status: 529,
-				headers: {},
-				bodyText: "overloaded",
-				bodyTruncated: false,
-			}),
-			createProviderAttemptNoExecutionSnapshot({
-				status: 307,
-				headers: { location: "https://other.invalid" },
-				bodyText: "",
-				bodyTruncated: false,
-			}),
-		]) {
-			expect(await plan.classifyNoExecution(snapshot)).toEqual({
-				decision: "executing_or_ambiguous",
-			});
-		}
 	});
 });
