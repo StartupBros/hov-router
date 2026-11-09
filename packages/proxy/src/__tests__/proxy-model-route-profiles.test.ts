@@ -3297,8 +3297,11 @@ describe("catalog-role Codex route profiles", () => {
 		);
 	}
 
-	function makeRoleContext(accounts: Account[]) {
-		const harness = makeContext(makeRoleRegistry(), { accounts });
+	function makeRoleContext(
+		accounts: Account[],
+		registry: ModelRouteSessionRegistry = makeRoleRegistry(),
+	) {
+		const harness = makeContext(registry, { accounts });
 		harness.strategySelect.mockImplementation(
 			(candidates: Account[]) => candidates,
 		);
@@ -4380,6 +4383,61 @@ describe("catalog-role Codex route profiles", () => {
 			expect(await upstreamModels(upstream.responses)).toEqual(["gpt-7-nova"]);
 		});
 
+		// After a deploy, a session's first request can be a stock-model child of a
+		// binding restored from history, before any root has warmed the catalog.
+		// The child carries the profile's policy but no picker id of its own. A
+		// pool admits it on its root's catalog role, so it needs the prime; an
+		// exact route does not hold a stock child to the catalog and stays a
+		// regression guard.
+		it.each([
+			["exact-account", "codex-opus", [ROLE_ACCOUNT_ID]],
+			[
+				"capability-pool",
+				"codex-opus-pool",
+				["restored-pool-first", "restored-pool-second"],
+			],
+		] as const)("serves a restored session's stock-model child on a cold %s role route", async (_shape, profileId, accountIds) => {
+			const accounts = accountIds.map((id) => coldRoleAccount(id));
+			const registry = makeRoleRegistry();
+			const harness = makeRoleContext(accounts, registry);
+			const upstream = installCodexRoleUpstream();
+			const sessionId = `restored-${profileId}`;
+			const restored = await restoreModelRouteBindings({
+				registry,
+				reader: {
+					listRouteBindingSessionsSince: async () => ({
+						sessions: [
+							{
+								apiKeyId: "key-1",
+								sessionId,
+								routeProfileId: profileId,
+								lastStartedAt: Date.now() - 60_000,
+							},
+						],
+						capReached: false,
+					}),
+				},
+			});
+			expect(restored?.bindingsRestored).toBe(1);
+			for (const account of accounts) {
+				expect(codexModelCatalogModule.getKnownCodexModels(account.id)).toBe(
+					null,
+				);
+			}
+
+			const child = await send(harness.ctx, CHILD_MODEL, {
+				"x-claude-code-session-id": sessionId,
+				"x-claude-code-agent-id": "restored-stock-child",
+			});
+
+			expect(child.response.status, child.text).toBe(200);
+			expect([...upstream.catalogReads].sort()).toEqual(
+				accounts.map(bearer).sort(),
+			);
+			// The stock child keeps its own family's role in the account's catalog.
+			expect(await upstreamModels(upstream.responses)).toEqual(["gpt-7-sol"]);
+		});
+
 		it.each([
 			"rejects",
 			"hangs",
@@ -4519,7 +4577,7 @@ describe("catalog-role Codex route profiles", () => {
 			expect(codexModelCatalogModule.getKnownCodexModels(codex.id)).toBe(null);
 		});
 
-		it("never primes for a descendant of an exact-policy pool, a descendant of a catalog-role pool, or an unbound child", async () => {
+		it("never primes for a descendant of an exact-policy pool or an unbound child, and primes for a descendant of a catalog-role pool", async () => {
 			const codex = coldRoleAccount("exact-pool-descendant-codex");
 			codex.model_mappings = JSON.stringify({ opus: "gpt-7-nova" });
 			const normal = makeAccount("exact-pool-descendant-normal");
@@ -4587,8 +4645,9 @@ describe("catalog-role Codex route profiles", () => {
 			expect(upstream.catalogReads).toEqual([bearer(codex), bearer(codex)]);
 
 			// A catalog-role pool root primes its cold candidate ahead of selection.
-			// Only roots prime: a descendant meeting the pool cold under a live
-			// lineage binding reads nothing and fails closed.
+			// So does a descendant: the pool admits it on the root's catalog role,
+			// and a binding can outlive the process that primed it (bindings are
+			// restored at boot), so a descendant can meet the pool cold.
 			const roleSession = {
 				"x-claude-code-session-id": "role-pool-descendant",
 			};
@@ -4596,23 +4655,27 @@ describe("catalog-role Codex route profiles", () => {
 			expect(roleRoot.response.status, roleRoot.text).toBe(200);
 			expect(readsAtSelection).toEqual([0, 1, 2, 3]);
 			codexModelCatalogModule.clearCodexModelCacheForAccount(codex.id);
+			const sentBeforeDescendant = upstream.responses.length;
 			const roleDescendant = await send(harness.ctx, CHILD_MODEL, {
 				...roleSession,
 				"x-claude-code-agent-id": "role-pool-descendant-child",
 			});
-			expect(roleDescendant.response.status).toBe(503);
-			expect(JSON.parse(roleDescendant.text)).toMatchObject({
-				error: {
-					type: "force_route_unavailable",
-					reason: "catalog_role_unavailable",
-				},
-			});
+			expect(roleDescendant.response.status, roleDescendant.text).toBe(200);
+			// The fourth read landed before the descendant's selection.
+			expect(readsAtSelection).toEqual([0, 1, 2, 3, 4]);
 			expect(upstream.catalogReads).toEqual([
 				bearer(codex),
 				bearer(codex),
 				bearer(codex),
+				bearer(codex),
 			]);
-			expect(codexModelCatalogModule.getKnownCodexModels(codex.id)).toBe(null);
+			expect(codexModelCatalogModule.getKnownCodexModels(codex.id)).not.toBe(
+				null,
+			);
+			// The stock child takes its own family's role from the fresh listing.
+			expect(
+				await upstreamModels(upstream.responses.slice(sentBeforeDescendant)),
+			).toEqual(["gpt-7-sol"]);
 		});
 
 		it("primes only refresh-eligible Codex candidates of a role pool", async () => {

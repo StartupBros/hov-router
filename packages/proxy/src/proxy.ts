@@ -2061,12 +2061,15 @@ async function handleProxyCoreImpl(
 	// the implicit Codex route does, bounded by the account-selection deadline
 	// and the routing signal. Selection stays fetch-free, so a prime that fails
 	// or runs out of time leaves the account cold and the route fails closed
-	// with catalog_role_unavailable. Exact-policy and non-profile requests skip
-	// this.
+	// with catalog_role_unavailable. The gate reads the profile's policy, the
+	// field selection holds a capability pool to: an inherited stock-model
+	// child (such as a subagent of a binding restored at boot) carries no
+	// request policy of its own, yet its pool still admits on the catalog.
+	// Exact-policy and non-profile requests skip this.
 	if (
 		modelRouteResolution?.kind === "route" &&
-		(requestMeta.routePhysicalModelPolicy === "catalog-role" ||
-			requestMeta.routePhysicalModelPolicy === "line")
+		(requestMeta.routeProfilePhysicalModelPolicy === "catalog-role" ||
+			requestMeta.routeProfilePhysicalModelPolicy === "line")
 	) {
 		const primeDeadlineAt =
 			Date.now() + preTransportDeadlines.accountSelectionTimeoutMs;
