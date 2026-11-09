@@ -99,6 +99,7 @@ describe("analytics model performance", () => {
 			.map((row) => row.detail)
 			.join("\n");
 
+		// Migrations drop this index (#762); this only bites if it comes back.
 		expect(plan).not.toContain("idx_requests_response_time");
 		expect(plan).toMatch(
 			/SEARCH r USING (COVERING )?INDEX \S+ \(timestamp>\?\)/,

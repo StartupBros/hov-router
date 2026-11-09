@@ -52,31 +52,9 @@ export function addPerformanceIndexes(db: Database): void {
 	`);
 	log.info("Added index: idx_requests_account_timestamp");
 
-	// 6. Additional indexes based on observed query patterns
-
-	// Index for cost analysis queries
-	db.run(`
-		CREATE INDEX IF NOT EXISTS idx_requests_cost_model 
-		ON requests(cost_usd, model, timestamp DESC) 
-		WHERE cost_usd > 0 AND model IS NOT NULL
-	`);
-	log.info("Added index: idx_requests_cost_model");
-
-	// Index for response time analysis (for p95 calculations)
-	db.run(`
-		CREATE INDEX IF NOT EXISTS idx_requests_response_time 
-		ON requests(model, response_time_ms) 
-		WHERE response_time_ms IS NOT NULL AND model IS NOT NULL
-	`);
-	log.info("Added index: idx_requests_response_time");
-
-	// Index for token usage analysis
-	db.run(`
-		CREATE INDEX IF NOT EXISTS idx_requests_tokens 
-		ON requests(timestamp DESC, total_tokens) 
-		WHERE total_tokens > 0
-	`);
-	log.info("Added index: idx_requests_tokens");
+	// 6. Additional indexes based on observed query patterns. The cost, response
+	// time and token indexes once created here are gone: no live query used
+	// them, and runMigrations drops them from older databases (#762).
 
 	// Index for account name lookups (used in analytics joins)
 	db.run(`
@@ -195,14 +173,6 @@ export function addPerformanceIndexes(db: Database): void {
 	log.info(
 		"Added index: idx_requests_analytics_covering (covering index for analytics aggregate queries)",
 	);
-
-	// 11. Index for billing_type time-range queries used in analytics cost breakdown
-	db.run(`
-		CREATE INDEX IF NOT EXISTS idx_requests_billing_type_timestamp
-		ON requests(billing_type, timestamp DESC)
-		WHERE billing_type IS NOT NULL
-	`);
-	log.info("Added index: idx_requests_billing_type_timestamp");
 
 	log.info("Performance indexes added successfully");
 }

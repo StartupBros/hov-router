@@ -384,10 +384,12 @@ export function createAnalyticsHandler(context: APIContext) {
 				}));
 
 			// Get model performance metrics. MATERIALIZED keeps SQLite from
-			// flattening `filtered` into the window function: otherwise it walks
+			// flattening `filtered` into the window function: otherwise it walked
 			// idx_requests_response_time (model, response_time_ms) to skip a sort
-			// and checks the timestamp of every request ever logged (~3 s on 2M
+			// and checked the timestamp of every request ever logged (~3 s on 2M
 			// rows, whatever the range) instead of reading only the window.
+			// Migrations drop that index since #762; MATERIALIZED stays so any
+			// later model-led index cannot bring the walk back.
 			const modelPerfData = await db.queryOffThread<{
 				model: string;
 				avg_response_time: number;
