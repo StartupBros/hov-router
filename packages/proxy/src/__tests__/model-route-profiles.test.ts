@@ -2169,3 +2169,227 @@ describe("describeModelRouteProfileFlow", () => {
 		}
 	});
 });
+
+describe("ModelRouteSessionRegistry binding restore", () => {
+	const child = (sessionId: string, requestModel: string) => ({
+		callerIdentity: "caller",
+		requestModel,
+		sessionId,
+		isSubagent: true,
+	});
+	const record = (
+		sessionId: string,
+		routeProfileId: string,
+		lastStartedAt: number,
+	) => ({ callerIdentity: "caller", sessionId, routeProfileId, lastStartedAt });
+
+	it("restores a bound session so picker and stock children keep its route", () => {
+		const configured = profile();
+		const clock = makeClock(10_000);
+		const registry = new ModelRouteSessionRegistry([configured], {
+			now: clock.now,
+		});
+		const restore = registry.beginBindingRestore();
+		if (!restore) throw new Error("Expected a restore session");
+
+		expect(restore.install([record("session", configured.id, 9_000)])).toBe(1);
+		restore.finish();
+
+		expect(
+			resolveRequest(registry, child("session", configured.publicModelId)),
+		).toEqual({ kind: "route", source: "inherited", profile: configured });
+		expect(
+			resolveRequest(registry, child("session", "claude-sonnet-4-5")),
+		).toEqual({ kind: "route", source: "inherited", profile: configured });
+	});
+
+	it("restores nothing for implicit Codex or unknown profile ids", () => {
+		const configured = profile();
+		const registry = new ModelRouteSessionRegistry([configured], {
+			now: makeClock(10_000).now,
+		});
+		const restore = registry.beginBindingRestore();
+		if (!restore) throw new Error("Expected a restore session");
+
+		expect(
+			restore.install([
+				record("implicit", "implicit-codex:acct", 9_000),
+				record("unknown", "retired-route", 9_000),
+			]),
+		).toBe(0);
+		restore.finish();
+
+		expect(registry.size).toBe(0);
+		expect(
+			resolveRequest(registry, child("unknown", configured.publicModelId)),
+		).toEqual({ kind: "unavailable", reason: "unbound_child_profile" });
+		expect(
+			resolveRequest(registry, child("implicit", "claude-sonnet-4-5")),
+		).toEqual({ kind: "native" });
+	});
+
+	it("keeps the original activity time so a restored binding expires on schedule", () => {
+		const configured = profile();
+		const clock = makeClock(10_000);
+		const registry = new ModelRouteSessionRegistry([configured], {
+			ttlMs: 1_000,
+			now: clock.now,
+		});
+		const restore = registry.beginBindingRestore();
+		if (!restore) throw new Error("Expected a restore session");
+
+		expect(
+			restore.install([
+				record("expired", configured.id, 9_000),
+				record("live", configured.id, 9_001),
+			]),
+		).toBe(1);
+		restore.finish();
+
+		expect(
+			resolveRequest(registry, child("expired", "claude-sonnet-4-5")),
+		).toEqual({ kind: "native" });
+		expect(
+			registry.resolve(child("live", "claude-sonnet-4-5"), null, {
+				touchInheritedBinding: false,
+			}),
+		).toMatchObject({ kind: "route", source: "inherited" });
+		clock.advance(1);
+		expect(
+			resolveRequest(registry, child("live", "claude-sonnet-4-5")),
+		).toEqual({ kind: "native" });
+	});
+
+	it("installs nothing once the restore has finished", () => {
+		const configured = profile();
+		const registry = new ModelRouteSessionRegistry([configured], {
+			now: makeClock(10_000).now,
+		});
+		const restore = registry.beginBindingRestore();
+		if (!restore) throw new Error("Expected a restore session");
+		restore.finish();
+
+		expect(restore.install([record("session", configured.id, 9_000)])).toBe(0);
+		expect(
+			resolveRequest(registry, child("session", configured.publicModelId)),
+		).toEqual({ kind: "unavailable", reason: "unbound_child_profile" });
+	});
+
+	it("never replaces a binding that live traffic already committed", () => {
+		const configured = profile();
+		const alternate = alternateProfile();
+		const registry = new ModelRouteSessionRegistry([configured, alternate], {
+			now: makeClock(10_000).now,
+		});
+		const restore = registry.beginBindingRestore();
+		if (!restore) throw new Error("Expected a restore session");
+		resolveAndCommit(registry, {
+			callerIdentity: "caller",
+			requestModel: alternate.publicModelId,
+			sessionId: "session",
+			isSubagent: false,
+		});
+
+		expect(restore.install([record("session", configured.id, 9_000)])).toBe(0);
+		restore.finish();
+		expect(
+			resolveRequest(registry, child("session", "claude-sonnet-4-5")),
+		).toEqual({ kind: "route", source: "inherited", profile: alternate });
+	});
+
+	it("keeps the newest sessions within the entry cap, in recency order", () => {
+		const configured = profile();
+		const clock = makeClock(10_000);
+		const registry = new ModelRouteSessionRegistry([configured], {
+			maxEntries: 2,
+			now: clock.now,
+		});
+		const restore = registry.beginBindingRestore();
+		if (!restore) throw new Error("Expected a restore session");
+
+		expect(
+			restore.install([
+				record("newest", configured.id, 9_300),
+				record("oldest", configured.id, 9_100),
+				record("middle", configured.id, 9_200),
+			]),
+		).toBe(2);
+		restore.finish();
+		expect(
+			resolveRequest(registry, child("oldest", "claude-sonnet-4-5")),
+		).toEqual({ kind: "native" });
+
+		// A new live binding evicts the least recently active restored session.
+		resolveAndCommit(registry, {
+			callerIdentity: "caller",
+			requestModel: configured.publicModelId,
+			sessionId: "fresh",
+			isSubagent: false,
+		});
+		expect(
+			resolveRequest(registry, child("middle", "claude-sonnet-4-5")),
+		).toEqual({ kind: "native" });
+		expect(
+			resolveRequest(registry, child("newest", "claude-sonnet-4-5")),
+		).toMatchObject({ kind: "route", source: "inherited" });
+	});
+
+	it("restores a session recorded under a former id to the renamed profile", () => {
+		const [renamed] = parseModelRouteProfiles(
+			JSON.stringify([
+				{
+					id: "ai-gateway-chat",
+					displayName: "Local gateway chat",
+					accountId: "gateway-account",
+					logicalModel: "claude-opus-5",
+					aliases: ["glm-5-3-flash"],
+				},
+			]),
+		);
+		if (!renamed) throw new Error("Expected the aliased route to parse");
+		const registry = new ModelRouteSessionRegistry([renamed], {
+			now: makeClock(10_000).now,
+		});
+		const restore = registry.beginBindingRestore();
+		if (!restore) throw new Error("Expected a restore session");
+
+		expect(restore.install([record("session", "glm-5-3-flash", 9_000)])).toBe(
+			1,
+		);
+		restore.finish();
+		expect(
+			resolveRequest(registry, child("session", "claude-sonnet-4-5")),
+		).toEqual({ kind: "route", source: "inherited", profile: renamed });
+	});
+
+	it("exposes a gate that opens when the restore finishes", async () => {
+		const configured = profile();
+		const registry = new ModelRouteSessionRegistry([configured]);
+		expect(registry.bindingRestoreGate()).toBeNull();
+
+		const restore = registry.beginBindingRestore();
+		if (!restore) throw new Error("Expected a restore session");
+		const gate = registry.bindingRestoreGate();
+		expect(gate).toBeInstanceOf(Promise);
+		expect(registry.beginBindingRestore()).toBeNull();
+
+		let opened = false;
+		void gate?.then(() => {
+			opened = true;
+		});
+		await Promise.resolve();
+		expect(opened).toBe(false);
+
+		restore.finish();
+		restore.finish();
+		await gate;
+		expect(opened).toBe(true);
+		expect(registry.bindingRestoreGate()).toBeNull();
+	});
+
+	it("starts no restore when no route profiles are configured", () => {
+		const registry = new ModelRouteSessionRegistry([]);
+		expect(registry.beginBindingRestore()).toBeNull();
+		expect(registry.bindingRestoreGate()).toBeNull();
+	});
+});

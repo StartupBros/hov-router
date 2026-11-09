@@ -683,10 +683,45 @@ export type ModelRouteResolution =
 	  }
 	| { readonly kind: "native" };
 
+/** One session's newest committed request, as the request history recorded it. */
+export interface ModelRouteBindingRecord {
+	/** The same stable caller identity the proxy derives for live requests. */
+	readonly callerIdentity: string;
+	readonly sessionId: string;
+	/** Profile id the newest committed request was served under. */
+	readonly routeProfileId: string;
+	/** Start time of that request, which is when its binding was last touched. */
+	readonly lastStartedAt: number;
+}
+
+/**
+ * A boot-time restore of session bindings. Requests wait on
+ * `bindingRestoreGate()` until `finish()`, and `install()` is a no-op once
+ * finished, so an abandoned slow read can never install stale bindings late.
+ */
+export interface ModelRouteBindingRestoreSession {
+	readonly ttlMs: number;
+	readonly maxEntries: number;
+	install(records: readonly ModelRouteBindingRecord[]): number;
+	finish(): void;
+}
+
 export interface ModelRouteSessionRegistryOptions {
 	readonly ttlMs?: number;
 	readonly maxEntries?: number;
 	readonly now?: () => number;
+}
+
+/**
+ * The caller identity the proxy derives for a request authenticated by an API
+ * key. Startup restore keys recorded history with this same function, so a
+ * restored binding matches the live requests that follow.
+ */
+export function apiKeyRouteCallerIdentity(
+	apiKeyId: string | null | undefined,
+): string | null {
+	const id = apiKeyId?.trim();
+	return id ? `api-key-id:${id}` : null;
 }
 
 /**
@@ -707,6 +742,7 @@ export class ModelRouteSessionRegistry {
 	private readonly maxEntries: number;
 	private readonly now: () => number;
 	private lastGeneration = 0;
+	private restoreGate: Promise<void> | null = null;
 
 	constructor(
 		profiles: readonly ModelRouteProfile[],
@@ -803,6 +839,75 @@ export class ModelRouteSessionRegistry {
 			display_name: profile.displayName,
 			description: describeModelRouteProfileFlow(profile),
 		}));
+	}
+
+	/** Pending while a boot-time binding restore runs; null otherwise. */
+	bindingRestoreGate(): Promise<void> | null {
+		return this.restoreGate;
+	}
+
+	/**
+	 * Start restoring bindings that a previous process held. Returns null when
+	 * no profiles are configured or a restore is already pending.
+	 */
+	beginBindingRestore(): ModelRouteBindingRestoreSession | null {
+		if (!this.hasProfiles || this.restoreGate !== null) return null;
+		let open: () => void = () => {};
+		let finished = false;
+		this.restoreGate = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		return {
+			ttlMs: this.ttlMs,
+			maxEntries: this.maxEntries,
+			install: (records) =>
+				finished ? 0 : this.installRestoredBindings(records),
+			finish: () => {
+				if (finished) return;
+				finished = true;
+				this.restoreGate = null;
+				open();
+			},
+		};
+	}
+
+	private installRestoredBindings(
+		records: readonly ModelRouteBindingRecord[],
+	): number {
+		const now = this.now();
+		const newest = new Map<
+			string,
+			{ profile: ModelRouteProfile; touchedAt: number }
+		>();
+		for (const record of records) {
+			const profile =
+				this.profilesById.get(record.routeProfileId) ??
+				this.profilesByPublicModelId.get(
+					`${MODEL_ROUTE_PROFILE_MODEL_PREFIX}${record.routeProfileId}`,
+				);
+			const key = this.bindingKey(record.callerIdentity, record.sessionId);
+			if (!profile || !key || !Number.isFinite(record.lastStartedAt)) continue;
+			const touchedAt = Math.min(record.lastStartedAt, now);
+			if (now - touchedAt >= this.ttlMs) continue;
+			const current = newest.get(key);
+			if (!current || touchedAt > current.touchedAt) {
+				newest.set(key, { profile, touchedAt });
+			}
+		}
+		// Oldest first, so Map insertion order matches recency and later live
+		// commits evict the least recently active restored session first.
+		const ordered = Array.from(newest)
+			.sort(([, a], [, b]) => a.touchedAt - b.touchedAt)
+			.slice(-this.maxEntries);
+		let installed = 0;
+		for (const [key, state] of ordered) {
+			// Live traffic decided after this process started; never overwrite it.
+			if (this.sessions.has(key)) continue;
+			this.evictOldestIfFull(this.sessions);
+			this.setSessionState(key, state);
+			installed += 1;
+		}
+		return installed;
 	}
 
 	/**

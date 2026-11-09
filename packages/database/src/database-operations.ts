@@ -1675,6 +1675,13 @@ OAuth tokens will need to be re-authenticated.
 		return this.requests.listAffinityLaneSummariesSince(sinceMs, limit);
 	}
 
+	listRouteBindingSessionsSince(
+		sinceMs: number,
+		limit: number,
+	): ReturnType<RequestRepository["listRouteBindingSessionsSince"]> {
+		return this.requests.listRouteBindingSessionsSince(sinceMs, limit);
+	}
+
 	async saveRequest(
 		id: string,
 		method: string,
