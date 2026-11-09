@@ -1078,6 +1078,18 @@ describe("account settings switches", () => {
 		);
 	}
 
+	it("gives settings switches explicit 44px targets independent of their borders", () => {
+		const html = render(makeAccount({ provider: "anthropic" }));
+		const switches = html.match(/<button[^>]*role="switch"[^>]*>/g) ?? [];
+		expect(switches.length).toBe(2);
+		for (const control of switches) {
+			expect(control).toContain("after:h-11");
+			expect(control).toContain("after:w-11");
+			expect(control).toContain("after:-translate-x-1/2");
+			expect(control).toContain("after:-translate-y-1/2");
+		}
+	});
+
 	it("offers auto-fallback but no auto-refresh switch on an Anthropic row", () => {
 		const html = render(makeAccount({ provider: "anthropic" }));
 		expect(html).toContain("Auto-fallback:");

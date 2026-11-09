@@ -87,6 +87,9 @@ const EMPTY_SESSION_INFO = new Set(["", "-", "No active session"]);
 
 /** Label + switch pair used in the per-account settings row. */
 const SETTING_CLASS = "flex min-h-11 min-w-0 flex-wrap items-center gap-2";
+// Explicit dimensions avoid the switch's border shrinking an inset-based target.
+const SETTING_SWITCH_CLASS =
+	"relative after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']";
 
 /**
  * Codex-only usage extras (plan_type, credits_balance) come from the free
@@ -174,7 +177,7 @@ export function CodexCreditDrainControl({
 		<div className={SETTING_CLASS}>
 			<span className="text-xs text-muted-foreground">Drain credits:</span>
 			<Switch
-				className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+				className={SETTING_SWITCH_CLASS}
 				checked={account.codexCreditDrainEnabled ?? false}
 				aria-label={`Drain credits for ${account.name}`}
 				onCheckedChange={() => onToggle(account)}
@@ -211,7 +214,7 @@ export function PublicValueControl({
 		<div className={SETTING_CLASS}>
 			<span className="text-xs text-muted-foreground">Public value:</span>
 			<Switch
-				className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+				className={SETTING_SWITCH_CLASS}
 				checked={enabled}
 				aria-label={`Public value for ${account.name}`}
 				onCheckedChange={() => onToggle(account)}
@@ -378,7 +381,7 @@ export function AccountListItem({
 	return (
 		<article
 			aria-label={account.name}
-			className={`min-w-0 space-y-3 rounded-lg border bg-card p-4 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.7fr)_8.5rem] xl:items-start xl:gap-4 xl:space-y-0 xl:[&>*]:col-span-full ${
+			className={`min-w-0 space-y-3 rounded-lg border bg-card p-4 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.7fr)_9rem] xl:items-start xl:gap-4 xl:space-y-0 xl:[&>*]:col-span-full ${
 				isPrimary
 					? "border-border border-l-2 border-l-primary"
 					: "border-border hover:border-muted-foreground/50"
@@ -841,7 +844,7 @@ export function AccountListItem({
 										Auto-fallback:
 									</span>
 									<Switch
-										className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+										className={SETTING_SWITCH_CLASS}
 										checked={account.autoFallbackEnabled}
 										aria-label={`Auto-fallback for ${account.name}`}
 										onCheckedChange={() => onAutoFallbackToggle(account)}
@@ -855,7 +858,7 @@ export function AccountListItem({
 										Plan billing:
 									</span>
 									<Switch
-										className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+										className={SETTING_SWITCH_CLASS}
 										checked={account.billingType === "plan"}
 										aria-label={`Plan billing for ${account.name}`}
 										onCheckedChange={() => onBillingTypeToggle(account)}
@@ -869,7 +872,7 @@ export function AccountListItem({
 										Auto-pause on overage:
 									</span>
 									<Switch
-										className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+										className={SETTING_SWITCH_CLASS}
 										checked={account.autoPauseOnOverageEnabled ?? false}
 										aria-label={`Auto-pause on overage for ${account.name}`}
 										onCheckedChange={() => onAutoPauseOnOverageToggle(account)}
@@ -896,7 +899,7 @@ export function AccountListItem({
 										Peak hours pause:
 									</span>
 									<Switch
-										className="relative after:absolute after:-inset-y-3 after:-inset-x-1 after:content-['']"
+										className={SETTING_SWITCH_CLASS}
 										checked={account.peakHoursPauseEnabled ?? false}
 										aria-label={`Peak hours pause for ${account.name}`}
 										onCheckedChange={() => onPeakHoursPauseToggle(account)}
