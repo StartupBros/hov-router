@@ -7,6 +7,7 @@ import {
 	CODEX_CATALOG_FAMILIES,
 	type CatalogModelGap,
 	type CodexCatalogEvt,
+	catalogSectionForModel,
 	type CodexCatalogStaleEvt,
 	type CodexIdentityRecordStaleEvt,
 	type CodexOwnCatalogPublishedEvt,
@@ -21,14 +22,17 @@ import {
 	getLoadedPricingCatalog,
 	getModelFamily,
 	getModelRates,
+	isModelPriced,
 	isValidModelId,
 	isWellFormedConcreteClaudeModelId,
 	LATEST_MODEL_BY_FAMILY,
+	LIST_PRICE_ERAS,
 	onPricingCatalogLoaded,
 	type PricingCatalog,
 	type PricingCatalogLoadSource,
 	type RequestEvt,
 	requestEvents,
+	selectListPriceEra,
 	VALUE_PRICING_VERSION,
 	warmPricingCatalog,
 } from "@better-ccflare/core";
@@ -779,6 +783,119 @@ export function buildPricingCatalogAlerts(
 			buildEraRateMismatchAlert(mismatch, nowMs),
 		),
 	];
+}
+
+/** Why a closed window could not price one model's tokens. */
+export type UnpricedWindowReason =
+	| "no_era"
+	| "before_first_era"
+	| "unpriceable";
+
+export interface UnpricedWindowModel {
+	model: string;
+	tokens: number;
+	reason: UnpricedWindowReason;
+	/** When the model's first era starts, for `before_first_era`. */
+	firstEraSinceMs?: number;
+}
+
+const BREAKDOWN_TOKEN_FIELDS = [
+	"inputTokens",
+	"cacheReadInputTokens",
+	"cacheCreationInputTokens",
+	"outputTokens",
+] as const;
+
+/**
+ * First-party models (by catalogSectionForModel) in a closed window's
+ * breakdown whose tokens the list-price table could not price, largest
+ * first. Route-profile ids, other id shapes and the empty key are left out:
+ * no era could price them.
+ */
+export function findUnpricedWindowModels(
+	window: UsageWindow,
+): UnpricedWindowModel[] {
+	const found: UnpricedWindowModel[] = [];
+	for (const [model, raw] of Object.entries(window.modelBreakdown ?? {})) {
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+		const entry = raw as Record<string, unknown>;
+		if (entry.valueUsd !== null) continue;
+		if (catalogSectionForModel(model) === null) continue;
+		let tokens = 0;
+		for (const field of BREAKDOWN_TOKEN_FIELDS) {
+			const value = entry[field];
+			if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+				tokens += value;
+			}
+		}
+		if (tokens === 0) continue;
+		const eras = LIST_PRICE_ERAS[model] ?? [];
+		if (eras.length === 0) {
+			found.push({ model, tokens, reason: "no_era" });
+		} else if (!selectListPriceEra(model, window.startedAt)) {
+			found.push({
+				model,
+				tokens,
+				reason: "before_first_era",
+				firstEraSinceMs: Math.min(...eras.map((era) => era.sinceMs)),
+			});
+		} else {
+			found.push({ model, tokens, reason: "unpriceable" });
+		}
+	}
+	return found.sort(
+		(a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model),
+	);
+}
+
+function formatUtcMinute(ms: number): string {
+	return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")}Z`;
+}
+
+/**
+ * One unpriced_window alert. Keyed by (model, the window's pricing
+ * version): every account's windows share it, so a model stays at one alert
+ * until VALUE_PRICING_VERSION changes.
+ */
+export function buildUnpricedWindowAlert(
+	window: UsageWindow,
+	accountName: string,
+	unpriced: UnpricedWindowModel,
+	timestamp: number,
+): AlertEvent {
+	const { model } = unpriced;
+	const version = window.projectionVersion ?? VALUE_PRICING_VERSION;
+	const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+	const reprice =
+		"bump VALUE_PRICING_VERSION and deploy; closed windows re-price at the next startup.";
+	let cause: string;
+	let fix: string;
+	if (unpriced.reason === "no_era") {
+		cause = `LIST_PRICE_ERAS has no era for ${model}`;
+		fix = `Check the rates on the provider's pricing page, add an era in packages/core/src/value-pricing.ts, ${reprice}`;
+	} else if (unpriced.reason === "before_first_era") {
+		cause = `${model}'s first list-price era starts ${day(unpriced.firstEraSinceMs ?? 0)}, after the window started`;
+		fix = `A window is priced at its start time, so a model released mid-window goes unpriced. If ${model}'s rates applied for this window's usage, start its era on or before ${day(window.startedAt)} in packages/core/src/value-pricing.ts, ${reprice}`;
+	} else {
+		cause = `${model}'s list-price era cannot price this window's token mix (a long-context split or a cache-write rate is missing)`;
+		fix = `Check that era's rates in packages/core/src/value-pricing.ts; if one is missing, add it, ${reprice}`;
+	}
+	return {
+		id: `model_routing_drift:unpriced_window:${encodeScopePart(model)}:${encodeScopePart(version)}`,
+		timestamp,
+		type: "model_routing_drift",
+		severity: "warning",
+		title: "Usage window closed with unpriced tokens",
+		classification: { reason: "unpriced_window" },
+		message: `${accountName}'s ${window.windowKey} usage window (${formatUtcMinute(window.startedAt)} to ${formatUtcMinute(window.closedAt ?? timestamp)}) closed with ${unpriced.tokens.toLocaleString("en-US")} ${model} tokens the list-price table could not price: ${cause}. The window's value leaves them out. ${fix} Later windows with unpriced ${model} tokens under pricing version ${version} raise no new alert.`,
+		value: null,
+		threshold: null,
+		account: accountName,
+		model,
+		project: null,
+		requestId: null,
+		acknowledged: false,
+	};
 }
 
 /*
@@ -1741,6 +1858,31 @@ export class AlertService {
 	 * each gap or era-rate mismatch (#774). Ids are content-addressed, so a
 	 * standing condition is recorded and delivered once.
 	 */
+	/**
+	 * Raises unpriced_window for each first-party model a just-closed window
+	 * could not price, when the pricing catalogue does price it (#774): a
+	 * model nobody publishes rates for has no era to add. Called by
+	 * UsageWindowLedger after a close; the silent startup re-price pass never
+	 * calls it. persistAndEmit's INSERT OR IGNORE dedupes per (model, pricing
+	 * version).
+	 */
+	async evaluateClosedWindowPricing(
+		window: UsageWindow,
+		accountName: string,
+		nowMs = Date.now(),
+	): Promise<void> {
+		const unpriced = findUnpricedWindowModels(window);
+		if (unpriced.length === 0) return;
+		const { webhookUrl } = getAlertsConfig(this.config);
+		for (const entry of unpriced) {
+			if (!(await isModelPriced(entry.model))) continue;
+			await this.persistAndEmit(
+				buildUnpricedWindowAlert(window, accountName, entry, nowMs),
+				webhookUrl,
+			);
+		}
+	}
+
 	async evaluatePricingCatalog(
 		catalog: PricingCatalog,
 		nowMs = Date.now(),
