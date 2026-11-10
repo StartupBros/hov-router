@@ -178,7 +178,7 @@ A `MemoryHigh` below the peak throttles the router at its busiest, so keep both 
 
 #### Protection on a shared host
 
-The router's own limits do nothing for it when another workload on the host fills memory. The kernel then reclaims the router's pages, and its event loop stalls on the page faults that bring them back. On the managed host, about half of the router's event-loop stalls of 5 seconds or more over eight days in November 2026 were faults of this kind. `MemoryLow` makes the kernel reclaim unprotected memory first. Set it on the service **and** on its slice:
+The router's own limits do nothing for it when another workload on the host fills memory. The kernel then reclaims the router's pages, and its event loop stalls on the page faults that bring them back. On the managed host in November 2026, the router took 50 or more major faults in about half of its event-loop stalls of 5 seconds or more, but a recount found 67 of 68 such stalls came while the whole host was stalled on I/O, which protection does not fix (see the trade-off below, and [reading a stall line](solutions/performance-issues/read-event-loop-stall-host-fields-before-blaming-sql.md)). `MemoryLow` makes the kernel reclaim unprotected memory first. Set it on the service **and** on its slice:
 
 ```sh
 sudo systemctl set-property system.slice MemoryLow=4G

@@ -49,8 +49,8 @@ Read the fields in this order:
 1. **Was the thread running?** If `on CPU` is close to the SQL time, the statement was doing work: look at its plan, indexes and row counts. No stall in the data below took this branch; it follows from the field definitions.
 2. **Was it waiting for a CPU?** A large `waiting for a CPU` share means CPU contention. Look at host cpu pressure and what else was running.
 3. **Otherwise it was blocked.** When `off CPU` is close to the tick, the SQL time measures how long the thread was blocked inside the call, not what the query costs. Then check, in order:
-   - **Did the whole host stall?** If io plus memory "all tasks" is a large share of the tick (25% or more in the rule below), nothing on the host was running. The router's memory protection cannot help there; `docs/systemd.md` ("Protection on a shared host") says so. Find the workload that filled memory or saturated the disk and bound it, and run an OOM daemon.
-   - **Did the router fault?** Many major faults on a quieter host mean the router's own pages were reclaimed and read back. That is the case `MemoryLow` on the service and its slice is for (`docs/systemd.md`, PR #776).
+   - **Did the whole host stall?** If io plus memory "all tasks" is a large share of the tick (25% or more in the rule below), nothing on the host was running. Protecting the router's memory does not end that; `docs/systemd.md` ("Protection on a shared host") says protection cannot help when the whole host stalls on swap I/O. Find the workload that filled memory or saturated the disk and bound it, and run an OOM daemon.
+   - **Did the router fault while the host kept running?** Many major faults without a whole-host stall mean the router's own pages were reclaimed and read back. That is the case `MemoryLow` on the service and its slice is for (`docs/systemd.md`, PR #776). In the counts below it was rare: nearly every high-fault stall also came with a whole-host stall.
    - **Neither?** Look at io `some`. A high value means some task, possibly the router, was waiting on disk, but the line doesn't say which task or what the router waited on. Then look at the statement. A point lookup or a read of a small table does not need seconds of disk reads by itself. A statement that scans can, so check its plan and how much it reads before ruling it out ([SQLite planned a per-account query on the billing_type index](sqlite-planner-tie-between-low-cardinality-and-account-index.md) is a real case: one refresh read 3.9 GiB).
 4. **Zero major faults does not clear the host.** The router maps the first 256 MB of the database by default (`mmapSize`, `packages/config/src/index.ts:2848`). A cold page inside that window comes back as a major fault. A page SQLite reads with an ordinary file read blocks on disk without counting one. The 23:41:00Z example below had 0 faults while every task on the host was stalled on io for 73% of the tick.
 5. **Don't judge one stall from a single field.** No single field says what a given stall waited on: swap, a disk read or a lock. Neither does the classifier below. Each field only rules some causes in or out.
@@ -65,7 +65,7 @@ Each stall line was classified by its own fields under rules fixed before counti
 - **HOSTWIDE:** io plus memory "all tasks" is 25% or more of the tick.
 - **OTHER:** the rest.
 
-Stalls of 1-5 s are the countermetric. All counts come from the production router's journal.
+The rules apply in that order, and a stall counts once, in the first class it matches. Stalls of 1-5 s are the countermetric. All counts come from the production router's journal.
 
 | Window (UTC) | Stall lines | Stalls ≥5 s | HOSTWIDE | FAULT | SQL | OTHER | 1-5 s: HOSTWIDE / FAULT / SQL / OTHER |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
@@ -73,6 +73,12 @@ Stalls of 1-5 s are the countermetric. All counts come from the production route
 | 2026-11-04 06:35 to 11-09 20:27, counted 11-10 | 1,099 | 143 | 69 | 68 | 2 | 4 | 229 / 81 / 31 / 58 |
 
 The second row exists because the journal had rotated: its start is the oldest line still in it, and the first count can no longer be reproduced.
+
+Because of the rule order, the classes overlap more than the table shows. In the second count:
+- **5 s or more:** 67 of the 68 FAULT stalls and both SQL stalls also met the HOSTWIDE test, so 138 of 143 came while the whole host was stalled.
+- **1-5 s:** 76 of 81 FAULT stalls and 25 of 31 SQL stalls also met it.
+
+The first count's overlap can no longer be computed.
 
 Even the SQL-class stalls were mostly not slow queries. From 2026-11-04 06:35Z to 11-10 01:00Z, 38 stalls of 1 s or more were SQL-class. The test, fixed before counting, was "blocked" (on CPU under 50% of the SQL time) against "ran" (50% or more):
 - **Blocked:** 38 of 38. The on-CPU share was at most 35%, median 1%.
@@ -101,7 +107,7 @@ Event loop stall: 16207ms late (tick took 17207ms, …); main-thread SQL in that
 
 - **The class misleads here.** SQL is 9,472 of 17,207 ms, so this counts as SQL-class.
 - **The thread barely ran.** It ran 342 ms in the whole tick, 4% of the SQL time, and was off CPU for 16,818 ms.
-- **Faults don't explain it.** 32 major faults can't account for 16.8 s.
+- **The fault count doesn't decide it.** 32 is under the classifier's 50, and a count says how many faults there were, not how long each one waited.
 - **The whole host stalled.** Every task on the host was stalled on io for 9,230 ms and on memory for 3,886 ms, 76% of the tick together.
 
 Verdict: a whole-host stall, with the lookup as a bystander. At that moment a coding agent's tool processes on the same host held about 68 GiB of swap, and the kernel logged an out-of-memory report for their cgroup at 23:41:12Z.
