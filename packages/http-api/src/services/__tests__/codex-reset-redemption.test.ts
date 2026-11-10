@@ -242,13 +242,55 @@ describe("CodexResetRedemptionService", () => {
 			expect(dispatches).toHaveLength(0);
 		});
 
-		it("answers not_applicable when no reset applies right now (AE2)", async () => {
+		it("sends when OpenAI counts none of the held resets as applying, as the Codex CLI does (#772)", async () => {
 			await seedCounts(2, 0);
+			await credits().insertCreditIfAbsent(creditRow("only", START + 5 * DAY));
+			nextDispatch = async () => answered("nothing_to_reset", 0);
+			cachedAvailable = 2;
+
+			const result = await service.redeem(ACCOUNT, "req-1");
+
+			expect(result.status).toBe(200);
+			expect(result.body).toMatchObject({
+				state: "done",
+				outcome: "nothing_to_reset",
+				spend: "not_spent",
+				availableBefore: 2,
+				availableAfter: 2,
+			});
+			expect(dispatches).toEqual([
+				{
+					accountId: ACCOUNT,
+					request: { redeemRequestId: "req-1", creditId: "only" },
+				},
+			]);
+		});
+
+		it("sends when OpenAI omits the applicable count", async () => {
+			await seedCounts(2, null);
+			const result = await service.redeem(ACCOUNT, "req-1");
+			expect(result.status).toBe(200);
+			expect(dispatches).toHaveLength(1);
+		});
+
+		it("answers none_held and sends nothing on a fresh count of zero or unknown resets", async () => {
+			for (const [index, available] of [0, null].entries()) {
+				const requestId = `req-none-${index}`;
+				await seedCounts(available, available === null ? null : 0);
+				const result = await service.redeem(ACCOUNT, requestId);
+				expect(result.status).toBe(409);
+				expect(result.body).toMatchObject({ reason: "none_held" });
+				expect(await redemptions().findByRequestId(requestId)).toBeNull();
+			}
+			expect(dispatches).toHaveLength(0);
+		});
+
+		it("still answers none_held when OpenAI's applicable count disagrees with a zero count", async () => {
+			await seedCounts(0, 1);
 			const result = await service.redeem(ACCOUNT, "req-1");
 			expect(result.status).toBe(409);
-			expect(result.body).toMatchObject({ reason: "not_applicable" });
+			expect(result.body).toMatchObject({ reason: "none_held" });
 			expect(dispatches).toHaveLength(0);
-			expect(await redemptions().findByRequestId("req-1")).toBeNull();
 		});
 
 		it("answers 503 not_sent without opening a row when no redeemer is registered", async () => {

@@ -140,14 +140,14 @@ export function describeRedeemAnswer(
 				"An earlier request on this account has not finished. Trying again finishes that request instead of starting a new one.",
 				true,
 			);
-		case "not_applicable":
+		case "none_held":
 			return errorView(
-				"OpenAI says a reset would not help this account right now. Nothing was sent.",
+				"OpenAI reports no banked reset on this account. Nothing was sent.",
 				false,
 			);
 		case "counts_stale":
 			return errorView(
-				"The banked-reset count is too old to tell whether a reset would help. Nothing was sent. Refresh usage, then try again.",
+				"The banked-reset count is too old to rely on. Nothing was sent. Refresh usage, then try again.",
 				true,
 			);
 		case "request_conflict":
@@ -186,13 +186,15 @@ export interface ResetActionAvailability {
 
 /**
  * Whether the account card offers Use reset (R8). It is shown whenever the
- * account holds a reset, and enabled only on a fresh count where OpenAI says
- * one would work, which is when the router would send it.
+ * account holds a reset, and enabled on any fresh count, which is when the
+ * router would send it. OpenAI's applicable count does not gate it: the
+ * Codex CLI offers Redeem reset on the held count alone, and OpenAI decides
+ * what a consume resets (#772).
  */
 export function resetActionAvailability(
 	resets: BankedResets,
 ): ResetActionAvailability {
-	// The same test as bankedResetsRowState's "usable" and "not_usable" kinds.
+	// The same test as bankedResetsRowState's "applicable" and "not_applicable" kinds.
 	const holdsResets =
 		resets.tracked &&
 		resets.availableCount !== null &&
@@ -205,7 +207,18 @@ export function resetActionAvailability(
 			note: "Use reset needs a fresh count.",
 		};
 	}
-	return { shown: true, enabled: resets.appliesNow, note: null };
+	return { shown: true, enabled: true, note: null };
+}
+
+/**
+ * What OpenAI said about whether a reset would help, when it did not say
+ * one would. Null when OpenAI counts a held reset as applying now.
+ */
+export function applicabilitySentence(resets: BankedResets): string | null {
+	if (resets.appliesNow) return null;
+	return resets.applicableCount === null
+		? "OpenAI did not say whether a reset would help this account right now."
+		: "OpenAI does not expect a reset to help this account right now.";
 }
 
 export interface ResetWindow {

@@ -214,7 +214,9 @@ capacity.
 OpenAI calls it a rate limit reset credit. Redeeming one resets the Codex 5-hour window and,
 on Pro, the weekly window, and moves the weekly reset date to about 7 days after redemption.
 Each credit expires 30 days after its grant, and OpenAI reports per account whether one
-applies right now. Credits arrive in grant waves that reach many accounts within minutes.
+applies right now. That report is advice, not a gate: the Codex CLI and the router's Use reset
+both redeem on the held count alone. Credits arrive in grant waves that reach many accounts
+within minutes.
 
 A redemption rolls the windows over early, so the usage-window ledger cannot tell it from a
 provider's own early reset (shown as a "bonus reset") unless the redemption is recorded.

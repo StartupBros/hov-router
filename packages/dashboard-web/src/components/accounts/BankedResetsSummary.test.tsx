@@ -116,22 +116,22 @@ describe("BankedResetsSummary", () => {
 		);
 	});
 
-	it("lists the accounts OpenAI says can use a reset now", () => {
+	it("lists the accounts OpenAI says a reset would help now", () => {
 		const html = render(
 			summary({
 				appliesNow: [usable("codex-pro-1", 2), usable("codex-pro-2", 1, true)],
 			}),
 		);
 		const visible = text(html);
-		expect(visible).toContain("Usable now, per OpenAI:");
-		expect(visible).toContain("codex-pro-1 (2 usable)");
-		expect(visible).toContain("codex-pro-2 (1 usable)");
+		expect(visible).toContain("Would help now, per OpenAI:");
+		expect(visible).toContain("codex-pro-1 (2 would help)");
+		expect(visible).toContain("codex-pro-2 (1 would help)");
 		expect(visible).toContain("last known");
 		expect(html).not.toContain("text-amber-600");
-		expect(visible).not.toContain("OpenAI reports no reset");
+		expect(visible).not.toContain("does not expect a reset");
 	});
 
-	it("hedges the usable label when every listed account is stale", () => {
+	it("hedges the would-help label when every listed account is stale", () => {
 		const visible = text(
 			render(
 				summary({
@@ -140,20 +140,22 @@ describe("BankedResetsSummary", () => {
 				}),
 			),
 		);
-		expect(visible).toContain("Usable at last check, per OpenAI:");
-		expect(visible).not.toContain("Usable now, per OpenAI:");
+		expect(visible).toContain("Would help at last check, per OpenAI:");
+		expect(visible).not.toContain("Would help now, per OpenAI:");
 	});
 
-	it("says OpenAI reports nothing usable when no account is listed", () => {
-		expect(text(render(summary()))).toContain(
-			"OpenAI reports no reset can be used on any account right now.",
+	it("relays that OpenAI expects no reset to help, without calling the resets unusable (#772)", () => {
+		const visible = text(render(summary()));
+		expect(visible).toContain(
+			"OpenAI does not expect a reset to help on any account right now.",
 		);
+		expect(visible).not.toMatch(/usable|can be used/i);
 	});
 
 	it("reports the last check, not the present, when values are stale", () => {
 		const visible = text(render(summary({ anyStale: true })));
 		expect(visible).toContain(
-			"At last check, OpenAI reported no reset usable on any account.",
+			"At last check, OpenAI did not expect a reset to help on any account.",
 		);
 		expect(visible).not.toContain("right now");
 		expect(visible).toContain("Includes last known values");
@@ -162,11 +164,11 @@ describe("BankedResetsSummary", () => {
 		);
 	});
 
-	it("says no resets are held and offers no usable line or how-to at zero", () => {
+	it("says no resets are held and offers no would-help line or how-to at zero", () => {
 		const html = render(summary({ totalAvailable: 0, soonestExpiresAt: null }));
 		const visible = text(html);
 		expect(visible).toContain("No banked resets held.");
-		expect(visible).not.toContain("OpenAI reports no reset");
+		expect(visible).not.toContain("does not expect a reset");
 		expect(howto(html)).toBeNull();
 	});
 
