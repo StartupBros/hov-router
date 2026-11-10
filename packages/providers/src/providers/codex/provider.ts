@@ -6,7 +6,6 @@ import {
 	getGitSha,
 	getModelFamily,
 	getOAuthErrorCode,
-	getOAuthErrorCodeCandidates,
 	getOAuthErrorCodeLabel,
 	isForceAccountModelEnabled,
 	MAX_OAUTH_ERROR_INPUT_LENGTH,
@@ -186,6 +185,8 @@ function hasCustomToolCallEvent(sseText: string): boolean {
 
 const TOKEN_URL = "https://auth.openai.com/oauth/token";
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+/** RFC 6749 §5.2 codes that reject the OAuth client, not the refresh token. */
+const CLIENT_REJECTION_CODE = /\b(?:invalid_client|unauthorized_client)\b/i;
 export const CODEX_DEFAULT_ENDPOINT =
 	"https://chatgpt.com/backend-api/codex/responses";
 // The compiled compatibility constants are re-exported from client-identity.
@@ -2411,9 +2412,6 @@ export class CodexProvider extends BaseProvider {
 			const errorCode = bodyComplete
 				? getOAuthErrorCode(errorData) || getExactOAuthErrorCode(responseText)
 				: "";
-			const candidates = bodyComplete
-				? getOAuthErrorCodeCandidates(responseText)
-				: [];
 			// OpenAI's own code, for the log only. The IdP controls this body and
 			// may echo what we sent, so a label found inside the attempted refresh
 			// token is dropped, and the free-text description is never logged.
@@ -2429,10 +2427,12 @@ export class CodexProvider extends BaseProvider {
 			// refresh token is dead and only a new sign-in recovers it. A known
 			// refresh-token code means the same at any status. A 401 that rejects
 			// the client rather than the grant (RFC 6749 §5.2) is a router
-			// misconfiguration, not a dead login, so it never quarantines.
-			const clientRejected = candidates.some(
-				(code) => code === "invalid_client" || code === "unauthorized_client",
-			);
+			// misconfiguration, not a dead login, so it never quarantines. The
+			// client codes are matched as whole words anywhere in the body, so a
+			// non-standard shape such as `error=invalid_client` still counts. The
+			// match only exempts and never reaches the log line.
+			const clientRejected =
+				bodyComplete && CLIENT_REJECTION_CODE.test(responseText);
 			if (
 				errorCode ||
 				(response.status === 401 && bodyComplete && !clientRejected)

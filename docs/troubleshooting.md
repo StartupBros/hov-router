@@ -80,7 +80,7 @@ This guide helps you diagnose and resolve common issues with HoV Router (formerl
 **Solutions**:
 1. Check if the refresh token was revoked in your Anthropic console
 2. Verify the CLIENT_ID environment variable matches your OAuth app
-3. Re-authenticate the account, which keeps its settings and history (see [Re-authenticating an account](oauth-reauthentication.md)). A refresh the provider refused has already paused the account with reason `oauth_invalid_grant`, and a successful re-login lifts that pause.
+3. Re-authenticate the account, which keeps its settings and history (see [Re-authenticating an account](oauth-reauthentication.md)). If the provider refused the refresh as a dead login, the account is already paused with reason `oauth_invalid_grant`, and a successful re-login lifts that pause.
 4. Check for multiple simultaneous refresh attempts in logs
 
 ## Rate Limiting Issues

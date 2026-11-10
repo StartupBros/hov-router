@@ -39,7 +39,6 @@ export {
 	formatOAuthErrorMessage,
 	getExactOAuthErrorCode,
 	getOAuthErrorCode,
-	getOAuthErrorCodeCandidates,
 	getOAuthErrorCodeLabel,
 	isExactInvalidGrantMessage,
 	isInvalidGrantMessage,

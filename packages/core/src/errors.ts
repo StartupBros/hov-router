@@ -228,17 +228,6 @@ function codeFieldValues(input: unknown): string[] {
 	return values;
 }
 
-/**
- * Every machine-code value in an OAuth error, lowercased, deduplicated and in
- * precedence order: the structured code fields of a JSON body, or the whole
- * text of a non-JSON body. Unlike `getOAuthErrorCode` this does not filter to
- * the terminal codes, so a caller can recognize other codes such as
- * `invalid_client`. Returns nothing for an oversized body.
- */
-export function getOAuthErrorCodeCandidates(input: unknown): string[] {
-	return codeFieldValues(input).map((value) => value.toLowerCase());
-}
-
 const LOGGABLE_OAUTH_CODE = /^[a-z][a-z0-9_]{1,39}$/;
 
 /**

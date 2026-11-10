@@ -287,17 +287,48 @@ describe("CodexProvider.refreshToken treats a refused refresh as needing re-logi
 		}
 	}
 
-	for (const body of [
-		{ error: "invalid_client" },
-		{ error: { code: "unauthorized_client" } },
-		{ error: "something", code: "invalid_client" },
-	]) {
+	for (const [body, logged] of [
+		[{ error: "invalid_client" }, " invalid_client"],
+		[{ error: { code: "unauthorized_client" } }, " unauthorized_client"],
+		[{ error: { type: "invalid_client" } }, " invalid_client"],
+		[{ error: "something", code: "invalid_client" }, " invalid_client"],
+		[{ errors: [{ code: "invalid_client" }] }, ""],
+	] as const) {
 		it(`does not pause a 401 that rejects the client: ${JSON.stringify(body)}`, async () => {
 			const error = await refreshError(json(body, 401));
 			expect(error).toBeInstanceOf(Error);
 			expect(error).not.toBeInstanceOf(OAuthRefreshTokenError);
+			expect(error.message).toBe(
+				`Failed to refresh Codex token for account codex-test: HTTP 401${logged}`,
+			);
 		});
 	}
+
+	for (const [text, logged] of [
+		["invalid_client", " invalid_client"],
+		[" Unauthorized_Client \n", ""],
+		["error=invalid_client&error_description=bad+secret", ""],
+		["<html><body>401 unauthorized_client</body></html>", ""],
+	] as const) {
+		it(`does not pause a non-JSON 401 that rejects the client: ${JSON.stringify(text)}`, async () => {
+			const error = await refreshError(new Response(text, { status: 401 }));
+			expect(error).not.toBeInstanceOf(OAuthRefreshTokenError);
+			expect(error.message).toBe(
+				`Failed to refresh Codex token for account codex-test: HTTP 401${logged}`,
+			);
+		});
+	}
+
+	it("still pauses a 401 whose body has invalid_client only inside a longer word", async () => {
+		const error = await refreshError(
+			json(
+				{ error: { code: "token_revoked", hint: "not_invalid_client" } },
+				401,
+			),
+		);
+		expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+		expect(error.message).toContain("HTTP 401 token_revoked.");
+	});
 
 	it("lets a listed refresh-token code win over a client-rejection field", async () => {
 		const error = await refreshError(

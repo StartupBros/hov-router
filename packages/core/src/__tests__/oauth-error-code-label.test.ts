@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
 	getOAuthErrorCode,
-	getOAuthErrorCodeCandidates,
 	getOAuthErrorCodeLabel,
 	OAuthRefreshTokenError,
 } from "../errors";
@@ -22,50 +21,41 @@ describe("terminal refresh codes", () => {
 	});
 });
 
-describe("getOAuthErrorCodeCandidates", () => {
-	it("returns every machine-code field in precedence order", () => {
+describe("getOAuthErrorCodeLabel", () => {
+	it("reads the nested code before the root code", () => {
 		expect(
-			getOAuthErrorCodeCandidates(
+			getOAuthErrorCodeLabel(
 				JSON.stringify({
 					error: { code: "nested_code", type: "nested_type" },
 					code: "root_code",
 				}),
 			),
-		).toEqual(["nested_code", "nested_type", "root_code"]);
+		).toBe("nested_code");
 	});
 
-	it("reads a flat RFC 6749 error string", () => {
+	it("reads a flat RFC 6749 error string, never its description", () => {
 		expect(
-			getOAuthErrorCodeCandidates({
+			getOAuthErrorCodeLabel({
 				error: "invalid_client",
-				error_description: "Client authentication failed",
+				error_description: "client_authentication_failed",
 			}),
-		).toEqual(["invalid_client"]);
-	});
-
-	it("treats a non-JSON body as one candidate", () => {
-		expect(getOAuthErrorCodeCandidates(" Unauthorized_Client \n")).toEqual([
-			"unauthorized_client",
-		]);
-	});
-
-	it("never returns description text", () => {
+		).toBe("invalid_client");
 		expect(
-			getOAuthErrorCodeCandidates({
+			getOAuthErrorCodeLabel({
 				error: { message: "invalid_client mentioned in prose" },
 			}),
-		).toEqual([]);
+		).toBe("");
 	});
 
-	it("returns nothing for an empty or oversized body", () => {
-		expect(getOAuthErrorCodeCandidates("")).toEqual([]);
-		expect(getOAuthErrorCodeCandidates(`"${"a".repeat(70 * 1024)}"`)).toEqual(
-			[],
-		);
+	it("treats a whole non-JSON body as one value", () => {
+		expect(getOAuthErrorCodeLabel(" invalid_client \n")).toBe("invalid_client");
+		expect(getOAuthErrorCodeLabel("error=invalid_client")).toBe("");
 	});
-});
 
-describe("getOAuthErrorCodeLabel", () => {
+	it("returns nothing for an oversized body", () => {
+		expect(getOAuthErrorCodeLabel(`"${"a".repeat(70 * 1024)}"`)).toBe("");
+	});
+
 	it("returns the first code-shaped candidate", () => {
 		expect(
 			getOAuthErrorCodeLabel(

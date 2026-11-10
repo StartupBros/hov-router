@@ -14,15 +14,15 @@ A re-login is needed when the provider refuses that refresh, because the login i
 When a refresh is refused, the router:
 
 1. Pauses the account with the reason `oauth_invalid_grant`, so requests stop going to it.
-2. Marks it as needing a re-login. Its row on the dashboard's Accounts page shows a **Re-authenticate** button.
+2. Marks it as needing a re-login. For an Anthropic account with a Claude login, a Codex account or a Qwen account, its row on the dashboard's Accounts page shows a **Re-authenticate** button. Other accounts re-authenticate from the CLI (see the table below).
 3. Raises a critical "Account authentication failed" alert, `Account <name> (<provider>) requires re-authentication: <reason>`. The alert appears in the dashboard and goes to the alert webhook if one is set ([Alerts](configuration.md#alerts)).
 4. Logs the refusal with the HTTP status and, when the provider sent one, its error code. The rest of the provider's response is never logged.
 
-Other failures, such as a network error, a `5xx` or a rate limit, are not treated as a dead login. The request fails, and the next request that needs a token tries the refresh again.
+Other failures, such as a network error, a `5xx` or a rate limit, are not treated as a dead login, and the account stays unpaused. The router waits 60 seconds before it tries that account's refresh again; until then, a request that needs the account's token fails with a service-unavailable error.
 
 ## How to re-authenticate
 
-On the dashboard, open the Accounts page. An account that needs a re-login shows a **Re-authenticate** button on its row. To re-authenticate any other time, open the row's **More actions** menu (⋯) and choose **Re-authenticate…**.
+On the dashboard, open the Accounts page. An Anthropic (Claude login), Codex or Qwen account that needs a re-login shows a **Re-authenticate** button on its row. To re-authenticate one of these any other time, open the row's **More actions** menu (⋯) and choose **Re-authenticate…**. The other providers have no dashboard path; use the CLI column.
 
 | Provider | Dashboard | CLI |
 |---|---|---|
