@@ -87,7 +87,7 @@ There is no PostgreSQL-to-SQLite migration tool, so option 2 starts with an empt
   - `CCFLARE_CODEX_TURN_STATE_*`, removed with the turn-state replay;
   - the cache-key and pacing experiment variables, starting with `CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT`.
 
-At startup the server logs one warning naming each Codex variable that is still set, without its value. [Configuration](configuration.md) lists every name.
+Release 5.0.0 logs one startup warning naming each Codex variable that is still set, without its value. Later releases drop that warning and ignore the variables without logging anything. [Configuration](configuration.md) lists every name.
 
 ## Manual source updates
 
