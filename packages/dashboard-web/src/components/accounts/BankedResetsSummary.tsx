@@ -68,9 +68,9 @@ export function BankedResetsSummary({
 	now?: number;
 }) {
 	if (!summary || summary.trackedAccounts === 0) return null;
-	const { totalAvailable, soonestExpiresAt, appliesNow, anyStale } = summary;
-	const allApplicableStale =
-		appliesNow.length > 0 && appliesNow.every((entry) => entry.stale);
+	// OpenAI's per-account applicable count (summary.appliesNow) stays in the
+	// API but is not shown: it predicts nothing about a reset working (#772).
+	const { totalAvailable, soonestExpiresAt, anyStale } = summary;
 
 	return (
 		<section
@@ -106,39 +106,6 @@ export function BankedResetsSummary({
 					"No banked resets held."
 				)}
 			</p>
-			{appliesNow.length > 0 ? (
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-					<span className="text-xs text-muted-foreground">
-						{allApplicableStale
-							? "Would help at last check, per OpenAI:"
-							: "Would help now, per OpenAI:"}
-					</span>
-					{appliesNow.map((entry) => (
-						<span key={entry.accountId} className="whitespace-nowrap">
-							<span className="font-medium">{entry.accountName}</span>{" "}
-							<span className="tabular-nums text-muted-foreground">
-								({entry.applicableCount}
-								<span className="sr-only"> would help</span>)
-							</span>
-							{entry.stale && (
-								<span
-									className={`ml-1.5 ${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
-								>
-									last known
-								</span>
-							)}
-						</span>
-					))}
-				</div>
-			) : (
-				totalAvailable > 0 && (
-					<p className="text-sm text-muted-foreground">
-						{anyStale
-							? "At last check, OpenAI did not expect a reset to help on any account."
-							: "OpenAI does not expect a reset to help on any account right now."}
-					</p>
-				)
-			)}
 			{anyStale && (
 				<p className="text-xs text-muted-foreground">
 					Some accounts have not reported recently. Their last known counts are

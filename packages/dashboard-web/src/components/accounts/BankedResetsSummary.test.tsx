@@ -11,6 +11,9 @@ import {
 const NOV_30 = Date.UTC(2026, 10, 30);
 const NOW = Date.UTC(2026, 10, 2, 18, 30);
 const BANNED = /applies now|bonus|free|claim|ready|recommended|today|you can/i;
+/** Any wording built on OpenAI's applicable count, which does not tell whether a reset will work (#772). */
+const APPLICABILITY =
+	/would help|expected to help|expect a reset|help not reported|usable|applies|applicable|would work/i;
 
 function summary(
 	overrides: Partial<BankedResetsSummaryData> = {},
@@ -25,7 +28,7 @@ function summary(
 	};
 }
 
-const usable = (name: string, count: number, stale = false) => ({
+const reported = (name: string, count: number, stale = false) => ({
 	accountId: name,
 	accountName: name,
 	applicableCount: count,
@@ -116,59 +119,48 @@ describe("BankedResetsSummary", () => {
 		);
 	});
 
-	it("lists the accounts OpenAI says a reset would help now", () => {
-		const html = render(
+	it("says nothing about OpenAI's applicable count, whatever it reads (#772)", () => {
+		const cases = [
+			summary(),
+			summary({ anyStale: true }),
 			summary({
-				appliesNow: [usable("codex-pro-1", 2), usable("codex-pro-2", 1, true)],
+				appliesNow: [
+					reported("codex-pro-1", 2),
+					reported("codex-pro-2", 1, true),
+				],
 			}),
-		);
-		const visible = text(html);
-		expect(visible).toContain("Would help now, per OpenAI:");
-		expect(visible).toContain("codex-pro-1 (2 would help)");
-		expect(visible).toContain("codex-pro-2 (1 would help)");
-		expect(visible).toContain("last known");
-		expect(html).not.toContain("text-amber-600");
-		expect(visible).not.toContain("does not expect a reset");
+			summary({
+				anyStale: true,
+				appliesNow: [reported("codex-pro-1", 2, true)],
+			}),
+			summary({ totalAvailable: 0, soonestExpiresAt: null }),
+		];
+		for (const data of cases) {
+			const visible = text(render(data));
+			expect(visible).not.toMatch(APPLICABILITY);
+			expect(visible).not.toContain("codex-pro-1");
+			expect(visible).not.toContain("per OpenAI");
+		}
 	});
 
-	it("hedges the would-help label when every listed account is stale", () => {
-		const visible = text(
-			render(
-				summary({
-					anyStale: true,
-					appliesNow: [usable("codex-pro-1", 2, true)],
-				}),
-			),
+	it("gives the same card whether or not OpenAI counts a reset as applying", () => {
+		expect(render(summary({ appliesNow: [reported("codex-pro-1", 2)] }))).toBe(
+			render(summary()),
 		);
-		expect(visible).toContain("Would help at last check, per OpenAI:");
-		expect(visible).not.toContain("Would help now, per OpenAI:");
 	});
 
-	it("relays that OpenAI expects no reset to help, without calling the resets unusable (#772)", () => {
-		const visible = text(render(summary()));
-		expect(visible).toContain(
-			"OpenAI does not expect a reset to help on any account right now.",
-		);
-		expect(visible).not.toMatch(/usable|can be used/i);
-	});
-
-	it("reports the last check, not the present, when values are stale", () => {
+	it("flags last known values when some accounts are stale", () => {
 		const visible = text(render(summary({ anyStale: true })));
-		expect(visible).toContain(
-			"At last check, OpenAI did not expect a reset to help on any account.",
-		);
-		expect(visible).not.toContain("right now");
 		expect(visible).toContain("Includes last known values");
 		expect(visible).toContain(
 			"Some accounts have not reported recently. Their last known counts are included, so the real total may differ.",
 		);
 	});
 
-	it("says no resets are held and offers no would-help line or how-to at zero", () => {
+	it("says no resets are held and offers no how-to at zero", () => {
 		const html = render(summary({ totalAvailable: 0, soonestExpiresAt: null }));
 		const visible = text(html);
 		expect(visible).toContain("No banked resets held.");
-		expect(visible).not.toContain("does not expect a reset");
 		expect(howto(html)).toBeNull();
 	});
 
@@ -181,8 +173,11 @@ describe("BankedResetsSummary", () => {
 	it("points to Use reset, with the Codex CLI as the other way, whenever resets are held, as plain text", () => {
 		const cases = [
 			summary(),
-			summary({ appliesNow: [usable("codex-pro-1", 2)] }),
-			summary({ anyStale: true, appliesNow: [usable("codex-pro-1", 2, true)] }),
+			summary({ appliesNow: [reported("codex-pro-1", 2)] }),
+			summary({
+				anyStale: true,
+				appliesNow: [reported("codex-pro-1", 2, true)],
+			}),
 		];
 		for (const data of cases) {
 			const block = howto(render(data));
@@ -205,8 +200,8 @@ describe("BankedResetsSummary", () => {
 				summary({
 					anyStale: true,
 					appliesNow: [
-						usable("codex-pro-1", 2),
-						usable("codex-pro-2", 1, true),
+						reported("codex-pro-1", 2),
+						reported("codex-pro-2", 1, true),
 					],
 				}),
 			),

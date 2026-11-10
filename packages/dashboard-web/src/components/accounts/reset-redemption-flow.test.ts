@@ -9,7 +9,6 @@ import type {
 import type { RedeemResetAnswer } from "../../lib/redeem-reset";
 import {
 	accountResetWindows,
-	applicabilitySentence,
 	describeRedeemAnswer,
 	formatWindowReset,
 	openResetFlow,
@@ -333,22 +332,14 @@ describe("resetActionAvailability (R8)", () => {
 		observedAt: NOW,
 	};
 
-	it("is enabled on a fresh count when OpenAI says a reset would help", () => {
-		expect(resetActionAvailability(held)).toEqual({
-			shown: true,
-			enabled: true,
-			note: null,
-		});
-	});
-
-	it("is enabled on a fresh count when OpenAI does not expect one to help, as the Codex CLI allows (#772)", () => {
-		for (const applicableCount of [0, null]) {
+	it("is enabled on any fresh held count, whatever OpenAI's applicable count says, as in the Codex CLI (#772)", () => {
+		for (const [applicableCount, appliesNow] of [
+			[2, true],
+			[0, false],
+			[null, false],
+		] as const) {
 			expect(
-				resetActionAvailability({
-					...held,
-					applicableCount,
-					appliesNow: false,
-				}),
+				resetActionAvailability({ ...held, applicableCount, appliesNow }),
 			).toEqual({ shown: true, enabled: true, note: null });
 		}
 	});
@@ -374,50 +365,6 @@ describe("resetActionAvailability (R8)", () => {
 			expect(resetActionAvailability(resets).shown).toBe(false);
 			expect(resetActionAvailability(resets).enabled).toBe(false);
 		}
-	});
-});
-
-describe("applicabilitySentence", () => {
-	const base: BankedResets = {
-		tracked: true,
-		availableCount: 2,
-		applicableCount: 2,
-		soonestExpiresAt: NOW + 86_400_000,
-		doesNotExpire: false,
-		appliesNow: true,
-		stale: false,
-		observedAt: NOW,
-	};
-
-	it("says nothing when OpenAI says a reset would help", () => {
-		expect(applicabilitySentence(base)).toBeNull();
-	});
-
-	it("relays OpenAI's zero as given, without guessing why or calling the reset unusable", () => {
-		const sentence = applicabilitySentence({
-			...base,
-			applicableCount: 0,
-			appliesNow: false,
-		});
-		expect(sentence).toBe(
-			"OpenAI does not expect a reset to help this account right now.",
-		);
-		expect(sentence).not.toMatch(
-			/usable|limit|plan|cooldown|window|exhausted/i,
-		);
-		expect(sentence).not.toMatch(BANNED);
-	});
-
-	it("says OpenAI did not say when the applicable count is missing", () => {
-		expect(
-			applicabilitySentence({
-				...base,
-				applicableCount: null,
-				appliesNow: false,
-			}),
-		).toBe(
-			"OpenAI did not say whether a reset would help this account right now.",
-		);
 	});
 });
 

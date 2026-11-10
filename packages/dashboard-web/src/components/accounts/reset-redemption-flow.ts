@@ -194,7 +194,7 @@ export interface ResetActionAvailability {
 export function resetActionAvailability(
 	resets: BankedResets,
 ): ResetActionAvailability {
-	// The same test as bankedResetsRowState's "applicable" and "not_applicable" kinds.
+	// The same test as bankedResetsRowState's "held" kind.
 	const holdsResets =
 		resets.tracked &&
 		resets.availableCount !== null &&
@@ -208,17 +208,6 @@ export function resetActionAvailability(
 		};
 	}
 	return { shown: true, enabled: true, note: null };
-}
-
-/**
- * What OpenAI said about whether a reset would help, when it did not say
- * one would. Null when OpenAI counts a held reset as applying now.
- */
-export function applicabilitySentence(resets: BankedResets): string | null {
-	if (resets.appliesNow) return null;
-	return resets.applicableCount === null
-		? "OpenAI did not say whether a reset would help this account right now."
-		: "OpenAI does not expect a reset to help this account right now.";
 }
 
 export interface ResetWindow {

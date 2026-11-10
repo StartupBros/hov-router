@@ -227,10 +227,9 @@ export class CodexResetRedemptionService {
 		const assessment = assessBankedResets(state, live, now);
 		if (assessment.stale) return refuse(409, "counts_stale");
 		// Like OpenAI's Codex CLI, a held reset is enough to send. OpenAI's
-		// applicable count is shown to the operator, not used as a gate: the
-		// router's own capacity fence parks accounts below the point where
-		// OpenAI would count a reset as applying, and OpenAI decides what a
-		// consume resets (#772).
+		// applicable count is not a gate: an account at its weekly limit read 0
+		// and a reset still worked, and OpenAI decides what a consume resets
+		// (#772).
 		if ((assessment.availableCount ?? 0) <= 0) {
 			return refuse(409, "none_held");
 		}
