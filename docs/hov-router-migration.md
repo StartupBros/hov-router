@@ -72,12 +72,22 @@ There is no PostgreSQL-to-SQLite migration tool, so option 2 starts with an empt
 | `POST /api/accounts/<id>/model-fallbacks` | `POST /api/accounts/<id>/model-mappings` with an array per model family, first choice first: `{"modelMappings": {"sonnet": ["model-a", "model-b"]}}`. A mapping holds at most 16 models. |
 | `GET /api/system/info` | Nothing. `GET /health` reports the running version and build SHA. |
 | `GET /api/workspaces` | `GET /api/agents`, whose `workspaces` field lists the same workspaces. For a per-workspace agent count, count its `workspaceAgents` entries by `workspace`. |
+| `POST /api/debug/cache-diagnosis` | Nothing. It ran only when `CCFLARE_CACHE_DIAG` was set. |
 
-**Fields.** Account API responses no longer include `autoRefreshEnabled`. `GET /api/config` no longer includes `default_agent_model`.
+**Fields.** Account API responses no longer include `autoRefreshEnabled`. `GET /api/config` no longer includes `default_agent_model`. For this release, `GET /api/insights/cache-parity` still reports the removed Codex levers, at fixed values: session keys, prefix sharding, settle window, pacing bypass, explicit breakpoints, turn state and WebSocket, with continuity fixed on. `GET /api/debug/cache-pacing` reports `codex_settle_ms` as `0`.
 
 **Commands.** `--get-model` and `--set-model` are gone and now exit with status 1 as unknown arguments. `--show-config` still reads the configuration file without writing it.
 
-**Settings now ignored.** A `default_agent_model` key in `better-ccflare.json` and the `DEFAULT_AGENT_MODEL` environment variable are ignored and left in place. So are the `CCFLARE_CODEX_WS_*` variables, removed with the Codex WebSocket transport; the server logs a warning naming any that are still set (see [configuration](configuration.md)).
+**Settings now ignored.** These are ignored and left in place:
+
+- a `default_agent_model` key in `better-ccflare.json` and the `DEFAULT_AGENT_MODEL` environment variable;
+- `CCFLARE_CACHE_DIAG`;
+- the Codex variables for features that are gone:
+  - `CCFLARE_CODEX_WS_*`, removed with the WebSocket transport;
+  - `CCFLARE_CODEX_TURN_STATE_*`, removed with the turn-state replay;
+  - the cache-key and pacing experiment variables, starting with `CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT`.
+
+At startup the server logs one warning naming each Codex variable that is still set, without its value. [Configuration](configuration.md) lists every name.
 
 ## Manual source updates
 
