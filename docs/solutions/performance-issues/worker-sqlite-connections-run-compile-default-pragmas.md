@@ -175,6 +175,6 @@ Notes on the inventory:
 - #624: `--serve` opens the database with the server's config (the main-connection instance).
 - #686: adapter writes commit on a writer thread that receives the main connection's pragmas through `connectionPragmas()`. Opt out with `BETTER_CCFLARE_DB_WRITER_WORKER=0` (`docs/reference.md`).
 - Upstream tombii/better-ccflare PR #231: mmap on the main connection. Its trap is recorded for the worker connection in `vacuum-worker.ts`.
-- #613 (open): the retention-backlog stall, and the source of the derived ~2.8 s per-chunk figure.
+- #613 (closed 2026-11-07; fixed by #619, deployed 2026-10-26): the retention-backlog stall, and the source of the derived ~2.8 s per-chunk figure.
 - #668: on 2026-10-28 the production vacuum worker read `auto_vacuum=0` at the database path while the main-side gate passed. The config directory had been deleted under the running backend. When it reappeared, the worker's default-flag open created an empty file at the path, while the main connection kept writing to the deleted original. Fixed by opening worker connections existing-only.
 - [verify-fix-ancestry-before-citing-a-measured-rate](../workflow-issues/verify-fix-ancestry-before-citing-a-measured-rate.md)
