@@ -145,5 +145,5 @@ An install from upstream's compose file (the one that ran `ghcr.io/tombii/better
 ## Related
 
 - [Deployment options](deployment.md), including the systemd service in [systemd](systemd.md).
-- [Release policy](hov-router-releases.md): releases here are draft-only GitHub releases of the binary; no container image is part of them.
+- [Release policy](hov-router-releases.md): releases here are GitHub releases of the Linux x86_64 binary; no container image is part of them.
 - [Acknowledgements](acknowledgements.md) for upstream credit.

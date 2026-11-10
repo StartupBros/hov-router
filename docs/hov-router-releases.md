@@ -1,6 +1,6 @@
 # HoV Router release automation (draft-only)
 
-For the current published release, 3.7.1 (Linux x86_64), follow the technical
+For the current published release, 4.0.0 (Linux x86_64), follow the technical
 reference's [consumer installation and verification instructions](reference.md#install-the-linux-x86_64-release).
 
 This is the operator guide for HoV Router release automation at
@@ -11,7 +11,8 @@ repository ID and derives the current repository name from validated metadata. H
 below intentionally keeps the old repository and signer identity.
 The automation stages a verified **draft** GitHub release. It never publishes a
 release, publishes npm packages or images, announces, installs, restarts services,
-or deploys. Public publication is a separate operator decision, and it posts a
+or deploys. The operator publishes each verified draft as it is cut, after the
+[pre-publish checks](#publishing-a-verified-draft), and publishing posts a
 [tool-drops announcement](#publishing-announces-the-release); the consumer
 instructions above do not use the draft-only automation helpers.
 
@@ -28,22 +29,22 @@ Attestation lookup may require your existing GitHub CLI authentication. If a too
 flag, authentication, or verification step fails, stop and resolve it; do not treat
 an incomplete provenance check as successful.
 
-Release 3.7.1 was built and signed in this repository under its current name, so
+Release 4.0.0 was built and signed in this repository under its current name, so
 it is retrieved from and verified against the same repository, `StartupBros/hov-router`.
 
 <!-- router-release-provenance -->
 ```bash
 (
   set -eu
-  binary="$HOME/.local/lib/hov-router/3.7.1/hov-router"
-  source_sha=6b88f789e30c3a86ee918d35a6673e7be12f9243
-  digest=f6e6ee137d0766eb6df9d6c76d264603e9696c12797e1570b8ad6b9648d0b12c
+  binary="$HOME/.local/lib/hov-router/4.0.0/hov-router"
+  source_sha=8009109dad34843e8b456bfc15dac80aee2ba47c
+  digest=bf9d57f4a2ddd0e8f9b4cf98926f073986a70ed2185f6194315c0ef6c2d1e2ed
   printf '%s  %s\n' "$digest" "$binary" | sha256sum --check --strict -
   gh attestation verify "$binary" \
     --repo StartupBros/hov-router \
     --source-digest "$source_sha" \
-    --source-ref refs/tags/v3.7.1 \
-    --cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.1 \
+    --source-ref refs/tags/v4.0.0 \
+    --cert-identity https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v4.0.0 \
     --signer-digest "$source_sha" \
     --deny-self-hosted-runners
 )
@@ -62,9 +63,34 @@ release auditing; neither is required by the consumer install above. The operato
 pipeline below still verifies the complete inventory and both attestations before
 executing release smoke checks. Its strict verification policy is unchanged.
 
-Release ID **423574844** and tag `refs/tags/v3.7.1` identify source commit
-`6b88f789e30c3a86ee918d35a6673e7be12f9243`. The exact certificate is
-`https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v3.7.1`.
+Release ID **434700374** and tag `refs/tags/v4.0.0` identify source commit
+`8009109dad34843e8b456bfc15dac80aee2ba47c`. The exact certificate is
+`https://github.com/StartupBros/hov-router/.github/workflows/router-release-artifacts.yml@refs/tags/v4.0.0`.
+
+| 4.0.0 asset | Asset ID | Size (bytes) | SHA-256 |
+| --- | --- | --- | --- |
+| `better-ccflare-linux-amd64` | 711782874 | 98137568 | `bf9d57f4a2ddd0e8f9b4cf98926f073986a70ed2185f6194315c0ef6c2d1e2ed` |
+| `release-manifest.json` | 711783548 | 805 | `7e436b91a3ec832842c388c612a6e01eb23f31dd3e642debb5217cdb2030a86a` |
+| `SHA256SUMS` | 711782351 | 93 | `1ca6120dc0de822202825d2556643e852ee1f005b5b5f077c957d3bda58be2ae` |
+
+For a manifest audit, download `release-manifest.json` from the v4.0.0 release,
+check its digest above, then run the same verify command with `binary` set to that
+local manifest and `digest` set to its SHA-256. The signed manifest names repository
+`StartupBros/hov-router`. Its distribution token is
+`v1:startupbros-hov-router-binary`, with `actionable: false` and
+`updateChannel: null`. Releases 3.6.2 through 3.7.1 carry
+`v1:startupbros-wstack-router-binary` instead, an operational name that predates
+HoV Router, with the same fields. Rebuilding one of those releases reproduces its
+original token.
+
+### Verify release 3.7.1
+
+Release 3.7.1 is the last release that supports PostgreSQL (see
+[PostgreSQL support removed](hov-router-migration.md#postgresql-support-removed)).
+It was signed under this repository's current name, so the block above verifies it
+once `4.0.0` becomes `3.7.1` in the binary path and both tag refs, with
+`source_sha` and `digest` set from this release. Release ID **423574844** and tag
+`refs/tags/v3.7.1` identify source commit `6b88f789e30c3a86ee918d35a6673e7be12f9243`.
 
 | 3.7.1 asset | Asset ID | Size (bytes) | SHA-256 |
 | --- | --- | --- | --- |
@@ -72,14 +98,8 @@ Release ID **423574844** and tag `refs/tags/v3.7.1` identify source commit
 | `release-manifest.json` | 675765600 | 811 | `5e88ab1d8376fe783da736003c40f34a0207db4c71be5f6a5c328d1c30881d0c` |
 | `SHA256SUMS` | 675764852 | 93 | `923d6041201ba6ade61ff3dcd2ec200970475076ae7b9af261058211394545e5` |
 
-For a manifest audit, download `release-manifest.json` from the v3.7.1 release,
-check its digest above, then run the same verify command with `binary` set to that
-local manifest and `digest` set to its SHA-256. The signed manifest names repository
-`StartupBros/hov-router`. Its distribution token is
-`v1:startupbros-wstack-router-binary`, an operational name that predates HoV Router,
-with `actionable: false` and `updateChannel: null`. Releases 3.6.2 through 3.7.1
-carry that token; later releases carry `v1:startupbros-hov-router-binary` with the
-same fields. Rebuilding one of the earlier releases reproduces its original token.
+To install it, use the reference's install block the same way: `3.7.1` in place of
+`4.0.0` in the version directory and download URL, and the binary's digest above.
 
 ### Verify the historical 3.6.2 release
 
@@ -292,6 +312,29 @@ The coordinator processes every validated pending candidate. Its concurrency gro
 is separate from the artifact workflow's per-tag groups. All use
 `cancel-in-progress: false`: staging for the same tag is serialized, while distinct
 release tags do not replace each other's pending runs.
+
+## Publishing a verified draft
+
+The automation stops at a verified draft. The operator publishes each one as it
+is cut (a standing decision since 2026-11-10), after these checks:
+
+1. The coordinator run and the tag's artifact run both succeeded.
+2. The draft's tag is `vX.Y.Z` at the release PR's merge commit, and the tag ref
+   points at that commit.
+3. The draft holds exactly the three assets listed under
+   [Fixed inventory and provenance](#fixed-inventory-and-provenance), and the
+   binary's SHA-256 matches both `SHA256SUMS` and `release-manifest.json`.
+4. The body opens with a short summary and a `## Highlights` list (see the next
+   section), and tells upgraders what to do about any breaking change.
+
+When editing a draft's body through the API, send `tag_name` and
+`target_commitish` with the new body: a body-only update resets a draft's tag to
+`untagged-…`. After publishing, check that `releases/latest` names the new
+release, that the tag ref is unchanged, and that the
+[announce run](#publishing-announces-the-release) succeeded. Then repoint the
+current-release pins in the [install reference](reference.md#install-the-linux-x86_64-release),
+this guide, the migration guide and the README, together with
+`apps/cli/__tests__/binary-install.test.ts`.
 
 ## Publishing announces the release
 

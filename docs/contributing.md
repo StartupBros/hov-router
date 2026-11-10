@@ -656,11 +656,11 @@ We use semantic versioning (SemVer):
 
 ### Release Workflow
 
-Releases are automated and draft-only. Never edit a version number, write `CHANGELOG.md` entries or push a release tag by hand.
+Release-please drafts each release, and nothing publishes one automatically. Never edit a version number, write `CHANGELOG.md` entries or push a release tag by hand.
 
 1. Give each commit a conventional prefix (see [Commit Message Format](#commit-message-format)). The prefix decides the next version: `fix:` gives a patch, `feat:` a minor, and `!` or a `BREAKING CHANGE` footer a major. `docs:`, `chore:`, `test:` and `style:` alone produce no release.
 2. After the foundation gate passes on `main`, release-please keeps one release pull request open with the next version and its `CHANGELOG.md` entries.
-3. Merging that pull request tags the release and stages a verified **draft** GitHub release. Publishing the draft is a separate maintainer decision.
+3. Merging that pull request tags the release and stages a verified **draft** GitHub release. The operator publishes each verified draft as it is cut, after the [pre-publish checks](hov-router-releases.md#publishing-a-verified-draft).
 
 The full policy is in [HoV Router release automation](hov-router-releases.md).
 
