@@ -269,11 +269,29 @@ describe("AlertService pricing catalogue watch", () => {
 			"model_routing_drift:catalog_new_model:13:claude-opus-6:registry",
 		]);
 
-		// The next refresh sees the same gaps and adds no rows.
+		// The next refresh restates those gaps, which add no rows, and lists one
+		// more model, whose gaps do: the watch evaluates every load.
+		serveCatalogue({
+			anthropic: {
+				models: {
+					...freshOpus.anthropic.models,
+					"claude-sonnet-6": {
+						...freshOpus.anthropic.models["claude-opus-6"],
+						id: "claude-sonnet-6",
+						name: "Claude Sonnet 6",
+					},
+				},
+			},
+		});
 		resetNanoGPTPricingCacheForTest();
 		await warmPricingCatalog();
 		await service.pricingCatalogSettled();
-		expect(await service.listAlerts()).toHaveLength(3);
+		expect((await service.listAlerts()).map((a) => a.id).sort()).toEqual([
+			...ids,
+			"model_routing_drift:catalog_new_model:15:claude-sonnet-6:auto_line",
+			"model_routing_drift:catalog_new_model:15:claude-sonnet-6:era",
+			"model_routing_drift:catalog_new_model:15:claude-sonnet-6:registry",
+		]);
 	});
 
 	it("evaluates a catalogue that loaded before the watch started", async () => {

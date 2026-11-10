@@ -1922,7 +1922,7 @@ describe("UsageCollector request lifecycle", () => {
 
 			it("marks billing incomplete when advisor entries overflow the retained limit", async () => {
 				useDeterministicModelPricing();
-				const { collector, savedUsages } = harness();
+				const { collector, savedUsages, summaryDetails } = harness();
 				const requestId = "stream-advisor-overflow";
 				const advisorLogs = captureAdvisorLogs();
 				// The two entries past the retained limit name their own model.
@@ -1982,13 +1982,19 @@ describe("UsageCollector request lifecycle", () => {
 						cacheCreationInputTokens: 0,
 					},
 				]);
+				// The live summary names each advisor model once, for the
+				// unknown-model drift alert (#774).
+				expect(
+					summaryDetails.find((summary) => summary.id === requestId)
+						?.advisorModels,
+				).toEqual([HAIKU_MODEL, OPUS_MODEL]);
 			});
 
 			it("folds advisor models past the distinct-model limit into the unpriced entry", async () => {
 				useDeterministicModelPricing();
 				modelPricedImplementation = async (model) =>
 					!model.startsWith("advisor-limit-");
-				const { collector, savedUsages } = harness();
+				const { collector, savedUsages, summaryDetails } = harness();
 				const requestId = "stream-advisor-model-limit";
 				const advisorEntries = Array.from({ length: 18 }, (_, index) => ({
 					type: "advisor_message",
@@ -2024,6 +2030,13 @@ describe("UsageCollector request lifecycle", () => {
 						...tokens(index + 1),
 					})),
 				]);
+				// The model-less entry names no model, so it is not listed.
+				expect(
+					summaryDetails.find((summary) => summary.id === requestId)
+						?.advisorModels,
+				).toEqual(
+					Array.from({ length: 16 }, (_, index) => `advisor-limit-${index}`),
+				);
 			});
 
 			it("marks billing incomplete and keeps the executor cost when advisor pricing misses the deadline", async () => {

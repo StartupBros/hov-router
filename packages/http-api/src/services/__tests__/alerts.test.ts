@@ -18,6 +18,7 @@ import {
 	buildStalePolicyDriftAlert,
 	buildThresholdAlertId,
 	buildUnknownModelDriftAlert,
+	buildUnknownModelDriftAlerts,
 	buildUsageWindowAlertId,
 	shouldFireAlert,
 } from "../alerts";
@@ -458,6 +459,121 @@ describe("model_routing_drift: unknown_model (day-0 catalog gap)", () => {
 		expect(
 			buildUnknownModelDriftAlert(request, CONFIG, DRIFT_TIMESTAMP),
 		).toBeNull();
+	});
+
+	test("fires for an unknown served model when the requested one is known", () => {
+		const alerts = buildUnknownModelDriftAlerts(
+			baseRequest({
+				originalModel: CLAUDE_MODEL_IDS.OPUS_5,
+				model: "claude-opus-6",
+			}),
+			CONFIG,
+			DRIFT_TIMESTAMP,
+		);
+		expect(alerts).toHaveLength(1);
+		const [alert] = alerts as [AlertEvent];
+		expect(alert.model).toBe("claude-opus-6");
+		expect(alert.message).toContain(
+			"responses report claude-opus-6 (family opus)",
+		);
+		expect(alert.message).toContain(
+			"bump CLAUDE_MODEL_IDS/LATEST_* in packages/core/src/models.ts and deploy",
+		);
+	});
+
+	test("fires for an unknown advisor model on an otherwise known request", () => {
+		// The 2026-11-09 case: the Claude Code advisor called a new Fable model
+		// before it was registered, and its cost went unrecorded.
+		const request = baseRequest({
+			model: CLAUDE_MODEL_IDS.OPUS_5,
+			advisorModels: ["claude-fable-6"],
+		});
+		const alerts = buildUnknownModelDriftAlerts(
+			request,
+			CONFIG,
+			DRIFT_TIMESTAMP,
+		);
+		expect(alerts.map((a) => a.model)).toEqual(["claude-fable-6"]);
+		expect(alerts[0]?.message).toContain(
+			"advisor calls use claude-fable-6 (family fable)",
+		);
+		expect(
+			buildModelRoutingDriftAlerts(request, CONFIG, DRIFT_TIMESTAMP).map(
+				(a) => a.id,
+			),
+		).toEqual(alerts.map((a) => a.id));
+	});
+
+	test("reports one alert per family across requested, served and advisor models", () => {
+		const alerts = buildUnknownModelDriftAlerts(
+			baseRequest({
+				originalModel: "claude-opus-6",
+				model: "claude-opus-6-preview",
+				advisorModels: ["claude-fable-6", "claude-fable-6"],
+			}),
+			CONFIG,
+			DRIFT_TIMESTAMP,
+		);
+		expect(alerts.map((a) => [a.model, a.id])).toEqual([
+			[
+				"claude-opus-6",
+				buildThresholdAlertId(
+					"model_routing_drift",
+					"unknown_model:opus",
+					DRIFT_TIMESTAMP,
+					CONFIG.cooldownMinutes,
+				),
+			],
+			[
+				"claude-fable-6",
+				buildThresholdAlertId(
+					"model_routing_drift",
+					"unknown_model:fable",
+					DRIFT_TIMESTAMP,
+					CONFIG.cooldownMinutes,
+				),
+			],
+		]);
+	});
+
+	test("fires for a Claude model in a family this build does not know", () => {
+		const alert = buildUnknownModelDriftAlert(
+			baseRequest({ model: "claude-mythos-6" }),
+			CONFIG,
+			DRIFT_TIMESTAMP,
+		) as AlertEvent;
+		expect(alert).not.toBeNull();
+		expect(alert.id).toBe(
+			buildThresholdAlertId(
+				"model_routing_drift",
+				"unknown_model:other",
+				DRIFT_TIMESTAMP,
+				CONFIG.cooldownMinutes,
+			),
+		);
+		expect(alert.message).toContain(
+			"clients are requesting claude-mythos-6, a Claude model family this build does not recognize",
+		);
+		expect(alert.message).not.toContain("family's latest model");
+	});
+
+	test("never fires for route-profile and quality-auto picker ids", () => {
+		// About 200k production requests a week carry these as originalModel;
+		// a looser shape gate would raise an hourly unknown_model:other alert.
+		for (const model of [
+			"claude-bccf-route-pro-primary-sol",
+			"claude-bccf-route-glm-5-2-bounded-v1",
+			"claude-bccf-route-codex-pool-astra",
+			"claude-bccf-quality-auto",
+		]) {
+			expect(
+				buildUnknownModelDriftAlerts(
+					baseRequest({ originalModel: model, model: CLAUDE_MODEL_IDS.OPUS_5 }),
+					CONFIG,
+					DRIFT_TIMESTAMP,
+				),
+			).toEqual([]);
+		}
 	});
 });
 

@@ -429,7 +429,12 @@ export function buildRequestTokenAlert(
 // (e.g. some unrelated identifier with "opus" inside it); this regex
 // requires the string to actually look like a `claude-<family>...` model ID
 // before we treat it as a genuine (if unrecognized) Claude model request.
-const CLAUDE_MODEL_SHAPE_RE = /^claude-(opus|sonnet|haiku|fable)(-|$)/i;
+// The second branch admits a family this build does not know yet
+// (`claude-<word>-<digit>...`, e.g. a new family's first model) while still
+// rejecting the router's own picker ids (`claude-bccf-route-*`,
+// `claude-bccf-quality-auto`), whose second word is not followed by a digit.
+const CLAUDE_MODEL_SHAPE_RE =
+	/^claude-(?:(?:opus|sonnet|haiku|fable)(?:-|$)|[a-z]+-\d)/i;
 
 /**
  * Detects the "Opus 5 incident" class of model-routing staleness: a combo
@@ -521,33 +526,94 @@ export function buildUnknownModelDriftAlert(
 	config: AlertsConfigPayload,
 	timestamp: number,
 ): AlertEvent | null {
-	const requestedModel = request.originalModel ?? request.model;
-	if (!requestedModel) return null;
-	if (!CLAUDE_MODEL_SHAPE_RE.test(requestedModel)) return null;
-	if (isValidModelId(requestedModel)) return null;
-	const family = getModelFamily(requestedModel);
-	if (!family) return null;
+	return buildUnknownModelDriftAlerts(request, config, timestamp)[0] ?? null;
+}
+
+type UnknownModelSource = "requested" | "served" | "advisor";
+
+/**
+ * Every unknown-model alert for one request summary (#774): the
+ * client-requested model (as buildUnknownModelDriftAlert always checked), the
+ * model the response reports, and each advisor model, in that order. One
+ * alert per cooldown bucket (`unknown_model:<family>`, or `other` for a
+ * family this build does not know); the first source to name a family wins.
+ */
+export function buildUnknownModelDriftAlerts(
+	request: RequestResponse,
+	config: AlertsConfigPayload,
+	timestamp: number,
+): AlertEvent[] {
+	const candidates: Array<[UnknownModelSource, string | undefined]> = [
+		["requested", request.originalModel ?? request.model],
+		["served", request.model],
+		...(request.advisorModels ?? []).map(
+			(model): [UnknownModelSource, string] => ["advisor", model],
+		),
+	];
+	const alerts = new Map<string, AlertEvent>();
+	for (const [source, model] of candidates) {
+		const alert = buildUnknownModelAlertFor(
+			source,
+			model,
+			request,
+			config,
+			timestamp,
+		);
+		if (alert && !alerts.has(alert.id)) alerts.set(alert.id, alert);
+	}
+	return [...alerts.values()];
+}
+
+function buildUnknownModelAlertFor(
+	source: UnknownModelSource,
+	model: string | undefined,
+	request: RequestResponse,
+	config: AlertsConfigPayload,
+	timestamp: number,
+): AlertEvent | null {
+	if (!model) return null;
+	if (!CLAUDE_MODEL_SHAPE_RE.test(model)) return null;
+	if (isValidModelId(model)) return null;
+	const family = getModelFamily(model);
 	const catalogGapMessage = `offline pricing, list-price eras, and pickers don't recognize it yet; bump CLAUDE_MODEL_IDS/LATEST_* in packages/core/src/models.ts and deploy`;
-	const message = isWellFormedConcreteClaudeModelId(requestedModel)
-		? `clients are requesting ${requestedModel} (family ${family}) which is missing from the bundled model catalog — a same-family bare-alias route now passes a well-formed id like this straight through instead of downgrading it, though a cross-family fallback slot or a version-pinned account can still send an older model instead; ${catalogGapMessage}`
-		: `clients are requesting ${requestedModel} (family ${family}) which is missing from the bundled model catalog and doesn't match the pass-through shape guard, so a bare-alias route can still silently rewrite it to the family's latest model; ${catalogGapMessage}`;
+	const subject =
+		source === "requested"
+			? "clients are requesting"
+			: source === "served"
+				? "responses report"
+				: "advisor calls use";
+	let message: string;
+	if (!family) {
+		message = `${subject} ${model}, a Claude model family this build does not recognize, so no family alias or Auto line can follow it; ${catalogGapMessage}`;
+	} else if (source !== "requested") {
+		message = `${subject} ${model} (family ${family}) which is missing from the bundled model catalog; ${catalogGapMessage}`;
+	} else if (isWellFormedConcreteClaudeModelId(model)) {
+		message = `${subject} ${model} (family ${family}) which is missing from the bundled model catalog — a same-family bare-alias route now passes a well-formed id like this straight through instead of downgrading it, though a cross-family fallback slot or a version-pinned account can still send an older model instead; ${catalogGapMessage}`;
+	} else {
+		message = `${subject} ${model} (family ${family}) which is missing from the bundled model catalog and doesn't match the pass-through shape guard, so a bare-alias route can still silently rewrite it to the family's latest model; ${catalogGapMessage}`;
+	}
 	return {
 		id: buildThresholdAlertId(
 			"model_routing_drift",
-			`unknown_model:${family}`,
+			`unknown_model:${family ?? "other"}`,
 			timestamp,
 			config.cooldownMinutes,
 		),
 		timestamp,
 		type: "model_routing_drift",
 		severity: "warning",
-		title: "Unknown model requested",
+		title:
+			source === "requested"
+				? "Unknown model requested"
+				: source === "served"
+					? "Unknown model served"
+					: "Unknown advisor model",
 		classification: { reason: "unknown_model" },
 		message,
 		value: null,
 		threshold: null,
 		account: request.accountUsed,
-		model: requestedModel,
+		model,
 		project: request.project ?? null,
 		requestId: request.id,
 		acknowledged: false,
@@ -568,8 +634,7 @@ export function buildModelRoutingDriftAlerts(
 	const alerts: AlertEvent[] = [];
 	const stalePolicy = buildStalePolicyDriftAlert(request, config, timestamp);
 	if (stalePolicy) alerts.push(stalePolicy);
-	const unknownModel = buildUnknownModelDriftAlert(request, config, timestamp);
-	if (unknownModel) alerts.push(unknownModel);
+	alerts.push(...buildUnknownModelDriftAlerts(request, config, timestamp));
 	return alerts;
 }
 

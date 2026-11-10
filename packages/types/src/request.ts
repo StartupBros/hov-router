@@ -881,6 +881,12 @@ export interface RequestResponse {
 	// alert, which evaluates the live event stream. Persisting it would require
 	// a SQLite migration for a field no consumer reads back.
 	comboModelOverride?: { from: string; to: string } | null;
+	// Distinct models named by the response's billable advisor iterations, so
+	// the model-routing drift alert can see an advisor on a model the bundled
+	// catalog lacks (#774). LIVE-ONLY like comboModelOverride: set on the
+	// real-time summary event, never returned by historical reads (the
+	// persisted advisor_usage column already carries the per-model tokens).
+	advisorModels?: string[];
 	// Derived from statusCode === 429 server-side so the list view can render
 	// the "Rate Limited" badge without lazy-loading the full payload.
 	rateLimited?: boolean;
