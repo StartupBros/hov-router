@@ -31,9 +31,10 @@ ExecStartPre=/opt/better-ccflare/scripts/preflight-env.sh
 ExecStart=/usr/bin/better-ccflare --smol --serve --port 8889
 
 # --- Optional resource-limit hardening example ---
-# Uncomment only after measuring this deployment under its expected load.
-# MemoryMax=3G
-# MemoryHigh=2G
+# Uncomment only after measuring this deployment under its expected load, and
+# set both memory values above its measured peak (see Resource Limits).
+# MemoryMax=<peak plus headroom>
+# MemoryHigh=<above the peak>
 # CPUQuota=200%
 
 # --- Restart policy ---
@@ -162,14 +163,33 @@ exec bun run better-ccflare --smol --serve
 
 ### Memory
 
-The live managed `ccflare-stack.service` deployment does **not** currently set `MemoryMax` or `MemoryHigh`. The following is recommended systemd hardening for operators who have measured their own process envelope; it is not a statement of the live deployment configuration:
+Limits and protection do different jobs. A limit (`MemoryMax`, `MemoryHigh`) bounds the router. Protection (`MemoryLow`) keeps the kernel from reclaiming the router's memory while something else on the host fills RAM. The live managed `ccflare-stack.service` deployment sets no limit; since 2026-11-09 it sets protection, as described below.
+
+#### Limits
+
+Measure before you set one. systemd logs a unit's peak when it stops (`journalctl -u better-ccflare | grep 'memory peak'`), and `memory.peak` in the unit's cgroup holds the peak since it started. Both include page cache. The managed deployment's unit peaked between 2.2 and 4.7 GB a run from 2026-11-04 to 2026-11-09, so no fixed number fits every deployment:
 
 ```ini
-MemoryMax=3G      # Hard kill if exceeded (OOM)
-MemoryHigh=2G     # Kernel applies memory pressure, reclaims pages
+MemoryMax=<peak plus headroom>   # hard limit: the OOM killer ends the process above it
+MemoryHigh=<above the peak>      # the kernel reclaims and throttles the process above it
 ```
 
-Set `MemoryMax` above what the process actually needs. `MemoryHigh` applies back-pressure before the hard limit. Combined with `--smol`, this can keep a measured deployment within predictable bounds.
+A `MemoryHigh` below the peak throttles the router at its busiest, so keep both values above the peak. Combined with `--smol`, this can keep a measured deployment within predictable bounds.
+
+#### Protection on a shared host
+
+The router's own limits do nothing for it when another workload on the host fills memory. The kernel then reclaims the router's pages, and its event loop stalls on the page faults that bring them back. On the managed host in November 2026, the router took 50 or more major faults in about half of its event-loop stalls of 5 seconds or more, but a recount found 67 of 68 such stalls came while the whole host was stalled on I/O, which protection does not fix (see the trade-off below, and [reading a stall line](solutions/performance-issues/read-event-loop-stall-host-fields-before-blaming-sql.md)). `MemoryLow` makes the kernel reclaim unprotected memory first. Set it on the service **and** on its slice:
+
+```sh
+sudo systemctl set-property system.slice MemoryLow=4G
+sudo systemctl set-property better-ccflare.service MemoryLow=3G
+```
+
+Both are needed because the kernel caps a cgroup's protection at what its ancestors allow ([cgroup v2, `memory.low`](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files)), and `system.slice` has none by default. On its own, the service's `MemoryLow` protects nothing. Set the service's value to about its working set under normal load. Set the slice's value to at least the sum of the `MemoryLow` values of the services in it. Unless cgroup2 is mounted with `memory_recursiveprot` (check `/proc/mounts`), a service in the slice without its own `MemoryLow` gets none of the slice's protection.
+
+`set-property` applies at once, with no restart, and writes a drop-in under `/etc/systemd/system.control/` that persists across reboots. To confirm it took, read `memory.low` in `/sys/fs/cgroup/system.slice/` and in the service's directory under it. The `low` line in the service's `memory.events` counts reclaims that reached protected memory anyway. A rising count means the protection was overrun, and the value is too small or the host has run out of unprotected memory.
+
+The trade-off is deliberate. Under pressure, the other workloads are swapped or OOM-killed sooner. Protection does not bound them, and it cannot help when the whole host stalls on swap I/O. On a host shared with coding agents, builds or batch jobs, bound those too and run an OOM daemon such as earlyoom or systemd-oomd.
 
 ### CPU
 

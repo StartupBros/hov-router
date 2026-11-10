@@ -2322,6 +2322,15 @@ export class UsageCollector {
 						to: startMessage.comboModelOverrideTo as string,
 					}
 				: null,
+			advisorModels: advisorUsage
+				? [
+						...new Set(
+							advisorUsage
+								.map((usage) => usage.model)
+								.filter((model): model is string => Boolean(model)),
+						),
+					]
+				: undefined,
 			projectAttributionSource: state.projectAttributionSource ?? undefined,
 			agentAttributionSource: state.agentAttributionSource ?? undefined,
 			clientSessionId: startMessage.clientSessionId ?? undefined,

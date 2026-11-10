@@ -8,6 +8,7 @@ import {
 	fetchNanoGPTPricingData,
 	getCachedNanoGPTPricing,
 	getCatalogModelSummaries,
+	getLoadedPricingCatalog,
 	getModelRates,
 	getPricingCatalogSnapshotSync,
 	initializeNanoGPTPricingRefresh,
@@ -16,6 +17,7 @@ import {
 	setPricingLogger,
 	stopNanoGPTPricingRefresh,
 	type TokenBreakdown,
+	warmPricingCatalog,
 } from "./pricing";
 
 /**
@@ -622,10 +624,13 @@ describe("getModelRates", () => {
 			getModelRates("claude-sonnet-5-5"),
 		);
 
+		// Cache hits are $0.10, not the standard 0.1x of input: "Cache hits and
+		// refreshes on Claude Opus 5.5 and Claude Sonnet 5.5 are priced at 0.05x
+		// the base input price" (platform.claude.com pricing page, 2026-11-10).
 		expect(rates).toEqual({
 			input: 2,
 			output: 10,
-			cacheRead: 0.2,
+			cacheRead: 0.1,
 			cacheWrite: 2.5,
 		});
 	});
@@ -943,6 +948,54 @@ describe("catalog metadata retention and synchronous accessors", () => {
 			// Second call within the cache window must serve memory, not reload.
 			await estimateCostUSD("grok-4.7", { inputTokens: 1 });
 			expect(loads.length).toBe(1);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("tells listeners which source answered and keeps that load readable", async () => {
+		global.fetch = mockModelsDevFetch({
+			xai: {
+				models: {
+					"grok-4.7": {
+						id: "grok-4.7",
+						name: "Grok 4.7",
+						cost: { input: 1, output: 1 },
+					},
+				},
+			},
+		}) as typeof global.fetch;
+
+		const sources: string[] = [];
+		const unsubscribe = onPricingCatalogLoaded((_data, source) =>
+			sources.push(source),
+		);
+		try {
+			expect(getLoadedPricingCatalog()).toBeNull();
+			await warmPricingCatalog();
+			expect(sources).toEqual(["remote"]);
+			const loaded = getLoadedPricingCatalog();
+			expect(loaded?.source).toBe("remote");
+			expect(loaded?.data.xai?.models?.["grok-4.7"]).toBeDefined();
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("labels disk-cache and bundled fallback loads", async () => {
+		global.fetch = vi.fn(() =>
+			Promise.reject(new Error("offline")),
+		) as unknown as typeof global.fetch;
+		const sources: string[] = [];
+		const unsubscribe = onPricingCatalogLoaded((_data, source) =>
+			sources.push(source),
+		);
+		try {
+			await withDiskCache({ xai: { models: {} } }, () => warmPricingCatalog());
+			resetNanoGPTPricingCacheForTest();
+			await withDiskCache(null, () => warmPricingCatalog());
+			expect(sources).toEqual(["disk", "bundled"]);
+			expect(getLoadedPricingCatalog()?.source).toBe("bundled");
 		} finally {
 			unsubscribe();
 		}

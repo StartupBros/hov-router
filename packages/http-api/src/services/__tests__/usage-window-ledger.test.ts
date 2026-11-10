@@ -107,19 +107,35 @@ async function seedAccount(
 }
 
 /** Minimal AlertService double for wiring tests below — only
- * evaluateClosedWindow is exercised by UsageWindowLedger, so nothing else
- * on the real class needs a fake. */
+ * evaluateClosedWindow and evaluateClosedWindowPricing are exercised by
+ * UsageWindowLedger, so nothing else on the real class needs a fake. */
 function fakeAlertService(
 	impl: (window: UsageWindow, accountName: string) => Promise<void>,
-): { service: AlertService; calls: Array<[UsageWindow, string]> } {
+	pricingImpl: (
+		window: UsageWindow,
+		accountName: string,
+	) => Promise<void> = async () => {},
+): {
+	service: AlertService;
+	calls: Array<[UsageWindow, string]>;
+	pricingCalls: Array<[UsageWindow, string]>;
+} {
 	const calls: Array<[UsageWindow, string]> = [];
+	const pricingCalls: Array<[UsageWindow, string]> = [];
 	const service = {
 		evaluateClosedWindow: async (window: UsageWindow, accountName: string) => {
 			calls.push([window, accountName]);
 			await impl(window, accountName);
 		},
+		evaluateClosedWindowPricing: async (
+			window: UsageWindow,
+			accountName: string,
+		) => {
+			pricingCalls.push([window, accountName]);
+			await pricingImpl(window, accountName);
+		},
 	} as unknown as AlertService;
-	return { service, calls };
+	return { service, calls, pricingCalls };
 }
 
 describe("UsageWindowLedger", () => {
@@ -619,6 +635,55 @@ describe("UsageWindowLedger alertService wiring", () => {
 		// failure — the failure isolation must not roll back or skip the close.
 		const windows = await dbOps.listUsageWindows({ accountId: ACCOUNT_ID });
 		expect(windows[0]?.closedAt).toBe(closedAt);
+	});
+
+	it("hands the closed window and account name to the unpriced-window check (#774)", async () => {
+		await seedAccount(dbOps, { id: ACCOUNT_ID, name: "Primary account" });
+		const { service, pricingCalls } = fakeAlertService(async () => {});
+		const ledger = new UsageWindowLedger(dbOps, service);
+
+		const startedAt = Date.parse("2026-08-10T00:00:00Z");
+		const closedAt = startedAt + 7 * DAY_MS;
+		const opened = await dbOps.openUsageWindow({
+			accountId: ACCOUNT_ID,
+			windowKey: "seven_day",
+			startedAt,
+			resetsAt: closedAt,
+			grantType: "natural",
+		});
+
+		await ledger.closeAndValue(opened, closedAt);
+
+		expect(pricingCalls).toHaveLength(1);
+		const [closedWindow, accountName] = pricingCalls[0];
+		expect(accountName).toBe("Primary account");
+		expect(closedWindow.id).toBe(opened.id);
+		expect(closedWindow.closedAt).toBe(closedAt);
+	});
+
+	it("still runs the value-drop check when the unpriced-window check fails", async () => {
+		await seedAccount(dbOps, { id: ACCOUNT_ID, name: "Primary account" });
+		const { service, calls, pricingCalls } = fakeAlertService(
+			async () => {},
+			async () => {
+				throw new Error("boom: pricing evaluation exploded");
+			},
+		);
+		const ledger = new UsageWindowLedger(dbOps, service);
+
+		const startedAt = Date.parse("2026-08-10T00:00:00Z");
+		const closedAt = startedAt + 7 * DAY_MS;
+		const opened = await dbOps.openUsageWindow({
+			accountId: ACCOUNT_ID,
+			windowKey: "seven_day",
+			startedAt,
+			resetsAt: closedAt,
+			grantType: "natural",
+		});
+
+		await expect(ledger.closeAndValue(opened, closedAt)).resolves.toBe(true);
+		expect(pricingCalls).toHaveLength(1);
+		expect(calls).toHaveLength(1);
 	});
 
 	it("does not require an alertService at all (backward compatible)", async () => {

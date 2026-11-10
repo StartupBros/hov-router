@@ -48,6 +48,12 @@ On `docker compose stop`, `docker stop` or an upgrade, the server stops taking n
 
 To change how long the server waits, set `CCFLARE_SHUTDOWN_DRAIN_MS` (milliseconds, up to 900000). Keep the stop grace longer than that value plus 15 seconds.
 
+## Memory
+
+The compose file limits the container to 1 GB (`deploy.resources.limits.memory`), and Docker OOM-kills a container that goes over its limit. That suits a small deployment. A busy one needs more: the managed systemd deployment peaked between 2.2 and 4.7 GB a run, page cache included. Watch `docker stats`, or the container's `memory.peak`, under your normal load and set the limit above the peak.
+
+The 256 MB `reservations.memory` does not protect the router by itself. Compose sets it as the container's `memory.low` (checked with Compose v5.4.0 on cgroup v2), but the kernel caps a cgroup's protection at what its ancestors allow, and the cgroups Docker puts containers under have none by default. To keep other workloads on the host from reclaiming the router's memory, set `MemoryLow` on every ancestor as well. With Docker's systemd cgroup driver, that is `system.slice`, or each slice above a configured `cgroup-parent`; the container's path is in `/proc/$(docker inspect -f '{{.State.Pid}}' better-ccflare)/cgroup`. [Protection on a shared host](systemd.md#protection-on-a-shared-host) explains the rule and the sizing.
+
 ## What the image contains
 
 - A two-stage build: the `oven/bun` builder (pinned to the Bun version in `.bun-version`) compiles with the same `bun run build` as a source checkout; the runtime stage is `debian:trixie-slim` (Debian 13, the current stable release) with `ca-certificates` and `curl` (for the health check) and the compiled binary.

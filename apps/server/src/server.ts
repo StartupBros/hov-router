@@ -1691,6 +1691,9 @@ export default async function startServer(options?: {
 
 	const alertService = new AlertService(db, config);
 	alertService.start();
+	// Diff each models.dev load against the shipped tables (#774); stop()
+	// unsubscribes.
+	alertService.watchPricingCatalog();
 	stopAlertJob = () => alertService.stop();
 	registerDisposable({ dispose: () => alertService.stop() });
 	const memberNoticeWarning = memberNoticeStartupWarning(config);
