@@ -4,6 +4,7 @@ import {
 	type AuthFailureEvt,
 	alertEvents,
 	authFailureEvents,
+	type CatalogModelGap,
 	CODEX_CATALOG_FAMILIES,
 	type CodexCatalogEvt,
 	type CodexCatalogStaleEvt,
@@ -11,15 +12,29 @@ import {
 	type CodexOwnCatalogPublishedEvt,
 	type CodexRoleTargetChangedEvt,
 	type CodexRouteRoleUnavailableEvt,
+	catalogSectionForModel,
 	codexCatalogEvents,
 	computeWindowStartMs,
+	type EraRateField,
+	type EraRateMismatch,
+	findCatalogNewModels,
+	findEraRateMismatches,
+	getLoadedPricingCatalog,
 	getModelFamily,
 	getModelRates,
+	isModelPriced,
 	isValidModelId,
 	isWellFormedConcreteClaudeModelId,
 	LATEST_MODEL_BY_FAMILY,
+	LIST_PRICE_ERAS,
+	onPricingCatalogLoaded,
+	type PricingCatalog,
+	type PricingCatalogLoadSource,
 	type RequestEvt,
 	requestEvents,
+	selectListPriceEra,
+	VALUE_PRICING_VERSION,
+	warmPricingCatalog,
 } from "@better-ccflare/core";
 import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import {
@@ -28,7 +43,10 @@ import {
 	type UsageWindow,
 } from "@better-ccflare/database";
 import { Logger } from "@better-ccflare/logger";
-import { getProviderModelDefaultOverrides } from "@better-ccflare/providers";
+import {
+	getProviderModelDefaultOverrides,
+	getSupportedLineIdentities,
+} from "@better-ccflare/providers";
 import type {
 	Account,
 	AlertEvent,
@@ -415,7 +433,12 @@ export function buildRequestTokenAlert(
 // (e.g. some unrelated identifier with "opus" inside it); this regex
 // requires the string to actually look like a `claude-<family>...` model ID
 // before we treat it as a genuine (if unrecognized) Claude model request.
-const CLAUDE_MODEL_SHAPE_RE = /^claude-(opus|sonnet|haiku|fable)(-|$)/i;
+// The second branch admits a family this build does not know yet
+// (`claude-<word>-<digit>...`, e.g. a new family's first model) while still
+// rejecting the router's own picker ids (`claude-bccf-route-*`,
+// `claude-bccf-quality-auto`), whose second word is not followed by a digit.
+const CLAUDE_MODEL_SHAPE_RE =
+	/^claude-(?:(?:opus|sonnet|haiku|fable)(?:-|$)|[a-z]+-\d)/i;
 
 /**
  * Detects the "Opus 5 incident" class of model-routing staleness: a combo
@@ -507,33 +530,94 @@ export function buildUnknownModelDriftAlert(
 	config: AlertsConfigPayload,
 	timestamp: number,
 ): AlertEvent | null {
-	const requestedModel = request.originalModel ?? request.model;
-	if (!requestedModel) return null;
-	if (!CLAUDE_MODEL_SHAPE_RE.test(requestedModel)) return null;
-	if (isValidModelId(requestedModel)) return null;
-	const family = getModelFamily(requestedModel);
-	if (!family) return null;
+	return buildUnknownModelDriftAlerts(request, config, timestamp)[0] ?? null;
+}
+
+type UnknownModelSource = "requested" | "served" | "advisor";
+
+/**
+ * Every unknown-model alert for one request summary (#774): the
+ * client-requested model (as buildUnknownModelDriftAlert always checked), the
+ * model the response reports, and each advisor model, in that order. One
+ * alert per cooldown bucket (`unknown_model:<family>`, or `other` for a
+ * family this build does not know); the first source to name a family wins.
+ */
+export function buildUnknownModelDriftAlerts(
+	request: RequestResponse,
+	config: AlertsConfigPayload,
+	timestamp: number,
+): AlertEvent[] {
+	const candidates: Array<[UnknownModelSource, string | undefined]> = [
+		["requested", request.originalModel ?? request.model],
+		["served", request.model],
+		...(request.advisorModels ?? []).map(
+			(model): [UnknownModelSource, string] => ["advisor", model],
+		),
+	];
+	const alerts = new Map<string, AlertEvent>();
+	for (const [source, model] of candidates) {
+		const alert = buildUnknownModelAlertFor(
+			source,
+			model,
+			request,
+			config,
+			timestamp,
+		);
+		if (alert && !alerts.has(alert.id)) alerts.set(alert.id, alert);
+	}
+	return [...alerts.values()];
+}
+
+function buildUnknownModelAlertFor(
+	source: UnknownModelSource,
+	model: string | undefined,
+	request: RequestResponse,
+	config: AlertsConfigPayload,
+	timestamp: number,
+): AlertEvent | null {
+	if (!model) return null;
+	if (!CLAUDE_MODEL_SHAPE_RE.test(model)) return null;
+	if (isValidModelId(model)) return null;
+	const family = getModelFamily(model);
 	const catalogGapMessage = `offline pricing, list-price eras, and pickers don't recognize it yet; bump CLAUDE_MODEL_IDS/LATEST_* in packages/core/src/models.ts and deploy`;
-	const message = isWellFormedConcreteClaudeModelId(requestedModel)
-		? `clients are requesting ${requestedModel} (family ${family}) which is missing from the bundled model catalog — a same-family bare-alias route now passes a well-formed id like this straight through instead of downgrading it, though a cross-family fallback slot or a version-pinned account can still send an older model instead; ${catalogGapMessage}`
-		: `clients are requesting ${requestedModel} (family ${family}) which is missing from the bundled model catalog and doesn't match the pass-through shape guard, so a bare-alias route can still silently rewrite it to the family's latest model; ${catalogGapMessage}`;
+	const subject =
+		source === "requested"
+			? "clients are requesting"
+			: source === "served"
+				? "responses report"
+				: "advisor calls use";
+	let message: string;
+	if (!family) {
+		message = `${subject} ${model}, a Claude model family this build does not recognize, so no family alias or Auto line can follow it; ${catalogGapMessage}`;
+	} else if (source !== "requested") {
+		message = `${subject} ${model} (family ${family}) which is missing from the bundled model catalog; ${catalogGapMessage}`;
+	} else if (isWellFormedConcreteClaudeModelId(model)) {
+		message = `${subject} ${model} (family ${family}) which is missing from the bundled model catalog — a same-family bare-alias route now passes a well-formed id like this straight through instead of downgrading it, though a cross-family fallback slot or a version-pinned account can still send an older model instead; ${catalogGapMessage}`;
+	} else {
+		message = `${subject} ${model} (family ${family}) which is missing from the bundled model catalog and doesn't match the pass-through shape guard, so a bare-alias route can still silently rewrite it to the family's latest model; ${catalogGapMessage}`;
+	}
 	return {
 		id: buildThresholdAlertId(
 			"model_routing_drift",
-			`unknown_model:${family}`,
+			`unknown_model:${family ?? "other"}`,
 			timestamp,
 			config.cooldownMinutes,
 		),
 		timestamp,
 		type: "model_routing_drift",
 		severity: "warning",
-		title: "Unknown model requested",
+		title:
+			source === "requested"
+				? "Unknown model requested"
+				: source === "served"
+					? "Unknown model served"
+					: "Unknown advisor model",
 		classification: { reason: "unknown_model" },
 		message,
 		value: null,
 		threshold: null,
 		account: request.accountUsed,
-		model: requestedModel,
+		model,
 		project: request.project ?? null,
 		requestId: request.id,
 		acknowledged: false,
@@ -554,9 +638,264 @@ export function buildModelRoutingDriftAlerts(
 	const alerts: AlertEvent[] = [];
 	const stalePolicy = buildStalePolicyDriftAlert(request, config, timestamp);
 	if (stalePolicy) alerts.push(stalePolicy);
-	const unknownModel = buildUnknownModelDriftAlert(request, config, timestamp);
-	if (unknownModel) alerts.push(unknownModel);
+	alerts.push(...buildUnknownModelDriftAlerts(request, config, timestamp));
 	return alerts;
+}
+
+/*
+ * Catalogue-derived model_routing_drift alerts (#774). Each models.dev load
+ * (AlertService.watchPricingCatalog) is diffed against the shipped tables by
+ * the pure checks in packages/core/src/catalog-diff.ts. Content-addressed ids:
+ * a gap is reported once per (model, gap), and a rate mismatch once per
+ * (model, VALUE_PRICING_VERSION, catalogue rates), so a daily refresh that
+ * sees the same standing condition adds nothing.
+ */
+
+function formatPerMillion(value: number): string {
+	return `$${Number(value.toFixed(4))}`;
+}
+
+type CatalogRates = { input?: number; output?: number; cache_read?: number };
+
+function catalogEntryCost(
+	catalog: PricingCatalog,
+	gap: CatalogModelGap,
+): CatalogRates | undefined {
+	const models = catalog[gap.section]?.models ?? {};
+	return (
+		models[gap.modelId]?.cost ??
+		Object.values(models).find((def) => def?.id === gap.modelId)?.cost
+	);
+}
+
+function describeCatalogRates(cost: CatalogRates | undefined): string {
+	if (!cost) return "with no published rates";
+	const parts = [
+		typeof cost.input === "number" && `${formatPerMillion(cost.input)} input`,
+		typeof cost.output === "number" &&
+			`${formatPerMillion(cost.output)} output`,
+		typeof cost.cache_read === "number" &&
+			`${formatPerMillion(cost.cache_read)} cache read`,
+	].filter(Boolean);
+	return parts.length > 0
+		? `at ${parts.join(" / ")} per MTok`
+		: "with no published rates";
+}
+
+export function buildCatalogNewModelAlert(
+	gap: CatalogModelGap,
+	catalog: PricingCatalog,
+	timestamp: number,
+): AlertEvent {
+	const seen = `models.dev lists ${gap.modelId} (released ${gap.releaseDate})`;
+	let title: string;
+	let message: string;
+	let severity: AlertEvent["severity"] = "warning";
+	if (gap.gap === "registry") {
+		title = "New model missing from the bundled catalog";
+		message = `${seen}, but CLAUDE_MODEL_IDS does not include it: the dashboard and CLI pickers, offline pricing and the family alias still point at older models, and requests for it raise unknown-model alerts. Register it in packages/core/src/models.ts with its pricing and list-price era, then deploy.`;
+	} else if (gap.gap === "era") {
+		title = "New model has no list-price era";
+		message = `${seen} ${describeCatalogRates(catalogEntryCost(catalog, gap))}, but LIST_PRICE_ERAS has no era for it, so usage on it closes usage windows with unpriced tokens. Check the rates on the provider's pricing page, add an era in packages/core/src/value-pricing.ts, bump VALUE_PRICING_VERSION and deploy; closed windows re-price at the next startup.`;
+	} else {
+		severity = "info";
+		const supported = gap.autoLineModels ?? [];
+		title = "New model outside its Auto line";
+		message = `${seen}, but the approved Auto line ${gap.autoLine} supports only ${supported.join(", ") || "no identities"}, so Auto keeps serving ${gap.autoLine} from those until reviewed support evidence adds ${gap.modelId} to SUPPORTED_IDENTITIES in packages/providers/src/auto-model-capabilities.ts. No action is needed if staying on the older model is deliberate.`;
+	}
+	return {
+		id: `model_routing_drift:catalog_new_model:${encodeScopePart(gap.modelId)}:${gap.gap}`,
+		timestamp,
+		type: "model_routing_drift",
+		severity,
+		title,
+		classification: { reason: "catalog_new_model" },
+		message,
+		value: null,
+		threshold: null,
+		account: null,
+		model: gap.modelId,
+		project: null,
+		requestId: null,
+		acknowledged: false,
+	};
+}
+
+const ERA_RATE_FIELD_LABEL: Record<EraRateField, string> = {
+	input: "input",
+	output: "output",
+	cache_read: "cache read",
+	cache_write: "cache write",
+	long_context_input: "long-context input",
+	long_context_output: "long-context output",
+	long_context_cache_read: "long-context cache read",
+	long_context_cache_write: "long-context cache write",
+	long_context_threshold: "long-context threshold",
+};
+
+export function buildEraRateMismatchAlert(
+	mismatch: EraRateMismatch,
+	timestamp: number,
+): AlertEvent {
+	const fingerprint = mismatch.fields
+		.map((field) => `${field.field}=${field.catalogValue}`)
+		.join(",");
+	const differences = mismatch.fields
+		.map((field) =>
+			field.field === "long_context_threshold"
+				? `the long-context tier starts at ${field.eraValue} prompt tokens in the era but ${field.catalogValue} in the catalogue`
+				: `${ERA_RATE_FIELD_LABEL[field.field]} is ${formatPerMillion(field.eraValue)} in the era but ${formatPerMillion(field.catalogValue)} in the catalogue`,
+		)
+		.join("; ");
+	const since = new Date(mismatch.eraSinceMs).toISOString().slice(0, 10);
+	return {
+		id: `model_routing_drift:era_rate_mismatch:${encodeScopePart(mismatch.modelId)}:${encodeScopePart(VALUE_PRICING_VERSION)}:${encodeScopePart(fingerprint)}`,
+		timestamp,
+		type: "model_routing_drift",
+		severity: "warning",
+		title: "List-price era disagrees with models.dev",
+		classification: { reason: "era_rate_mismatch" },
+		message: `${mismatch.modelId}'s list-price era (since ${since}) disagrees with models.dev's ${mismatch.section} section: ${differences} (per MTok). Usage window values for ${mismatch.modelId} use the era. Check the provider's pricing page; if the catalogue is right, correct the era or add a dated one, bump VALUE_PRICING_VERSION and deploy; closed windows re-price at the next startup.`,
+		value: null,
+		threshold: null,
+		account: null,
+		model: mismatch.modelId,
+		project: null,
+		requestId: null,
+		acknowledged: false,
+	};
+}
+
+/**
+ * Every catalogue-derived alert for one loaded models.dev catalogue. Pure:
+ * `autoLines` is the approved Auto line identities (getSupportedLineIdentities).
+ */
+export function buildPricingCatalogAlerts(
+	catalog: PricingCatalog,
+	nowMs: number,
+	autoLines: Readonly<Record<string, readonly string[]>>,
+): AlertEvent[] {
+	return [
+		...findCatalogNewModels(catalog, { nowMs, autoLines }).map((gap) =>
+			buildCatalogNewModelAlert(gap, catalog, nowMs),
+		),
+		...findEraRateMismatches(catalog, nowMs).map((mismatch) =>
+			buildEraRateMismatchAlert(mismatch, nowMs),
+		),
+	];
+}
+
+/** Why a closed window could not price one model's tokens. */
+export type UnpricedWindowReason =
+	| "no_era"
+	| "before_first_era"
+	| "unpriceable";
+
+export interface UnpricedWindowModel {
+	model: string;
+	tokens: number;
+	reason: UnpricedWindowReason;
+	/** When the model's first era starts, for `before_first_era`. */
+	firstEraSinceMs?: number;
+}
+
+const BREAKDOWN_TOKEN_FIELDS = [
+	"inputTokens",
+	"cacheReadInputTokens",
+	"cacheCreationInputTokens",
+	"outputTokens",
+] as const;
+
+/**
+ * First-party models (by catalogSectionForModel) in a closed window's
+ * breakdown whose tokens the list-price table could not price, largest
+ * first. Route-profile ids, other id shapes and the empty key are left out:
+ * no era could price them.
+ */
+export function findUnpricedWindowModels(
+	window: UsageWindow,
+): UnpricedWindowModel[] {
+	const found: UnpricedWindowModel[] = [];
+	for (const [model, raw] of Object.entries(window.modelBreakdown ?? {})) {
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+		const entry = raw as Record<string, unknown>;
+		if (entry.valueUsd !== null) continue;
+		if (catalogSectionForModel(model) === null) continue;
+		let tokens = 0;
+		for (const field of BREAKDOWN_TOKEN_FIELDS) {
+			const value = entry[field];
+			if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+				tokens += value;
+			}
+		}
+		if (tokens === 0) continue;
+		const eras = LIST_PRICE_ERAS[model] ?? [];
+		if (eras.length === 0) {
+			found.push({ model, tokens, reason: "no_era" });
+		} else if (!selectListPriceEra(model, window.startedAt)) {
+			found.push({
+				model,
+				tokens,
+				reason: "before_first_era",
+				firstEraSinceMs: Math.min(...eras.map((era) => era.sinceMs)),
+			});
+		} else {
+			found.push({ model, tokens, reason: "unpriceable" });
+		}
+	}
+	return found.sort(
+		(a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model),
+	);
+}
+
+function formatUtcMinute(ms: number): string {
+	return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")}Z`;
+}
+
+/**
+ * One unpriced_window alert. Keyed by (model, the window's pricing
+ * version): every account's windows share it, so a model stays at one alert
+ * until VALUE_PRICING_VERSION changes.
+ */
+export function buildUnpricedWindowAlert(
+	window: UsageWindow,
+	accountName: string,
+	unpriced: UnpricedWindowModel,
+	timestamp: number,
+): AlertEvent {
+	const { model } = unpriced;
+	const version = window.projectionVersion ?? VALUE_PRICING_VERSION;
+	const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+	const reprice =
+		"bump VALUE_PRICING_VERSION and deploy; closed windows re-price at the next startup.";
+	let cause: string;
+	let fix: string;
+	if (unpriced.reason === "no_era") {
+		cause = `LIST_PRICE_ERAS has no era for ${model}`;
+		fix = `Check the rates on the provider's pricing page, add an era in packages/core/src/value-pricing.ts, ${reprice}`;
+	} else if (unpriced.reason === "before_first_era") {
+		cause = `${model}'s first list-price era starts ${day(unpriced.firstEraSinceMs ?? 0)}, after the window started`;
+		fix = `A window is priced at its start time, so a model released mid-window goes unpriced. If ${model}'s rates applied for this window's usage, start its era on or before ${day(window.startedAt)} in packages/core/src/value-pricing.ts, ${reprice}`;
+	} else {
+		cause = `${model}'s list-price era cannot price this window's token mix (a long-context split or a cache-write rate is missing)`;
+		fix = `Check that era's rates in packages/core/src/value-pricing.ts; if one is missing, add it, ${reprice}`;
+	}
+	return {
+		id: `model_routing_drift:unpriced_window:${encodeScopePart(model)}:${encodeScopePart(version)}`,
+		timestamp,
+		type: "model_routing_drift",
+		severity: "warning",
+		title: "Usage window closed with unpriced tokens",
+		classification: { reason: "unpriced_window" },
+		message: `${accountName}'s ${window.windowKey} usage window (${formatUtcMinute(window.startedAt)} to ${formatUtcMinute(window.closedAt ?? timestamp)}) closed with ${unpriced.tokens.toLocaleString("en-US")} ${model} tokens the list-price table could not price: ${cause}. The window's value leaves them out. ${fix} Later windows with unpriced ${model} tokens under pricing version ${version} raise no new alert.`,
+		value: null,
+		threshold: null,
+		account: accountName,
+		model,
+		project: null,
+		requestId: null,
+		acknowledged: false,
+	};
 }
 
 /*
@@ -998,6 +1337,45 @@ export function buildDiscordAlertContent(alert: AlertEvent): string {
 				: "Recorded cache reuse is below its expected range.";
 		action =
 			"Inspect request patterns in the dashboard before deciding whether cache changes are needed.";
+	} else if (
+		alert.type === "model_routing_drift" &&
+		classification?.reason === "catalog_new_model"
+	) {
+		const gap = alert.id.split(":").at(-1);
+		if (gap === "auto_line") {
+			condition = "A newly released model is outside its approved Auto line.";
+			impact = "Auto keeps serving the line's older model; no requests fail.";
+			action =
+				"Review support evidence before adding it to the Auto line, or keep the older model deliberately.";
+		} else {
+			condition =
+				gap === "era"
+					? "A newly released model has no list-price era."
+					: "A newly released model is missing from the bundled catalog.";
+			impact =
+				gap === "era"
+					? "Usage on this model closes usage windows with unpriced tokens."
+					: "Requests for it still route, but pickers, offline pricing and latest-model routing don't recognize it.";
+			action =
+				"Register the model in the router (catalog and list-price era) and deploy.";
+		}
+	} else if (
+		alert.type === "model_routing_drift" &&
+		classification?.reason === "era_rate_mismatch"
+	) {
+		condition = "A list-price era disagrees with the models.dev catalog.";
+		impact = "Usage window values for this model may be over- or under-stated.";
+		action =
+			"Check the provider's pricing page and correct the era if the catalog is right.";
+	} else if (
+		alert.type === "model_routing_drift" &&
+		classification?.reason === "unpriced_window"
+	) {
+		condition =
+			"A closed usage window has tokens the list-price table could not price.";
+		impact = "That window's value is understated; routing is unaffected.";
+		action =
+			"Add or extend the model's list-price era and deploy; closed windows re-price at the next startup.";
 	} else if (alert.type === "model_routing_drift") {
 		condition =
 			classification?.reason === "unknown_model"
@@ -1189,7 +1567,13 @@ function alertClassification(alert: AlertEvent): AlertEvent["classification"] {
 	if (alert.classification) return alert.classification;
 	if (alert.type === "model_routing_drift") {
 		const reason = alert.id.split(":")[1];
-		if (reason === "unknown_model" || reason === "stale_policy")
+		if (
+			reason === "unknown_model" ||
+			reason === "stale_policy" ||
+			reason === "catalog_new_model" ||
+			reason === "era_rate_mismatch" ||
+			reason === "unpriced_window"
+		)
 			return { reason };
 	}
 	if (alert.type === "cache_telemetry_gap")
@@ -1374,6 +1758,12 @@ export class AlertService {
 	private cacheHealthFlight: Promise<void> | null = null;
 	private cacheHealthEpoch = 0;
 	private cacheHealthDelivery = new AbortController();
+	/** Queued catalogue evaluations (#774); stop() awaits the tail. */
+	private pricingCatalogFlight: Promise<void> = Promise.resolve();
+	/** The watch's own warm-up fetch. Kept out of the flight so shutdown never
+	 * waits on a network fetch; tests await it via pricingCatalogSettled(). */
+	private pricingCatalogWarm: Promise<void> = Promise.resolve();
+	private pricingCatalogUnsubscribe: (() => void) | null = null;
 	private started = false;
 	/** Last exhaustion-projection evaluation per `${accountId}:${windowKey}`
 	 * — in-memory rate limit on the history+regression work (see
@@ -1453,9 +1843,105 @@ export class AlertService {
 			this.anomalyTimer = null;
 		}
 		this.invalidateCacheHealth();
+		this.pricingCatalogUnsubscribe?.();
+		this.pricingCatalogUnsubscribe = null;
 		// Synchronous callers still detach listeners/timers immediately. The
 		// existing disposal registry can await an already-admitted DB batch.
-		return this.cacheHealthFlight ?? Promise.resolve();
+		return Promise.all([
+			this.cacheHealthFlight ?? Promise.resolve(),
+			this.pricingCatalogFlight,
+		]).then(() => undefined);
+	}
+
+	/**
+	 * Diff a loaded models.dev catalogue against the shipped tables and record
+	 * each gap or era-rate mismatch (#774). Ids are content-addressed, so a
+	 * standing condition is recorded and delivered once.
+	 */
+	/**
+	 * Raises unpriced_window for each first-party model a just-closed window
+	 * could not price, when the pricing catalogue does price it (#774): a
+	 * model nobody publishes rates for has no era to add. Called by
+	 * UsageWindowLedger after a close; the silent startup re-price pass never
+	 * calls it. persistAndEmit's INSERT OR IGNORE dedupes per (model, pricing
+	 * version).
+	 */
+	async evaluateClosedWindowPricing(
+		window: UsageWindow,
+		accountName: string,
+		nowMs = Date.now(),
+	): Promise<void> {
+		const unpriced = findUnpricedWindowModels(window);
+		if (unpriced.length === 0) return;
+		const { webhookUrl } = getAlertsConfig(this.config);
+		for (const entry of unpriced) {
+			if (!(await isModelPriced(entry.model))) continue;
+			await this.persistAndEmit(
+				buildUnpricedWindowAlert(window, accountName, entry, nowMs),
+				webhookUrl,
+			);
+		}
+	}
+
+	async evaluatePricingCatalog(
+		catalog: PricingCatalog,
+		nowMs = Date.now(),
+	): Promise<void> {
+		const alerts = buildPricingCatalogAlerts(
+			catalog,
+			nowMs,
+			getSupportedLineIdentities(),
+		);
+		if (alerts.length === 0) return;
+		const { webhookUrl } = getAlertsConfig(this.config);
+		for (const alert of alerts) {
+			await this.persistAndEmit(alert, webhookUrl);
+		}
+	}
+
+	/**
+	 * Evaluate every remote or disk-cache catalogue load, plus the one already
+	 * loaded (or warm one now). The bundled fallback is skipped: it restates
+	 * this build's own tables. Idempotent; stop() unsubscribes. Returns the
+	 * unsubscribe function.
+	 */
+	watchPricingCatalog(): () => void {
+		if (this.pricingCatalogUnsubscribe) return this.pricingCatalogUnsubscribe;
+		const enqueue = (catalog: PricingCatalog) => {
+			this.pricingCatalogFlight = this.pricingCatalogFlight
+				.then(() => this.evaluatePricingCatalog(catalog))
+				.catch((error) => {
+					log.error(
+						`Pricing catalogue alert evaluation failed: ${(error as Error).message}`,
+					);
+				});
+		};
+		const unsubscribe = onPricingCatalogLoaded(
+			(catalog, source: PricingCatalogLoadSource) => {
+				if (source === "bundled") return;
+				enqueue(catalog);
+			},
+		);
+		this.pricingCatalogUnsubscribe = () => {
+			unsubscribe();
+		};
+		const loaded = getLoadedPricingCatalog();
+		if (loaded) {
+			if (loaded.source !== "bundled") enqueue(loaded.data);
+		} else {
+			this.pricingCatalogWarm = warmPricingCatalog();
+		}
+		return this.pricingCatalogUnsubscribe;
+	}
+
+	/** Resolves once the watch's warm-up and every queued evaluation finish. */
+	async pricingCatalogSettled(): Promise<void> {
+		await this.pricingCatalogWarm;
+		let flight: Promise<void>;
+		do {
+			flight = this.pricingCatalogFlight;
+			await flight;
+		} while (flight !== this.pricingCatalogFlight);
 	}
 
 	private invalidateCacheHealth(): void {

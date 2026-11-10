@@ -1,6 +1,20 @@
 // Re-export only used items from each module
 
 export * from "./bounded-request-body";
+export {
+	autoLineNameForModel,
+	CATALOG_NEW_MODEL_MAX_AGE_DAYS,
+	type CatalogGapKind,
+	type CatalogModelGap,
+	type CatalogSection,
+	catalogSectionForModel,
+	type EraRateField,
+	type EraRateFieldMismatch,
+	type EraRateMismatch,
+	type FindCatalogNewModelsOptions,
+	findCatalogNewModels,
+	findEraRateMismatches,
+} from "./catalog-diff";
 export * from "./combo-membership-resolver";
 export {
 	BUFFER_SIZES,
@@ -117,10 +131,13 @@ export {
 	uninstallOutboundProxy,
 } from "./outbound-proxy";
 export {
+	type ApiResponse as PricingCatalog,
 	type CatalogModelSummary,
 	type CatalogueModelEntry,
 	estimateCostUSD,
+	getBundledPricingCatalog,
 	getCatalogModelSummaries,
+	getLoadedPricingCatalog,
 	getModelRates,
 	getPricingCatalogSnapshotSync,
 	initializeNanoGPTPricingIfAccountsExist,
@@ -128,10 +145,13 @@ export {
 	listCatalogueModels,
 	type ModelRates,
 	onPricingCatalogLoaded,
+	type PricingCatalogLoadedListener,
+	type PricingCatalogLoadSource,
 	type PricingCatalogSnapshot,
 	resetNanoGPTPricingCacheForTest,
 	setPricingLogger,
 	type TokenBreakdown,
+	warmPricingCatalog,
 } from "./pricing";
 export { PROCESS_STARTED_AT_MS } from "./process-start";
 export * from "./quality-routing-policy";
@@ -170,6 +190,7 @@ export {
 	LONG_CONTEXT_PROMPT_TOKENS,
 	type LongContextListPrice,
 	priceTokensAtListPrice,
+	selectListPriceEra,
 	VALUE_PRICING_VERSION,
 } from "./value-pricing";
 export {

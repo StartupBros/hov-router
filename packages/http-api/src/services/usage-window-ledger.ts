@@ -591,7 +591,8 @@ export class UsageWindowLedger {
 	 * same "resolve at dispatch" rule server.ts's alert-evaluation callback
 	 * already follows for usage_window_threshold/usage_window_exhaustion_
 	 * projected) and hands the closed window to AlertService for the
-	 * usage_window_value_drop evaluation.
+	 * unpriced-window (#774) and usage_window_value_drop evaluations. Each is
+	 * isolated, so one failing never skips the other.
 	 */
 	private async notifyClosedWindow(
 		closedWindow: UsageWindow,
@@ -600,9 +601,20 @@ export class UsageWindowLedger {
 		if (!this.alertService) return;
 		await this.revaluationSettled;
 		const account = await this.dbOps.getAccount(closedWindow.accountId);
+		const accountName = account?.name ?? closedWindow.accountId;
+		try {
+			await this.alertService.evaluateClosedWindowPricing(
+				closedWindow,
+				accountName,
+			);
+		} catch (error) {
+			log.warn(
+				`unpriced_window evaluation failed for account ${closedWindow.accountId} window ${closedWindow.id}: ${error}`,
+			);
+		}
 		await this.alertService.evaluateClosedWindow(
 			closedWindow,
-			account?.name ?? closedWindow.accountId,
+			accountName,
 			expectedCreatedAt,
 		);
 	}
