@@ -7,9 +7,19 @@ artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-brainstorm
 execution: code
 deepened: 2026-11-02
+status: completed
 ---
 
 # Banked Resets - Plan
+
+> **Shipped. The "applies now" gate was dropped on 2026-11-10.** All three PRs shipped: PR1 as #697, PR2 as #707 and PR3 as #708, whose delivery #720 later replaced (see the note under PR3). OpenAI's `applicable_available_count` does not tell whether a redemption will work. On 2026-11-10 pro-tertiary-will was at its weekly limit and read an applicable count of 0. The operator's first redemption still reset its windows (held resets 2 → 1, weekly use 100% → 0%), and the count read 0 afterwards too. OpenAI's Codex CLI (openai/codex at `e0370f0b`) never reads the field: its Redeem reset needs only `available_count` above 0. What the field means is unknown.
+>
+> - #773 removed the R8 gate. A redemption now needs a fresh count with at least one reset held. The stale-count refusal and KTD8's rules for a stored request id are unchanged.
+> - #775 removed "applies now" from the dashboard. The account row, fleet summary and confirmation show the held count, soonest expiry and Use reset. The API still returns `applicableCount` and `appliesNow` as OpenAI reports them.
+> - Superseded below and kept as written: the Key Decision "'Applies now' is OpenAI's judgment"; the applies-now parts of R6, R7, AE1, F2's trigger and the first Success Criterion; R8; AE2; the Outstanding Question on what "applies now" means; KTD7; KTD8's last two table rows; the "applies now" risk row; the applies-now test scenarios in U5, U6, U9 and U10; and the PR1 row of the Definition of Done.
+> - Acceptance: PR1 visibility and PR2 redeem passed. Redeem passed with the operator's click on 2026-11-10. PR3 member-notice acceptance is still open: delivery is on in production and no notice has fired yet. The first scheduled one is the 3-day expiry reminder around 2026-11-27.
+>
+> This note covers only what #773 and #775 changed. Other parts of the plan may be out of date for other reasons; for example, its PostgreSQL parity steps predate #723, which removed PostgreSQL.
 
 ## Goal Capsule
 
