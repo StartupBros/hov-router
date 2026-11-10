@@ -13,7 +13,7 @@ import {
 	runForceAccountModelExempt,
 	ServiceUnavailableError,
 } from "@better-ccflare/core";
-import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
+import { reauthInstruction } from "@better-ccflare/core/reauth-instructions";
 import { DatabaseFactory } from "@better-ccflare/database";
 import { sanitizeRequestHeaders } from "@better-ccflare/http-common";
 import { Logger } from "@better-ccflare/logger";
@@ -4972,19 +4972,17 @@ async function handleProxyCoreImpl(
 	);
 
 	if (needsReauth.length > 0) {
-		// Quote account names to prevent command injection (defense-in-depth)
-		const reauthCommands = needsReauth
-			.map(
-				(acc) =>
-					`${COMMAND_NAME} --reauthenticate "${acc.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
-			)
+		// Each account gets its own provider's way back in; a CLI command in
+		// it shell-quotes the name (defense-in-depth).
+		const reauthSteps = needsReauth
+			.map((acc) => `${acc.name}: ${reauthInstruction(acc.provider, acc.name)}`)
 			.join("\n  ");
 		cacheBodyStore.discardStaged(requestMeta.id);
 		pacingSlot?.abandon();
 		// All candidates failed, no account served — degrade the badge (KTD-5).
 		if (sessionId) clearSession(sessionId, requestMeta.timestamp);
 		throw new ServiceUnavailableError(
-			`All accounts failed to proxy the request. OAuth tokens have expired for accounts: ${needsReauth.map((acc) => acc.name).join(", ")}.\n\nPlease re-authenticate:\n  ${reauthCommands}`,
+			`All accounts failed to proxy the request. OAuth tokens have expired for accounts: ${needsReauth.map((acc) => acc.name).join(", ")}.\n\nPlease re-authenticate:\n  ${reauthSteps}`,
 			ctx.provider.name,
 		);
 	}

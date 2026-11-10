@@ -7,6 +7,8 @@ import type { ModelMapping } from "@better-ccflare/core";
 import {
 	PAUSE_REASON_NEEDS_REAUTH,
 	REAUTHENTICATION_REQUIRED_CODE,
+	reauthInstruction,
+	supportsCliReauthentication,
 	validateAndSanitizeModelFallbacks,
 	validateAndSanitizeModelMappings,
 	validateApiKey,
@@ -2595,15 +2597,12 @@ export async function reauthenticateAccount(
 		};
 	}
 
-	// Check if account supports OAuth re-authentication
-	if (
-		account.provider !== "anthropic" &&
-		account.provider !== "qwen" &&
-		account.provider !== "xai"
-	) {
+	// The CLI signs in only the providers it has a login flow for; every other
+	// account is told where it can sign in again instead.
+	if (!supportsCliReauthentication(account.provider)) {
 		return {
 			success: false,
-			message: `Account '${name}' (${account.provider}) does not support OAuth re-authentication. Only Anthropic, Qwen, and xAI accounts can be re-authenticated.`,
+			message: `Account '${name}' (${account.provider}) cannot be re-authenticated from the CLI. To re-authenticate, ${reauthInstruction(account.provider, name)}.`,
 		};
 	}
 

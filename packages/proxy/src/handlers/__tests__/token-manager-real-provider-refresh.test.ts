@@ -65,6 +65,7 @@ function makeContext(
 ) {
 	let current: Account = { ...stored };
 	const flagCalls: Array<[string, string, number]> = [];
+	const pauseCalls: unknown[][] = [];
 	const persistCalls: unknown[][] = [];
 	const dbOps = {
 		getAccount: mock(async (accountId: string) =>
@@ -91,6 +92,10 @@ function makeContext(
 				return true;
 			},
 		),
+		pauseAccountIfActive: mock(async (...args: unknown[]) => {
+			pauseCalls.push(args);
+			return true;
+		}),
 		setRequiresReauth: mock(async () => {}),
 	};
 	return {
@@ -102,7 +107,12 @@ function makeContext(
 		},
 		dbOps,
 		flagCalls,
+		pauseCalls,
 		persistCalls,
+		/** Overwrite the durable row, as another consumer's rotation would. */
+		store: (patch: Partial<Account>) => {
+			current = { ...current, ...patch };
+		},
 	};
 }
 
@@ -280,5 +290,88 @@ describe("getValidAccessToken definitive auth failure", () => {
 
 		expect(flagCalls).toHaveLength(0);
 		expect(emittedCount).toBe(0);
+	});
+});
+
+describe("getValidAccessToken when OpenAI refuses a Codex refresh with HTTP 401", () => {
+	function countEvents() {
+		const emitted: AuthFailureEvt[] = [];
+		const listener = (event: AuthFailureEvt) => emitted.push(event);
+		authFailureEvents.on("event", listener);
+		return { emitted, stop: () => authFailureEvents.off("event", listener) };
+	}
+
+	it("flags and pauses the account when the 401 carries no code", async () => {
+		const account = makeAccount("codex-codeless-401", "codex");
+		const { ctx, flagCalls, pauseCalls } = makeContext(account);
+		mockTokenEndpoint("Unauthorized", 401);
+		const events = countEvents();
+
+		try {
+			await expect(
+				getValidAccessToken(account, ctx as never),
+			).rejects.toThrow();
+		} finally {
+			events.stop();
+		}
+
+		expect(flagCalls).toEqual([["codex-codeless-401", "rt-old", CREATED_AT]]);
+		expect(pauseCalls).toEqual([
+			["codex-codeless-401", "oauth_invalid_grant", "rt-old", CREATED_AT],
+		]);
+		expect(events.emitted).toHaveLength(1);
+		expect(events.emitted[0]).toMatchObject({
+			accountId: "codex-codeless-401",
+			provider: "codex",
+			reason: "invalid_grant",
+		});
+	});
+
+	it("leaves the account alone when the 401 rejects the client", async () => {
+		const account = makeAccount("codex-client-401", "codex");
+		const { ctx, flagCalls, pauseCalls } = makeContext(account);
+		mockTokenEndpoint({ error: "invalid_client" }, 401);
+		const events = countEvents();
+
+		try {
+			await expect(
+				getValidAccessToken(account, ctx as never),
+			).rejects.toThrow();
+		} finally {
+			events.stop();
+		}
+
+		expect(flagCalls).toHaveLength(0);
+		expect(pauseCalls).toHaveLength(0);
+		expect(events.emitted).toHaveLength(0);
+	});
+
+	it("adopts the stored token when another consumer rotated it mid-refresh", async () => {
+		const account = makeAccount("codex-rotated-401", "codex");
+		const { ctx, flagCalls, pauseCalls, store } = makeContext(account);
+		// The rotation lands while OpenAI is refusing our now-superseded token.
+		const fetchMock = mock(async () => {
+			store({
+				refresh_token: "rt-new",
+				access_token: "at-current",
+				expires_at: Date.now() + 3_600_000,
+			});
+			return new Response("Unauthorized", { status: 401 });
+		});
+		global.fetch = fetchMock as unknown as typeof fetch;
+		const events = countEvents();
+
+		try {
+			await expect(getValidAccessToken(account, ctx as never)).resolves.toBe(
+				"at-current",
+			);
+		} finally {
+			events.stop();
+		}
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(flagCalls).toHaveLength(0);
+		expect(pauseCalls).toHaveLength(0);
+		expect(events.emitted).toHaveLength(0);
 	});
 });

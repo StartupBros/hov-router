@@ -6,17 +6,18 @@ import {
 	getGitSha,
 	getModelFamily,
 	getOAuthErrorCode,
+	getOAuthErrorCodeLabel,
 	isForceAccountModelEnabled,
 	MAX_OAUTH_ERROR_INPUT_LENGTH,
 	mapModelName,
 	OAuthRefreshTokenError,
 	readBoundedOAuthResponseText,
+	reauthInstruction,
 	SseFrameBuffer,
 	StreamResourceLimitError,
 	ValidationError,
 	validateEndpointUrl,
 } from "@better-ccflare/core";
-import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
 import {
 	CODEX_LOGICAL_MODEL_FAMILY_HEADER,
 	sanitizeProxyHeaders,
@@ -184,6 +185,8 @@ function hasCustomToolCallEvent(sseText: string): boolean {
 
 const TOKEN_URL = "https://auth.openai.com/oauth/token";
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+/** RFC 6749 §5.2 codes that reject the OAuth client, not the refresh token. */
+const CLIENT_REJECTION_CODE = /\b(?:invalid_client|unauthorized_client)\b/i;
 export const CODEX_DEFAULT_ENDPOINT =
 	"https://chatgpt.com/backend-api/codex/responses";
 // The compiled compatibility constants are re-exported from client-identity.
@@ -2385,40 +2388,60 @@ export class CodexProvider extends BaseProvider {
 		});
 
 		if (!response.ok) {
-			let errorData: unknown = null;
+			// Only a body read to its end is evidence. A body that hit the bound
+			// could mean something else in its trailing bytes, and an unreadable
+			// one says nothing, so neither may quarantine an account.
 			let responseText = "";
-			let responseTextTruncated = false;
+			let bodyComplete = false;
 			try {
 				const bounded = await readBoundedOAuthResponseText(response);
 				responseText = bounded.text;
-				responseTextTruncated = bounded.truncated;
-				errorData = JSON.parse(responseText);
+				bodyComplete = !bounded.truncated;
 			} catch {
-				// ignore
+				// Unreadable body: classified by status alone, never quarantined.
+			}
+			let errorData: unknown = null;
+			if (bodyComplete) {
+				try {
+					errorData = JSON.parse(responseText);
+				} catch {
+					// Not JSON; the exact-code check below still reads the text.
+				}
 			}
 
-			// A response that hit the bound is not authoritative. Even if the
-			// bounded prefix happens to be valid JSON, trailing bytes could change
-			// its meaning, so it must never quarantine an account.
-			const errorCode = responseTextTruncated
-				? ""
-				: getOAuthErrorCode(errorData) || getExactOAuthErrorCode(responseText);
-			const errorMessage = errorCode || `HTTP ${response.status}`;
+			const errorCode = bodyComplete
+				? getOAuthErrorCode(errorData) || getExactOAuthErrorCode(responseText)
+				: "";
+			// OpenAI's own code, for the log only. The IdP controls this body and
+			// may echo what we sent, so a label found inside the attempted refresh
+			// token is dropped, and the free-text description is never logged.
+			const label = bodyComplete ? getOAuthErrorCodeLabel(responseText) : "";
+			const loggedCode =
+				errorCode ||
+				(label && !account.refresh_token.toLowerCase().includes(label)
+					? label
+					: "");
+			const failureMessage = `Failed to refresh Codex token for account ${account.name}: HTTP ${response.status}${loggedCode ? ` ${loggedCode}` : ""}`;
 
-			// Rotating refresh tokens: reuse → terminal, must re-auth. Throw the
-			// typed error so the refresh chokepoint pauses the account for reauth
-			// (detection is by type, not by message wording).
-			if (errorCode === "refresh_token_reused") {
+			// OpenAI's Codex CLI treats every refresh 401 as permanent: the
+			// refresh token is dead and only a new sign-in recovers it. A known
+			// refresh-token code means the same at any status. A 401 that rejects
+			// the client rather than the grant (RFC 6749 §5.2) is a router
+			// misconfiguration, not a dead login, so it never quarantines. The
+			// client codes are matched as whole words anywhere in the body, so a
+			// non-standard shape such as `error=invalid_client` still counts. The
+			// match only exempts and never reaches the log line.
+			const clientRejected =
+				bodyComplete && CLIENT_REJECTION_CODE.test(responseText);
+			if (
+				errorCode ||
+				(response.status === 401 && bodyComplete && !clientRejected)
+			) {
 				throw new OAuthRefreshTokenError(
 					account.id,
-					`Codex refresh_token_reused for account ${account.name}. Please re-authenticate with: ${COMMAND_NAME} --reauthenticate ${account.name}`,
-					errorCode,
+					`${failureMessage}. To re-authenticate, ${reauthInstruction("codex", account.name)}.`,
+					errorCode || undefined,
 				);
-			}
-
-			const failureMessage = `Failed to refresh Codex token for account ${account.name}: ${errorMessage}`;
-			if (errorCode) {
-				throw new OAuthRefreshTokenError(account.id, failureMessage, errorCode);
 			}
 			throw new Error(failureMessage);
 		}
