@@ -32,7 +32,7 @@ That statement is a primary-key lookup (`PRIMARY KEY (principal_id, session_id)`
 
 ## Guidance
 
-**Statement time is wall-clock time.** `packages/database/src/sqlite-statement-timing.ts` times each synchronous bun:sqlite call with `performance.now()` (`:107`, `:215-220`). It counts every millisecond the main thread spent inside the call, including time spent waiting for a CPU, for a page to come back from swap or disk, or for a lock. The tail of the line separates those:
+**Statement time is wall-clock time.** `packages/database/src/sqlite-statement-timing.ts` times each synchronous bun:sqlite call with `performance.now()` (`:107`, `:237-242`). It counts every millisecond the main thread spent inside the call, including time spent waiting for a CPU, for a page to come back from swap or disk, or for a lock. The tail of the line separates those:
 
 | Field | Source | Meaning |
 | --- | --- | --- |
