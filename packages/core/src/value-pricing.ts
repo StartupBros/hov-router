@@ -39,7 +39,7 @@ import type { TokenBreakdown } from "./pricing";
  * (UsageWindowLedger.revalueStaleClosedWindows), so history follows the
  * current rates instead of keeping the price it was closed at.
  */
-export const VALUE_PRICING_VERSION = "2026-11-09.1";
+export const VALUE_PRICING_VERSION = "2026-11-10.1";
 
 /**
  * Prompt-token threshold (input + cache read + cache creation, per request)
@@ -344,7 +344,9 @@ export const LIST_PRICE_ERAS: Record<string, ListPriceEra[]> = {
 		{
 			sinceMs: INITIAL_ERA_FLOOR_MS,
 			inputPerM: 2,
-			cacheReadPerM: 0.2,
+			// "Cache hits and refreshes on Claude Opus 5.5 and Claude Sonnet 5.5 are priced at 0.05x the base input price" (pricing page footnote 2, checked 2026-11-10).
+			// The era carried the standard 0.1x ($0.20) until VALUE_PRICING_VERSION 2026-11-10.1; the page names no dated change, so this corrects the single era.
+			cacheReadPerM: 0.1,
 			// Published 5-minute write rate applied to aggregate cache creation until TTL buckets are preserved end-to-end.
 			cacheCreationPerM: 2.5,
 			outputPerM: 10,
@@ -485,6 +487,20 @@ function selectEra(
 		}
 	}
 	return selected;
+}
+
+/**
+ * The list-price era in effect for `model` at `atMs`, or `null` when the
+ * model has no era table or `atMs` precedes every era. Same selection as
+ * `priceTokensAtListPrice`, without its cloud-export alias.
+ */
+export function selectListPriceEra(
+	model: string,
+	atMs: number,
+): ListPriceEra | null {
+	const eras = LIST_PRICE_ERAS[model];
+	if (!eras || eras.length === 0) return null;
+	return selectEra(eras, atMs);
 }
 
 /**

@@ -156,8 +156,8 @@ describe("priceTokensAtListPrice long-context tier", () => {
 });
 
 describe("priceTokensAtListPrice", () => {
-	it("advances VALUE_PRICING_VERSION for the Fable 5.2 list-price era", () => {
-		expect(VALUE_PRICING_VERSION).toBe("2026-11-09.1");
+	it("advances VALUE_PRICING_VERSION for the Sonnet 5.5 cache-read correction", () => {
+		expect(VALUE_PRICING_VERSION).toBe("2026-11-10.1");
 	});
 
 	describe("OpenAI GPT-6 and GPT-5.6 Sol eras", () => {
@@ -489,7 +489,10 @@ describe("priceTokensAtListPrice", () => {
 					outputTokens: 1_000_000,
 				},
 			);
-			expect(result).toBeCloseTo(2 + 10 + 0.2 + 2.5, 10);
+			// Cache hits are $0.10, not the standard 0.1x of input: "Cache hits and
+			// refreshes on Claude Opus 5.5 and Claude Sonnet 5.5 are priced at 0.05x
+			// the base input price" (pricing page footnote 2, checked 2026-11-10).
+			expect(result).toBeCloseTo(2 + 10 + 0.1 + 2.5, 10);
 		});
 
 		it("prices Haiku 5.5 at Anthropic's published launch rates", () => {

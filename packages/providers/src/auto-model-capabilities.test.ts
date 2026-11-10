@@ -1,9 +1,29 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import {
 	createAutoCatalogEvidence,
+	getSupportedLineIdentities,
+	getSupportedLines,
 	normalizeAutoModelCapabilities,
 	resolveAutoModelTargets,
 } from "./auto-model-capabilities";
+
+describe("getSupportedLineIdentities", () => {
+	it("lists every approved line's identities, oldest to newest", () => {
+		const lines = getSupportedLineIdentities();
+		expect(Object.keys(lines).sort()).toEqual(
+			[...getSupportedLines("anthropic"), ...getSupportedLines("codex")].sort(),
+		);
+		expect(lines["gpt-sol"]).toEqual(["gpt-5.6-sol", "gpt-6.1-sol"]);
+	});
+
+	it("returns a copy the caller cannot use to widen a line", () => {
+		const first = getSupportedLineIdentities();
+		(first["gpt-sol"] as string[]).push("gpt-99-sol");
+		expect(getSupportedLineIdentities()["gpt-sol"]).not.toContain(
+			"gpt-99-sol",
+		);
+	});
+});
 
 describe("account-local approved line evidence", () => {
 	const caps = normalizeAutoModelCapabilities("codex", {

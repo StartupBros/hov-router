@@ -68,6 +68,22 @@ export function getSupportedLines(
 	);
 }
 
+/**
+ * Every approved line's supported identities, oldest to newest, as a fresh
+ * copy. Read-only reporting (the catalogue-gap alert): adding an identity
+ * here still needs reviewed support evidence in SUPPORTED_IDENTITIES.
+ */
+export function getSupportedLineIdentities(): Record<
+	QualityApprovedLine,
+	readonly string[]
+> {
+	return Object.fromEntries(
+		(Object.keys(SUPPORTED_IDENTITIES) as QualityApprovedLine[]).map(
+			(line) => [line, [...SUPPORTED_IDENTITIES[line].models]],
+		),
+	) as Record<QualityApprovedLine, readonly string[]>;
+}
+
 /** The newest supported identity of `line` among `modelIds`, or null. */
 export function newestSupportedLineModel(
 	line: QualityApprovedLine,

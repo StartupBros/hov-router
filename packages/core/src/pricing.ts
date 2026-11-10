@@ -156,7 +156,8 @@ const BUNDLED_PRICING: ApiResponse = {
 				cost: {
 					input: 2,
 					output: 10,
-					cache_read: 0.2,
+					// Cache hits on Opus 5.5 and Sonnet 5.5 are 0.05x base input (pricing page footnote 2).
+					cache_read: 0.1,
 					cache_write: 2.5,
 				},
 			},
@@ -453,24 +454,39 @@ let nanogptPricingFetchPromise: Promise<ApiResponse | null> | null = null;
  * test isolation, and a subscriber's registration must survive that swap or
  * every test after the first would silently stop deriving anything.
  */
-const catalogLoadedListeners = new Set<(data: ApiResponse) => void>();
+/**
+ * Which tier of `getPricing()`'s chain produced a load: a fresh models.dev
+ * fetch, the on-disk cache of an earlier fetch, or the bundled table.
+ */
+export type PricingCatalogLoadSource = "remote" | "disk" | "bundled";
+
+export type PricingCatalogLoadedListener = (
+	data: ApiResponse,
+	source: PricingCatalogLoadSource,
+) => void;
+
+const catalogLoadedListeners = new Set<PricingCatalogLoadedListener>();
 
 /**
  * Subscribe to catalogue loads. Returns an unsubscribe function.
  * A throwing listener is caught and ignored - a subscriber bug must never
- * break pricing for every other caller.
+ * break pricing for every other caller. An async listener must catch its
+ * own rejections: only a synchronous throw is caught here.
  */
 export function onPricingCatalogLoaded(
-	listener: (data: ApiResponse) => void,
+	listener: PricingCatalogLoadedListener,
 ): () => void {
 	catalogLoadedListeners.add(listener);
 	return () => catalogLoadedListeners.delete(listener);
 }
 
-function notifyCatalogLoaded(data: ApiResponse): void {
+function notifyCatalogLoaded(
+	data: ApiResponse,
+	source: PricingCatalogLoadSource,
+): void {
 	for (const listener of catalogLoadedListeners) {
 		try {
-			listener(data);
+			listener(data, source);
 		} catch {
 			// A subscriber's derivation bug must never break pricing itself.
 		}
@@ -480,6 +496,7 @@ function notifyCatalogLoaded(data: ApiResponse): void {
 class PriceCatalogue {
 	private static instance: PriceCatalogue;
 	private priceData: ApiResponse | null = null;
+	private priceDataSource: PricingCatalogLoadSource | null = null;
 	private lastFetch = 0;
 	private remoteFetchPromise: Promise<ApiResponse | null> | null = null;
 	private warnedModels = new Set<string>();
@@ -794,11 +811,14 @@ class PriceCatalogue {
 
 		// Always attempt to fetch fresh pricing first (once per process start)
 		let data = await this.fetchRemote();
+		let source: PricingCatalogLoadSource = "remote";
 
 		// If remote fetch failed (offline or error), fall back to disk cache
 		if (!data) {
 			data = await this.loadFromCache();
+			source = "disk";
 		}
+		if (!data) source = "bundled";
 
 		// If we have remote data, merge it with bundled pricing to ensure we have all models
 		if (data) {
@@ -815,9 +835,19 @@ class PriceCatalogue {
 		const finalData = this.mergeNanoGPTPricing(data, nanogptPricing);
 
 		this.priceData = finalData;
+		this.priceDataSource = source;
 		this.lastFetch = Date.now();
-		notifyCatalogLoaded(finalData);
+		notifyCatalogLoaded(finalData, source);
 		return finalData;
+	}
+
+	/** The most recent completed load and its source, or null before the first. */
+	getLoadedCatalog(): {
+		data: ApiResponse;
+		source: PricingCatalogLoadSource;
+	} | null {
+		if (!this.priceData || !this.priceDataSource) return null;
+		return { data: this.priceData, source: this.priceDataSource };
 	}
 
 	warnOnce(modelId: string, error?: Error | string): void {
@@ -1114,6 +1144,38 @@ export interface PricingCatalogSnapshot {
  */
 export function getPricingCatalogSnapshotSync(): PricingCatalogSnapshot {
 	return PriceCatalogue.get().getCatalogSnapshotSync();
+}
+
+/**
+ * The catalogue from the most recent completed `getPricing()` load and which
+ * source answered it, or `null` before any load in this process. Never loads.
+ */
+export function getLoadedPricingCatalog(): {
+	data: ApiResponse;
+	source: PricingCatalogLoadSource;
+} | null {
+	return PriceCatalogue.get().getLoadedCatalog();
+}
+
+/**
+ * Load the catalogue now (if it is not already warm), so its listeners run
+ * without waiting for the first priced request. Never throws.
+ */
+export async function warmPricingCatalog(): Promise<void> {
+	try {
+		await PriceCatalogue.get().getPricing();
+	} catch {
+		// Pricing has its own fallbacks; a failed warm-up changes nothing.
+	}
+}
+
+/**
+ * A copy of the price sheet compiled into this build (the fallback used when
+ * neither models.dev nor the disk cache answers). For checks that compare the
+ * build's own tables with each other, never for pricing a request.
+ */
+export function getBundledPricingCatalog(): ApiResponse {
+	return structuredClone(BUNDLED_PRICING);
 }
 
 export interface CatalogModelSummary {

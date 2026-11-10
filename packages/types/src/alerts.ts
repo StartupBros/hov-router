@@ -142,6 +142,14 @@ export function isWebhookOptInAlertType(type: AlertType): boolean {
  * - `unknown_model`: a client requested a plausibly-shaped Claude model ID
  *   that isn't in the bundled catalog (CLAUDE_MODEL_IDS) — the day-0 signal
  *   that packages/core/src/models.ts itself needs a bump.
+ * - `catalog_new_model`: the models.dev catalogue lists a recently released
+ *   first-party model that CLAUDE_MODEL_IDS, LIST_PRICE_ERAS or its approved
+ *   Auto line does not include (one alert per model and gap; the id ends in
+ *   `registry`, `era` or `auto_line`).
+ * - `era_rate_mismatch`: a list-price era's rates disagree with the model's
+ *   own first-party catalogue section.
+ * - `unpriced_window`: a usage window closed with tokens for a model the
+ *   catalogue prices but the list-price table could not.
  *
  * There is no dedicated schema column for this discriminator (the `alerts`
  * table's fixed columns are shared by every alert type). Following how other
@@ -150,7 +158,12 @@ export function isWebhookOptInAlertType(type: AlertType): boolean {
  * scope (`model_routing_drift:<reason>:...`, via buildThresholdAlertId) and
  * spelled out in `title`/`message`.
  */
-export type ModelRoutingDriftReason = "stale_policy" | "unknown_model";
+export type ModelRoutingDriftReason =
+	| "stale_policy"
+	| "unknown_model"
+	| "catalog_new_model"
+	| "era_rate_mismatch"
+	| "unpriced_window";
 
 /** A single alert raised by the alert engine. */
 export interface AlertEvent {
