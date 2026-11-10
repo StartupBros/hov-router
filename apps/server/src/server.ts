@@ -159,7 +159,6 @@ import {
 	createManagedIngress,
 	malformedRequestUrlResponse,
 } from "./managed-ingress";
-import { logRemovedCodexSettingsWarnings } from "./removed-codex-settings-warning";
 import {
 	describeRetentionSweepStop,
 	type RetentionSweepPacer,
@@ -1697,9 +1696,6 @@ export default async function startServer(options?: {
 	registerDisposable({ dispose: () => alertService.stop() });
 	const memberNoticeWarning = memberNoticeStartupWarning(config);
 	if (memberNoticeWarning) log.warn(memberNoticeWarning);
-	// Removed Codex features (WebSocket transport, cache canaries); name their
-	// variables still set.
-	logRemovedCodexSettingsWarnings(process.env, log);
 	// Each pass reads the destination fresh and does nothing while it is off
 	// or blocked, so the scheduler always runs.
 	const stopMemberNotices = startMemberNoticeScheduler((signal) =>

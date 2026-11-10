@@ -475,7 +475,7 @@ Configuration precedence is:
 4. `CCFLARE_CODEX_CACHE_KEY_MODE=session` is an explicit all-session override: one key per session, shared by all of its subagents, with no continuity.
 5. Otherwise requests use conversation keys. Empty transformed input keeps the session-key fallback.
 
-The session-key canary that compared the two modes was removed. `CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT` is ignored and the router logs a startup warning while it is still set, so delete it from the drop-in.
+The session-key canary that compared the two modes was removed. `CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT` is ignored, so delete it from the drop-in.
 
 #### Trace schema and analysis
 
