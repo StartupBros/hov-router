@@ -69,7 +69,7 @@ export function BankedResetsSummary({
 }) {
 	if (!summary || summary.trackedAccounts === 0) return null;
 	const { totalAvailable, soonestExpiresAt, appliesNow, anyStale } = summary;
-	const allUsableStale =
+	const allApplicableStale =
 		appliesNow.length > 0 && appliesNow.every((entry) => entry.stale);
 
 	return (
@@ -109,16 +109,16 @@ export function BankedResetsSummary({
 			{appliesNow.length > 0 ? (
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
 					<span className="text-xs text-muted-foreground">
-						{allUsableStale
-							? "Usable at last check, per OpenAI:"
-							: "Usable now, per OpenAI:"}
+						{allApplicableStale
+							? "Would help at last check, per OpenAI:"
+							: "Would help now, per OpenAI:"}
 					</span>
 					{appliesNow.map((entry) => (
 						<span key={entry.accountId} className="whitespace-nowrap">
 							<span className="font-medium">{entry.accountName}</span>{" "}
 							<span className="tabular-nums text-muted-foreground">
 								({entry.applicableCount}
-								<span className="sr-only"> usable</span>)
+								<span className="sr-only"> would help</span>)
 							</span>
 							{entry.stale && (
 								<span
@@ -134,8 +134,8 @@ export function BankedResetsSummary({
 				totalAvailable > 0 && (
 					<p className="text-sm text-muted-foreground">
 						{anyStale
-							? "At last check, OpenAI reported no reset usable on any account."
-							: "OpenAI reports no reset can be used on any account right now."}
+							? "At last check, OpenAI did not expect a reset to help on any account."
+							: "OpenAI does not expect a reset to help on any account right now."}
 					</p>
 				)
 			)}

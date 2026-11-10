@@ -431,9 +431,9 @@ export type RedeemResetErrorReason =
 	| "in_progress"
 	/** 409: another request id is open on this account; adopt `openRequestId`. */
 	| "open_request"
-	/** 409: OpenAI applies no reset to this account right now (R8). */
-	| "not_applicable"
-	/** 409: the counts are too old to say whether a reset applies. */
+	/** 409: a fresh count shows no banked reset held on this account (R8). */
+	| "none_held"
+	/** 409: the counts are too old to rely on. */
 	| "counts_stale"
 	/** 409: this request id was used for a different account. */
 	| "request_conflict"

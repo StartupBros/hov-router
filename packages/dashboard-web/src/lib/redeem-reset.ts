@@ -58,7 +58,7 @@ const REASONS = new Set<string>(
 	Object.keys({
 		in_progress: true,
 		open_request: true,
-		not_applicable: true,
+		none_held: true,
 		counts_stale: true,
 		request_conflict: true,
 		not_sent: true,

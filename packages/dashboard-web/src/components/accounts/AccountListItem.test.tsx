@@ -693,7 +693,7 @@ describe("AccountListItem banked resets", () => {
 			'<fieldset aria-label="Banked resets for acc-1"',
 		);
 		expect(group).toBeGreaterThan(-1);
-		expect(html).toContain("Usable now (OpenAI)");
+		expect(html).toContain("Would help now (OpenAI)");
 		expect(html).not.toContain("applies now");
 		// The status line closes before the group opens: the group is not one of
 		// its chips, so it cannot wrap in among the request counters.

@@ -497,7 +497,7 @@ describe("POST /api/accounts/:id/redeem-reset", () => {
 		expect(calls).toHaveLength(2);
 	});
 
-	it("refuses a new id after a done redemption once the applicable count reads 0", async () => {
+	it("refuses a new id after a done redemption once the count reads 0", async () => {
 		await insertAccount(accountId);
 		await observe(accountId, { available: 1, applicable: 1 });
 		replies.push(reply(200, { code: "reset", windows_reset: 1 }));
@@ -514,7 +514,7 @@ describe("POST /api/accounts/:id/redeem-reset", () => {
 		const res = await post(accountId, { requestId: crypto.randomUUID() });
 
 		expect(res.status).toBe(409);
-		expect(res.body.reason).toBe("not_applicable");
+		expect(res.body.reason).toBe("none_held");
 		expect(calls).toHaveLength(1);
 	});
 
@@ -565,14 +565,31 @@ describe("POST /api/accounts/:id/redeem-reset", () => {
 		expect(calls).toHaveLength(1);
 	});
 
-	it("answers 409 with the R8 reason when no reset applies now (AE2)", async () => {
+	it("sends one consume call when OpenAI counts none of the held resets as applying (#772)", async () => {
 		await insertAccount(accountId);
 		await observe(accountId, { available: 2, applicable: 0 });
+		replies.push(reply(200, { code: "nothing_to_reset" }));
+		nextUsage = { available: 2, applicable: 0 };
+
+		const res = await post(accountId, { requestId: crypto.randomUUID() });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({
+			state: "done",
+			outcome: "nothing_to_reset",
+			spend: "not_spent",
+		});
+		expect(calls).toHaveLength(1);
+	});
+
+	it("answers 409 none_held and sends nothing when no reset is held", async () => {
+		await insertAccount(accountId);
+		await observe(accountId, { available: 0, applicable: 0 });
 
 		const res = await post(accountId, { requestId: crypto.randomUUID() });
 
 		expect(res.status).toBe(409);
-		expect(res.body.reason).toBe("not_applicable");
+		expect(res.body.reason).toBe("none_held");
 		expect(calls).toHaveLength(0);
 	});
 

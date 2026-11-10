@@ -126,6 +126,40 @@ describe("UseResetPanel confirmation (R9, KTD12)", () => {
 		);
 	});
 
+	it("adds no applicability note when OpenAI says a reset would help", () => {
+		const visible = text(render(flow("confirm")));
+		expect(visible).not.toContain("does not expect a reset");
+		expect(visible).not.toContain("did not say whether");
+	});
+
+	it("says before confirming when OpenAI does not expect a reset to help, and still offers it (#772)", () => {
+		const html = render(flow("confirm"), {
+			resets: { ...resets, applicableCount: 0, appliesNow: false },
+		});
+		const visible = text(html);
+		expect(visible).toContain(
+			"OpenAI does not expect a reset to help this account right now. It may answer that nothing needed a reset. Afterwards the router shows whether one was spent.",
+		);
+		expect(visible).not.toMatch(/usable/i);
+		expect(visible).not.toMatch(BANNED);
+		const confirm = buttons(html).find(
+			(button) => button.label === "Use 1 reset",
+		);
+		expect(confirm?.tag).toBeDefined();
+		expect(confirm?.tag).not.toMatch(/\sdisabled=""/);
+	});
+
+	it("says OpenAI did not report applicability when the applicable count is missing", () => {
+		const visible = text(
+			render(flow("confirm"), {
+				resets: { ...resets, applicableCount: null, appliesNow: false },
+			}),
+		);
+		expect(visible).toContain(
+			"OpenAI did not say whether a reset would help this account right now. It may answer that nothing needed a reset.",
+		);
+	});
+
 	it("gives 'No, go back' the initial focus and puts it first", () => {
 		const [goBack, confirm] = buttons(render(flow("confirm"))).filter(
 			(button) => button.label !== "Close",

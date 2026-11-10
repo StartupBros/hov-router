@@ -14,6 +14,7 @@ import {
 import { formatBankedResetExpiry } from "./BankedResetsSummary";
 import {
 	accountResetWindows,
+	applicabilitySentence,
 	describeRedeemAnswer,
 	formatWindowReset,
 	openResetFlow,
@@ -45,8 +46,14 @@ function ConfirmBody({
 	now: number;
 }) {
 	const weekFromNow = `${formatBankedResetExpiry(now + SEVEN_DAYS_MS)} UTC`;
+	const applicability = applicabilitySentence(resets);
 	return (
 		<div className="space-y-3 text-sm">
+			{applicability && (
+				<p>
+					{`${applicability} It may answer that nothing needed a reset. Afterwards the router shows whether one was spent.`}
+				</p>
+			)}
 			<div>
 				<p>OpenAI says a reset:</p>
 				<ul className="list-disc space-y-0.5 pl-5">
