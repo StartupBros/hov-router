@@ -15,6 +15,7 @@ import {
 	buildCandidates,
 	createRouterManifest,
 	githubTransport,
+	POST_CREATE_READBACK_DELAYS_MS,
 	type ReleaseTransport,
 	reconcileDraft,
 	reconcilePullRequests,
@@ -75,6 +76,7 @@ async function draftFixture(repo = "hov-router") {
 		};
 		return draft;
 	};
+	const waits: number[] = [];
 	const transport: ReleaseTransport = {
 		scm,
 		getRepository: async () => repositoryMetadata(),
@@ -83,10 +85,14 @@ async function draftFixture(repo = "hov-router") {
 		checkFoundation: async () => true,
 		getTagSha: async () => tag,
 		getRelease: async () => draft,
+		wait: async (ms) => {
+			waits.push(ms);
+		},
 	};
 	return {
 		transport,
 		writes,
+		waits,
 		getLabels: () => labels,
 		setTag: (value: string) => {
 			tag = value;
@@ -257,7 +263,12 @@ for (const mode of ["create", "validate"] as const) {
 		await expect(operation(f.transport, expected)).rejects.toThrow(
 			`Draft/tag verification failed: ${detail}`,
 		);
-		expect(releaseReads).toBe(2);
+		// Only a release missing right after creation is read again (#784).
+		const retried = mode === "create" && failure === "missing";
+		expect(releaseReads).toBe(
+			retried ? 2 + POST_CREATE_READBACK_DELAYS_MS.length : 2,
+		);
+		expect(f.waits).toEqual(retried ? [...POST_CREATE_READBACK_DELAYS_MS] : []);
 		expect(tagReads).toBe(
 			failure === "resolved" || failure === "missing-tag" ? 2 : 1,
 		);
@@ -266,6 +277,69 @@ for (const mode of ["create", "validate"] as const) {
 		expect(f.getLabels()).toEqual(["autorelease: pending"]);
 	});
 }
+
+// The release listing can lag a draft created a moment earlier: every release from
+// 3.6.0 to 4.0.0 failed this readback once and passed on a manual rerun (#784).
+function lagListing(
+	f: Awaited<ReturnType<typeof draftFixture>>,
+	misses: number,
+) {
+	const readRelease = f.transport.getRelease;
+	let releaseReads = 0;
+	f.transport.getRelease = async (tag) => {
+		const release = await readRelease(tag);
+		// Read 1 finds nothing and triggers creation; the next `misses` reads lag.
+		if (++releaseReads > 1 && releaseReads <= 1 + misses) return undefined;
+		return release;
+	};
+	return () => releaseReads;
+}
+
+test("create readback waits for a lagging release listing instead of failing", async () => {
+	const f = await draftFixture();
+	const reads = lagListing(f, 3);
+	expect(await reconcileDraft(f.transport, expected)).toMatchObject({
+		...expected,
+		releaseId: 17,
+		tag: "v3.5.79",
+	});
+	expect(reads()).toBe(5);
+	expect(f.waits).toEqual(POST_CREATE_READBACK_DELAYS_MS.slice(0, 3));
+	expect(f.writes).toHaveLength(1);
+	expect(f.getLabels()).toEqual(["autorelease: tagged"]);
+});
+
+test("create readback gives up after its bounded waits with the original diagnosis", async () => {
+	const f = await draftFixture();
+	const reads = lagListing(f, Number.POSITIVE_INFINITY);
+	await expect(reconcileDraft(f.transport, expected)).rejects.toThrow(
+		'Draft/tag verification failed: release missing; expected tag="v3.5.79"; observed=undefined',
+	);
+	expect(reads()).toBe(2 + POST_CREATE_READBACK_DELAYS_MS.length);
+	expect(f.waits).toEqual([...POST_CREATE_READBACK_DELAYS_MS]);
+	expect(
+		POST_CREATE_READBACK_DELAYS_MS.reduce((a, b) => a + b, 0),
+	).toBeLessThanOrEqual(90_000);
+	expect(f.writes).toHaveLength(1);
+	expect(f.getLabels()).toEqual(["autorelease: pending"]);
+});
+
+test("a release that appears after a wait still gets every identity check", async () => {
+	const f = await draftFixture();
+	const readRelease = f.transport.getRelease;
+	let releaseReads = 0;
+	f.transport.getRelease = async (tag) => {
+		const release = await readRelease(tag);
+		if (++releaseReads === 2) return undefined;
+		return release && releaseReads > 2 ? { ...release, id: 18 } : release;
+	};
+	await expect(reconcileDraft(f.transport, expected)).rejects.toThrow(
+		"Draft/tag verification failed: release ID mismatch; expected=17; observed=18",
+	);
+	expect(f.waits).toEqual(POST_CREATE_READBACK_DELAYS_MS.slice(0, 1));
+	expect(f.writes).toHaveLength(1);
+	expect(f.getLabels()).toEqual(["autorelease: pending"]);
+});
 
 test.each([
 	"release",
