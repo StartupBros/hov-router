@@ -156,38 +156,53 @@ describe("priceTokensAtListPrice long-context tier", () => {
 });
 
 describe("priceTokensAtListPrice", () => {
-	it("advances VALUE_PRICING_VERSION for the Sonnet 5.5 cache-read correction", () => {
-		expect(VALUE_PRICING_VERSION).toBe("2026-11-10.1");
+	it("advances VALUE_PRICING_VERSION for the GPT-6 era floor and gpt-6.1-terra", () => {
+		expect(VALUE_PRICING_VERSION).toBe("2026-11-10.2");
+	});
+
+	it("starts every model's first era at the era floor", () => {
+		// Windows are valued at their start time, so a model's first era must
+		// reach back to the floor: a launch-dated era leaves the model's tokens
+		// unpriced in every window that opened before its launch.
+		const floor = Date.parse("2026-06-01T00:00:00Z");
+		const offFloor = Object.entries(LIST_PRICE_ERAS)
+			.filter(([, eras]) => eras[0]?.sinceMs !== floor)
+			.map(([model]) => model);
+		expect(offFloor).toEqual([]);
 	});
 
 	describe("OpenAI GPT-6 and GPT-5.6 Sol eras", () => {
 		const D = (s: string) => Date.parse(s);
+		const FLOOR = D("2026-06-01T00:00:00Z");
 		const M = {
 			inputTokens: 1_000_000,
 			cacheReadInputTokens: 1_000_000,
 			cacheCreationInputTokens: 1_000_000,
 			outputTokens: 1_000_000,
 		};
+		// [launch date per OpenAI's changelog, 1M of each token kind at list price]
 		const LAUNCH: Record<string, [string, number]> = {
 			"gpt-6-astra": ["2026-09-03T00:00:00Z", 10 + 1 + 12.5 + 50],
 			"gpt-6-sol": ["2026-09-22T00:00:00Z", 2 + 0.2 + 2.5 + 10],
 			"gpt-6-luna": ["2026-09-22T00:00:00Z", 0.1 + 0.01 + 0.125 + 0.5],
 			"gpt-6.1-sol": ["2026-09-29T00:00:00Z", 2 + 0.1 + 2.5 + 10],
+			"gpt-6.1-terra": ["2026-10-26T00:00:00Z", 1 + 0.05 + 1.25 + 5],
 		};
 
-		it("era boundaries: null one ms before launch, priced at launch", () => {
-			for (const [model, [since, total]] of Object.entries(LAUNCH)) {
-				expect(priceTokensAtListPrice(model, D(since) - 1, M)).toBeNull();
-				expect(priceTokensAtListPrice(model, D(since), M)).toBeCloseTo(
-					total,
-					10,
-				);
+		it("prices from the era floor, so a window opened before launch is valued", () => {
+			for (const [model, [launch, total]] of Object.entries(LAUNCH)) {
+				expect(priceTokensAtListPrice(model, FLOOR - 1, M)).toBeNull();
+				expect(priceTokensAtListPrice(model, FLOOR, M)).toBeCloseTo(total, 10);
+				// A seven-day window that opened a day before launch.
+				expect(
+					priceTokensAtListPrice(model, D(launch) - 86_400_000, M),
+				).toBeCloseTo(total, 10);
 			}
 		});
 
-		it("planted negative: gpt-6-sol before 2026-09-22 is unpriced", () => {
+		it("planted negative: gpt-6-sol before the era floor is unpriced", () => {
 			expect(
-				priceTokensAtListPrice("gpt-6-sol", D("2026-09-21T12:00:00Z"), M),
+				priceTokensAtListPrice("gpt-6-sol", D("2026-05-31T12:00:00Z"), M),
 			).toBeNull();
 		});
 

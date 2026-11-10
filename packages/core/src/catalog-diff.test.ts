@@ -126,15 +126,26 @@ describe("findCatalogNewModels", () => {
 	});
 
 	it("flags only the missing era for a fresh GPT model with no Auto line", () => {
+		// Synthetic id: no list-price era, and no Auto line covers terra models.
+		const gaps = findCatalogNewModels(
+			catalog({
+				openai: { "gpt-6.2-terra": { release_date: recent, cost: COST } },
+			}),
+			{ nowMs: NOW, autoLines: { "gpt-sol": ["gpt-6.1-sol"] } },
+		);
+		expect(gaps.map((g) => [g.modelId, g.gap])).toEqual([
+			["gpt-6.2-terra", "era"],
+		]);
+	});
+
+	it("reports no gap for gpt-6.1-terra now that it has a list-price era", () => {
 		const gaps = findCatalogNewModels(
 			catalog({
 				openai: { "gpt-6.1-terra": { release_date: recent, cost: COST } },
 			}),
 			{ nowMs: NOW, autoLines: { "gpt-sol": ["gpt-6.1-sol"] } },
 		);
-		expect(gaps.map((g) => [g.modelId, g.gap])).toEqual([
-			["gpt-6.1-terra", "era"],
-		]);
+		expect(gaps).toEqual([]);
 	});
 
 	it("flags a fresh GPT model outside an existing Auto line", () => {
