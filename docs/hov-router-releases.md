@@ -346,6 +346,9 @@ through `--version` and `--git-sha`.
 - A failed draft/coordinator step: run the coordinator by `workflow_dispatch` with
   `source_sha` (the release PR merge commit) and `version`. It re-validates and
   re-dispatches the artifact run; each write is preceded by re-validation.
+- The release listing can lag a draft the coordinator has just created. The
+  coordinator re-reads it for about a minute before failing with `release missing`;
+  any other readback mismatch fails at once ([#784](https://github.com/StartupBros/hov-router/issues/784)).
 - The auto-rerun workflow excludes both new workflows.
 
 GitHub immutable releases are currently disabled on the platform. The no-clobber
