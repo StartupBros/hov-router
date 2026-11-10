@@ -1,6 +1,7 @@
 import { promises as fs, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { catalogSectionForModel } from "./catalog-diff";
 import { TIME_CONSTANTS } from "./constants";
 import { CLAUDE_MODEL_IDS, MODEL_DISPLAY_NAMES } from "./models";
 
@@ -432,6 +433,9 @@ interface NanoGPTApiResponse {
 
 const MODELS_DEV_FETCH_TIMEOUT_MS = 10_000;
 
+/** Quiet time after a catalogue load or first-sight attempt before another. */
+const FIRST_SIGHT_REFRESH_FLOOR_MS = 5 * 60 * 1000;
+
 // Cache constants for NanoGPT pricing
 export const NANOGPT_CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
@@ -498,6 +502,9 @@ class PriceCatalogue {
 	private priceData: ApiResponse | null = null;
 	private priceDataSource: PricingCatalogLoadSource | null = null;
 	private lastFetch = 0;
+	private lastFirstSightAttempt = 0;
+	/** When each id last started a first-sight refresh (noteUnknownModel). */
+	private firstSightAttempts = new Map<string, number>();
 	private remoteFetchPromise: Promise<ApiResponse | null> | null = null;
 	private warnedModels = new Set<string>();
 	private warnedRatesUnknownModels = new Set<string>();
@@ -820,9 +827,18 @@ class PriceCatalogue {
 		}
 		if (!data) source = "bundled";
 
-		// If we have remote data, merge it with bundled pricing to ensure we have all models
-		if (data) {
-			data = this.mergePricingData(data, BUNDLED_PRICING);
+		return this.commitLoad(data, source);
+	}
+
+	/** Publish one load: merge the bundled and NanoGPT tables, then notify. */
+	private async commitLoad(
+		loaded: ApiResponse | null,
+		source: PricingCatalogLoadSource,
+	): Promise<ApiResponse> {
+		let data: ApiResponse;
+		if (loaded) {
+			// Merge loaded data with bundled pricing to ensure we have all models
+			data = this.mergePricingData(loaded, BUNDLED_PRICING);
 		} else {
 			// Fall back to bundled pricing - create a deep copy to avoid mutation
 			data = structuredClone
@@ -839,6 +855,50 @@ class PriceCatalogue {
 		this.lastFetch = Date.now();
 		notifyCatalogLoaded(finalData, source);
 		return finalData;
+	}
+
+	/**
+	 * A lookup named a first-party model (catalogue id shape) that the loaded
+	 * catalogue lacks. models.dev can list a release before the next scheduled
+	 * refresh, so fetch it again now (#774): at most once per id per refresh
+	 * cycle, and never within FIRST_SIGHT_REFRESH_FLOOR_MS of the last load or
+	 * attempt. Fire-and-forget: the lookup that missed answers from the
+	 * current catalogue and is never held up.
+	 */
+	noteUnknownModel(modelId: string): void {
+		if (process.env.CF_PRICING_OFFLINE === "1") return;
+		if (!this.priceData || catalogSectionForModel(modelId) === null) return;
+		const now = Date.now();
+		const lastActivity = Math.max(this.lastFetch, this.lastFirstSightAttempt);
+		if (now - lastActivity < FIRST_SIGHT_REFRESH_FLOOR_MS) return;
+		const cycleMs = this.getCacheDurationMs();
+		const attemptedAt = this.firstSightAttempts.get(modelId);
+		if (attemptedAt !== undefined && now - attemptedAt < cycleMs) return;
+		// The floor allows at most 12 attempts an hour; expired ids are dropped
+		// so the map holds about one refresh cycle's worth.
+		for (const [id, at] of this.firstSightAttempts) {
+			if (now - at >= cycleMs) this.firstSightAttempts.delete(id);
+		}
+		this.firstSightAttempts.set(modelId, now);
+		this.lastFirstSightAttempt = now;
+		void this.refreshForFirstSight(modelId).catch((error) => {
+			this.logger?.warn("First-sight pricing refresh failed: %s", error);
+		});
+	}
+
+	private async refreshForFirstSight(modelId: string): Promise<void> {
+		const data = await this.fetchRemote();
+		if (!data) return;
+		const finalData = await this.commitLoad(data, "remote");
+		const listed = Object.values(finalData).some(
+			(provider) => provider?.models?.[modelId],
+		);
+		this.logger?.info(
+			listed
+				? "Pricing catalogue refreshed: models.dev now lists %s"
+				: "Pricing catalogue refreshed: models.dev does not list %s yet",
+			modelId,
+		);
 	}
 
 	/** The most recent completed load and its source, or null before the first. */
@@ -1264,7 +1324,8 @@ export async function listCatalogueModels(
  * Find a model definition in the pricing catalogue across all providers
  */
 async function findModel(modelId: string): Promise<ModelDef | null> {
-	const pricing = await PriceCatalogue.get().getPricing();
+	const catalogue = PriceCatalogue.get();
+	const pricing = await catalogue.getPricing();
 
 	// Search all providers for the model
 	for (const provider of Object.values(pricing)) {
@@ -1273,6 +1334,7 @@ async function findModel(modelId: string): Promise<ModelDef | null> {
 		}
 	}
 
+	catalogue.noteUnknownModel(modelId);
 	return null;
 }
 
