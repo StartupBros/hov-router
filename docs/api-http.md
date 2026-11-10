@@ -1410,28 +1410,6 @@ curl -X PATCH http://localhost:8080/api/agents/agent-uuid \
   -d '{"model": null}'
 ```
 
-#### GET /api/workspaces
-
-List all available workspaces with agent counts.
-
-**Response:**
-```json
-{
-  "workspaces": [
-    {
-      "name": "my-workspace",
-      "path": "/path/to/workspace",
-      "agentCount": 5
-    }
-  ]
-}
-```
-
-**Example:**
-```bash
-curl http://localhost:8080/api/workspaces
-```
-
 ---
 
 ### Model Catalog

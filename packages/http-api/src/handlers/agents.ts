@@ -156,32 +156,6 @@ export function createAgentPreferenceDeleteHandler(dbOps: DatabaseOperations) {
 	};
 }
 
-export function createWorkspacesListHandler() {
-	return async (): Promise<Response> => {
-		try {
-			const workspaces = agentRegistry.getWorkspaces();
-
-			// Add agent count for each workspace
-			const agents = await agentRegistry.getAgents();
-			const workspacesWithStats = workspaces.map((workspace) => {
-				const agentCount = agents.filter(
-					(a) => a.source === "workspace" && a.workspace === workspace.path,
-				).length;
-
-				return {
-					...workspace,
-					agentCount,
-				};
-			});
-
-			return jsonResponse({ workspaces: workspacesWithStats });
-		} catch (error) {
-			log.error("Error fetching workspaces:", error);
-			return jsonResponse({ error: "Failed to fetch workspaces" }, 500);
-		}
-	};
-}
-
 export function createBulkAgentPreferenceUpdateHandler(
 	dbOps: DatabaseOperations,
 	modelCatalog?: APIContext["modelCatalog"],
