@@ -16,6 +16,23 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { RateLimitProgress } from "./RateLimitProgress";
 
 describe("RateLimitProgress", () => {
+	it("lets detailed reset timestamps wrap with a gap in narrow dialogs", () => {
+		const reset = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+		const html = renderToStaticMarkup(
+			<RateLimitProgress
+				provider="anthropic"
+				resetIso={reset}
+				usageUtilization={38}
+				usageWindow="five_hour"
+				usageData={{ five_hour: { utilization: 38, resets_at: reset } }}
+			/>,
+		);
+		expect(html).toContain("until refresh");
+		expect(html).toContain("Resets ");
+		expect(html).toContain(
+			'class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1"',
+		);
+	});
 	it("shows the throttling message for Zai tokens_limit windows", () => {
 		const html = renderToStaticMarkup(
 			<RateLimitProgress
