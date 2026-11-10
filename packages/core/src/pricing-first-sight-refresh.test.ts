@@ -156,6 +156,20 @@ describe("first-sight catalogue refresh", () => {
 		expect(modelsDevFetches).toBe(5);
 	});
 
+	it("leaves the scheduled refresh where it was when the refetch still lacks the model", async () => {
+		setSystemTime(T0 + 6 * MINUTE);
+		const first = nextRemoteLoad();
+		await isModelPriced(NEW_MODEL);
+		await first;
+		expect(modelsDevFetches).toBe(2);
+
+		// Due 24 hours after the scheduled load at T0, not after the refetch.
+		catalogue = catalogueWith("claude-opus-5-5", NEW_MODEL);
+		setSystemTime(T0 + 24 * HOUR + MINUTE);
+		expect(await isModelPriced(NEW_MODEL)).toBe(true);
+		expect(modelsDevFetches).toBe(3);
+	});
+
 	it("ignores ids outside the first-party catalogue shapes and offline mode", async () => {
 		setSystemTime(T0 + 6 * MINUTE);
 		for (const id of [

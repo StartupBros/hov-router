@@ -17,7 +17,11 @@ import {
 } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { Config } from "@better-ccflare/config";
-import { LIST_PRICE_ERAS, VALUE_PRICING_VERSION } from "@better-ccflare/core";
+import {
+	LIST_PRICE_ERAS,
+	resetNanoGPTPricingCacheForTest,
+	VALUE_PRICING_VERSION,
+} from "@better-ccflare/core";
 import type { UsageWindow } from "@better-ccflare/database";
 import { BunSqlAdapter, ensureSchema } from "@better-ccflare/database";
 import {
@@ -224,6 +228,7 @@ describe("AlertService.evaluateClosedWindowPricing", () => {
 	beforeAll(() => {
 		previousOffline = process.env.CF_PRICING_OFFLINE;
 		process.env.CF_PRICING_OFFLINE = "1";
+		resetNanoGPTPricingCacheForTest();
 		previousFetch = globalThis.fetch;
 		globalThis.fetch = (() =>
 			Promise.reject(new Error("offline test"))) as unknown as typeof fetch;
@@ -231,6 +236,7 @@ describe("AlertService.evaluateClosedWindowPricing", () => {
 
 	afterAll(() => {
 		globalThis.fetch = previousFetch;
+		resetNanoGPTPricingCacheForTest();
 		if (previousOffline === undefined) delete process.env.CF_PRICING_OFFLINE;
 		else process.env.CF_PRICING_OFFLINE = previousOffline;
 	});

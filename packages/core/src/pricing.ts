@@ -827,13 +827,18 @@ class PriceCatalogue {
 		}
 		if (!data) source = "bundled";
 
-		return this.commitLoad(data, source);
+		return this.commitLoad(data, source, { scheduled: true });
 	}
 
-	/** Publish one load: merge the bundled and NanoGPT tables, then notify. */
+	/**
+	 * Publish one load: merge the bundled and NanoGPT tables, then notify.
+	 * Only a scheduled load restarts the refresh clock, so a first-sight
+	 * refetch never pushes the next scheduled refresh later.
+	 */
 	private async commitLoad(
 		loaded: ApiResponse | null,
 		source: PricingCatalogLoadSource,
+		{ scheduled }: { scheduled: boolean },
 	): Promise<ApiResponse> {
 		let data: ApiResponse;
 		if (loaded) {
@@ -852,7 +857,7 @@ class PriceCatalogue {
 
 		this.priceData = finalData;
 		this.priceDataSource = source;
-		this.lastFetch = Date.now();
+		if (scheduled) this.lastFetch = Date.now();
 		notifyCatalogLoaded(finalData, source);
 		return finalData;
 	}
@@ -860,9 +865,9 @@ class PriceCatalogue {
 	/**
 	 * A lookup named a first-party model (catalogue id shape) that the loaded
 	 * catalogue lacks. models.dev can list a release before the next scheduled
-	 * refresh, so fetch it again now (#774): at most once per id per refresh
-	 * cycle, and never within FIRST_SIGHT_REFRESH_FLOOR_MS of the last load or
-	 * attempt. Fire-and-forget: the lookup that missed answers from the
+	 * refresh, so fetch it again now (#774): at most once per id between
+	 * scheduled loads, and never within FIRST_SIGHT_REFRESH_FLOOR_MS of the
+	 * last load or attempt. Fire-and-forget: the lookup that missed answers from the
 	 * current catalogue and is never held up.
 	 */
 	noteUnknownModel(modelId: string): void {
@@ -871,13 +876,12 @@ class PriceCatalogue {
 		const now = Date.now();
 		const lastActivity = Math.max(this.lastFetch, this.lastFirstSightAttempt);
 		if (now - lastActivity < FIRST_SIGHT_REFRESH_FLOOR_MS) return;
-		const cycleMs = this.getCacheDurationMs();
 		const attemptedAt = this.firstSightAttempts.get(modelId);
-		if (attemptedAt !== undefined && now - attemptedAt < cycleMs) return;
-		// The floor allows at most 12 attempts an hour; expired ids are dropped
-		// so the map holds about one refresh cycle's worth.
+		if (attemptedAt !== undefined && attemptedAt >= this.lastFetch) return;
+		// Attempts from before the last scheduled load are spent; the floor
+		// keeps the rest to at most 12 an hour.
 		for (const [id, at] of this.firstSightAttempts) {
-			if (now - at >= cycleMs) this.firstSightAttempts.delete(id);
+			if (at < this.lastFetch) this.firstSightAttempts.delete(id);
 		}
 		this.firstSightAttempts.set(modelId, now);
 		this.lastFirstSightAttempt = now;
@@ -889,7 +893,9 @@ class PriceCatalogue {
 	private async refreshForFirstSight(modelId: string): Promise<void> {
 		const data = await this.fetchRemote();
 		if (!data) return;
-		const finalData = await this.commitLoad(data, "remote");
+		const finalData = await this.commitLoad(data, "remote", {
+			scheduled: false,
+		});
 		const listed = Object.values(finalData).some(
 			(provider) => provider?.models?.[modelId],
 		);
