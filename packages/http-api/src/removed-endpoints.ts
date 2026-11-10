@@ -49,6 +49,15 @@ const EXACT = new Map<string, RemovedEndpoint>([
 				"GET /api/agents returns the workspaces; count workspaceAgents by workspace for per-workspace totals.",
 		},
 	],
+	[
+		"/api/debug/cache-diagnosis",
+		{
+			endpoint: "/api/debug/cache-diagnosis",
+			replacement: null,
+			advice:
+				"Cache diagnosis ran only when CCFLARE_CACHE_DIAG was set, and that variable is now ignored.",
+		},
+	],
 ]);
 
 const ACCOUNT_ACTIONS = new Map<string, RemovedEndpoint>([

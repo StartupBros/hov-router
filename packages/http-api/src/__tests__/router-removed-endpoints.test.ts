@@ -101,6 +101,13 @@ const REMOVED: Array<{
 		endpoint: "/api/workspaces",
 		replacement: "GET /api/agents",
 	},
+	{
+		method: "POST",
+		path: "/api/debug/cache-diagnosis",
+		body: {},
+		endpoint: "/api/debug/cache-diagnosis",
+		replacement: null,
+	},
 ];
 
 describe("endpoints removed in 5.0.0", () => {
@@ -139,10 +146,12 @@ describe("endpoints removed in 5.0.0", () => {
 				"/api/accounts/acct-1/x/model-fallbacks",
 				"/api/system/info",
 				"/api/workspaces",
+				"/api/debug/cache-diagnosis",
 			]) {
 				expect((await send(method, path))?.status).toBe(410);
 			}
 		}
+		expect((await send("GET", "/api/debug/cache-diagnosis"))?.status).toBe(410);
 	});
 
 	it("leaves the routes next to them alone", async () => {
@@ -150,6 +159,7 @@ describe("endpoints removed in 5.0.0", () => {
 			["GET", "/api/config/model-capacity-routing"],
 			["POST", "/api/accounts/acct-1/model-mappings"],
 			["GET", "/api/agents"],
+			["GET", "/api/debug/cache-pacing"],
 		] as const) {
 			const response = await send(
 				method,
@@ -165,6 +175,7 @@ describe("endpoints removed in 5.0.0", () => {
 			"/api/accounts/acct-1/model-fallbacks-x",
 			"/api/system/info/extra",
 			"/api/workspaces/extra",
+			"/api/debug/cache-diagnosis/extra",
 		]) {
 			expect((await send("GET", path))?.status).not.toBe(410);
 		}

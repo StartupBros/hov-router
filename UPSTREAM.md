@@ -75,7 +75,8 @@ would justify bringing it back.
   cooldowns cover the accounts the backoff deprioritized. See
   [Auto-refresh removed](docs/hov-router-migration.md#auto-refresh-removed).
 - **Deprecated API endpoints** (`/api/config/model`, `/api/accounts/:id/auto-refresh`,
-  `/api/accounts/:id/model-fallbacks`, `/api/system/info`, `/api/workspaces`):
+  `/api/accounts/:id/model-fallbacks`, `/api/system/info`, `/api/workspaces`,
+  `/api/debug/cache-diagnosis`):
   removed in 5.0.0 and answered with `410 Gone` (`packages/http-api/src/removed-endpoints.ts`).
   Upstream changes to these handlers are not ported. See
   [Removed in 5.0.0](docs/hov-router-migration.md#removed-in-500).
