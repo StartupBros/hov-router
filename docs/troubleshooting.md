@@ -50,7 +50,7 @@ This guide helps you diagnose and resolve common issues with HoV Router (formerl
 
 **Solutions**:
 1. HoV Router automatically attempts to refresh expired tokens
-2. If automatic refresh fails, re-authenticate the account
+2. If automatic refresh fails, re-authenticate the account (see [Re-authenticating an account](oauth-reauthentication.md))
 3. Check for refresh token stampede prevention - multiple simultaneous refresh attempts are prevented
 
 ### PKCE Failures
@@ -80,11 +80,7 @@ This guide helps you diagnose and resolve common issues with HoV Router (formerl
 **Solutions**:
 1. Check if the refresh token was revoked in your Anthropic console
 2. Verify the CLIENT_ID environment variable matches your OAuth app
-3. Remove and re-add the account:
-   ```bash
-   better-ccflare --remove <account-name>
-   better-ccflare --add-account <account-name> --mode <mode> --priority <number>
-   ```
+3. Re-authenticate the account, which keeps its settings and history (see [Re-authenticating an account](oauth-reauthentication.md)). A refresh the provider refused has already paused the account with reason `oauth_invalid_grant`, and a successful re-login lifts that pause.
 4. Check for multiple simultaneous refresh attempts in logs
 
 ## Rate Limiting Issues
@@ -1176,7 +1172,7 @@ Deployment and activation require separate authorization from current main. Reve
 | Problem | Quick Fix |
 |---------|-----------|
 | All accounts rate limited | Add more accounts: `better-ccflare --add-account newaccount --mode claude-oauth --priority 10` |
-| Token expired | Re-authenticate: `better-ccflare --remove account && better-ccflare --add-account account --mode claude-oauth --priority 0` |
+| Token expired | Re-authenticate: dashboard Accounts page → **Re-authenticate**, or `better-ccflare --reauthenticate <name>` for Anthropic, Qwen and xAI ([guide](oauth-reauthentication.md)) |
 | Database locked | Kill duplicate processes: `pkill -f "bun start"` |
 | Port in use | Use different port: `PORT=3000 bun start` |
 | Config corrupted | Reset config: `rm ~/.config/better-ccflare/better-ccflare.json` |

@@ -83,8 +83,11 @@ const INVALID_GRANT_MARKERS = [
 	"invalid_grant",
 	"invalid_refresh_token",
 	// Codex uses rotating refresh tokens; a reused/rotated token is terminal and
-	// equally requires re-authentication.
+	// equally requires re-authentication. The expired and invalidated codes are
+	// the other two the Codex CLI treats as permanent (codex-rs login manager).
 	"refresh_token_reused",
+	"refresh_token_expired",
+	"refresh_token_invalidated",
 	"refresh token not found or invalid",
 	"oauth authentication is currently not supported",
 ] as const;
@@ -175,13 +178,25 @@ export function formatOAuthErrorMessage(input: unknown): string {
 export function getOAuthErrorCode(input: unknown): string {
 	const parsed = parseOAuthErrorValue(input);
 	if (typeof parsed !== "object" || parsed === null) return "";
+	for (const candidate of structuredCodeFields(parsed)) {
+		const code = boundedOAuthText(candidate).toLowerCase();
+		if (INVALID_GRANT_CODES.has(code)) return code;
+	}
+	return "";
+}
+
+/**
+ * The machine-code fields of a structured OAuth error, in precedence order.
+ * Description fields are never included.
+ */
+function structuredCodeFields(parsed: object): unknown[] {
 	const root = parsed as Record<string, unknown>;
 	const nestedValue = parseOAuthErrorValue(root.error);
 	const nested =
 		typeof nestedValue === "object" && nestedValue !== null
 			? (nestedValue as Record<string, unknown>)
 			: undefined;
-	const candidates = [
+	return [
 		nested?.error_code,
 		nested?.code,
 		nested?.type,
@@ -191,11 +206,52 @@ export function getOAuthErrorCode(input: unknown): string {
 		typeof nestedValue === "string" ? nestedValue : undefined,
 		typeof root.error === "string" ? root.error : undefined,
 	];
-	for (const candidate of candidates) {
-		const code = boundedOAuthText(candidate).toLowerCase();
-		if (INVALID_GRANT_CODES.has(code)) return code;
+}
+
+function codeFieldValues(input: unknown): string[] {
+	const parsed = parseOAuthErrorValue(input);
+	const fields =
+		typeof parsed === "string"
+			? [parsed]
+			: typeof parsed === "object" && parsed !== null
+				? structuredCodeFields(parsed)
+				: [];
+	const seen = new Set<string>();
+	const values: string[] = [];
+	for (const field of fields) {
+		const value = boundedOAuthText(field);
+		const key = value.toLowerCase();
+		if (!value || seen.has(key)) continue;
+		seen.add(key);
+		values.push(value);
 	}
-	return "";
+	return values;
+}
+
+/**
+ * Every machine-code value in an OAuth error, lowercased, deduplicated and in
+ * precedence order: the structured code fields of a JSON body, or the whole
+ * text of a non-JSON body. Unlike `getOAuthErrorCode` this does not filter to
+ * the terminal codes, so a caller can recognize other codes such as
+ * `invalid_client`. Returns nothing for an oversized body.
+ */
+export function getOAuthErrorCodeCandidates(input: unknown): string[] {
+	return codeFieldValues(input).map((value) => value.toLowerCase());
+}
+
+const LOGGABLE_OAUTH_CODE = /^[a-z][a-z0-9_]{1,39}$/;
+
+/**
+ * The first machine-code value shaped like an OAuth error code (lowercase
+ * snake_case, 2-40 characters), for a log line only. It never decides
+ * whether to quarantine an account. A caller must still drop a value that
+ * could have come from a credential before logging it.
+ */
+export function getOAuthErrorCodeLabel(input: unknown): string {
+	return (
+		codeFieldValues(input).find((value) => LOGGABLE_OAUTH_CODE.test(value)) ??
+		""
+	);
 }
 
 /** True only for an explicit structured terminal OAuth machine code. */

@@ -1,4 +1,4 @@
-import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
+import { reauthInstruction } from "@better-ccflare/core/reauth-instructions";
 import { Logger } from "@better-ccflare/logger";
 import type { Account } from "@better-ccflare/types";
 import { REFRESH_TOKEN_MAX_AGE_MS } from "../constants";
@@ -242,9 +242,7 @@ export function formatTokenHealthReport(report: TokenHealthReport): string {
 			}
 
 			if (account.requiresReauth) {
-				lines.push(
-					`   🔄 Action required: run '${COMMAND_NAME} --reauthenticate ${account.accountName}'`,
-				);
+				lines.push(`   🔄 Action required: ${instructionFor(account)}`);
 			}
 
 			lines.push("");
@@ -255,12 +253,18 @@ export function formatTokenHealthReport(report: TokenHealthReport): string {
 		lines.push("🔧 Recommended Actions:");
 		const needsReauth = report.accounts.filter((a) => a.requiresReauth);
 		needsReauth.forEach((account) => {
-			lines.push(`  ${COMMAND_NAME} --reauthenticate ${account.accountName}`);
+			lines.push(`  ${account.accountName}: ${instructionFor(account)}`);
 		});
 		lines.push("");
 	}
 
 	return lines.join("\n");
+}
+
+function instructionFor(account: TokenHealthStatus): string {
+	return reauthInstruction(account.provider, account.accountName, {
+		hasRefreshToken: account.hasRefreshToken,
+	});
 }
 
 function getStatusIcon(status: TokenHealthStatus["status"]): string {
@@ -308,17 +312,24 @@ export function getOAuthErrorMessage(
 	originalError: string,
 ): string {
 	const health = checkRefreshTokenHealth(account);
+	const instruction = reauthInstruction(account.provider, account.name, {
+		hasRefreshToken: health.hasRefreshToken,
+	});
+	// A provider that already said how to sign in again is not repeated.
+	const hint = originalError.includes(instruction)
+		? ""
+		: ` To re-authenticate, ${instruction}.`;
 
 	if (health.status === "expired" || health.status === "critical") {
-		return `OAuth tokens have expired for account '${account.name}'. Please re-authenticate: ${COMMAND_NAME} --reauthenticate ${account.name}`;
+		return `OAuth tokens have expired for account '${account.name}'.${hint} Original error: ${originalError}`;
 	}
 
 	if (health.status === "no-refresh-token" && health.requiresReauth) {
-		return `OAuth account '${account.name}' missing refresh token. Please re-authenticate: ${COMMAND_NAME} --reauthenticate ${account.name}`;
+		return `OAuth account '${account.name}' missing refresh token.${hint} Original error: ${originalError}`;
 	}
 
 	if (health.status === "warning") {
-		return `OAuth tokens for account '${account.name}' are nearing expiration. Consider re-authenticating soon: ${COMMAND_NAME} --reauthenticate ${account.name}. Original error: ${originalError}`;
+		return `OAuth tokens for account '${account.name}' are nearing expiration.${hint} Original error: ${originalError}`;
 	}
 
 	return `OAuth token refresh failed for account '${account.name}': ${originalError}`;

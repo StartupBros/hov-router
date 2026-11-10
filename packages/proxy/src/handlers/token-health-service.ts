@@ -1,4 +1,4 @@
-import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
+import { reauthInstruction } from "@better-ccflare/core/reauth-instructions";
 import { Logger } from "@better-ccflare/logger";
 import type { Account } from "@better-ccflare/types";
 import { REFRESH_TOKEN_HEALTH_CHECK_INTERVAL_MS } from "../constants";
@@ -36,11 +36,15 @@ export function createTokenHealthService(): TokenHealthService {
 			if (needsReauth.length > 0) {
 				log.warn(`🔄 ${needsReauth.length} account(s) need re-authentication:`);
 				needsReauth.forEach((account) => {
-					log.warn(`  - ${account.name} (${account.provider})`);
+					const instruction = reauthInstruction(
+						account.provider,
+						account.name,
+						{
+							hasRefreshToken: !!account.refresh_token,
+						},
+					);
+					log.warn(`  - ${account.name} (${account.provider}): ${instruction}`);
 				});
-				log.warn(
-					`Re-authenticate each with '${COMMAND_NAME} --reauthenticate <name>', or from the dashboard's Accounts page.`,
-				);
 			}
 
 			// Log summary statistics
