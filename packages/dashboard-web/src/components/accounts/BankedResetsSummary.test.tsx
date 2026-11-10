@@ -11,7 +11,7 @@ import {
 const NOV_30 = Date.UTC(2026, 10, 30);
 const NOW = Date.UTC(2026, 10, 2, 18, 30);
 const BANNED = /applies now|bonus|free|claim|ready|recommended|today|you can/i;
-/** Any wording built on OpenAI's applicable count, which predicts nothing (#772). */
+/** Any wording built on OpenAI's applicable count, which does not tell whether a reset will work (#772). */
 const APPLICABILITY =
 	/would help|expected to help|expect a reset|help not reported|usable|applies|applicable|would work/i;
 

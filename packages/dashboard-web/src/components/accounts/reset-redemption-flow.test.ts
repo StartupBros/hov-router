@@ -332,22 +332,14 @@ describe("resetActionAvailability (R8)", () => {
 		observedAt: NOW,
 	};
 
-	it("is enabled on a fresh count when OpenAI says a reset would help", () => {
-		expect(resetActionAvailability(held)).toEqual({
-			shown: true,
-			enabled: true,
-			note: null,
-		});
-	});
-
-	it("is enabled on a fresh count when OpenAI does not expect one to help, as the Codex CLI allows (#772)", () => {
-		for (const applicableCount of [0, null]) {
+	it("is enabled on any fresh held count, whatever OpenAI's applicable count says, as in the Codex CLI (#772)", () => {
+		for (const [applicableCount, appliesNow] of [
+			[2, true],
+			[0, false],
+			[null, false],
+		] as const) {
 			expect(
-				resetActionAvailability({
-					...held,
-					applicableCount,
-					appliesNow: false,
-				}),
+				resetActionAvailability({ ...held, applicableCount, appliesNow }),
 			).toEqual({ shown: true, enabled: true, note: null });
 		}
 	});

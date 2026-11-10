@@ -561,7 +561,7 @@ OpenAI grants ChatGPT accounts banked rate-limit resets that can be redeemed lat
 ```
 
 - `availableCount` is OpenAI's count of banked resets, not the length of the credit list.
-- `applicableCount` is OpenAI's `applicable_available_count`, passed through as reported, and `appliesNow` is true when it is above zero. Neither gates a redemption, and the dashboard shows neither: the Codex CLI never reads the field, and the router, like it, sends a redemption whenever a fresh count shows a reset held. On 2026-11-10 an account at its weekly limit read `applicableCount` 0, and a redemption still reset its windows.
+- `applicableCount` is OpenAI's `applicable_available_count`, passed through as reported, and `appliesNow` is true when it is above zero. Neither gates a redemption, and the dashboard shows neither: the Codex CLI never reads the field, and the router, like it, sends a redemption whenever a fresh count shows a reset held. On 2026-11-10 one account at its weekly limit read `applicableCount` 0, and a redemption still reset its windows.
 - `soonestExpiresAt` is the earliest expiry among available resets, in epoch milliseconds. `doesNotExpire` is true when resets are held and none of them has an expiry.
 - `stale` is true when the counts are more than 10 minutes old, when the latest poll lacked them, or when list reads have failed for more than 12 hours. A stale account keeps its last values; it never reads as zero. A Codex account with no observation yet is stale with null values.
 - `tracked` is false for a custom-endpoint Codex account, which does not report resets. Its values are null and it is never stale.

@@ -8,9 +8,9 @@ const NOV_30 = Date.UTC(2026, 10, 30);
 const NOW = Date.UTC(2026, 10, 2, 18, 30);
 const OBSERVED = Date.UTC(2026, 10, 3, 14, 5);
 const BANNED = /applies now|bonus|free|claim|ready|recommended/i;
-/** Any wording built on OpenAI's applicable count, which predicts nothing (#772). */
+/** Any wording built on OpenAI's applicable count, which does not tell whether a reset will work (#772). */
 const APPLICABILITY =
-	/would help|expected to help|help not reported|usable|applies|applicable|would work/i;
+	/would help|expected to help|expect a reset|help not reported|did not say whether|nothing needed a reset|usable|applies|applicable|would work/i;
 const HELD_DETAIL =
 	"Using one resets this account's usage limits early. It is optional and cannot be undone.";
 
@@ -145,9 +145,9 @@ describe("BankedResetsStatus", () => {
 	});
 
 	it("gives the same line whether or not OpenAI counts a reset as applying", () => {
-		expect(
-			text(render({ ...held, applicableCount: 0, appliesNow: false })),
-		).toBe(text(render(held)));
+		expect(render({ ...held, applicableCount: 0, appliesNow: false })).toBe(
+			render(held),
+		);
 	});
 
 	it("says Expires, not Soonest expires, for a single reset", () => {

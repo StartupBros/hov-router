@@ -12,7 +12,7 @@ const NOV_30 = Date.UTC(2026, 10, 30);
 const WEEK_RESET = Date.UTC(2026, 10, 9, 14, 0);
 const BANNED =
 	/applies now|bonus|free|claim|(?<!al)ready|recommended|today|you can/i;
-/** Any wording built on OpenAI's applicable count, which predicts nothing (#772). */
+/** Any wording built on OpenAI's applicable count, which does not tell whether a reset will work (#772). */
 const APPLICABILITY =
 	/would help|expected to help|expect a reset|did not say whether|nothing needed a reset|usable|applies|applicable|would work/i;
 
