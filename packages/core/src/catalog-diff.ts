@@ -149,8 +149,7 @@ export function findCatalogNewModels(
 	}
 
 	return [...found.values()].sort(
-		(a, b) =>
-			a.modelId.localeCompare(b.modelId) || a.gap.localeCompare(b.gap),
+		(a, b) => a.modelId.localeCompare(b.modelId) || a.gap.localeCompare(b.gap),
 	);
 }
 
@@ -186,7 +185,9 @@ function isRate(value: unknown): value is number {
 }
 
 function sameRate(a: number, b: number): boolean {
-	return Math.abs(a - b) <= RATE_TOLERANCE * Math.max(1, Math.abs(a), Math.abs(b));
+	return (
+		Math.abs(a - b) <= RATE_TOLERANCE * Math.max(1, Math.abs(a), Math.abs(b))
+	);
 }
 
 /**

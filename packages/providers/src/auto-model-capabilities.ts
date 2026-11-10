@@ -77,11 +77,13 @@ export function getSupportedLineIdentities(): Record<
 	QualityApprovedLine,
 	readonly string[]
 > {
-	return Object.fromEntries(
-		(Object.keys(SUPPORTED_IDENTITIES) as QualityApprovedLine[]).map(
-			(line) => [line, [...SUPPORTED_IDENTITIES[line].models]],
-		),
-	) as Record<QualityApprovedLine, readonly string[]>;
+	const lines = {} as Record<QualityApprovedLine, readonly string[]>;
+	for (const line of Object.keys(
+		SUPPORTED_IDENTITIES,
+	) as QualityApprovedLine[]) {
+		lines[line] = [...SUPPORTED_IDENTITIES[line].models];
+	}
+	return lines;
 }
 
 /** The newest supported identity of `line` among `modelIds`, or null. */

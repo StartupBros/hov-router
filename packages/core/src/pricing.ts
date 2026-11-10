@@ -893,7 +893,7 @@ class PriceCatalogue {
 		const listed = Object.values(finalData).some(
 			(provider) => provider?.models?.[modelId],
 		);
-		this.logger?.info(
+		this.logger?.debug(
 			listed
 				? "Pricing catalogue refreshed: models.dev now lists %s"
 				: "Pricing catalogue refreshed: models.dev does not list %s yet",

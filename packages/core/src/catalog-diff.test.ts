@@ -48,7 +48,9 @@ describe("catalogSectionForModel", () => {
 		expect(catalogSectionForModel("claude-3-5-sonnet-20241022")).toBeNull();
 		expect(catalogSectionForModel("claude-opus")).toBeNull();
 		expect(catalogSectionForModel("gpt-image-2")).toBeNull();
-		expect(catalogSectionForModel(`claude-opus-6-${"9".repeat(64)}`)).toBeNull();
+		expect(
+			catalogSectionForModel(`claude-opus-6-${"9".repeat(64)}`),
+		).toBeNull();
 	});
 });
 
@@ -249,7 +251,9 @@ describe("findEraRateMismatches", () => {
 		expect(
 			findEraRateMismatches(
 				catalog({
-					anthropic: { [SYNTHETIC]: { cost: { input: 2, output: 10, cache_write: 9 } } },
+					anthropic: {
+						[SYNTHETIC]: { cost: { input: 2, output: 10, cache_write: 9 } },
+					},
 				}),
 				NOW,
 			),
@@ -266,10 +270,7 @@ describe("findEraRateMismatches", () => {
 			},
 		];
 		expect(
-			findEraRateMismatches(
-				catalog({ anthropic: { [SYNTHETIC]: {} } }),
-				NOW,
-			),
+			findEraRateMismatches(catalog({ anthropic: { [SYNTHETIC]: {} } }), NOW),
 		).toEqual([]);
 		expect(findEraRateMismatches({}, NOW)).toEqual([]);
 	});
@@ -296,8 +297,10 @@ describe("findEraRateMismatches", () => {
 		});
 		expect(findEraRateMismatches(data, NOW)).toEqual([]);
 		expect(
-			findEraRateMismatches(data, Date.parse("2026-10-01T00:00:00Z"))[0]
-				?.fields.map((f) => f.field),
+			findEraRateMismatches(
+				data,
+				Date.parse("2026-10-01T00:00:00Z"),
+			)[0]?.fields.map((f) => f.field),
 		).toEqual(["input", "output", "cache_read"]);
 	});
 
@@ -343,9 +346,7 @@ describe("findEraRateMismatches", () => {
 		expect(
 			findEraRateMismatches(withTier(LONG_CONTEXT_PROMPT_TOKENS, 4), NOW)[0]
 				?.fields,
-		).toEqual([
-			{ field: "long_context_input", catalogValue: 4, eraValue: 2 },
-		]);
+		).toEqual([{ field: "long_context_input", catalogValue: 4, eraValue: 2 }]);
 		expect(findEraRateMismatches(withTier(200_000, 2), NOW)[0]?.fields).toEqual(
 			[
 				{
@@ -376,7 +377,11 @@ describe("findEraRateMismatches", () => {
 								output: 5,
 								cache_read: 0.1,
 								tiers: [
-									{ input: 2, output: 10, tier: { type: "context", size: 272_000 } },
+									{
+										input: 2,
+										output: 10,
+										tier: { type: "context", size: 272_000 },
+									},
 								],
 							},
 						},

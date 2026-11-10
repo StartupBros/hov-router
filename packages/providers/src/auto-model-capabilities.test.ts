@@ -19,9 +19,7 @@ describe("getSupportedLineIdentities", () => {
 	it("returns a copy the caller cannot use to widen a line", () => {
 		const first = getSupportedLineIdentities();
 		(first["gpt-sol"] as string[]).push("gpt-99-sol");
-		expect(getSupportedLineIdentities()["gpt-sol"]).not.toContain(
-			"gpt-99-sol",
-		);
+		expect(getSupportedLineIdentities()["gpt-sol"]).not.toContain("gpt-99-sol");
 	});
 });
 
