@@ -40,7 +40,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    # Resource limits (adjust as needed)
+    # Resource limits (adjust as needed). Set the memory limit above the router's
+    # measured peak; the reservation is the container's memory.low, which protects
+    # nothing unless its parent slice also sets MemoryLow. See docs/docker.md#memory.
     deploy:
       resources:
         limits:
