@@ -12,6 +12,9 @@ const NOV_30 = Date.UTC(2026, 10, 30);
 const WEEK_RESET = Date.UTC(2026, 10, 9, 14, 0);
 const BANNED =
 	/applies now|bonus|free|claim|(?<!al)ready|recommended|today|you can/i;
+/** Any wording built on OpenAI's applicable count, which does not tell whether a reset will work (#772). */
+const APPLICABILITY =
+	/would help|expected to help|expect a reset|did not say whether|nothing needed a reset|usable|applies|applicable|would work/i;
 
 const resets: BankedResets = {
 	tracked: true,
@@ -124,6 +127,28 @@ describe("UseResetPanel confirmation (R9, KTD12)", () => {
 		expect(visible).toContain(
 			"It spends one reset. These resets do not expire.",
 		);
+	});
+
+	it("confirms with the same words and an enabled Use 1 reset, whatever OpenAI's applicable count says (#772)", () => {
+		const base = render(flow("confirm"));
+		for (const [applicableCount, appliesNow] of [
+			[2, true],
+			[0, false],
+			[null, false],
+		] as const) {
+			const html = render(flow("confirm"), {
+				resets: { ...resets, applicableCount, appliesNow },
+			});
+			expect(html).toBe(base);
+			const visible = text(html);
+			expect(visible).not.toMatch(APPLICABILITY);
+			expect(visible).not.toMatch(BANNED);
+			const confirm = buttons(html).find(
+				(button) => button.label === "Use 1 reset",
+			);
+			expect(confirm?.tag).toBeDefined();
+			expect(confirm?.tag).not.toMatch(/\sdisabled=""/);
+		}
 	});
 
 	it("gives 'No, go back' the initial focus and puts it first", () => {

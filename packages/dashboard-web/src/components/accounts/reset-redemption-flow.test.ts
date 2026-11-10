@@ -217,9 +217,9 @@ describe("describeRedeemAnswer: answers that sent nothing or got no reply", () =
 			true,
 		],
 		[
-			"409 not_applicable",
-			refused(409, "not_applicable"),
-			/would not help.*Nothing was sent/,
+			"409 none_held",
+			refused(409, "none_held"),
+			/no banked reset on this account.*Nothing was sent/,
 			false,
 		],
 		[
@@ -298,7 +298,7 @@ describe("dialog copy", () => {
 		const reasons: RedeemResetErrorReason[] = [
 			"in_progress",
 			"open_request",
-			"not_applicable",
+			"none_held",
 			"counts_stale",
 			"request_conflict",
 			"not_sent",
@@ -332,20 +332,16 @@ describe("resetActionAvailability (R8)", () => {
 		observedAt: NOW,
 	};
 
-	it("is enabled only when OpenAI says a reset would help and the count is fresh", () => {
-		expect(resetActionAvailability(held)).toEqual({
-			shown: true,
-			enabled: true,
-			note: null,
-		});
-	});
-
-	it("is shown but disabled when no reset would help; the status line says why", () => {
-		expect(resetActionAvailability({ ...held, appliesNow: false })).toEqual({
-			shown: true,
-			enabled: false,
-			note: null,
-		});
+	it("is enabled on any fresh held count, whatever OpenAI's applicable count says, as in the Codex CLI (#772)", () => {
+		for (const [applicableCount, appliesNow] of [
+			[2, true],
+			[0, false],
+			[null, false],
+		] as const) {
+			expect(
+				resetActionAvailability({ ...held, applicableCount, appliesNow }),
+			).toEqual({ shown: true, enabled: true, note: null });
+		}
 	});
 
 	it("is disabled with a reason while the count is stale, as the server would refuse it", () => {

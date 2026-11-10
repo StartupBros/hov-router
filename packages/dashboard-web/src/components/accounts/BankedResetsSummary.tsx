@@ -69,9 +69,8 @@ export function BankedResetsSummary({
 	now?: number;
 }) {
 	if (!summary || summary.trackedAccounts === 0) return null;
-	const { totalAvailable, soonestExpiresAt, appliesNow, anyStale } = summary;
-	const allUsableStale =
-		appliesNow.length > 0 && appliesNow.every((entry) => entry.stale);
+	// Applicability stays in the API but predicts nothing about a reset working.
+	const { totalAvailable, soonestExpiresAt, anyStale } = summary;
 	const explanation = (
 		<p className="max-w-prose text-sm text-muted-foreground">
 			A banked reset is a saved reset that restores an account's usage limits
@@ -82,12 +81,7 @@ export function BankedResetsSummary({
 
 	// An empty, fresh balance should not push the accounts below a help panel.
 	// Keep held resets, expiry information and stale observations fully visible.
-	if (
-		totalAvailable === 0 &&
-		!anyStale &&
-		soonestExpiresAt === null &&
-		appliesNow.length === 0
-	) {
+	if (totalAvailable === 0 && !anyStale && soonestExpiresAt === null) {
 		return (
 			<details
 				aria-label="Banked resets"
@@ -137,39 +131,6 @@ export function BankedResetsSummary({
 					"No banked resets held."
 				)}
 			</p>
-			{appliesNow.length > 0 ? (
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-					<span className="text-xs text-muted-foreground">
-						{allUsableStale
-							? "Usable at last check, per OpenAI:"
-							: "Usable now, per OpenAI:"}
-					</span>
-					{appliesNow.map((entry) => (
-						<span key={entry.accountId} className="whitespace-nowrap">
-							<span className="font-medium">{entry.accountName}</span>{" "}
-							<span className="tabular-nums text-muted-foreground">
-								({entry.applicableCount}
-								<span className="sr-only"> usable</span>)
-							</span>
-							{entry.stale && (
-								<span
-									className={`ml-1.5 ${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
-								>
-									last known
-								</span>
-							)}
-						</span>
-					))}
-				</div>
-			) : (
-				totalAvailable > 0 && (
-					<p className="text-sm text-muted-foreground">
-						{anyStale
-							? "At last check, OpenAI reported no reset usable on any account."
-							: "OpenAI reports no reset can be used on any account right now."}
-					</p>
-				)
-			)}
 			{anyStale && (
 				<p className="text-xs text-muted-foreground">
 					Some accounts have not reported recently. Their last known counts are

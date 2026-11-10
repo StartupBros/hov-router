@@ -561,7 +561,7 @@ OpenAI grants ChatGPT accounts banked rate-limit resets that can be redeemed lat
 ```
 
 - `availableCount` is OpenAI's count of banked resets, not the length of the credit list.
-- `applicableCount` is how many OpenAI would apply to the account right now. `appliesNow` is true when it is above zero.
+- `applicableCount` is OpenAI's `applicable_available_count`, passed through as reported, and `appliesNow` is true when it is above zero. Neither gates a redemption, and the dashboard shows neither: the Codex CLI never reads the field, and the router, like it, sends a redemption whenever a fresh count shows a reset held. On 2026-11-10 one account at its weekly limit read `applicableCount` 0, and a redemption still reset its windows.
 - `soonestExpiresAt` is the earliest expiry among available resets, in epoch milliseconds. `doesNotExpire` is true when resets are held and none of them has an expiry.
 - `stale` is true when the counts are more than 10 minutes old, when the latest poll lacked them, or when list reads have failed for more than 12 hours. A stale account keeps its last values; it never reads as zero. A Codex account with no observation yet is stale with null values.
 - `tracked` is false for a custom-endpoint Codex account, which does not report resets. Its values are null and it is never stale.
@@ -582,7 +582,7 @@ Fleet summary of banked Codex resets. Requires the same authentication as the ot
 }
 ```
 
-`totalAvailable` counts each ChatGPT account once, from its freshest observation, so two router accounts signed in to one ChatGPT account are not double counted. `soonestExpiresAt` is the earliest expiry across tracked accounts. `appliesNow` lists every account where a reset would apply now. `anyStale` is true when any tracked account is stale, so the total may include old values. Neither route returns the ChatGPT account id or anything derived from it.
+`totalAvailable` counts each ChatGPT account once, from its freshest observation, so two router accounts signed in to one ChatGPT account are not double counted. `soonestExpiresAt` is the earliest expiry across tracked accounts. `appliesNow` lists every account whose `applicableCount` is above zero; the dashboard does not show it. `anyStale` is true when any tracked account is stale, so the total may include old values. Neither route returns the ChatGPT account id or anything derived from it.
 
 #### POST /api/accounts/:accountId/redeem-reset
 
@@ -647,7 +647,7 @@ After `reset` or `already_redeemed`, when the usage read that follows shows the 
 | A record for this id that is `pending` and under 60 seconds old | `409 in_progress` |
 | A record for this id that is `pending` and older, `unknown` or `retryable` | Resends the same id and credit, whatever the counts now say, unless the account now signs in to a different ChatGPT account |
 | A different id still open on this account | `409 open_request` with `openRequestId`; retry with that id |
-| Counts more than 10 minutes old, or no reset applies now | `409 counts_stale` or `409 not_applicable`; nothing is sent |
+| Counts more than 10 minutes old, or a fresh count of zero or unknown resets held | `409 counts_stale` or `409 none_held`; nothing is sent |
 | Otherwise | Records the id as `pending`, then calls OpenAI |
 
 **Errors** carry `{ "error": "...", "reason": "..." }`:
@@ -659,8 +659,8 @@ After `reset` or `already_redeemed`, when the usage read that follows shows the 
 | `404` | `account_not_found` | Unknown account |
 | `409` | `in_progress` | This id is being sent right now; `requestId` names it |
 | `409` | `open_request` | Another id is open on this account; `openRequestId` names it |
-| `409` | `not_applicable` | A reset would not clear any limit on this account right now |
-| `409` | `counts_stale` | The counts are too old to tell; refresh usage and try again |
+| `409` | `none_held` | A fresh count shows no banked reset held on this account |
+| `409` | `counts_stale` | The counts are too old to rely on; refresh usage and try again |
 | `409` | `request_conflict` | This id was already used for another account |
 | `415` | `unsupported_media_type` | The body was not sent as `application/json` |
 | `503` | `not_sent` | Nothing reached OpenAI (no running proxy could take the request, or no valid token); retry with the same id |

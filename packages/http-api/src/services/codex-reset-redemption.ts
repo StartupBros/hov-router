@@ -78,7 +78,7 @@ type ServiceErrorReason = Extract<
 	RedeemResetErrorReason,
 	| "in_progress"
 	| "open_request"
-	| "not_applicable"
+	| "none_held"
 	| "counts_stale"
 	| "request_conflict"
 	| "not_sent"
@@ -87,10 +87,9 @@ type ServiceErrorReason = Extract<
 const ERROR_TEXT: Record<ServiceErrorReason, string> = {
 	in_progress: "This redemption is being sent right now.",
 	open_request: "Another redemption is still open on this account.",
-	not_applicable:
-		"A reset would not clear any limit on this account right now.",
+	none_held: "OpenAI reports no banked reset held on this account.",
 	counts_stale:
-		"The reset counts are too old to tell whether a reset applies. Refresh usage and try again.",
+		"The reset counts are too old to rely on. Refresh usage and try again.",
 	request_conflict: "This request id was already used for another account.",
 	not_sent: "Nothing was sent to OpenAI. Try again.",
 };
@@ -227,7 +226,13 @@ export class CodexResetRedemptionService {
 		if (!state) return refuse(409, "counts_stale");
 		const assessment = assessBankedResets(state, live, now);
 		if (assessment.stale) return refuse(409, "counts_stale");
-		if (!assessment.appliesNow) return refuse(409, "not_applicable");
+		// Like OpenAI's Codex CLI, a held reset is enough to send. OpenAI's
+		// applicable count is not a gate: an account at its weekly limit read 0
+		// and a reset still worked, and OpenAI decides what a consume resets
+		// (#772).
+		if ((assessment.availableCount ?? 0) <= 0) {
+			return refuse(409, "none_held");
+		}
 		if (!this.deps.hasRedeemer()) {
 			return refuse(503, "not_sent", { requestId });
 		}
