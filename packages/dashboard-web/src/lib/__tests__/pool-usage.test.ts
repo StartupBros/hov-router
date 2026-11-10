@@ -41,7 +41,6 @@ function mkAccount(partial: Partial<AccountResponse>): AccountResponse {
 		sessionInfo: "",
 		priority: 0,
 		autoFallbackEnabled: false,
-		autoRefreshEnabled: false,
 		autoPauseOnOverageEnabled: false,
 		peakHoursPauseEnabled: false,
 		customEndpoint: null,

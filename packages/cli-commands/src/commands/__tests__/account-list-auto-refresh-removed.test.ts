@@ -3,7 +3,7 @@ import type { Account } from "@better-ccflare/types";
 import { getAccountsList } from "../account";
 
 describe("getAccountsList after the auto-refresh removal", () => {
-	it("keeps the autoRefreshEnabled field and reports false for a stored value that is on", async () => {
+	it("has no autoRefreshEnabled field, even for a stored value that is on", async () => {
 		const account = {
 			id: "account-1",
 			name: "Account 1",
@@ -28,6 +28,8 @@ describe("getAccountsList after the auto-refresh removal", () => {
 
 		const result = await getAccountsList(dbOps as never);
 
-		expect(result[0]).toHaveProperty("autoRefreshEnabled", false);
+		expect(result).toHaveLength(1);
+		expect(result[0]).toHaveProperty("autoFallbackEnabled", false);
+		expect(result[0]).not.toHaveProperty("autoRefreshEnabled");
 	});
 });

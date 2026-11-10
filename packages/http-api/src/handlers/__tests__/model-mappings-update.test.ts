@@ -10,7 +10,6 @@ import { existsSync, unlinkSync } from "node:fs";
 import type { DatabaseOperations } from "@better-ccflare/database";
 import { DatabaseFactory } from "@better-ccflare/database";
 import {
-	createAccountModelFallbacksUpdateHandler,
 	createAccountModelMappingsUpdateHandler,
 	createOpenAIAccountAddHandler,
 } from "../accounts";
@@ -65,7 +64,6 @@ function makeRequest(body: unknown): Request {
 describe("createAccountModelMappingsUpdateHandler — replace semantics", () => {
 	let dbOps: DatabaseOperations;
 	let handler: (req: Request, accountId: string) => Promise<Response>;
-	let fallbackHandler: (req: Request, accountId: string) => Promise<Response>;
 	let addHandler: (req: Request) => Promise<Response>;
 
 	beforeAll(() => {
@@ -73,7 +71,6 @@ describe("createAccountModelMappingsUpdateHandler — replace semantics", () => 
 		DatabaseFactory.initialize(TEST_DB_PATH);
 		dbOps = DatabaseFactory.getInstance();
 		handler = createAccountModelMappingsUpdateHandler(dbOps);
-		fallbackHandler = createAccountModelFallbacksUpdateHandler(dbOps);
 		addHandler = createOpenAIAccountAddHandler(dbOps);
 	});
 
@@ -243,23 +240,6 @@ describe("createAccountModelMappingsUpdateHandler — replace semantics", () => 
 		expect(await readMappings(dbOps, id)).toEqual({
 			sonnet: "existing-model",
 		});
-	});
-
-	it("deprecated fallback updates cannot append a 17th candidate", async () => {
-		const candidates = Array.from(
-			{ length: 16 },
-			(_, index) => `model-${index + 1}`,
-		);
-		const id = await insertAccount(dbOps, "fallback-overflow", {
-			sonnet: candidates,
-		});
-		const response = await fallbackHandler(
-			makeRequest({ modelFallbacks: { sonnet: "overflow-fallback" } }),
-			id,
-		);
-
-		expect(response.status).toBe(400);
-		expect(await readMappings(dbOps, id)).toEqual({ sonnet: candidates });
 	});
 
 	it("OpenAI-compatible creation rejects 17 candidates without inserting an account", async () => {

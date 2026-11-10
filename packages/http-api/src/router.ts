@@ -15,12 +15,10 @@ import {
 	createAccountAddHandler,
 	createAccountAutoFallbackHandler,
 	createAccountAutoPauseOnOverageHandler,
-	createAccountAutoRefreshHandler,
 	createAccountBillingTypeHandler,
 	createAccountCodexCreditDrainHandler,
 	createAccountCustomEndpointUpdateHandler,
 	createAccountForceResetRateLimitHandler,
-	createAccountModelFallbacksUpdateHandler,
 	createAccountModelMappingsUpdateHandler,
 	createAccountPauseHandler,
 	createAccountPeakHoursPauseHandler,
@@ -52,7 +50,6 @@ import {
 	createAgentPreferenceUpdateHandler,
 	createAgentsListHandler,
 	createBulkAgentPreferenceUpdateHandler,
-	createWorkspacesListHandler,
 } from "./handlers/agents";
 import { createAgentUpdateHandler } from "./handlers/agents-update";
 import {
@@ -158,7 +155,6 @@ import {
 	createIntegrityCheckHandler,
 	createStorageHandler,
 } from "./handlers/storage";
-import { createSystemInfoHandler } from "./handlers/system";
 import {
 	createAccountTokenHealthHandler,
 	createReauthNeededHandler,
@@ -167,6 +163,10 @@ import {
 import { createUsageHistoryHandler } from "./handlers/usage-history";
 import { createUsageWindowsHandler } from "./handlers/usage-windows";
 import { createVersionCheckHandler } from "./handlers/version";
+import {
+	findRemovedEndpoint,
+	removedEndpointResponse,
+} from "./removed-endpoints";
 import { AuthService } from "./services/auth-service";
 import type { DeviceSetupCoordinator } from "./services/device-setup-jobs";
 import type { APIContext } from "./types";
@@ -317,10 +317,8 @@ export class APIRouter {
 			config,
 		);
 		const agentsHandler = createAgentsListHandler(dbOps);
-		const workspacesHandler = createWorkspacesListHandler();
 		const requestsStreamHandler = createRequestsStreamHandler();
 		const cleanupHandler = createCleanupHandler(dbOps, config);
-		const systemInfoHandler = createSystemInfoHandler();
 		const versionCheckHandler = createVersionCheckHandler();
 
 		// Debug/profiling handlers
@@ -543,7 +541,6 @@ export class APIRouter {
 			configHandlers.setForceAccountModel(req),
 		);
 		this.handlers.set("POST:/api/maintenance/cleanup", () => cleanupHandler());
-		this.handlers.set("GET:/api/system/info", () => systemInfoHandler());
 		this.handlers.set("GET:/api/version/check", () => versionCheckHandler());
 		this.handlers.set("GET:/api/logs/stream", (req) => logsStreamHandler(req));
 		this.handlers.set("GET:/api/logs/history", () => logsHistoryHandler());
@@ -595,7 +592,6 @@ export class APIRouter {
 			);
 			return bulkHandler(req);
 		});
-		this.handlers.set("GET:/api/workspaces", () => workspacesHandler());
 
 		// Debug/profiling routes
 		this.handlers.set("GET:/api/debug/heap", () => heapStatsHandler());
@@ -775,6 +771,13 @@ export class APIRouter {
 			);
 		}
 
+		// Endpoints removed in 5.0.0 answer 410 here rather than falling
+		// through to the inference proxy (see removed-endpoints.ts).
+		const removed = findRemovedEndpoint(path);
+		if (removed) {
+			return removedEndpointResponse(removed);
+		}
+
 		// Check for dynamic request payload endpoint
 		if (path.startsWith("/api/requests/payload/") && method === "GET") {
 			const parts = path.split("/");
@@ -927,16 +930,6 @@ export class APIRouter {
 				)(req, url);
 			}
 
-			// Account auto-refresh toggle
-			if (path.endsWith("/auto-refresh") && method === "POST") {
-				const autoRefreshHandler = createAccountAutoRefreshHandler(
-					this.context.dbOps,
-				);
-				return await this.wrapHandler((req) =>
-					autoRefreshHandler(req, accountId),
-				)(req, url);
-			}
-
 			// Account custom endpoint update
 			if (path.endsWith("/custom-endpoint") && method === "POST") {
 				const customEndpointHandler = createAccountCustomEndpointUpdateHandler(
@@ -954,16 +947,6 @@ export class APIRouter {
 				);
 				return await this.wrapHandler((req) =>
 					modelMappingsHandler(req, accountId),
-				)(req, url);
-			}
-
-			// Account model fallbacks update
-			if (path.endsWith("/model-fallbacks") && method === "POST") {
-				const modelFallbacksHandler = createAccountModelFallbacksUpdateHandler(
-					this.context.dbOps,
-				);
-				return await this.wrapHandler((req) =>
-					modelFallbacksHandler(req, accountId),
 				)(req, url);
 			}
 

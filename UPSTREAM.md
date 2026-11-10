@@ -74,6 +74,11 @@ would justify bringing it back.
   Request-time token refresh, the per-account circuit breaker and rate-limit
   cooldowns cover the accounts the backoff deprioritized. See
   [Auto-refresh removed](docs/hov-router-migration.md#auto-refresh-removed).
+- **Deprecated API endpoints** (`/api/config/model`, `/api/accounts/:id/auto-refresh`,
+  `/api/accounts/:id/model-fallbacks`, `/api/system/info`, `/api/workspaces`):
+  removed in 5.0.0 and answered with `410 Gone` (`packages/http-api/src/removed-endpoints.ts`).
+  Upstream changes to these handlers are not ported. See
+  [Removed in 5.0.0](docs/hov-router-migration.md#removed-in-500).
 - **Docker image publishing workflow:** removed earlier; the
   [Docker guide](docs/docker.md) builds from source.
 - **Wholesale-merge tooling** (`scripts/verify-upstream-sync-ledger.ts`,

@@ -49,7 +49,6 @@ function account(
 		sessionInfo: "fixture",
 		priority,
 		autoFallbackEnabled: true,
-		autoRefreshEnabled: true,
 		customEndpoint: null,
 		modelMappings: null,
 		usageUtilization: null,
