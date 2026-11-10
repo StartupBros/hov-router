@@ -39,7 +39,7 @@ import type { TokenBreakdown } from "./pricing";
  * (UsageWindowLedger.revalueStaleClosedWindows), so history follows the
  * current rates instead of keeping the price it was closed at.
  */
-export const VALUE_PRICING_VERSION = "2026-11-10.1";
+export const VALUE_PRICING_VERSION = "2026-11-10.2";
 
 /**
  * Prompt-token threshold (input + cache read + cache creation, per request)
@@ -102,6 +102,11 @@ export interface ListPriceEra {
  * file. A request timestamped before this floor gets `null` rather than a
  * guessed price — an unpriced gap is loud and visible; a guessed price
  * quietly poisons a window's total.
+ *
+ * Every model's first era starts here, including models launched after it.
+ * A window is valued at its start time, so an era dated at a model's launch
+ * leaves that model's tokens unpriced in every window that opened before the
+ * launch and ran past it. value-pricing.test.ts enforces this.
  */
 const INITIAL_ERA_FLOOR_MS = Date.parse("2026-06-01T00:00:00Z");
 
@@ -209,9 +214,11 @@ export const LIST_PRICE_ERAS: Record<string, ListPriceEra[]> = {
 	// less") gives no figures, so no pre-07-30 era is recorded (that window may
 	// be mispriced). No cache-write rate is confirmed for either model, so
 	// cache-creation tokens return null (unpriced) rather than a guessed rate.
+	// The GPT-6 eras start at INITIAL_ERA_FLOOR_MS, not at each model's launch
+	// (see that constant): the launch dates below are provenance only.
 	"gpt-6-astra": [
 		{
-			sinceMs: Date.parse("2026-09-03T00:00:00Z"),
+			sinceMs: INITIAL_ERA_FLOOR_MS,
 			inputPerM: 10.0,
 			cacheReadPerM: 1.0,
 			cacheCreationPerM: 12.5,
@@ -225,7 +232,7 @@ export const LIST_PRICE_ERAS: Record<string, ListPriceEra[]> = {
 	],
 	"gpt-6-sol": [
 		{
-			sinceMs: Date.parse("2026-09-22T00:00:00Z"),
+			sinceMs: INITIAL_ERA_FLOOR_MS,
 			inputPerM: 2.0,
 			cacheReadPerM: 0.2,
 			cacheCreationPerM: 2.5,
@@ -239,7 +246,7 @@ export const LIST_PRICE_ERAS: Record<string, ListPriceEra[]> = {
 	],
 	"gpt-6.1-sol": [
 		{
-			sinceMs: Date.parse("2026-09-29T00:00:00Z"),
+			sinceMs: INITIAL_ERA_FLOOR_MS,
 			inputPerM: 2.0,
 			cacheReadPerM: 0.1,
 			cacheCreationPerM: 2.5,
@@ -253,7 +260,7 @@ export const LIST_PRICE_ERAS: Record<string, ListPriceEra[]> = {
 	],
 	"gpt-6-luna": [
 		{
-			sinceMs: Date.parse("2026-09-22T00:00:00Z"),
+			sinceMs: INITIAL_ERA_FLOOR_MS,
 			inputPerM: 0.1,
 			cacheReadPerM: 0.01,
 			cacheCreationPerM: 0.125,
@@ -263,6 +270,24 @@ export const LIST_PRICE_ERAS: Record<string, ListPriceEra[]> = {
 			// and https://developers.openai.com/api/docs/models/gpt-6-luna (same base
 			// rates); launch 2026-09-22 per https://developers.openai.com/api/docs/changelog.
 			// checked 2026-10-18.
+		},
+	],
+	"gpt-6.1-terra": [
+		{
+			sinceMs: INITIAL_ERA_FLOOR_MS,
+			inputPerM: 1.0,
+			cacheReadPerM: 0.05,
+			cacheCreationPerM: 1.25,
+			outputPerM: 5.0,
+			// source: https://developers.openai.com/api/docs/pricing, Standard table,
+			// whose columns are now short-context input, output, cached input,
+			// 30m write, 12h write, then the same five for long context:
+			// "| gpt-6.1-terra | $1.00 | $5.00 | $0.05 | $1.25 | $2.50 | $2.00 | $7.50 | $0.10 | $2.50 | $5.00 |"
+			// and https://developers.openai.com/api/docs/models/gpt-6.1-terra (Input
+			// $1, Cached input $0.05, Cache writes $1.25 "shown use 30-minute
+			// retention", Output $5); launch 2026-10-26 per
+			// https://developers.openai.com/api/docs/changelog. The 30-minute write
+			// rate is used, as for the other GPT-6 entries. checked 2026-11-10.
 		},
 	],
 
