@@ -9,7 +9,6 @@ import type {
 import type { RedeemResetAnswer } from "../../lib/redeem-reset";
 import {
 	accountResetWindows,
-	applicabilitySentence,
 	describeRedeemAnswer,
 	formatWindowReset,
 	openResetFlow,
@@ -374,50 +373,6 @@ describe("resetActionAvailability (R8)", () => {
 			expect(resetActionAvailability(resets).shown).toBe(false);
 			expect(resetActionAvailability(resets).enabled).toBe(false);
 		}
-	});
-});
-
-describe("applicabilitySentence", () => {
-	const base: BankedResets = {
-		tracked: true,
-		availableCount: 2,
-		applicableCount: 2,
-		soonestExpiresAt: NOW + 86_400_000,
-		doesNotExpire: false,
-		appliesNow: true,
-		stale: false,
-		observedAt: NOW,
-	};
-
-	it("says nothing when OpenAI says a reset would help", () => {
-		expect(applicabilitySentence(base)).toBeNull();
-	});
-
-	it("relays OpenAI's zero as given, without guessing why or calling the reset unusable", () => {
-		const sentence = applicabilitySentence({
-			...base,
-			applicableCount: 0,
-			appliesNow: false,
-		});
-		expect(sentence).toBe(
-			"OpenAI does not expect a reset to help this account right now.",
-		);
-		expect(sentence).not.toMatch(
-			/usable|limit|plan|cooldown|window|exhausted/i,
-		);
-		expect(sentence).not.toMatch(BANNED);
-	});
-
-	it("says OpenAI did not say when the applicable count is missing", () => {
-		expect(
-			applicabilitySentence({
-				...base,
-				applicableCount: null,
-				appliesNow: false,
-			}),
-		).toBe(
-			"OpenAI did not say whether a reset would help this account right now.",
-		);
 	});
 });
 

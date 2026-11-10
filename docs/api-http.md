@@ -561,7 +561,7 @@ OpenAI grants ChatGPT accounts banked rate-limit resets that can be redeemed lat
 ```
 
 - `availableCount` is OpenAI's count of banked resets, not the length of the credit list.
-- `applicableCount` is how many OpenAI would apply to the account right now. `appliesNow` is true when it is above zero. Neither gates a redemption: like the Codex CLI, the router sends one whenever a fresh count shows a reset held, and OpenAI decides what it resets. The router's capacity fence stops an account just before OpenAI's own limit, so a full account usually reads `applicableCount` 0 while it still holds resets.
+- `applicableCount` is OpenAI's `applicable_available_count`, passed through as reported, and `appliesNow` is true when it is above zero. Neither gates a redemption, and the dashboard shows neither: the Codex CLI never reads the field, and the router, like it, sends a redemption whenever a fresh count shows a reset held. On 2026-11-10 an account at its weekly limit read `applicableCount` 0, and a redemption still reset its windows.
 - `soonestExpiresAt` is the earliest expiry among available resets, in epoch milliseconds. `doesNotExpire` is true when resets are held and none of them has an expiry.
 - `stale` is true when the counts are more than 10 minutes old, when the latest poll lacked them, or when list reads have failed for more than 12 hours. A stale account keeps its last values; it never reads as zero. A Codex account with no observation yet is stale with null values.
 - `tracked` is false for a custom-endpoint Codex account, which does not report resets. Its values are null and it is never stale.
@@ -582,7 +582,7 @@ Fleet summary of banked Codex resets. Requires the same authentication as the ot
 }
 ```
 
-`totalAvailable` counts each ChatGPT account once, from its freshest observation, so two router accounts signed in to one ChatGPT account are not double counted. `soonestExpiresAt` is the earliest expiry across tracked accounts. `appliesNow` lists every account where a reset would apply now. `anyStale` is true when any tracked account is stale, so the total may include old values. Neither route returns the ChatGPT account id or anything derived from it.
+`totalAvailable` counts each ChatGPT account once, from its freshest observation, so two router accounts signed in to one ChatGPT account are not double counted. `soonestExpiresAt` is the earliest expiry across tracked accounts. `appliesNow` lists every account whose `applicableCount` is above zero; the dashboard does not show it. `anyStale` is true when any tracked account is stale, so the total may include old values. Neither route returns the ChatGPT account id or anything derived from it.
 
 #### POST /api/accounts/:accountId/redeem-reset
 

@@ -8,6 +8,11 @@ const NOV_30 = Date.UTC(2026, 10, 30);
 const NOW = Date.UTC(2026, 10, 2, 18, 30);
 const OBSERVED = Date.UTC(2026, 10, 3, 14, 5);
 const BANNED = /applies now|bonus|free|claim|ready|recommended/i;
+/** Any wording built on OpenAI's applicable count, which predicts nothing (#772). */
+const APPLICABILITY =
+	/would help|expected to help|help not reported|usable|applies|applicable|would work/i;
+const HELD_DETAIL =
+	"Using one resets this account's usage limits early. It is optional and cannot be undone.";
 
 const held: BankedResets = {
 	tracked: true,
@@ -56,7 +61,7 @@ describe("BankedResetsStatus expiry wrapping", () => {
 });
 
 describe("bankedResetsRowState", () => {
-	it("decides from tracking, then the count, then OpenAI's flag", () => {
+	it("decides from tracking, then the count, never from OpenAI's applicable count", () => {
 		expect(bankedResetsRowState({ ...held, tracked: false })).toEqual({
 			kind: "not_tracked",
 			stale: false,
@@ -70,11 +75,13 @@ describe("bankedResetsRowState", () => {
 			stale: false,
 		});
 		expect(bankedResetsRowState(held)).toEqual({
-			kind: "applicable",
+			kind: "held",
 			stale: false,
 		});
-		expect(bankedResetsRowState({ ...held, appliesNow: false })).toEqual({
-			kind: "not_applicable",
+		expect(
+			bankedResetsRowState({ ...held, applicableCount: 0, appliesNow: false }),
+		).toEqual({
+			kind: "held",
 			stale: false,
 		});
 	});
@@ -92,7 +99,7 @@ describe("bankedResetsRowState", () => {
 
 	it("carries the stale flag through", () => {
 		expect(bankedResetsRowState({ ...held, stale: true })).toEqual({
-			kind: "applicable",
+			kind: "held",
 			stale: true,
 		});
 	});
@@ -106,21 +113,29 @@ describe("BankedResetsStatus", () => {
 		);
 	});
 
-	it("shows an account OpenAI says a reset would help, in plain words with OpenAI as the source", () => {
+	it("shows the held count, its expiry and what using one does, in plain words", () => {
 		const visible = text(render(held));
 		expect(visible).toContain("Banked resets: 2");
-		expect(visible).toContain("Would help now (OpenAI)");
 		expect(visible).toContain("Soonest expires Nov 30, 2026 UTC (in 27d 5h)");
-		expect(visible).toContain(
-			"OpenAI says a reset would work on this account right now. Using one is optional and cannot be undone.",
-		);
+		expect(visible).toContain(HELD_DETAIL);
 		expect(visible).not.toMatch(BANNED);
 	});
 
-	it("shows how many of the held resets OpenAI says would help when they differ", () => {
-		expect(text(render({ ...held, availableCount: 3 }))).toContain(
-			"Would help now: 2 of 3 (OpenAI)",
-		);
+	it("says nothing about OpenAI's applicable count, whatever it reads (#772)", () => {
+		for (const [applicableCount, appliesNow] of [
+			[2, true],
+			[1, true],
+			[0, false],
+			[null, false],
+		] as const) {
+			for (const stale of [false, true]) {
+				const visible = text(
+					render({ ...held, applicableCount, appliesNow, stale }),
+				);
+				expect(visible).toContain("Banked resets: 2");
+				expect(visible).not.toMatch(APPLICABILITY);
+			}
+		}
 	});
 
 	it("never colours a held reset green", () => {
@@ -129,28 +144,10 @@ describe("BankedResetsStatus", () => {
 		}
 	});
 
-	it("relays OpenAI's zero without calling the resets unusable or guessing why (#772)", () => {
-		const visible = text(
-			render({ ...held, applicableCount: 0, appliesNow: false }),
-		);
-		expect(visible).toContain("Not expected to help now (OpenAI)");
-		expect(visible).toContain(
-			"OpenAI does not expect a reset to help this account right now. Using one is still allowed, as in the Codex CLI: OpenAI decides what it resets, and the router then shows whether one was spent. It cannot be undone.",
-		);
-		expect(visible).not.toMatch(/usable/i);
-		expect(visible).not.toMatch(/limit|plan|cooldown|window|exhausted/i);
-		expect(visible).not.toMatch(BANNED);
-	});
-
-	it("says OpenAI did not report whether a reset would help when the applicable count is missing", () => {
-		const visible = text(
-			render({ ...held, applicableCount: null, appliesNow: false }),
-		);
-		expect(visible).toContain("Help not reported (OpenAI)");
-		expect(visible).toContain(
-			"OpenAI did not say whether a reset would help this account right now. Using one is still allowed",
-		);
-		expect(visible).not.toMatch(/usable/i);
+	it("gives the same line whether or not OpenAI counts a reset as applying", () => {
+		expect(
+			text(render({ ...held, applicableCount: 0, appliesNow: false })),
+		).toBe(text(render(held)));
 	});
 
 	it("says Expires, not Soonest expires, for a single reset", () => {
@@ -165,29 +162,14 @@ describe("BankedResetsStatus", () => {
 		const html = render({ ...held, stale: true });
 		const visible = text(html);
 		expect(visible).toContain("Banked resets: 2 Last known");
-		expect(visible).toContain("Would help at last check (OpenAI)");
 		expect(visible).toContain("Soonest expires Nov 30, 2026 UTC");
 		expect(visible).toContain(
 			"Last read Nov 3, 14:05 UTC. The router has not been able to refresh it.",
 		);
-		expect(visible).not.toContain("Would help now");
 		expect(visible).not.toMatch(/Banked resets: 0\b/);
 		// Said once, by the amber pill, not repeated on every chunk.
 		expect(visible.match(/last known/gi)).toHaveLength(1);
 		expect(html).toContain(`${STATUS_TONE_CLASS.warning}">Last known<`);
-	});
-
-	it("hedges a stale account OpenAI did not expect a reset to help", () => {
-		expect(
-			text(
-				render({
-					...held,
-					stale: true,
-					applicableCount: 0,
-					appliesNow: false,
-				}),
-			),
-		).toContain("Not expected to help at last check (OpenAI)");
 	});
 
 	it("falls back when a stale account has no read time", () => {
@@ -228,12 +210,12 @@ describe("BankedResetsStatus", () => {
 		expect(visible).not.toContain("OpenAI");
 	});
 
-	it("offers no would-help pill when OpenAI's flag disagrees with a zero or unknown count", () => {
+	it("says nothing about applicability when OpenAI's flag disagrees with a zero or unknown count", () => {
 		for (const availableCount of [0, null]) {
 			const visible = text(
 				render({ ...held, availableCount, appliesNow: true }),
 			);
-			expect(visible).not.toContain("Would help now");
+			expect(visible).not.toMatch(APPLICABILITY);
 		}
 	});
 
@@ -317,27 +299,23 @@ describe("BankedResetsStatus Use reset button (R8)", () => {
 		expect(button(render(held))).toBeNull();
 	});
 
-	it("is enabled on a fresh count where OpenAI says a reset would work", () => {
-		const html = withButton(held);
-		const tag = button(html);
-		expect(tag).not.toBeNull();
-		expect(tag).not.toMatch(DISABLED);
-		// Described by the detail line, which says it is optional and final.
-		const describedBy = tag?.match(/aria-describedby="([^"]+)"/)?.[1];
-		expect(describedBy).toBeDefined();
-		expect(html).toContain(`<p id="${describedBy}"`);
-		expect(text(html)).not.toMatch(BANNED);
-	});
-
-	it("is enabled when OpenAI does not expect one to help, as the Codex CLI allows; the detail line says OpenAI decides (#772)", () => {
-		for (const applicableCount of [0, null]) {
-			const html = withButton({ ...held, applicableCount, appliesNow: false });
+	it("is enabled on any fresh held count, whatever OpenAI's applicable count says (#772)", () => {
+		for (const [applicableCount, appliesNow] of [
+			[2, true],
+			[0, false],
+			[null, false],
+		] as const) {
+			const html = withButton({ ...held, applicableCount, appliesNow });
 			const tag = button(html);
 			expect(tag).not.toBeNull();
 			expect(tag).not.toMatch(DISABLED);
-			expect(text(html)).toContain(
-				"OpenAI decides what it resets, and the router then shows whether one was spent.",
-			);
+			// Described by the detail line, which says it is optional and final.
+			const describedBy = tag?.match(/aria-describedby="([^"]+)"/)?.[1];
+			expect(describedBy).toBeDefined();
+			expect(html).toContain(`<p id="${describedBy}"`);
+			expect(text(html)).toContain(HELD_DETAIL);
+			expect(text(html)).not.toMatch(BANNED);
+			expect(text(html)).not.toMatch(APPLICABILITY);
 		}
 	});
 

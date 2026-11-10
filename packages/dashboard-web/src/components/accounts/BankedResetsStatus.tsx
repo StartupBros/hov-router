@@ -6,30 +6,21 @@ import {
 	describeBankedResetExpiry,
 	formatBankedResetObserved,
 } from "./BankedResetsSummary";
-import {
-	applicabilitySentence,
-	resetActionAvailability,
-} from "./reset-redemption-flow";
+import { resetActionAvailability } from "./reset-redemption-flow";
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from "./status-tones";
 
-export type BankedResetsRowKind =
-	| "not_tracked"
-	| "unknown"
-	| "none"
-	| "applicable"
-	| "not_applicable";
+export type BankedResetsRowKind = "not_tracked" | "unknown" | "none" | "held";
 
 export interface BankedResetsRowState {
 	kind: BankedResetsRowKind;
-	/** The values are the last known ones; only shown for none, applicable and not_applicable. */
+	/** The values are the last known ones; only shown for none and held. */
 	stale: boolean;
 }
 
 /**
- * What one account's banked-resets line says. The count decides first, so
- * OpenAI's applicable count only matters when at least one reset is held.
- * It is relayed as OpenAI's expectation, never as whether a reset can be
- * used: Use reset works on any held reset, as in the Codex CLI (#772).
+ * What one account's banked-resets line says: tracking, then the held count.
+ * OpenAI's applicable count is not shown. It read 0 on a full account whose
+ * reset then worked, and OpenAI's own apps show only the held count (#772).
  */
 export function bankedResetsRowState(
 	resets: BankedResets,
@@ -38,27 +29,7 @@ export function bankedResetsRowState(
 	if (!resets.tracked) return { kind: "not_tracked", stale };
 	if (resets.availableCount === null) return { kind: "unknown", stale };
 	if (resets.availableCount === 0) return { kind: "none", stale };
-	return { kind: resets.appliesNow ? "applicable" : "not_applicable", stale };
-}
-
-function applicablePillText(resets: BankedResets, stale: boolean): string {
-	if (stale) return "Would help at last check (OpenAI)";
-	const { applicableCount, availableCount } = resets;
-	if (applicableCount !== null && applicableCount !== availableCount) {
-		return `Would help now: ${applicableCount} of ${availableCount} (OpenAI)`;
-	}
-	return "Would help now (OpenAI)";
-}
-
-function notApplicablePillText(resets: BankedResets, stale: boolean): string {
-	if (resets.applicableCount === null) {
-		return stale
-			? "Help not reported at last check (OpenAI)"
-			: "Help not reported (OpenAI)";
-	}
-	return stale
-		? "Not expected to help at last check (OpenAI)"
-		: "Not expected to help now (OpenAI)";
+	return { kind: "held", stale };
 }
 
 /**
@@ -122,7 +93,7 @@ export function BankedResetsStatus({
 	const action = onUseReset ? resetActionAvailability(resets) : null;
 	const count = resets.availableCount;
 	const showsStale = stale && count !== null && kind !== "not_tracked";
-	const holdsResets = kind === "applicable" || kind === "not_applicable";
+	const holdsResets = kind === "held";
 
 	let value: string;
 	let detail: string;
@@ -139,14 +110,10 @@ export function BankedResetsStatus({
 			value = "0";
 			detail = "None held.";
 			break;
-		case "applicable":
+		case "held":
 			value = String(count);
 			detail =
-				"OpenAI says a reset would work on this account right now. Using one is optional and cannot be undone.";
-			break;
-		case "not_applicable":
-			value = String(count);
-			detail = `${applicabilitySentence(resets)} Using one is still allowed, as in the Codex CLI: OpenAI decides what it resets, and the router then shows whether one was spent. It cannot be undone.`;
+				"Using one resets this account's usage limits early. It is optional and cannot be undone.";
 			break;
 	}
 	// A stale count keeps its last known number, flagged once by the amber pill
@@ -171,16 +138,6 @@ export function BankedResetsStatus({
 				{showsStale && (
 					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}>
 						Last known
-					</span>
-				)}
-				{kind === "applicable" && (
-					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
-						{applicablePillText(resets, stale)}
-					</span>
-				)}
-				{kind === "not_applicable" && (
-					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
-						{notApplicablePillText(resets, stale)}
 					</span>
 				)}
 				{holdsResets && <ExpiryChunk resets={resets} now={now} />}
