@@ -10,7 +10,7 @@
  * renderToStaticMarkup pattern RateLimitProgress.test.tsx uses in this
  * directory.
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import type { BankedResets, FullUsageData } from "@better-ccflare/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Account } from "../../api";
@@ -23,7 +23,29 @@ import {
 import { mergeAccountModelMappings } from "./AccountModelMappingsDialog";
 import type { AccountFamilyRoutingState } from "./account-routing";
 
+// SSR omits closed portals. Exercise provider controls at the content boundary;
+// this mock does not establish browser dialog or focus behavior.
+const dialogPrimitives = await import("../ui/dialog");
+mock.module("../ui/dialog", () => ({
+	...dialogPrimitives,
+	DialogContent: ({ children }: { children: React.ReactNode }) => (
+		<div data-testid="details-content">{children}</div>
+	),
+}));
+
 function noop() {}
+function withoutDetailsContent(html: string): string {
+	const start = html.indexOf('<div data-testid="details-content">');
+	if (start < 0) return html;
+	const tags = /<div\b[^>]*>|<\/div>/g;
+	tags.lastIndex = start;
+	let depth = 0;
+	for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
+		depth += tag[0].startsWith("</") ? -1 : 1;
+		if (depth === 0) return html.slice(0, start) + html.slice(tags.lastIndex);
+	}
+	throw new Error("Unclosed details content");
+}
 async function noopAsync() {}
 
 describe("account scan layout", () => {
@@ -63,16 +85,10 @@ describe("account scan layout", () => {
 				]}
 			/>,
 		);
-		const disclosures =
-			html.match(/<details\b[^>]*>[\s\S]*?<\/details>/g) ?? [];
-		expect(disclosures.length).toBe(2);
-		expect(disclosures.every((d) => !/^<details[^>]*\bopen/.test(d))).toBe(
-			true,
-		);
-		expect(
-			disclosures.find((d) => d.includes("Settings &amp; account details")),
-		).toContain("Drain credits");
-		const visible = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, "");
+		expect(html).toContain('aria-haspopup="dialog"');
+		expect(html).not.toContain("<details");
+		expect(html).toContain("Drain credits");
+		const visible = withoutDetailsContent(html);
 		expect(visible).toContain("Re-authenticate");
 		expect(visible).toContain("Action required");
 		expect(visible).not.toContain("No account block reported");
@@ -105,11 +121,11 @@ describe("account scan layout", () => {
 				{...requiredHandlers}
 			/>,
 		);
-		const visible = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, "");
+		const visible = withoutDetailsContent(html);
 		expect(visible).toContain("Force Reset");
 		expect(visible).toContain("Stale lock detected");
 		expect(visible).not.toContain("No account block reported");
-		expect(visible).toContain("Usage data unavailable");
+		expect(visible).toContain("Not reported");
 	});
 });
 
@@ -1107,5 +1123,52 @@ describe("account settings switches", () => {
 		expect(html).toContain(
 			"Account resumes when the usage window resets only if auto-fallback is on.",
 		);
+	});
+});
+
+describe("compact hybrid list", () => {
+	it("keeps an empty fresh banked balance in Details, while held resets stay visible", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({
+					provider: "codex",
+					bankedResets: {
+						tracked: true,
+						availableCount: 0,
+						applicableCount: 0,
+						soonestExpiresAt: null,
+						doesNotExpire: false,
+						appliesNow: false,
+						stale: false,
+						observedAt: Date.now(),
+					},
+				})}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(html).toContain("Banked resets:");
+		expect(withoutDetailsContent(html)).not.toContain("Banked resets:");
+	});
+	it("offers a global review action and aligned comparison headings", () => {
+		const html = renderToStaticMarkup(
+			<AccountList
+				accounts={[makeAccount({ requiresReauth: true })]}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(html).toContain('aria-label="Attention across all accounts"');
+		expect(html).toContain("1 needs attention");
+		expect(html).toContain("Review issues");
+		expect(html).toContain("Operational status");
+		expect(html).toContain("5-hour used");
+		expect(html).toContain("Weekly used");
+	});
+	it("uses a dialog trigger instead of inline settings disclosures", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem account={makeAccount()} {...requiredHandlers} />,
+		);
+		expect(html).toContain('aria-haspopup="dialog"');
+		expect(html).toContain("Details");
+		expect(html).not.toContain("<summary");
 	});
 });

@@ -14,6 +14,16 @@ import {
 	createAccountCreationCallbacks,
 } from "./AccountsTab";
 
+// Closed Radix portals are absent from SSR. Render the content boundary so
+// this cache-wiring test still verifies the family data offered in Details.
+const dialogPrimitives = await import("./ui/dialog");
+mock.module("./ui/dialog", () => ({
+	...dialogPrimitives,
+	DialogContent: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+}));
+
 const creationMethodNames = [
 	"completeAddAccount",
 	"addVertexAIAccount",

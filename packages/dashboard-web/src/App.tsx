@@ -404,15 +404,16 @@ export function App() {
 
 						{/* Page Content */}
 						<div className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto">
-							{/* Page Header */}
-							<div className="mb-8">
-								<h1 className="text-3xl font-bold gradient-text">
-									{currentRoute.title}
-								</h1>
-								<p className="text-muted-foreground mt-2">
-									{currentRoute.subtitle}
-								</p>
-							</div>
+							{currentRoute.path !== "/accounts" && (
+								<div className="mb-8">
+									<h1 className="text-3xl font-bold gradient-text">
+										{currentRoute.title}
+									</h1>
+									<p className="text-muted-foreground mt-2">
+										{currentRoute.subtitle}
+									</p>
+								</div>
+							)}
 
 							{/* Tab Content - Only render if auth check is complete and user is authenticated */}
 							{!isCheckingAuth && isAuthenticated && (

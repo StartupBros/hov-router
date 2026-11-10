@@ -2,7 +2,6 @@ import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
 	AlertCircle,
-	ChevronDown,
 	Edit2,
 	Ellipsis,
 	Globe,
@@ -14,10 +13,9 @@ import {
 	Trash2,
 	Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Account } from "../../api";
 import {
-	providerShowsCreditsBalance,
 	providerShowsWeeklyUsage,
 	providerSupportsAutoFeatures,
 	providerSupportsCustomBilling,
@@ -25,6 +23,13 @@ import {
 import { OAuthTokenStatusWithBoundary } from "../OAuthTokenStatus";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+	DialogTrigger,
+} from "../ui/dialog";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -269,6 +274,18 @@ export function AccountListItem({
 	onUseReset,
 }: AccountListItemProps) {
 	const [isRefreshingUsage, setIsRefreshingUsage] = useState(false);
+	const [detailsOpen, setDetailsOpen] = useState(false);
+	const detailsTriggerRef = useRef<HTMLButtonElement>(null);
+	const afterDetailsClose = useRef<(() => void) | null>(null);
+	const closeDetailsThen = (openDialog: () => void) => {
+		afterDetailsClose.current = openDialog;
+		setDetailsOpen(false);
+	};
+	const quietBankedBalance =
+		account.provider === "codex" &&
+		account.bankedResets?.tracked &&
+		account.bankedResets.availableCount === 0 &&
+		!account.bankedResets.stale;
 	const presenter = new AccountPresenter(account);
 	const pauseStatus = pauseStatusDisplay(account.pauseReason);
 	// Display-only: the window actually closest to blocking this account,
@@ -362,6 +379,17 @@ export function AccountListItem({
 								"Re-authenticate this Codex account (preserves all metadata)",
 						}
 					: null;
+	const rateLimitProgressProps = {
+		resetIso: account.rateLimitReset,
+		usageUtilization: account.usageUtilization,
+		usageWindow: account.usageWindow,
+		usageData: account.usageData,
+		usageRateLimitedUntil: account.usageRateLimitedUntil,
+		usageThrottledUntil: account.usageThrottledUntil,
+		usageThrottledWindows: account.usageThrottledWindows,
+		provider: account.provider,
+		showWeekly: providerShowsWeeklyUsage(account.provider),
+	};
 	const showAutoFeatures = providerSupportsAutoFeatures(account.provider);
 	const showPlanBilling = providerSupportsCustomBilling(account.provider);
 	const showAutoPause =
@@ -381,7 +409,7 @@ export function AccountListItem({
 	return (
 		<article
 			aria-label={account.name}
-			className={`min-w-0 space-y-3 rounded-lg border bg-card p-4 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.7fr)_9rem] xl:items-start xl:gap-4 xl:space-y-0 xl:[&>*]:col-span-full ${
+			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,1.5fr)_4rem_minmax(0,1.5fr)] xl:items-center xl:gap-4 xl:space-y-0 ${
 				isPrimary
 					? "border-border border-l-2 border-l-primary"
 					: "border-border hover:border-muted-foreground/50"
@@ -401,7 +429,7 @@ export function AccountListItem({
 								Primary
 							</span>
 						)}
-						<span className="whitespace-nowrap rounded-full bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums text-secondary-foreground">
+						<span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground xl:hidden">
 							Priority {account.priority}
 						</span>
 						{codexUsageExtras?.plan_type && (
@@ -419,7 +447,7 @@ export function AccountListItem({
 						<span>{account.provider}</span>
 					</div>
 				</div>
-				<div className="ml-auto flex shrink-0 flex-wrap items-center gap-1 xl:col-start-4 xl:row-start-1">
+				<div className="ml-auto flex shrink-0 flex-wrap items-center gap-1 min-w-0 max-w-full justify-end xl:col-start-5 xl:row-start-1">
 					{showForceReset && (
 						<Button
 							variant="outline"
@@ -490,6 +518,295 @@ export function AccountListItem({
 					</Button>
 					{/* modal={false}: every item opens a Radix dialog, and a modal menu
 					    closing underneath one can leave pointer-events disabled on body. */}
+					<Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+						<DialogTrigger asChild>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="min-h-11"
+								ref={detailsTriggerRef}
+								aria-label={`Details for ${account.name}`}
+							>
+								Details
+							</Button>
+						</DialogTrigger>
+						<DialogContent
+							className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto [&>button]:h-11 [&>button]:w-11"
+							onCloseAutoFocus={(event) => {
+								const openDialog = afterDetailsClose.current;
+								if (!openDialog) return;
+								afterDetailsClose.current = null;
+								// Finish the old focus scope before opening another modal, and
+								// give that modal a mounted trigger to return focus to.
+								event.preventDefault();
+								detailsTriggerRef.current?.focus();
+								openDialog();
+							}}
+						>
+							<DialogTitle className="break-words pr-10">
+								{account.name}
+							</DialogTitle>
+							<DialogDescription>
+								Settings &amp; account details
+							</DialogDescription>
+							{quietBankedBalance && account.bankedResets && (
+								<BankedResetsStatus
+									resets={account.bankedResets}
+									accountName={account.name}
+								/>
+							)}
+							<RateLimitProgress {...rateLimitProgressProps} />{" "}
+							{routingStates.length > 0 && (
+								<section
+									aria-label={`Family routing for ${account.name}`}
+									className="group space-y-2"
+								>
+									<h4 className="text-sm font-medium">Family routing</h4>
+									<div className="flex flex-wrap gap-2">
+										{routingStates.map((state) => {
+											const availability = routingAvailabilityOverlay(state);
+											const actionRequired =
+												state.reason === "ambiguous" ||
+												state.reason === "new_billing_class";
+											const reasonDuplicatesMembership =
+												state.membershipLabel === "Manual" &&
+												state.reason === "manual_override";
+
+											return (
+												<div
+													key={`${state.family}:${state.comboId ?? "none"}`}
+													className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/20 px-2 py-1.5 text-xs"
+												>
+													<Badge variant="outline">
+														{formatRoutingFamily(state.family)}
+													</Badge>
+													{state.membershipLabel && (
+														<Badge
+															variant={
+																state.membershipLabel === "Managed"
+																	? "outline"
+																	: "secondary"
+															}
+														>
+															{state.membershipLabel}
+														</Badge>
+													)}
+													{state.logicalModel && (
+														<span>{state.logicalModel}</span>
+													)}
+													{state.tier !== null && (
+														<span>Tier {state.tier}</span>
+													)}
+													{state.reasonLabel && !reasonDuplicatesMembership && (
+														<span className="text-muted-foreground">
+															{state.reasonLabel}
+														</span>
+													)}
+													{actionRequired && (
+														<Badge variant="warning">Action required</Badge>
+													)}
+													{state.managedRouteAvailable && (
+														<>
+															<Badge variant="warning">
+																Managed route available
+															</Badge>
+															<span className="text-muted-foreground">
+																Review in Combos
+															</span>
+														</>
+													)}
+													{availability && (
+														<>
+															<Badge
+																variant={availability.variant}
+																title={state.availabilityLabel ?? undefined}
+															>
+																{availability.label}
+															</Badge>
+															<span className="text-muted-foreground">
+																membership is unchanged
+															</span>
+														</>
+													)}
+												</div>
+											);
+										})}
+									</div>
+								</section>
+							)}
+							<div className="space-y-4 py-2">
+								{" "}
+								{hasSettings && (
+									<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+										{showAutoFeatures && (
+											<div className={SETTING_CLASS}>
+												<span className="text-xs text-muted-foreground">
+													Auto-fallback:
+												</span>
+												<Switch
+													className={SETTING_SWITCH_CLASS}
+													checked={account.autoFallbackEnabled}
+													aria-label={`Auto-fallback for ${account.name}`}
+													onCheckedChange={() => onAutoFallbackToggle(account)}
+													title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
+												/>
+											</div>
+										)}
+										{showPlanBilling && (
+											<div className={SETTING_CLASS}>
+												<span className="text-xs text-muted-foreground">
+													Plan billing:
+												</span>
+												<Switch
+													className={SETTING_SWITCH_CLASS}
+													checked={account.billingType === "plan"}
+													aria-label={`Plan billing for ${account.name}`}
+													onCheckedChange={() => onBillingTypeToggle(account)}
+													title="Toggle plan billing for this account"
+												/>
+											</div>
+										)}
+										{showAutoPause && onAutoPauseOnOverageToggle && (
+											<div className={SETTING_CLASS}>
+												<span className="text-xs text-muted-foreground">
+													Auto-pause on overage:
+												</span>
+												<Switch
+													className={SETTING_SWITCH_CLASS}
+													checked={account.autoPauseOnOverageEnabled ?? false}
+													aria-label={`Auto-pause on overage for ${account.name}`}
+													onCheckedChange={() =>
+														onAutoPauseOnOverageToggle(account)
+													}
+													title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if auto-fallback is on."
+												/>
+											</div>
+										)}
+										{showCreditDrain && onCodexCreditDrainToggle && (
+											<CodexCreditDrainControl
+												account={account}
+												onToggle={onCodexCreditDrainToggle}
+											/>
+										)}
+										{onPublicValueToggle && (
+											<PublicValueControl
+												account={account}
+												onToggle={(selected) => {
+													if (selected.publicValueEnabled) {
+														onPublicValueToggle(selected);
+													} else {
+														closeDetailsThen(() =>
+															onPublicValueToggle(selected),
+														);
+													}
+												}}
+												onEditLabel={
+													onPublicValueEditLabel
+														? (selected) => {
+																closeDetailsThen(() =>
+																	onPublicValueEditLabel(selected),
+																);
+															}
+														: undefined
+												}
+											/>
+										)}
+										{showPeakHoursPause && onPeakHoursPauseToggle && (
+											<div className={SETTING_CLASS}>
+												<span className="text-xs text-muted-foreground">
+													Peak hours pause:
+												</span>
+												<Switch
+													className={SETTING_SWITCH_CLASS}
+													checked={account.peakHoursPauseEnabled ?? false}
+													aria-label={`Peak hours pause for ${account.name}`}
+													onCheckedChange={() =>
+														onPeakHoursPauseToggle(account)
+													}
+													title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
+												/>
+											</div>
+										)}
+									</div>
+								)}
+								<div className="flex min-w-0 flex-wrap gap-3 text-xs text-muted-foreground">
+									{" "}
+									{account.provider === "bedrock" && bedrockProfile && (
+										<>
+											<span className="whitespace-nowrap">
+												Profile: {bedrockProfile}
+											</span>
+											{bedrockRegion && (
+												<span
+													className="inline-flex items-center gap-1 whitespace-nowrap"
+													title={`Region: ${bedrockRegion}`}
+												>
+													<Globe className="h-3 w-3" />
+													{bedrockRegion}
+												</span>
+											)}
+											{bedrockCrossRegionMode && (
+												<span title="Cross-region inference mode">
+													{bedrockCrossRegionMode}
+												</span>
+											)}
+										</>
+									)}
+									{account.provider !== "bedrock" && account.customEndpoint && (
+										<span
+											className="inline-flex items-center gap-1 whitespace-nowrap"
+											title={`Custom endpoint: ${account.customEndpoint}`}
+										>
+											<Globe className="h-3 w-3" />
+											custom endpoint
+										</span>
+									)}
+									{modelMappingCount > 0 && (
+										<span className="inline-flex items-center gap-1 whitespace-nowrap">
+											<Hash className="h-3 w-3" />
+											{modelMappingCount} model{" "}
+											{modelMappingCount === 1 ? "mapping" : "mappings"}
+										</span>
+									)}
+								</div>{" "}
+								{showSessionInfo && (
+									<span className="whitespace-nowrap tabular-nums text-muted-foreground">
+										{sessionInfo}
+									</span>
+								)}{" "}
+								{account.sessionStats && (
+									<div className="text-xs text-muted-foreground">
+										Session: {account.sessionStats.requests} req
+										{" · "}↑{formatTokenCount(account.sessionStats.inputTokens)}{" "}
+										in
+										{" · "}✦
+										{formatTokenCount(
+											account.sessionStats.cacheCreationInputTokens,
+										)}{" "}
+										cache↑
+										{" · "}✦
+										{formatTokenCount(
+											account.sessionStats.cacheReadInputTokens,
+										)}{" "}
+										cache↓
+										{" · "}↓
+										{formatTokenCount(account.sessionStats.outputTokens)} out
+										{account.sessionStats.planCostUsd > 0 && (
+											<>
+												{" · "}${account.sessionStats.planCostUsd.toFixed(2)}{" "}
+												plan
+											</>
+										)}
+										{account.sessionStats.apiCostUsd > 0 && (
+											<>
+												{" · "}${account.sessionStats.apiCostUsd.toFixed(2)} api
+											</>
+										)}
+									</div>
+								)}
+							</div>
+						</DialogContent>
+					</Dialog>
 					<DropdownMenu modal={false}>
 						<DropdownMenuTrigger asChild>
 							<Button
@@ -557,10 +874,19 @@ export function AccountListItem({
 				</div>
 			</div>
 
+			<div className="hidden text-sm tabular-nums xl:block xl:col-start-4 xl:row-start-1">
+				<span className="xl:sr-only">Priority </span>
+				{account.priority}
+			</div>
+			{showForceReset && (
+				<p className="text-xs text-muted-foreground xl:col-span-full">
+					Force Reset clears local state; it does not restore provider quota.
+				</p>
+			)}
 			{/* Status first, then counters. */}
-			<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm xl:!col-span-1 xl:col-start-2 xl:row-start-1 xl:flex-col xl:items-start">
-				<span className="text-xs font-medium text-muted-foreground">
-					Operational state
+			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-sm [&>span]:max-w-full [&>span]:whitespace-normal xl:col-start-2 xl:row-start-1 xl:flex-col xl:items-start">
+				<span className="text-xs font-medium text-muted-foreground xl:sr-only">
+					Operational status
 				</span>
 				{!reauthRequired &&
 					!presenter.isPaused &&
@@ -580,12 +906,12 @@ export function AccountListItem({
 					</span>
 				)}
 				{reauthRequired ? (
-					<Badge
-						variant="destructive"
+					<span
+						className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.bad}`}
 						title="Refresh token invalid — re-authenticate"
 					>
 						Re-authentication required
-					</Badge>
+					</span>
 				) : (
 					presenter.isPaused && (
 						<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
@@ -655,55 +981,26 @@ export function AccountListItem({
 				)}
 			</div>
 
-			<div className="min-w-0 border-t pt-3 xl:!col-span-1 xl:col-start-3 xl:row-start-1 xl:border-t-0 xl:pt-0">
-				<p className="mb-2 text-xs font-medium text-muted-foreground">
-					Capacity &amp; resets
-				</p>{" "}
-				{(account.rateLimitReset ||
-					account.usageData ||
-					account.usageRateLimitedUntil ||
-					// Codex quota data only arrives piggybacked on real traffic (no usage
-					// polling endpoint), so gaps are routine. Mount the bar anyway: it
-					// renders the weekly window as "Data unavailable" instead of
-					// disappearing, and a missing quota bar reads as "no limit".
-					account.provider === "codex" ||
-					providerShowsCreditsBalance(account.provider)) && (
-					<RateLimitProgress
-						resetIso={account.rateLimitReset}
-						usageUtilization={account.usageUtilization}
-						usageWindow={account.usageWindow}
-						usageData={account.usageData}
-						usageRateLimitedUntil={account.usageRateLimitedUntil}
-						usageThrottledUntil={account.usageThrottledUntil}
-						usageThrottledWindows={account.usageThrottledWindows}
-						provider={account.provider}
-						showWeekly={providerShowsWeeklyUsage(account.provider)}
-					/>
-				)}
-				{!(
-					account.rateLimitReset ||
-					account.usageData ||
-					account.usageRateLimitedUntil ||
-					account.provider === "codex" ||
-					providerShowsCreditsBalance(account.provider)
-				) && (
-					<p className="text-xs text-muted-foreground">
-						Usage data unavailable
-					</p>
-				)}
+			<div className="min-w-0 border-t pt-3 xl:col-start-3 xl:row-start-1 xl:border-t-0 xl:pt-0">
+				<RateLimitProgress compact {...rateLimitProgressProps} />
 			</div>
-			{account.provider === "codex" && account.bankedResets && (
-				<div className="[&_button]:min-h-11">
-					<BankedResetsStatus
-						resets={account.bankedResets}
-						accountName={account.name}
-						onUseReset={onUseReset ? () => onUseReset(account) : undefined}
-					/>
-				</div>
-			)}
+			{account.provider === "codex" &&
+				account.bankedResets &&
+				!quietBankedBalance && (
+					<div className="xl:col-span-full [&_button]:min-h-11">
+						<BankedResetsStatus
+							resets={account.bankedResets}
+							accountName={account.name}
+							onUseReset={onUseReset ? () => onUseReset(account) : undefined}
+						/>
+					</div>
+				)}
 
 			{routingStates.some(routingNeedsNotice) && (
-				<section className="space-y-1 text-sm" aria-label="Routing notices">
+				<section
+					className="space-y-1 text-sm xl:col-span-full"
+					aria-label="Routing notices"
+				>
 					{routingStates.filter(routingNeedsNotice).map((state) => (
 						<p
 							key={`${state.family}:${state.comboId}`}
@@ -729,7 +1026,7 @@ export function AccountListItem({
 				// asks what is actually stopping you. Collapsing the two is what let
 				// a 100% model-scoped cap hide behind a 64% account-wide badge.
 				<div
-					className="text-xs text-muted-foreground"
+					className="text-xs text-muted-foreground xl:col-span-full"
 					data-testid="binding-constraint"
 				>
 					{bindingConstraint.divergesFromRouting ? (
@@ -748,237 +1045,6 @@ export function AccountListItem({
 					)}
 				</div>
 			)}
-			{routingStates.length > 0 && (
-				<details
-					aria-label={`Family routing for ${account.name}`}
-					className="group space-y-2"
-				>
-					<summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
-						<ChevronDown
-							aria-hidden="true"
-							className="h-4 w-4 shrink-0 group-open:rotate-180"
-						/>
-						Family routing
-					</summary>
-					<div className="flex flex-wrap gap-2">
-						{routingStates.map((state) => {
-							const availability = routingAvailabilityOverlay(state);
-							const actionRequired =
-								state.reason === "ambiguous" ||
-								state.reason === "new_billing_class";
-							const reasonDuplicatesMembership =
-								state.membershipLabel === "Manual" &&
-								state.reason === "manual_override";
-
-							return (
-								<div
-									key={`${state.family}:${state.comboId ?? "none"}`}
-									className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/20 px-2 py-1.5 text-xs"
-								>
-									<Badge variant="outline">
-										{formatRoutingFamily(state.family)}
-									</Badge>
-									{state.membershipLabel && (
-										<Badge
-											variant={
-												state.membershipLabel === "Managed"
-													? "outline"
-													: "secondary"
-											}
-										>
-											{state.membershipLabel}
-										</Badge>
-									)}
-									{state.logicalModel && <span>{state.logicalModel}</span>}
-									{state.tier !== null && <span>Tier {state.tier}</span>}
-									{state.reasonLabel && !reasonDuplicatesMembership && (
-										<span className="text-muted-foreground">
-											{state.reasonLabel}
-										</span>
-									)}
-									{actionRequired && (
-										<Badge variant="warning">Action required</Badge>
-									)}
-									{state.managedRouteAvailable && (
-										<>
-											<Badge variant="warning">Managed route available</Badge>
-											<span className="text-muted-foreground">
-												Review in Combos
-											</span>
-										</>
-									)}
-									{availability && (
-										<>
-											<Badge
-												variant={availability.variant}
-												title={state.availabilityLabel ?? undefined}
-											>
-												{availability.label}
-											</Badge>
-											<span className="text-muted-foreground">
-												membership is unchanged
-											</span>
-										</>
-									)}
-								</div>
-							);
-						})}
-					</div>
-				</details>
-			)}
-			<details className="group border-t pt-1">
-				<summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
-					<ChevronDown
-						aria-hidden="true"
-						className="h-4 w-4 shrink-0 group-open:rotate-180"
-					/>
-					Settings &amp; account details
-				</summary>
-				<div className="space-y-4 py-2">
-					{" "}
-					{hasSettings && (
-						<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-							{showAutoFeatures && (
-								<div className={SETTING_CLASS}>
-									<span className="text-xs text-muted-foreground">
-										Auto-fallback:
-									</span>
-									<Switch
-										className={SETTING_SWITCH_CLASS}
-										checked={account.autoFallbackEnabled}
-										aria-label={`Auto-fallback for ${account.name}`}
-										onCheckedChange={() => onAutoFallbackToggle(account)}
-										title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
-									/>
-								</div>
-							)}
-							{showPlanBilling && (
-								<div className={SETTING_CLASS}>
-									<span className="text-xs text-muted-foreground">
-										Plan billing:
-									</span>
-									<Switch
-										className={SETTING_SWITCH_CLASS}
-										checked={account.billingType === "plan"}
-										aria-label={`Plan billing for ${account.name}`}
-										onCheckedChange={() => onBillingTypeToggle(account)}
-										title="Toggle plan billing for this account"
-									/>
-								</div>
-							)}
-							{showAutoPause && onAutoPauseOnOverageToggle && (
-								<div className={SETTING_CLASS}>
-									<span className="text-xs text-muted-foreground">
-										Auto-pause on overage:
-									</span>
-									<Switch
-										className={SETTING_SWITCH_CLASS}
-										checked={account.autoPauseOnOverageEnabled ?? false}
-										aria-label={`Auto-pause on overage for ${account.name}`}
-										onCheckedChange={() => onAutoPauseOnOverageToggle(account)}
-										title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if auto-fallback is on."
-									/>
-								</div>
-							)}
-							{showCreditDrain && onCodexCreditDrainToggle && (
-								<CodexCreditDrainControl
-									account={account}
-									onToggle={onCodexCreditDrainToggle}
-								/>
-							)}
-							{onPublicValueToggle && (
-								<PublicValueControl
-									account={account}
-									onToggle={onPublicValueToggle}
-									onEditLabel={onPublicValueEditLabel}
-								/>
-							)}
-							{showPeakHoursPause && onPeakHoursPauseToggle && (
-								<div className={SETTING_CLASS}>
-									<span className="text-xs text-muted-foreground">
-										Peak hours pause:
-									</span>
-									<Switch
-										className={SETTING_SWITCH_CLASS}
-										checked={account.peakHoursPauseEnabled ?? false}
-										aria-label={`Peak hours pause for ${account.name}`}
-										onCheckedChange={() => onPeakHoursPauseToggle(account)}
-										title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
-									/>
-								</div>
-							)}
-						</div>
-					)}
-					<div className="flex min-w-0 flex-wrap gap-3 text-xs text-muted-foreground">
-						{" "}
-						{account.provider === "bedrock" && bedrockProfile && (
-							<>
-								<span className="whitespace-nowrap">
-									Profile: {bedrockProfile}
-								</span>
-								{bedrockRegion && (
-									<span
-										className="inline-flex items-center gap-1 whitespace-nowrap"
-										title={`Region: ${bedrockRegion}`}
-									>
-										<Globe className="h-3 w-3" />
-										{bedrockRegion}
-									</span>
-								)}
-								{bedrockCrossRegionMode && (
-									<span title="Cross-region inference mode">
-										{bedrockCrossRegionMode}
-									</span>
-								)}
-							</>
-						)}
-						{account.provider !== "bedrock" && account.customEndpoint && (
-							<span
-								className="inline-flex items-center gap-1 whitespace-nowrap"
-								title={`Custom endpoint: ${account.customEndpoint}`}
-							>
-								<Globe className="h-3 w-3" />
-								custom endpoint
-							</span>
-						)}
-						{modelMappingCount > 0 && (
-							<span className="inline-flex items-center gap-1 whitespace-nowrap">
-								<Hash className="h-3 w-3" />
-								{modelMappingCount} model{" "}
-								{modelMappingCount === 1 ? "mapping" : "mappings"}
-							</span>
-						)}
-					</div>{" "}
-					{showSessionInfo && (
-						<span className="whitespace-nowrap tabular-nums text-muted-foreground">
-							{sessionInfo}
-						</span>
-					)}{" "}
-					{account.sessionStats && (
-						<div className="text-xs text-muted-foreground">
-							Session: {account.sessionStats.requests} req
-							{" · "}↑{formatTokenCount(account.sessionStats.inputTokens)} in
-							{" · "}✦
-							{formatTokenCount(account.sessionStats.cacheCreationInputTokens)}{" "}
-							cache↑
-							{" · "}✦
-							{formatTokenCount(account.sessionStats.cacheReadInputTokens)}{" "}
-							cache↓
-							{" · "}↓{formatTokenCount(account.sessionStats.outputTokens)} out
-							{account.sessionStats.planCostUsd > 0 && (
-								<>
-									{" · "}${account.sessionStats.planCostUsd.toFixed(2)} plan
-								</>
-							)}
-							{account.sessionStats.apiCostUsd > 0 && (
-								<>
-									{" · "}${account.sessionStats.apiCostUsd.toFixed(2)} api
-								</>
-							)}
-						</div>
-					)}
-				</div>
-			</details>
 		</article>
 	);
 }

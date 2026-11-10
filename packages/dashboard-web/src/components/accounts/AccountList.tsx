@@ -1,4 +1,4 @@
-import { Search, X } from "lucide-react";
+import { AlertCircle, Search, X } from "lucide-react";
 import { useState } from "react";
 import type { Account } from "../../api";
 import { AccountListItem } from "./AccountListItem";
@@ -62,8 +62,50 @@ export function AccountList(props: AccountListProps) {
 
 	return (
 		<div className="min-w-0 space-y-3">
-			<div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-				<div className="flex flex-col gap-3 sm:flex-row">
+			{view.counts.attention > 0 && (
+				<section
+					aria-label="Attention across all accounts"
+					className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2"
+				>
+					<div className="flex min-w-0 items-center gap-2">
+						<AlertCircle
+							aria-hidden="true"
+							className="h-4 w-4 shrink-0 text-destructive"
+						/>
+						<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+							<p className="text-sm font-medium">
+								{view.counts.attention}{" "}
+								{view.counts.attention === 1 ? "needs" : "need"} attention
+							</p>
+							<p className="text-xs text-muted-foreground">
+								{[
+									view.attentionReasons.reconnect &&
+										`${view.attentionReasons.reconnect} reconnect`,
+									view.attentionReasons.limited &&
+										`${view.attentionReasons.limited} limited or throttled`,
+									view.attentionReasons.routing &&
+										`${view.attentionReasons.routing} routing notice${view.attentionReasons.routing === 1 ? "" : "s"}`,
+								]
+									.filter(Boolean)
+									.join(" · ")}
+							</p>
+						</div>
+					</div>
+					<button
+						type="button"
+						className="min-h-11 px-3 text-sm"
+						onClick={() => {
+							setSearch("");
+							setProvider("");
+							setStatus("attention");
+						}}
+					>
+						Review issues
+					</button>
+				</section>
+			)}
+			<div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+				<div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row">
 					<label className="relative flex min-w-0 flex-1 items-center">
 						<Search
 							aria-hidden="true"
@@ -105,7 +147,7 @@ export function AccountList(props: AccountListProps) {
 					</label>
 				</div>
 				<fieldset
-					className="flex min-w-0 flex-wrap items-center gap-2"
+					className="flex min-w-0 flex-wrap items-center gap-1 xl:shrink-0"
 					aria-label="Filter by account status"
 				>
 					{(
@@ -120,7 +162,7 @@ export function AccountList(props: AccountListProps) {
 							key={value}
 							aria-pressed={status === value}
 							onClick={() => setStatus(value)}
-							className={`min-h-11 rounded-md border px-3 text-sm ${status === value ? "border-foreground/30 bg-background font-medium" : "border-transparent text-muted-foreground hover:bg-muted"}`}
+							className={`min-h-11 whitespace-nowrap rounded-md border px-2 text-xs ${status === value ? "border-foreground/30 bg-background font-medium" : "border-transparent text-muted-foreground hover:bg-muted"}`}
 						>
 							{label}{" "}
 							<span className="ml-1 tabular-nums">{view.counts[value]}</span>
@@ -157,7 +199,36 @@ export function AccountList(props: AccountListProps) {
 					</button>
 				</div>
 			)}
-			{accountListItems({ ...props, accounts: view.accounts })}
+			<div className="overflow-hidden rounded-md border">
+				<div
+					aria-hidden="true"
+					className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,1.5fr)_4rem_minmax(0,1.5fr)] gap-4 border-b bg-muted/20 px-3 py-3 text-xs text-muted-foreground xl:grid"
+				>
+					<span>Account</span>
+					<span>Operational status</span>
+					<div className="grid grid-cols-2 gap-4">
+						<span>5-hour used %</span>
+						<span>Weekly used %</span>
+					</div>
+					<span>Priority</span>
+					<span>Actions</span>
+				</div>
+				{accountListItems({ ...props, accounts: view.accounts })}
+			</div>
+			<details className="text-xs text-muted-foreground">
+				<summary className="flex min-h-11 cursor-pointer items-center">
+					How routing works
+				</summary>
+				<p>
+					Lower priority numbers route first among eligible accounts. Allowed
+					means no local block, not guaranteed provider capacity. Force Reset
+					clears only local state, not provider quota. Local retry and provider
+					reset times are separate. Missing usage is not zero. Family membership
+					determines eligible routes; temporary availability does not change
+					membership. Binding limits can differ from account-wide routing
+					utilization. Review actionable family notices in Combos.
+				</p>
+			</details>
 		</div>
 	);
 }

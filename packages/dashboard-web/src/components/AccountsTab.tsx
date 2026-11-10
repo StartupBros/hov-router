@@ -47,13 +47,7 @@ import {
 	togglePublicValue,
 } from "./accounts/public-value-actions";
 import { Button } from "./ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "./ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "./ui/card";
 
 type AccountCreationClient = Pick<
 	typeof api,
@@ -804,21 +798,26 @@ export function AccountsTab() {
 				<CardHeader className="px-0 pb-4 pt-0">
 					<div className="flex flex-wrap items-center justify-between gap-4">
 						<div>
-							<CardTitle className="text-xl">Accounts</CardTitle>
+							<h1 className="text-2xl font-semibold tracking-tight">
+								Accounts
+							</h1>
 							<CardDescription>
-								Every provider account the router can send requests to
+								Provider accounts, usage limits and routing settings
 							</CardDescription>
 						</div>
-						{!adding && (
-							<Button
-								onClick={() => setAdding(true)}
-								size="sm"
-								className="min-h-11 text-black hover:text-black"
-							>
-								<Plus className="mr-2 h-4 w-4" />
-								Add Account
-							</Button>
-						)}
+						<div className="flex min-w-0 flex-wrap items-center gap-3">
+							<BankedResetsSummary summary={bankedResets} />
+							{!adding && (
+								<Button
+									onClick={() => setAdding(true)}
+									size="sm"
+									className="min-h-11 text-black hover:text-black"
+								>
+									<Plus className="mr-2 h-4 w-4" />
+									Add Account
+								</Button>
+							)}
+						</div>
 					</div>
 				</CardHeader>
 				<CardContent className="space-y-4 p-0">
@@ -857,7 +856,6 @@ export function AccountsTab() {
 						/>
 					)}
 
-					<BankedResetsSummary summary={bankedResets} />
 					<AccountList
 						accounts={accounts}
 						routingByAccountId={routingByAccountId}

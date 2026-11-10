@@ -99,6 +99,13 @@ describe("formatBankedResetExpiryLabel", () => {
 });
 
 describe("BankedResetsSummary", () => {
+	it("keeps held resets, expiry and stale warnings visible without opening a disclosure", () => {
+		const html = render(summary({ anyStale: true }));
+		expect(html).not.toContain("<details");
+		expect(html).toContain("Banked resets");
+		expect(html).toContain("Includes last known values");
+		expect(html).toContain("Soonest expires");
+	});
 	it("shows the fleet total without repeating the word resets", () => {
 		const html = render(summary());
 		expect(html).toContain(">Banked resets<");

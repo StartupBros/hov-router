@@ -106,9 +106,23 @@ export function PublicValueDialog({
 	onClose,
 	...formProps
 }: PublicValueDialogProps) {
+	// Accounts mounts this controller-owned dialog without a DialogTrigger.
+	// Capture the opener before the label input autofocuses.
+	const [returnFocusTo] = useState(() =>
+		typeof document !== "undefined" &&
+		document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null,
+	);
 	return (
 		<Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-			<DialogContent>
+			<DialogContent
+				onCloseAutoFocus={(event) => {
+					if (!returnFocusTo?.isConnected) return;
+					event.preventDefault();
+					returnFocusTo.focus();
+				}}
+			>
 				<PublicValueForm {...formProps} onClose={onClose} />
 			</DialogContent>
 		</Dialog>
