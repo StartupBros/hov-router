@@ -4,7 +4,7 @@ HoV Router is a House of Vibe project at [StartupBros/hov-router](https://github
 
 The public repository moved from `StartupBros-com/better-ccflare` on 2026-10-19 and has been `StartupBros/hov-router` since 2026-10-21. It is the same repository, ID `1278801682` (see [the repository move](#repository-move)). Use `StartupBros/hov-router` in clone, download, and support URLs. [Report Router issues here](https://github.com/StartupBros/hov-router/issues).
 
-The current [Linux x86_64 binary](reference.md#install-the-linux-x86_64-release), release 3.7.1, displays HoV Router, as do 3.7.0 and new source builds. The earlier 3.6.2 binary keeps its original product name, exact bytes, source SHA, tag, and signing identity, and prints that original name even through `hov-router`; a filesystem alias cannot relabel its embedded output. See [the historical 3.6.2 release](hov-router-releases.md#verify-the-historical-362-release). Router npm packages, container images, and other-platform binaries are not published.
+The current [Linux x86_64 binary](reference.md#install-the-linux-x86_64-release), release 4.0.0, displays HoV Router, as do 3.7.0, 3.7.1 and new source builds. The earlier 3.6.2 binary keeps its original product name, exact bytes, source SHA, tag, and signing identity, and prints that original name even through `hov-router`; a filesystem alias cannot relabel its embedded output. See [the historical 3.6.2 release](hov-router-releases.md#verify-the-historical-362-release). Router npm packages, container images, and other-platform binaries are not published.
 
 ## Install without replacing your current executable
 
@@ -42,7 +42,7 @@ There is no new HoV configuration namespace and no config or credential migratio
 
 **Ways forward.**
 
-1. Stay on v3.7.1, the last release that supports PostgreSQL.
+1. Stay on v3.7.1, the last release that supports PostgreSQL ([verify and install it](hov-router-releases.md#verify-release-371)).
 2. Unset `DATABASE_URL` and start fresh on SQLite, at `BETTER_CCFLARE_DB_PATH` or the default `~/.config/better-ccflare/better-ccflare.db`.
 
 There is no PostgreSQL-to-SQLite migration tool, so option 2 starts with an empty database: accounts and history in PostgreSQL are not carried over.
