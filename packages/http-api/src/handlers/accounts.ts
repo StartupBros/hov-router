@@ -813,8 +813,6 @@ export function createAccountsListHandler(
 							: null,
 					sessionInfo: account.session_info || "",
 					autoFallbackEnabled: account.auto_fallback_enabled === 1,
-					// Auto-refresh was removed; the column is kept but never reported on.
-					autoRefreshEnabled: false,
 					autoPauseOnOverageEnabled:
 						account.auto_pause_on_overage_enabled === 1,
 					peakHoursPauseEnabled: account.peak_hours_pause_enabled === 1,
@@ -3319,71 +3317,6 @@ export function createAccountBillingTypeHandler(dbOps: DatabaseOperations) {
 }
 
 /**
- * Auto-refresh was removed. For one release this endpoint keeps answering so
- * existing scripts do not break: turning the setting off clears the stored
- * value (which silences the startup warning), turning it on stores nothing,
- * and both report autoRefreshEnabled false.
- */
-export function createAccountAutoRefreshHandler(dbOps: DatabaseOperations) {
-	return async (req: Request, accountId: string): Promise<Response> => {
-		try {
-			const body = (await req.json()) as { enabled?: unknown } | null;
-			const raw = body?.enabled;
-			let turnOn: boolean;
-			if (raw === true || raw === 1) {
-				turnOn = true;
-			} else if (raw === false || raw === 0) {
-				turnOn = false;
-			} else {
-				return errorResponse(
-					BadRequest("enabled is required and must be true, false, 0 or 1"),
-				);
-			}
-
-			const db = dbOps.getAdapter();
-			const account = await db.get<{
-				name: string;
-				auto_refresh_enabled: number;
-			}>(
-				"SELECT name, COALESCE(auto_refresh_enabled, 0) AS auto_refresh_enabled FROM accounts WHERE id = ?",
-				[accountId],
-			);
-
-			if (!account) {
-				return errorResponse(NotFound("Account not found"));
-			}
-
-			let message: string;
-			if (turnOn) {
-				message = `Auto-refresh was removed; nothing was stored for account '${account.name}'. Usage windows are no longer opened ahead of use and pauses are no longer lifted after a probe.`;
-			} else {
-				await db.run(
-					"UPDATE accounts SET auto_refresh_enabled = 0 WHERE id = ?",
-					[accountId],
-				);
-				message =
-					account.auto_refresh_enabled === 1
-						? `Auto-refresh was removed; the stored setting was cleared for account '${account.name}'.`
-						: `Auto-refresh was removed; account '${account.name}' had no stored setting to clear.`;
-			}
-
-			return jsonResponse({
-				success: true,
-				message,
-				autoRefreshEnabled: false,
-			});
-		} catch (error) {
-			log.error("Account auto-refresh toggle error:", error);
-			return errorResponse(
-				error instanceof Error
-					? error
-					: new Error("Failed to toggle auto-refresh"),
-			);
-		}
-	};
-}
-
-/**
  * Create an account custom endpoint update handler
  */
 export function createAccountCustomEndpointUpdateHandler(
@@ -3513,123 +3446,6 @@ export function createAccountModelMappingsUpdateHandler(
 				error instanceof Error
 					? error
 					: new Error("Failed to update model mappings"),
-			);
-		}
-	};
-}
-
-/**
- * Create an account model fallbacks update handler.
- * @deprecated Fallbacks are now merged into model_mappings as arrays.
- * This handler appends fallback models to existing model_mappings arrays.
- */
-export function createAccountModelFallbacksUpdateHandler(
-	dbOps: DatabaseOperations,
-) {
-	return async (req: Request, accountId: string): Promise<Response> => {
-		try {
-			const body = await req.json();
-
-			const db = dbOps.getAdapter();
-			const account = await db.get<{ id: string }>(
-				"SELECT id FROM accounts WHERE id = ?",
-				[accountId],
-			);
-
-			if (!account) {
-				return errorResponse(NotFound("Account not found"));
-			}
-
-			// Validate fallbacks input. This deprecated endpoint only accepts one
-			// fallback string per key, even though the shared mapping validator also
-			// supports arrays for the replacement endpoint.
-			const validatedFallbacks = validateModelMappings(
-				body.modelFallbacks ?? {},
-				"modelFallbacks",
-			);
-			for (const value of Object.values(validatedFallbacks)) {
-				if (Array.isArray(value)) {
-					throw BadRequest(
-						"All model fallback values must be non-empty strings",
-					);
-				}
-			}
-
-			// Get existing model_mappings and merge fallbacks into them
-			let existingMappings: Record<string, string | string[]> = {};
-			const result = await db.get<{ model_mappings: string | null }>(
-				"SELECT model_mappings FROM accounts WHERE id = ?",
-				[accountId],
-			);
-
-			if (result?.model_mappings) {
-				try {
-					const parsed = JSON.parse(result.model_mappings) as unknown;
-					existingMappings = validateModelMappings(
-						parsed &&
-							typeof parsed === "object" &&
-							!Array.isArray(parsed) &&
-							"modelMappings" in parsed
-							? (parsed as { modelMappings: unknown }).modelMappings
-							: parsed,
-						"storedModelMappings",
-					);
-				} catch {
-					throw BadRequest(
-						"Existing model mappings are invalid; replace them before adding fallbacks",
-					);
-				}
-			}
-
-			// Merge: for each fallback, append to existing mapping array
-			for (const [modelType, fallbackValue] of Object.entries(
-				validatedFallbacks,
-			)) {
-				const existing = existingMappings[modelType];
-				const fallback = (fallbackValue as string).trim();
-
-				if (typeof existing === "string") {
-					// Promote single string to array with fallback appended
-					existingMappings[modelType] = [existing, fallback];
-				} else if (Array.isArray(existing)) {
-					if (!existing.includes(fallback)) {
-						existingMappings[modelType] = [...existing, fallback];
-					}
-				} else {
-					existingMappings[modelType] = fallback;
-				}
-			}
-
-			existingMappings = validateModelMappings(
-				existingMappings,
-				"modelMappings",
-			);
-
-			const finalMappings =
-				Object.keys(existingMappings).length > 0
-					? JSON.stringify(existingMappings)
-					: null;
-
-			await db.run(
-				"UPDATE accounts SET model_mappings = ?, model_fallbacks = NULL WHERE id = ?",
-				[finalMappings, accountId],
-			);
-
-			log.info(
-				`Merged model fallbacks into model_mappings for account ${accountId}`,
-			);
-
-			return jsonResponse({
-				success: true,
-				message: "Model fallbacks merged into model mappings",
-				modelMappings: existingMappings,
-			});
-		} catch (error) {
-			log.error("Account model fallbacks update error:", error);
-			return errorResponse(
-				error instanceof Error
-					? error
-					: new Error("Failed to update model fallbacks"),
 			);
 		}
 	};

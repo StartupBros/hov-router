@@ -2,6 +2,8 @@ name: Prepare HoV Router Artifacts
 
 on:
   pull_request:
+    # edited: re-run the squash-commit check when the title or description changes.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 permissions:
@@ -30,6 +32,10 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Check that release-please can parse the squash commit
+        # release-please drops a commit it cannot parse without failing (#797).
+        run: bun run scripts/check-squash-commit-parse.ts "$GITHUB_EVENT_PATH"
 
       - name: Prepare and verify unpublished Linux artifacts
         run: |

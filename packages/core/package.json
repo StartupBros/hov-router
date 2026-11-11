@@ -8,7 +8,8 @@
 		"./managed-routing": "./src/managed-routing.ts",
 		"./model-mappings": "./src/model-mappings.ts",
 		"./models": "./src/models.ts",
-		"./product-identity": "./src/product-identity.ts"
+		"./product-identity": "./src/product-identity.ts",
+		"./reauth-instructions": "./src/reauth-instructions.ts"
 	},
 	"scripts": {
 		"typecheck": "bunx tsc --noEmit"

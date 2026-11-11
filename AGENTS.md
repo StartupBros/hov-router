@@ -56,7 +56,7 @@ Production is a root systemd service, `ccflare-stack.service` (guard on `:8788` 
 
 ## Releases and versions
 
-**NEVER bump the version by hand, and never publish to npm.** Router releases are draft-only GitHub releases produced by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`); publishing a draft is a separate operator decision. Upstream's npm, multi-architecture and signing publishers (`release.yml`, `release-dispatch.yml`, `signpath-*.yml`, `.signpath/`) and the npm publish hooks were deleted on 2026-11-03 and must not come back; `scripts/__tests__/router-release-workflow.test.ts` fails if a publisher workflow reappears. No container image is published; Docker builds from source ([docs/docker.md](docs/docker.md)). Full policy: [docs/hov-router-releases.md](docs/hov-router-releases.md).
+**NEVER bump the version by hand, and never publish to npm.** Router releases are GitHub releases drafted by release-please (`.github/workflows/router-release.yml`, `scripts/router-release.ts`), and the automation never publishes one. The operator's standing decision (2026-11-10) is to publish each verified draft as it is cut, after the pre-publish checks in [docs/hov-router-releases.md](docs/hov-router-releases.md#publishing-a-verified-draft). Upstream's npm, multi-architecture and signing publishers (`release.yml`, `release-dispatch.yml`, `signpath-*.yml`, `.signpath/`) and the npm publish hooks were deleted on 2026-11-03 and must not come back; `scripts/__tests__/router-release-workflow.test.ts` fails if a publisher workflow reappears. No container image is published; Docker builds from source ([docs/docker.md](docs/docker.md)). Full policy: [docs/hov-router-releases.md](docs/hov-router-releases.md).
 
 Commit prefixes drive the version and changelog (`release-please-config.json`, plus the alias map in `scripts/router-release.ts`):
 - `feat:` → minor, under Features (`feature:`/`add:`/`new:` are accepted aliases)
@@ -64,6 +64,8 @@ Commit prefixes drive the version and changelog (`release-please-config.json`, p
 - `security:` → Security; `refactor:` → Improvements (`improve:`/`enhance:`/`update:` aliases); `perf:` → Performance Improvements
 - `docs:`, `chore:`, `test:`, `style:` alone produce no release
 - `!` or `BREAKING CHANGE` → major
+
+A squash commit is the PR title plus the description, and release-please silently drops any part it cannot parse. The required `prepare` check fails such a PR; the fix is in [docs/hov-router-releases.md](docs/hov-router-releases.md#squash-commits-release-please-can-parse).
 
 `CLAUDE_CLI_VERSION` in `packages/core/src/version.ts` tracks the Claude Code CLI version used in user-agent headers. It is not the product version.
 

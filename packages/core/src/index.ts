@@ -39,6 +39,7 @@ export {
 	formatOAuthErrorMessage,
 	getExactOAuthErrorCode,
 	getOAuthErrorCode,
+	getOAuthErrorCodeLabel,
 	isExactInvalidGrantMessage,
 	isInvalidGrantMessage,
 	isStructuredInvalidGrant,
@@ -62,6 +63,7 @@ export {
 	MAX_OAUTH_ERROR_INPUT_LENGTH,
 	readBoundedOAuthResponseText,
 } from "./oauth-response";
+export * from "./reauth-instructions";
 
 // Export types for model mappings - defined inline in model-mappings.ts
 export type ModelMapping = { [anthropicModel: string]: string | string[] };

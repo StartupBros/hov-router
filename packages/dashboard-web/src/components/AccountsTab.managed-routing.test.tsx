@@ -125,7 +125,6 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
 		sessionInfo: "No active session",
 		priority: 0,
 		autoFallbackEnabled: false,
-		autoRefreshEnabled: false,
 		customEndpoint: null,
 		modelMappings: null,
 		usageUtilization: null,

@@ -96,7 +96,20 @@ export interface ReleaseTransport {
 	checkFoundation(sha: string): Promise<boolean>;
 	getTagSha(tag: string): Promise<string | undefined>;
 	getRelease(tag: string): Promise<ScmRelease | undefined>;
+	/** Pause between post-create readbacks. Production sleeps; fixtures record. */
+	wait?(ms: number): Promise<void>;
 }
+
+/**
+ * Waits before each re-read of a release the coordinator has just created. The
+ * release listing can lag that create, and every release from 3.6.0 to 4.0.0
+ * failed its first readback this way and passed on a manual rerun (#784).
+ */
+export const POST_CREATE_READBACK_DELAYS_MS = [
+	1_000, 2_000, 4_000, 8_000, 15_000, 30_000,
+] as const;
+const sleep = (ms: number) =>
+	new Promise<void>((resolve) => setTimeout(resolve, ms));
 async function assertSource(
 	transport: ReleaseTransport,
 	expected: SourceIdentity,
@@ -278,6 +291,7 @@ async function draftFlow(
 		throw new Error(`Published or mismatched release ${release.id}`);
 	await assertSource(transport, expected, true);
 	if (!release && !write) throw new Error(`Missing draft release ${tag}`);
+	const created = !release;
 	if (!release)
 		release = await transport.scm.createRelease(candidate, {
 			draft: true,
@@ -285,7 +299,15 @@ async function draftFlow(
 			prerelease: false,
 		});
 	// Verify the effect rather than treating an API response as proof of the tag.
-	const verified = await transport.getRelease(tag);
+	let verified = await transport.getRelease(tag);
+	// Only a just-created release that the listing does not show yet is read again;
+	// every mismatch below stays fatal on the read that finds the release.
+	if (created)
+		for (const delay of POST_CREATE_READBACK_DELAYS_MS) {
+			if (verified) break;
+			await (transport.wait ?? sleep)(delay);
+			verified = await transport.getRelease(tag);
+		}
 	if (!verified)
 		throw new Error(
 			`Draft/tag verification failed: release missing; expected tag=${diagnosticValue(tag)}; observed=${diagnosticValue(verified)}`,

@@ -440,6 +440,7 @@ export function AccountListItem({
 						<OAuthTokenStatusWithBoundary
 							accountName={account.name}
 							hasRefreshToken={account.hasRefreshToken}
+							provider={account.provider}
 						/>
 					</div>
 					{/* No bullet separators: they strand at line ends when this wraps. */}

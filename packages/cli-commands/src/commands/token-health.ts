@@ -1,3 +1,4 @@
+import { reauthInstruction } from "@better-ccflare/core";
 import type { DatabaseOperations } from "@better-ccflare/database";
 import {
 	checkAllAccountsHealth,
@@ -38,12 +39,10 @@ export async function checkReauthNeeded(
 	);
 
 	needsReauth.forEach((account) => {
-		console.log(`  - ${account.name} (${account.provider})`);
-	});
-
-	console.log("\n🔧 Re-authentication commands:");
-	needsReauth.forEach((account) => {
-		console.log(`  bun run cli --reauthenticate "${account.name}"`);
+		const instruction = reauthInstruction(account.provider, account.name, {
+			hasRefreshToken: !!account.refresh_token,
+		});
+		console.log(`  - ${account.name} (${account.provider}): ${instruction}`);
 	});
 
 	console.log("\n💡 Or run the health check for detailed information:");

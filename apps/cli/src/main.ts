@@ -151,7 +151,7 @@ ${formatModeHelpBreakdown()}
     --priority <number>   Account priority (default: 0)
   --list               List all accounts
   --remove <name>      Remove an account
-  --reauthenticate <name> Re-authenticate an account (preserves metadata)
+  --reauthenticate <name> Re-authenticate an Anthropic, Qwen or xAI account (preserves metadata; Codex: use the dashboard)
   --pause <name>       Pause an account
   --resume <name>      Resume an account
   --force-reset-rate-limit <name> Force-clear stale rate-limit lock for an account

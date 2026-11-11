@@ -1,5 +1,76 @@
 # Changelog
 
+## [5.0.1](https://github.com/StartupBros/hov-router/compare/v5.0.0...v5.0.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **codex:** pause an account whose token refresh OpenAI refuses ([#795](https://github.com/StartupBros/hov-router/issues/795)) ([b469b65](https://github.com/StartupBros/hov-router/commit/b469b65533107fa5ab94cde3fbd744af2b1059ea))
+
+
+### Improvements
+
+* drop the startup warning for retired Codex settings after 5.0.0 ([#792](https://github.com/StartupBros/hov-router/issues/792)) ([0c1d86c](https://github.com/StartupBros/hov-router/commit/0c1d86cfc641dd8e6d8f731d4bbfec24c5839026)), refs [#749](https://github.com/StartupBros/hov-router/issues/749)
+
+## [5.0.0](https://github.com/StartupBros/hov-router/compare/v4.0.0...v5.0.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* `POST /api/accounts/:id/auto-refresh`, `POST /api/accounts/:id/model-fallbacks`, `GET /api/system/info` and `GET /api/workspaces` answer 410 Gone. Account API responses no longer include `autoRefreshEnabled`. Send fallbacks as arrays to `POST /api/accounts/:id/model-mappings`, and read workspaces from `GET /api/agents`.
+* remove the Default Agent Model setting ([#743](https://github.com/StartupBros/hov-router/issues/743))
+
+### Features
+
+* alert on model catalogue gaps and fix the Sonnet 5.5 cache-read rate ([#778](https://github.com/StartupBros/hov-router/issues/778)) ([04b2cfb](https://github.com/StartupBros/hov-router/commit/04b2cfbd1af96b9d7a1f9ced5e72c156fefe30c9))
+* register Claude Fable 5.2 and route the fable family to it ([#771](https://github.com/StartupBros/hov-router/issues/771)) ([d9bb16c](https://github.com/StartupBros/hov-router/commit/d9bb16c4e684b8668df96e63820fa63e865d36c9))
+
+
+### Bug Fixes
+
+* answer 410 for the removed cache-diagnosis route and list every ignored 5.0.0 setting ([#790](https://github.com/StartupBros/hov-router/issues/790)) ([2fe372d](https://github.com/StartupBros/hov-router/commit/2fe372dca6e26f0706255f575bc1970284a82649)), refs [#788](https://github.com/StartupBros/hov-router/issues/788)
+* **codex:** delete Codex trace files past a retention window ([#750](https://github.com/StartupBros/hov-router/issues/750)) ([6742e36](https://github.com/StartupBros/hov-router/commit/6742e369a451cd4781aa10fdd8f555665e034172))
+* correct docs and CLI output that cite commands, flags and routes that do not exist ([#741](https://github.com/StartupBros/hov-router/issues/741)) ([42e471f](https://github.com/StartupBros/hov-router/commit/42e471f9bd02f88f5adcc06be0b687bcf99e7fa7))
+* **dashboard:** show session-id attributions as sessions, not agents ([#742](https://github.com/StartupBros/hov-router/issues/742)) ([f274365](https://github.com/StartupBros/hov-router/commit/f274365da3be6312cb737a6a754c33a22ee24b20))
+* **deploy:** continue a backend handoff the server accepted without replying ([#744](https://github.com/StartupBros/hov-router/issues/744)) ([e890326](https://github.com/StartupBros/hov-router/commit/e890326f2dfe88b6c88501a8fa208308509a1fda)), refs [#743](https://github.com/StartupBros/hov-router/issues/743)
+* **deploy:** start a backend handoff only after the deploy acknowledges the prepared reply ([#746](https://github.com/StartupBros/hov-router/issues/746)) ([16097e5](https://github.com/StartupBros/hov-router/commit/16097e55ae271e7c4042ecb8efbe74f3fc892247)), refs [#745](https://github.com/StartupBros/hov-router/issues/745)
+* **docker:** give the container time to finish in-flight responses on stop ([#761](https://github.com/StartupBros/hov-router/issues/761)) ([f9b3b37](https://github.com/StartupBros/hov-router/commit/f9b3b37238e948a9682a2b74a5e47b10cb3c4ea6))
+* let Use reset redeem any held banked reset, as the Codex CLI does ([#773](https://github.com/StartupBros/hov-router/issues/773)) ([73bf389](https://github.com/StartupBros/hov-router/commit/73bf3897f6e03a75af90ab8b185cb2e452e24d04)), refs [#772](https://github.com/StartupBros/hov-router/issues/772)
+* price GPT-6 usage from the era floor and add gpt-6.1-terra ([#779](https://github.com/StartupBros/hov-router/issues/779)) ([afa76a8](https://github.com/StartupBros/hov-router/commit/afa76a8ff9c25785f1456005eb01b4c1a2e3491a))
+* **proxy:** date a thinking turn's tokens per second from its block start ([#758](https://github.com/StartupBros/hov-router/issues/758)) ([a08864a](https://github.com/StartupBros/hov-router/commit/a08864ae8caad8035e150e8d74bce9ffd12d80bd))
+* **proxy:** date tokens per second from when generation began ([#755](https://github.com/StartupBros/hov-router/issues/755)) ([cc80516](https://github.com/StartupBros/hov-router/commit/cc80516b09148f780da24d1587d9b505e2b3b533))
+* **proxy:** prime cold catalog-role pools for inherited stock-model children ([#770](https://github.com/StartupBros/hov-router/issues/770)) ([7aa8b6d](https://github.com/StartupBros/hov-router/commit/7aa8b6d55f701e4ef36a68834b7b7a9c1d9814f0)), refs [#768](https://github.com/StartupBros/hov-router/issues/768)
+* **proxy:** restore route-profile session bindings at startup ([#769](https://github.com/StartupBros/hov-router/issues/769)) ([650a671](https://github.com/StartupBros/hov-router/commit/650a6712812cd2b5559125521dd03d0b85b96a28)), refs [#768](https://github.com/StartupBros/hov-router/issues/768)
+* **proxy:** stop flush-length windows and Codex reasoning from inflating tokens per second ([#760](https://github.com/StartupBros/hov-router/issues/760)) ([d992207](https://github.com/StartupBros/hov-router/commit/d99220729f9346a4fe1e955d583ec808dd380ea3)), refs [#643](https://github.com/StartupBros/hov-router/issues/643)
+* record why a forwarded upstream request failed, and show its model ([#757](https://github.com/StartupBros/hov-router/issues/757)) ([d9e79a8](https://github.com/StartupBros/hov-router/commit/d9e79a8e47c4e4f4c1f8f51cd9bc4fc0e2c7577e))
+* **runner:** reap an owned helper only when the stop signal reached it ([#765](https://github.com/StartupBros/hov-router/issues/765)) ([6eddaab](https://github.com/StartupBros/hov-router/commit/6eddaab2d4212af44123f233fb77a92d606efff7))
+* show banked resets as a held count and Use reset, without OpenAI's applicable count ([#775](https://github.com/StartupBros/hov-router/issues/775)) ([7da6a9d](https://github.com/StartupBros/hov-router/commit/7da6a9dfacd8206761f2a8d3c39f84e34232d503)), refs [#772](https://github.com/StartupBros/hov-router/issues/772)
+* wait for a just-created release draft before failing the coordinator readback ([#785](https://github.com/StartupBros/hov-router/issues/785)) ([9041a9a](https://github.com/StartupBros/hov-router/commit/9041a9ad519904f6a38da986ff4e10379cdbc78f)), refs [#784](https://github.com/StartupBros/hov-router/issues/784)
+
+
+### Improvements
+
+* **database:** delete the adapter's no-op transaction() ([#759](https://github.com/StartupBros/hov-router/issues/759)) ([884ecb8](https://github.com/StartupBros/hov-router/commit/884ecb827674626eb6c8ea71fb4dbcd78915d8a0))
+* delete the Codex HTTP turn-state replay ([#736](https://github.com/StartupBros/hov-router/issues/736)) ([ae31d54](https://github.com/StartupBros/hov-router/commit/ae31d544829016bd1c87566b6266eda87a961202))
+* drop the unused Codex cache parity floor ([#737](https://github.com/StartupBros/hov-router/issues/737)) ([4df7c76](https://github.com/StartupBros/hov-router/commit/4df7c7607139b14d3a5bd3ecb162f90f3bd18278))
+* drop unused workspace deps and auto-refresh-named leftovers ([#748](https://github.com/StartupBros/hov-router/issues/748)) ([c4884bc](https://github.com/StartupBros/hov-router/commit/c4884bc84e879324a0292cb113c6a621b4074f8e))
+* make Codex cache-key continuity always-on and retire dormant canaries ([#735](https://github.com/StartupBros/hov-router/issues/735)) ([3e4c8f2](https://github.com/StartupBros/hov-router/commit/3e4c8f2705bb7cf6ffa82e141cf2ddd23b4c4f00))
+* remove dead code inherited from upstream ([#753](https://github.com/StartupBros/hov-router/issues/753)) ([be43006](https://github.com/StartupBros/hov-router/commit/be43006a34e140ec376ae817238d60501a1a14d2))
+* remove dead inherited code with no callers ([#731](https://github.com/StartupBros/hov-router/issues/731)) ([efd3205](https://github.com/StartupBros/hov-router/commit/efd32050800997aedc8f59909bb437cab98c5ac6)), refs [#725](https://github.com/StartupBros/hov-router/issues/725)
+* remove exported helpers nothing calls ([#739](https://github.com/StartupBros/hov-router/issues/739)) ([eabd4a5](https://github.com/StartupBros/hov-router/commit/eabd4a535d04afd793a0cb3f61f3399c18944db6))
+* remove the Codex WebSocket transport ([#734](https://github.com/StartupBros/hov-router/issues/734)) ([cc4d49b](https://github.com/StartupBros/hov-router/commit/cc4d49bed8bbc4e0a729c9bc533a555901fef9fc)), refs [#730](https://github.com/StartupBros/hov-router/issues/730)
+* remove the Default Agent Model setting ([#743](https://github.com/StartupBros/hov-router/issues/743)) ([8ab8636](https://github.com/StartupBros/hov-router/commit/8ab8636f8c37f3b3bc06e7c2c3383bbd1453ec30))
+* remove the deprecated API endpoints and the autoRefreshEnabled field ([#789](https://github.com/StartupBros/hov-router/issues/789)) ([1b113ef](https://github.com/StartupBros/hov-router/commit/1b113ef559a74cda68a29bd3e3cfac8036238893)), refs [#788](https://github.com/StartupBros/hov-router/issues/788) [#749](https://github.com/StartupBros/hov-router/issues/749)
+* remove the inert probe-backoff tie-break ([#733](https://github.com/StartupBros/hov-router/issues/733)) ([5f55cd5](https://github.com/StartupBros/hov-router/commit/5f55cd561dfcadf76dda762ed1ef56d9130cf2d7)), refs [#725](https://github.com/StartupBros/hov-router/issues/725)
+* remove the orphaned Ollama transformer and more test-only helpers ([#740](https://github.com/StartupBros/hov-router/issues/740)) ([4bd34d2](https://github.com/StartupBros/hov-router/commit/4bd34d2679bcfb79cf180327c3626e9468b515ca))
+* round-5 teardown cleanup (dead code, fictional docs, replay fold, classifyNoExecution) ([#764](https://github.com/StartupBros/hov-router/issues/764)) ([f7c328e](https://github.com/StartupBros/hov-router/commit/f7c328ee60e7b60821008384ed484850bdaeb1d9))
+
+
+### Performance Improvements
+
+* **database:** drop four requests indexes no live query uses ([#763](https://github.com/StartupBros/hov-router/issues/763)) ([600c761](https://github.com/StartupBros/hov-router/commit/600c76146568dd481d0fcb311c5e849c779db25f))
+* **database:** drop three indexes that wider indexes already cover ([#751](https://github.com/StartupBros/hov-router/issues/751)) ([8c070ee](https://github.com/StartupBros/hov-router/commit/8c070ee7907004a50eb6e71756041964b6d1ad98))
+
 ## [4.0.0](https://github.com/StartupBros/hov-router/compare/v3.7.1...v4.0.0) (2026-11-05)
 
 

@@ -486,7 +486,7 @@ Closes #(issue number)
 4. **Documentation**: Ensure docs are updated if needed
 5. **Merge**: Maintainer will merge using "Squash and merge"
 
-**Note**: Every pull request runs two required checks, `managed-routing-foundation` (`.github/workflows/managed-routing-postgres.yml`) and `prepare` (`.github/workflows/prepare-router-artifacts.yml`), and `main` only accepts branches that are up to date with it. Run the local checks above before pushing. The repository has no PR template file; follow the template in this guide.
+**Note**: Every pull request runs two required checks, `managed-routing-foundation` (`.github/workflows/managed-routing-postgres.yml`) and `prepare` (`.github/workflows/prepare-router-artifacts.yml`), and `main` only accepts branches that are up to date with it. `prepare` also fails a pull request whose squash commit release-please cannot parse, and re-runs when you edit the title or description ([how to fix it](hov-router-releases.md#squash-commits-release-please-can-parse)). Run the local checks above before pushing. The repository has no PR template file; follow the template in this guide.
 
 ### After PR is Merged
 
@@ -656,11 +656,11 @@ We use semantic versioning (SemVer):
 
 ### Release Workflow
 
-Releases are automated and draft-only. Never edit a version number, write `CHANGELOG.md` entries or push a release tag by hand.
+Release-please drafts each release, and nothing publishes one automatically. Never edit a version number, write `CHANGELOG.md` entries or push a release tag by hand.
 
 1. Give each commit a conventional prefix (see [Commit Message Format](#commit-message-format)). The prefix decides the next version: `fix:` gives a patch, `feat:` a minor, and `!` or a `BREAKING CHANGE` footer a major. `docs:`, `chore:`, `test:` and `style:` alone produce no release.
 2. After the foundation gate passes on `main`, release-please keeps one release pull request open with the next version and its `CHANGELOG.md` entries.
-3. Merging that pull request tags the release and stages a verified **draft** GitHub release. Publishing the draft is a separate maintainer decision.
+3. Merging that pull request tags the release and stages a verified **draft** GitHub release. The operator publishes each verified draft as it is cut, after the [pre-publish checks](hov-router-releases.md#publishing-a-verified-draft).
 
 The full policy is in [HoV Router release automation](hov-router-releases.md).
 

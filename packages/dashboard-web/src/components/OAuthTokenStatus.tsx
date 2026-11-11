@@ -1,4 +1,4 @@
-import { COMMAND_NAME } from "@better-ccflare/core/product-identity";
+import { reauthInstruction } from "@better-ccflare/core/reauth-instructions";
 import { AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
@@ -7,7 +7,8 @@ import { APIErrorBoundary } from "./ErrorBoundary";
 interface OAuthTokenStatusProps {
 	accountName: string;
 	hasRefreshToken: boolean;
-	provider?: string; // Optional for backward compatibility
+	/** Picks the re-login path the tooltip names. */
+	provider?: string;
 }
 
 type TokenStatus =
@@ -22,7 +23,8 @@ type TokenStatus =
 export function OAuthTokenStatus({
 	accountName,
 	hasRefreshToken,
-}: Omit<OAuthTokenStatusProps, "provider">) {
+	provider,
+}: OAuthTokenStatusProps) {
 	const [status, setStatus] = useState<TokenStatus>("loading");
 	const [message, setMessage] = useState("Loading...");
 	const [fallbackAttempted, setFallbackAttempted] = useState(false);
@@ -152,7 +154,7 @@ export function OAuthTokenStatus({
 				return `OAuth token expiring soon - ${message}`;
 			case "critical":
 			case "expired":
-				return `OAuth token expired - ${message} - Re-authenticate with: ${COMMAND_NAME} --reauthenticate ${accountName}`;
+				return `OAuth token expired - ${message} - To re-authenticate, ${reauthInstruction(provider ?? "", accountName, { hasRefreshToken, audience: "dashboard" })}`;
 			case "loading":
 				return "Checking OAuth token status...";
 			default:

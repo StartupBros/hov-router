@@ -200,3 +200,228 @@ describe("CodexProvider.refreshToken preserves the OAuth error code", () => {
 		).rejects.not.toBeInstanceOf(OAuthRefreshTokenError);
 	});
 });
+
+describe("CodexProvider.refreshToken treats a refused refresh as needing re-login", () => {
+	let originalFetch: typeof fetch;
+
+	beforeEach(() => {
+		originalFetch = globalThis.fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = originalFetch;
+	});
+
+	function respondWith(response: unknown) {
+		globalThis.fetch = mock(async () => response) as unknown as typeof fetch;
+	}
+
+	async function refreshError(
+		response: unknown,
+		overrides: Partial<Account> = {},
+	): Promise<Error> {
+		respondWith(response);
+		try {
+			await new CodexProvider().refreshToken(
+				codexAccount(overrides),
+				"test-client",
+			);
+		} catch (error) {
+			return error as Error;
+		}
+		throw new Error("expected refreshToken to throw");
+	}
+
+	function json(body: unknown, status: number) {
+		return new Response(JSON.stringify(body), {
+			status,
+			headers: { "content-type": "application/json" },
+		});
+	}
+
+	it("pauses a 401 that carries no code, as the Codex CLI does", async () => {
+		const error = await refreshError(
+			new Response("Unauthorized", { status: 401 }),
+		);
+		expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+		expect((error as OAuthRefreshTokenError).oauthErrorCode).toBe(
+			"invalid_grant",
+		);
+		expect(error.message).toContain(
+			"Failed to refresh Codex token for account codex-test: HTTP 401.",
+		);
+	});
+
+	it("pauses a 401 with an empty body", async () => {
+		const error = await refreshError(new Response("", { status: 401 }));
+		expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+	});
+
+	it("pauses a 401 with an unlisted code and logs that code", async () => {
+		const error = await refreshError(
+			json(
+				{
+					error: { code: "token_revoked", message: "The grant was withdrawn" },
+				},
+				401,
+			),
+		);
+		expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+		expect((error as OAuthRefreshTokenError).oauthErrorCode).toBe(
+			"invalid_grant",
+		);
+		expect(error.message).toContain("HTTP 401 token_revoked.");
+		expect(error.message).not.toContain("withdrawn");
+	});
+
+	for (const status of [400, 401]) {
+		for (const code of ["refresh_token_expired", "refresh_token_invalidated"]) {
+			it(`pauses HTTP ${status} ${code}, flat and nested, keeping the code`, async () => {
+				for (const body of [{ error: code }, { error: { code } }]) {
+					const error = await refreshError(json(body, status));
+					expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+					expect((error as OAuthRefreshTokenError).oauthErrorCode).toBe(code);
+					expect(error.message).toContain(`HTTP ${status} ${code}`);
+				}
+			});
+		}
+	}
+
+	for (const [body, logged] of [
+		[{ error: "invalid_client" }, " invalid_client"],
+		[{ error: { code: "unauthorized_client" } }, " unauthorized_client"],
+		[{ error: { type: "invalid_client" } }, " invalid_client"],
+		[{ error: "something", code: "invalid_client" }, " invalid_client"],
+		[{ errors: [{ code: "invalid_client" }] }, ""],
+	] as const) {
+		it(`does not pause a 401 that rejects the client: ${JSON.stringify(body)}`, async () => {
+			const error = await refreshError(json(body, 401));
+			expect(error).toBeInstanceOf(Error);
+			expect(error).not.toBeInstanceOf(OAuthRefreshTokenError);
+			expect(error.message).toBe(
+				`Failed to refresh Codex token for account codex-test: HTTP 401${logged}`,
+			);
+		});
+	}
+
+	for (const [text, logged] of [
+		["invalid_client", " invalid_client"],
+		[" Unauthorized_Client \n", ""],
+		["error=invalid_client&error_description=bad+secret", ""],
+		["<html><body>401 unauthorized_client</body></html>", ""],
+	] as const) {
+		it(`does not pause a non-JSON 401 that rejects the client: ${JSON.stringify(text)}`, async () => {
+			const error = await refreshError(new Response(text, { status: 401 }));
+			expect(error).not.toBeInstanceOf(OAuthRefreshTokenError);
+			expect(error.message).toBe(
+				`Failed to refresh Codex token for account codex-test: HTTP 401${logged}`,
+			);
+		});
+	}
+
+	it("still pauses a 401 whose body has invalid_client only inside a longer word", async () => {
+		const error = await refreshError(
+			json(
+				{ error: { code: "token_revoked", hint: "not_invalid_client" } },
+				401,
+			),
+		);
+		expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+		expect(error.message).toContain("HTTP 401 token_revoked.");
+	});
+
+	it("lets a listed refresh-token code win over a client-rejection field", async () => {
+		const error = await refreshError(
+			json({ error: "refresh_token_reused", code: "invalid_client" }, 401),
+		);
+		expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+		expect((error as OAuthRefreshTokenError).oauthErrorCode).toBe(
+			"refresh_token_reused",
+		);
+	});
+
+	it("does not pause a truncated 401 or log anything from it", async () => {
+		const prefix = JSON.stringify({ error: "token_revoked" });
+		const body = `${prefix}${" ".repeat(MAX_OAUTH_ERROR_INPUT_LENGTH)}x`;
+		const error = await refreshError(new Response(body, { status: 401 }));
+		expect(error).not.toBeInstanceOf(OAuthRefreshTokenError);
+		expect(error.message).toBe(
+			"Failed to refresh Codex token for account codex-test: HTTP 401",
+		);
+	});
+
+	it("does not pause a 401 whose body cannot be read", async () => {
+		const error = await refreshError({
+			ok: false,
+			status: 401,
+			statusText: "Unauthorized",
+			headers: new Headers(),
+			body: {
+				getReader() {
+					throw new TypeError("body already used");
+				},
+			},
+		});
+		expect(error).not.toBeInstanceOf(OAuthRefreshTokenError);
+		expect(error.message).toBe(
+			"Failed to refresh Codex token for account codex-test: HTTP 401",
+		);
+	});
+
+	it("does not pause a 401 whose body stream fails midway", async () => {
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				controller.error(new Error("connection reset"));
+			},
+		});
+		const error = await refreshError(new Response(body, { status: 401 }));
+		expect(error).not.toBeInstanceOf(OAuthRefreshTokenError);
+	});
+
+	for (const status of [403, 429, 500, 503]) {
+		it(`does not pause HTTP ${status} without a listed code`, async () => {
+			const error = await refreshError(
+				json({ error: "temporarily_unavailable" }, status),
+			);
+			expect(error).not.toBeInstanceOf(OAuthRefreshTokenError);
+			expect(error.message).toContain(`HTTP ${status} temporarily_unavailable`);
+		});
+	}
+
+	it("never logs the description, even when it echoes the refresh token", async () => {
+		const error = await refreshError(
+			json(
+				{
+					error: "invalid_grant",
+					error_description: "rt_secretvalue123 was revoked",
+				},
+				401,
+			),
+			{ refresh_token: "rt_secretvalue123" },
+		);
+		expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+		expect(error.message).not.toContain("rt_secretvalue123");
+		expect(error.message).not.toContain("was revoked");
+	});
+
+	it("drops a code-shaped value that is part of the refresh token", async () => {
+		for (const echoed of ["leaked_token_value", "token_value"]) {
+			const error = await refreshError(json({ error: echoed }, 401), {
+				refresh_token: "leaked_token_value",
+			});
+			expect(error).toBeInstanceOf(OAuthRefreshTokenError);
+			expect(error.message).not.toContain(echoed);
+			expect(error.message).toContain("HTTP 401.");
+		}
+	});
+
+	it("tells the operator to re-authenticate from the dashboard", async () => {
+		const error = await refreshError(
+			json({ error: "refresh_token_reused" }, 400),
+		);
+		expect(error.message).toContain(
+			"To re-authenticate, open the dashboard's Accounts page and choose Re-authenticate",
+		);
+		expect(error.message).not.toContain("--reauthenticate");
+	});
+});

@@ -484,7 +484,6 @@ export interface AccountResponse {
 	sessionInfo: string;
 	priority: number;
 	autoFallbackEnabled: boolean;
-	autoRefreshEnabled: boolean;
 	autoPauseOnOverageEnabled?: boolean;
 	codexCreditDrainEnabled?: boolean;
 	/** Published on the public subscription value feed (#536). */
@@ -544,7 +543,6 @@ export interface AccountDisplay {
 	access_token?: string | null;
 	priority: number;
 	autoFallbackEnabled: boolean;
-	autoRefreshEnabled: boolean;
 }
 
 // CLI list item type
@@ -585,7 +583,6 @@ export interface AccountListItem {
 		| "meta";
 	priority: number;
 	autoFallbackEnabled: boolean;
-	autoRefreshEnabled: boolean;
 	customEndpoint?: string | null;
 	crossRegionMode?: string | null; // Bedrock cross-region inference mode
 }
@@ -727,8 +724,6 @@ export function toAccountResponse(account: Account): AccountResponse {
 		sessionInfo,
 		priority: account.priority,
 		autoFallbackEnabled: account.auto_fallback_enabled,
-		// Auto-refresh was removed; the field stays and always reads false.
-		autoRefreshEnabled: false,
 		autoPauseOnOverageEnabled: account.auto_pause_on_overage_enabled,
 		peakHoursPauseEnabled: account.peak_hours_pause_enabled,
 		codexCreditDrainEnabled: !!account.codex_credit_drain_enabled,

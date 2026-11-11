@@ -4,7 +4,7 @@ HoV Router is a House of Vibe project at [StartupBros/hov-router](https://github
 
 The public repository moved from `StartupBros-com/better-ccflare` on 2026-10-19 and has been `StartupBros/hov-router` since 2026-10-21. It is the same repository, ID `1278801682` (see [the repository move](#repository-move)). Use `StartupBros/hov-router` in clone, download, and support URLs. [Report Router issues here](https://github.com/StartupBros/hov-router/issues).
 
-The current [Linux x86_64 binary](reference.md#install-the-linux-x86_64-release), release 3.7.1, displays HoV Router, as do 3.7.0 and new source builds. The earlier 3.6.2 binary keeps its original product name, exact bytes, source SHA, tag, and signing identity, and prints that original name even through `hov-router`; a filesystem alias cannot relabel its embedded output. See [the historical 3.6.2 release](hov-router-releases.md#verify-the-historical-362-release). Router npm packages, container images, and other-platform binaries are not published.
+The current [Linux x86_64 binary](reference.md#install-the-linux-x86_64-release), release 5.0.1, displays HoV Router, as do 3.7.0, 3.7.1, 4.0.0, 5.0.0 and new source builds. The earlier 3.6.2 binary keeps its original product name, exact bytes, source SHA, tag, and signing identity, and prints that original name even through `hov-router`; a filesystem alias cannot relabel its embedded output. See [the historical 3.6.2 release](hov-router-releases.md#verify-the-historical-362-release). Router npm packages, container images, and other-platform binaries are not published.
 
 ## Install without replacing your current executable
 
@@ -42,7 +42,7 @@ There is no new HoV configuration namespace and no config or credential migratio
 
 **Ways forward.**
 
-1. Stay on v3.7.1, the last release that supports PostgreSQL.
+1. Stay on v3.7.1, the last release that supports PostgreSQL ([verify and install it](hov-router-releases.md#verify-release-371)).
 2. Unset `DATABASE_URL` and start fresh on SQLite, at `BETTER_CCFLARE_DB_PATH` or the default `~/.config/better-ccflare/better-ccflare.db`.
 
 There is no PostgreSQL-to-SQLite migration tool, so option 2 starts with an empty database: accounts and history in PostgreSQL are not carried over.
@@ -54,12 +54,40 @@ There is no PostgreSQL-to-SQLite migration tool, so option 2 starts with an empt
 **What changed.** The per-account auto-refresh setting no longer does anything. Upstream used it to send a short scripted message to an account when its usage window reset, so the next window opened before anyone needed it. That is automated traffic sent on the account's behalf, which this fork does not send, and this fork's own install never had the setting on. Three behaviors stopped with it:
 
 1. **Window-opening messages.** Nothing is sent on an account's behalf. A usage window opens when real traffic first uses it.
-2. **Background OAuth token refresh.** Tokens are still refreshed when a request needs one: an expired or nearly expired token is refreshed before the request is sent, and a `401` on an Anthropic OAuth, Codex or xAI account triggers one refresh and retry. An account left idle until its refresh token lapses needs a re-login (`hov-router --reauthenticate <name>`) when it is next used.
+2. **Background OAuth token refresh.** Tokens are still refreshed when a request needs one: an expired or nearly expired token is refreshed before the request is sent, and a `401` on an Anthropic OAuth, Codex or xAI account triggers one refresh and retry. An account left idle until its refresh token lapses needs a re-login when it is next used (see [Re-authenticating an account](oauth-reauthentication.md)).
 3. **Resuming paused accounts after a successful message.** An account paused after repeated failures (`failure_threshold`) now stays paused until you resume it from the dashboard or with `POST /api/accounts/<id>/resume`. An overage pause still clears on its own once its usage window resets, but only on Anthropic, Codex and Z.ai accounts with auto-fallback on.
 
-**Who is affected.** Only accounts that had auto-refresh turned on. At startup the server logs one warning naming each of them, what they no longer get, and how to clear the setting. The Z.ai peak-hours pause, which ran on the same timer, is unchanged and now runs as its own job (see [Z.ai Peak-Hours Pause](providers.md#zai-peak-hours-pause)).
+**Who is affected.** Only accounts that had auto-refresh turned on. Release 4.0.0 logs one startup warning naming each of them and what they no longer get. Release 5.0.0 drops that warning, because the stored value has no effect. The Z.ai peak-hours pause, which ran on the same timer, is unchanged and now runs as its own job (see [Z.ai Peak-Hours Pause](providers.md#zai-peak-hours-pause)).
 
-**Clearing the setting.** Send `POST /api/accounts/<id>/auto-refresh` with `{"enabled": false}` for each named account; the warning stops once none is left. The endpoint keeps answering for one release so existing scripts do not fail: turning the setting on stores nothing, and both answers say auto-refresh was removed. Account API responses and `--list` keep the `autoRefreshEnabled` field, which is always `false`. The dashboard toggle is gone. The database column is kept, with no migration. A request that still sends the `x-better-ccflare-auto-refresh` header is treated as an ordinary client request; the header is removed at ingress.
+**The stored setting.** Nothing needs clearing. The database column is kept, with no migration, and nothing acts on it. Release 4.0.0 kept `POST /api/accounts/<id>/auto-refresh` answering and kept `autoRefreshEnabled` (always `false`) in account API responses, so existing scripts had one release to change. Release 5.0.0 removes both; see [Removed in 5.0.0](#removed-in-500). The dashboard toggle is gone. A request that still sends the `x-better-ccflare-auto-refresh` header is treated as an ordinary client request; the header is removed at ingress.
+
+## Removed in 5.0.0
+
+**Endpoints.** Each of these now answers `410 Gone` from the router itself, for every method, with a JSON body naming the endpoint, `removedIn: "5.0.0"` and the replacement, if any. A path the router does not recognize can be passed on to an upstream provider, so the router answers these itself rather than forwarding a stale call.
+
+| Removed | Use instead |
+|---|---|
+| `GET` and `POST /api/config/model` | Nothing. The Default Agent Model setting never changed which model an agent used. Set a model per agent on the Agents tab or with `POST /api/agents/<id>/preference`. |
+| `POST /api/accounts/<id>/auto-refresh` | Nothing. Auto-refresh was removed in 4.0.0 ([above](#auto-refresh-removed)). |
+| `POST /api/accounts/<id>/model-fallbacks` | `POST /api/accounts/<id>/model-mappings` with an array per model family, first choice first: `{"modelMappings": {"sonnet": ["model-a", "model-b"]}}`. A mapping holds at most 16 models. |
+| `GET /api/system/info` | Nothing. `GET /health` reports the running version and build SHA. |
+| `GET /api/workspaces` | `GET /api/agents`, whose `workspaces` field lists the same workspaces. For a per-workspace agent count, count its `workspaceAgents` entries by `workspace`. |
+| `POST /api/debug/cache-diagnosis` | Nothing. It ran only when `CCFLARE_CACHE_DIAG` was set. |
+
+**Fields.** Account API responses no longer include `autoRefreshEnabled`. `GET /api/config` no longer includes `default_agent_model`. Until the next major release, `GET /api/insights/cache-parity` still reports the removed Codex levers, at fixed values: session keys, prefix sharding, settle window, pacing bypass, explicit breakpoints, turn state and WebSocket, with continuity fixed on. `GET /api/debug/cache-pacing` reports `codex_settle_ms` as `0`.
+
+**Commands.** `--get-model` and `--set-model` are gone and now exit with status 1 as unknown arguments. `--show-config` still reads the configuration file without writing it.
+
+**Settings now ignored.** These are ignored and left in place:
+
+- a `default_agent_model` key in `better-ccflare.json` and the `DEFAULT_AGENT_MODEL` environment variable;
+- `CCFLARE_CACHE_DIAG`;
+- the Codex variables for features that are gone:
+  - `CCFLARE_CODEX_WS_*`, removed with the WebSocket transport;
+  - `CCFLARE_CODEX_TURN_STATE_*`, removed with the turn-state replay;
+  - the cache-key and pacing experiment variables, starting with `CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT`.
+
+Release 5.0.0 logs one startup warning naming each Codex variable that is still set, without its value. Release 5.0.1 and later drop that warning and ignore the variables without logging anything. [Configuration](configuration.md) lists every name.
 
 ## Manual source updates
 
