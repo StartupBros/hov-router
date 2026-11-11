@@ -1,6 +1,6 @@
 import { computeWindowStartMs, registerUIRefresh } from "@better-ccflare/core";
 import type { AnthropicUsageData, FullUsageData } from "@better-ccflare/types";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { formatRelativeReset } from "../../lib/pool-usage";
 import { cn, formatShortDuration } from "../../lib/utils";
 import {
@@ -150,17 +150,18 @@ export function RateLimitProgress({
 	showWeekly = false,
 	compact = false,
 }: RateLimitProgressProps) {
+	const refreshId = useId();
 	const [now, setNow] = useState(Date.now());
 
 	useEffect(() => {
 		const unregisterInterval = registerUIRefresh({
-			id: "rate-limit-progress-update",
+			id: `rate-limit-progress-update-${refreshId}`,
 			callback: () => setNow(Date.now()),
 			seconds: 30,
 			description: "Rate limit progress UI update",
 		});
 		return unregisterInterval;
-	}, []);
+	}, [refreshId]);
 
 	// Codex has no usage-polling endpoint, so gaps in its data are routine (the
 	// weekly percentage arrives only piggybacked on real traffic). The weekly bar

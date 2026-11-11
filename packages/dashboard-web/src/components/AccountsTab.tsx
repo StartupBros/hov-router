@@ -227,6 +227,26 @@ export function buildRoutingByAccountId(
 	return routingByAccountId;
 }
 
+/** Catch Details setting failures while keeping the page fallback visible. */
+export async function runAccountSetting(
+	accountId: string,
+	operation: () => Promise<unknown>,
+	setSettingsError: (accountId: string, error: string | null) => void,
+	setPageError: (error: string | null) => void,
+	formatError: (error: unknown) => string,
+): Promise<void> {
+	setSettingsError(accountId, null);
+	setPageError(null);
+	try {
+		await operation();
+		setSettingsError(accountId, null);
+	} catch (error) {
+		const message = formatError(error);
+		setSettingsError(accountId, message);
+		setPageError(message);
+	}
+}
+
 export function AccountsTab() {
 	const { formatError } = useApiError();
 	const {
@@ -324,6 +344,23 @@ export function AccountsTab() {
 	// answer must not unmount the dialog that is showing it.
 	const [useResetAccount, setUseResetAccount] = useState<Account | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
+	const [settingsErrors, setSettingsErrors] = useState<
+		Record<string, string | null>
+	>({});
+	const setSettingsError = (accountId: string, message: string | null) => {
+		setSettingsErrors((previous) => ({ ...previous, [accountId]: message }));
+	};
+	const clearSettingsError = (accountId: string) =>
+		setSettingsError(accountId, null);
+	const runSetting = (account: Account, operation: () => Promise<unknown>) =>
+		runAccountSetting(
+			account.id,
+			operation,
+			setSettingsError,
+			setActionError,
+			formatError,
+		);
+
 	const accountCreationCallbacks = createAccountCreationCallbacks(
 		api,
 		() => invalidateManagedRouting(FULL_MANAGED_ROUTING_INVALIDATION),
@@ -606,55 +643,43 @@ export function AccountsTab() {
 		}
 	};
 
-	const handleAutoFallbackToggle = async (account: Account) => {
-		try {
+	const handleAutoFallbackToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await api.updateAccountAutoFallback(
 				account.id,
 				!account.autoFallbackEnabled,
 			);
 			await loadAccounts();
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
-	const handleBillingTypeToggle = async (account: Account) => {
-		try {
+	const handleBillingTypeToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await updateBillingType.mutateAsync({
 				accountId: account.id,
 				billingType: account.billingType === "plan" ? "api" : "plan",
 			});
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
-	const handleAutoPauseOnOverageToggle = async (account: Account) => {
-		try {
+	const handleAutoPauseOnOverageToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await api.updateAccountAutoPauseOnOverage(
 				account.id,
 				!account.autoPauseOnOverageEnabled,
 			);
 			await loadAccounts();
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
-	const handleCodexCreditDrainToggle = async (account: Account) => {
-		try {
+	const handleCodexCreditDrainToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await api.updateAccountCodexCreditDrain(
 				account.id,
 				!account.codexCreditDrainEnabled,
 			);
 			await loadAccounts();
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
-	const handlePublicValueToggle = async (account: Account) => {
-		try {
+	const handlePublicValueToggle = (account: Account) =>
+		runSetting(account, async () => {
 			const outcome = await togglePublicValue(account, api);
 			if (outcome.kind === "open-dialog") {
 				// Turning on needs a public label first.
@@ -663,10 +688,7 @@ export function AccountsTab() {
 			}
 			await loadAccounts();
 			setActionError(null);
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
 	const handlePublicValueEditLabel = (account: Account) => {
 		setPublicValueDialog({ account, error: null, isSaving: false });
@@ -725,17 +747,14 @@ export function AccountsTab() {
 		}
 	};
 
-	const handlePeakHoursPauseToggle = async (account: Account) => {
-		try {
+	const handlePeakHoursPauseToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await api.updateAccountPeakHoursPause(
 				account.id,
 				!account.peakHoursPauseEnabled,
 			);
 			await loadAccounts();
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
 	const handleUpdateCustomEndpoint = async (
 		accountId: string,
@@ -857,6 +876,8 @@ export function AccountsTab() {
 					)}
 
 					<AccountList
+						settingsErrors={settingsErrors}
+						onClearSettingsError={clearSettingsError}
 						accounts={accounts}
 						routingByAccountId={routingByAccountId}
 						onPauseToggle={handlePauseToggle}

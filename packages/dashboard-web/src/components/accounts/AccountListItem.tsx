@@ -142,6 +142,8 @@ function routingNeedsNotice(state: AccountFamilyRoutingState) {
 	);
 }
 interface AccountListItemProps {
+	settingsError?: string | null;
+	onClearSettingsError?: (accountId: string) => void;
 	account: Account;
 	routingStates?: readonly AccountFamilyRoutingState[];
 	isPrimary?: boolean;
@@ -250,6 +252,8 @@ export function PublicValueControl({
 }
 
 export function AccountListItem({
+	settingsError,
+	onClearSettingsError,
 	account,
 	routingStates = [],
 	isPrimary = false,
@@ -277,9 +281,13 @@ export function AccountListItem({
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	const detailsTriggerRef = useRef<HTMLButtonElement>(null);
 	const afterDetailsClose = useRef<(() => void) | null>(null);
+	const changeDetailsOpen = (open: boolean) => {
+		onClearSettingsError?.(account.id);
+		setDetailsOpen(open);
+	};
 	const closeDetailsThen = (openDialog: () => void) => {
 		afterDetailsClose.current = openDialog;
-		setDetailsOpen(false);
+		changeDetailsOpen(false);
 	};
 	const quietBankedBalance =
 		account.provider === "codex" &&
@@ -519,7 +527,7 @@ export function AccountListItem({
 					</Button>
 					{/* modal={false}: every item opens a Radix dialog, and a modal menu
 					    closing underneath one can leave pointer-events disabled on body. */}
-					<Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+					<Dialog open={detailsOpen} onOpenChange={changeDetailsOpen}>
 						<DialogTrigger asChild>
 							<Button
 								variant="ghost"
@@ -550,6 +558,11 @@ export function AccountListItem({
 							<DialogDescription>
 								Settings &amp; account details
 							</DialogDescription>
+							{settingsError && (
+								<p role="alert" className="text-sm text-destructive">
+									{settingsError}
+								</p>
+							)}
 							{quietBankedBalance && account.bankedResets && (
 								<BankedResetsStatus
 									resets={account.bankedResets}

@@ -6,6 +6,8 @@ import { type AccountListStatus, accountListView } from "./account-list-view";
 import type { AccountFamilyRoutingState } from "./account-routing";
 
 interface AccountListProps {
+	settingsErrors?: Readonly<Record<string, string | null>>;
+	onClearSettingsError?: (accountId: string) => void;
 	accounts: Account[] | undefined;
 	routingByAccountId?: Readonly<
 		Record<string, readonly AccountFamilyRoutingState[]>
@@ -235,6 +237,7 @@ export function AccountList(props: AccountListProps) {
 
 /** Keep immutable keys and routing lookup together when filters change. */
 export function accountListItems({
+	settingsErrors,
 	accounts,
 	routingByAccountId,
 	...handlers
@@ -243,6 +246,7 @@ export function accountListItems({
 		<AccountListItem
 			key={account.id}
 			account={account}
+			settingsError={settingsErrors?.[account.id]}
 			routingStates={routingByAccountId?.[account.id]}
 			isPrimary={account.isPrimary}
 			{...handlers}

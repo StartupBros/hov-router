@@ -1171,3 +1171,62 @@ describe("compact hybrid list", () => {
 		expect(html).not.toContain("<summary");
 	});
 });
+
+describe("Details settings errors", () => {
+	it("passes only the matching account error and renders its alert inside Details", () => {
+		const account = makeAccount();
+		const items = accountListItems({
+			accounts: [account, makeAccount({ id: "other" })],
+			...requiredHandlers,
+			settingsErrors: { [account.id]: "Setting failed" },
+		});
+		expect(items[0]?.props.settingsError).toBe("Setting failed");
+		expect(items[1]?.props.settingsError).toBeUndefined();
+		const html = renderToStaticMarkup(items[0]);
+		expect(html).toContain('role="alert"');
+		expect(html).toContain("Setting failed");
+		expect(withoutDetailsContent(html)).not.toContain("Setting failed");
+	});
+	it("clears the account on both Details open and dismiss", () => {
+		// Execute the row hooks, then invoke the rendered Dialog lifecycle callback.
+		const React = require("react");
+		const internals =
+			React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+		const previous = internals.H;
+		const changes: boolean[] = [];
+		const cleared: string[] = [];
+		internals.H = {
+			useState: () => [false, (value: boolean) => changes.push(value)],
+			useRef: () => ({ current: null }),
+		};
+		let tree: ReturnType<typeof AccountListItem>;
+		const account = makeAccount();
+		try {
+			tree = AccountListItem({
+				account,
+				...requiredHandlers,
+				onClearSettingsError: (id) => cleared.push(id),
+			});
+		} finally {
+			internals.H = previous;
+		}
+		type DialogNode = {
+			props?: { onOpenChange?: (open: boolean) => void; children?: unknown };
+		};
+		function find(node: unknown): DialogNode | undefined {
+			if (!node || typeof node !== "object") return;
+			const element = node as DialogNode;
+			if (element.props?.onOpenChange) return element;
+			for (const child of [element.props?.children].flat(Infinity)) {
+				const found = find(child);
+				if (found) return found;
+			}
+		}
+		const onOpenChange = find(tree)?.props?.onOpenChange;
+		if (!onOpenChange) throw new Error("Details dialog callback missing");
+		onOpenChange(true);
+		onOpenChange(false);
+		expect(changes).toEqual([true, false]);
+		expect(cleared).toEqual([account.id, account.id]);
+	});
+});

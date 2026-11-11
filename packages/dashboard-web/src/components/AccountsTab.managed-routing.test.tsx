@@ -388,3 +388,164 @@ describe("AccountsTab production routing prop", () => {
 		expect(html).toContain("Managed");
 	});
 });
+
+describe("Details setting error handling", () => {
+	it("catches all six setting failures, clears only the retrying account, and clears on success", async () => {
+		const { runAccountSetting } = await import("./AccountsTab");
+		const errors: Record<string, string | null> = { other: "other failure" };
+		const page: { error: string | null } = { error: null };
+		const setError = (id: string, error: string | null) => {
+			errors[id] = error;
+		};
+		for (const setting of [
+			"auto-fallback",
+			"billing",
+			"overage",
+			"credit-drain",
+			"peak-hours",
+			"public-off",
+		]) {
+			errors.target = "stale";
+			await runAccountSetting(
+				"target",
+				async () => {
+					expect(errors.target).toBeNull();
+					throw new Error(setting);
+				},
+				setError,
+				(value) => {
+					page.error = value;
+				},
+				(error) => (error as Error).message,
+			);
+			expect(errors.target).toBe(setting);
+			expect(page.error).toBe(setting);
+			expect(errors.other).toBe("other failure");
+			await runAccountSetting(
+				"target",
+				async () => {},
+				setError,
+				(value) => {
+					page.error = value;
+				},
+				String,
+			);
+			expect(errors.target).toBeNull();
+			expect(page.error).toBeNull();
+		}
+	});
+});
+
+it("routes each of the six real AccountsTab callbacks through account-scoped catches", async () => {
+	const React = await import("react");
+	const { api } = await import("../api");
+	const { spyOn } = await import("bun:test");
+	const internals = (
+		React as unknown as {
+			__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE: {
+				H: Record<string, unknown>;
+			};
+		}
+	).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+	});
+	const account = { ...makeAccount(), publicValueEnabled: true };
+	queryClient.setQueryData(queryKeys.accounts(), [account]);
+	const state: unknown[] = [];
+	type SettingHandler =
+		| "onAutoFallbackToggle"
+		| "onBillingTypeToggle"
+		| "onAutoPauseOnOverageToggle"
+		| "onCodexCreditDrainToggle"
+		| "onPeakHoursPauseToggle"
+		| "onPublicValueToggle";
+	type CapturedProps = Record<
+		SettingHandler,
+		(account: Account) => Promise<void>
+	> & {
+		settingsErrors: Record<string, string | null>;
+		onClearSettingsError: (accountId: string) => void;
+	};
+	let props: CapturedProps | undefined;
+	function Capture() {
+		const dispatcher = internals.H;
+		let index = 0;
+		internals.H = {
+			...dispatcher,
+			useState(initial: unknown) {
+				const slot = index++;
+				if (!(slot in state))
+					state[slot] =
+						typeof initial === "function"
+							? (initial as () => unknown)()
+							: initial;
+				return [
+					state[slot],
+					(value: unknown) => {
+						state[slot] =
+							typeof value === "function" ? value(state[slot]) : value;
+					},
+				];
+			},
+		};
+		try {
+			const tree = AccountsTab();
+			function find(node: unknown): CapturedProps | undefined {
+				if (!node || typeof node !== "object") return;
+				const element = node as {
+					props?: Partial<CapturedProps> & { children?: unknown };
+				};
+				if (element.props?.onAutoFallbackToggle)
+					return element.props as CapturedProps;
+				for (const child of [element.props?.children].flat(Infinity)) {
+					const found = find(child);
+					if (found) return found;
+				}
+			}
+			const captured = find(tree);
+			if (!captured) throw new Error("AccountList settings callbacks missing");
+			props = captured;
+		} finally {
+			internals.H = dispatcher;
+		}
+		return null;
+	}
+	const render = () =>
+		renderToStaticMarkup(
+			<QueryClientProvider client={queryClient}>
+				<Capture />
+			</QueryClientProvider>,
+		);
+	const pairs = [
+		["onAutoFallbackToggle", "updateAccountAutoFallback"],
+		["onBillingTypeToggle", "updateAccountBillingType"],
+		["onAutoPauseOnOverageToggle", "updateAccountAutoPauseOnOverage"],
+		["onCodexCreditDrainToggle", "updateAccountCodexCreditDrain"],
+		["onPeakHoursPauseToggle", "updateAccountPeakHoursPause"],
+		["onPublicValueToggle", "setAccountPublicValue"],
+	] as const;
+	for (const [handler, method] of pairs) {
+		const call = spyOn(api, method).mockRejectedValue(
+			new Error("setting failure"),
+		);
+		try {
+			render();
+			if (!props) throw new Error("AccountList was not rendered");
+			await props[handler](account);
+			render();
+			expect(call).toHaveBeenCalledTimes(1);
+			expect(call.mock.calls[0]?.[0]).toBe(account.id);
+			expect(props.settingsErrors[account.id]).toBeTruthy();
+			props.onClearSettingsError("other");
+			render();
+			expect(props.settingsErrors[account.id]).toBeTruthy();
+			props.onClearSettingsError(account.id);
+			render();
+			expect(props.settingsErrors[account.id]).toBeNull();
+		} finally {
+			call.mockRestore();
+		}
+	}
+	queryClient.clear();
+});
