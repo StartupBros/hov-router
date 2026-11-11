@@ -13,6 +13,7 @@
  * Remove this script, its step in .github/workflows/prepare-router-artifacts.yml and its
  * test once release-please's parser accepts fixtures/squash-parse/pr795-body.txt.
  */
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
 	type Commit,
@@ -178,12 +179,17 @@ function repair(check: SquashCheck): string {
 	return `Reword that line of the description, or put the commit message you want between ${OVERRIDE_START} and ${OVERRIDE_END} lines in the description. ${edit}`;
 }
 
-// The runner reads a line as a workflow command when it starts with "::" after leading
-// whitespace, so every printed line from the pull request carries a prefix.
 const escapeData = (text: string) =>
 	text.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 
-export function report(check: SquashCheck): string[] {
+// The Actions runner reads "::name::" at the start of a line and the older "##[name]"
+// anywhere in one, so text from the pull request is printed only between stop-commands
+// markers. The runner then processes nothing until it sees the random token.
+function verbatim(lines: string[], token: string): string[] {
+	return [`::stop-commands::${token}`, ...lines, `::${token}::`];
+}
+
+export function report(check: SquashCheck, token = randomUUID()): string[] {
 	const source = check.overrideActive
 		? `the text after ${OVERRIDE_START} in the description`
 		: "this pull request's squash commit";
@@ -191,7 +197,10 @@ export function report(check: SquashCheck): string[] {
 		const count = check.entries.length;
 		return [
 			`release-please reads ${source} as ${count} ${count === 1 ? "entry" : "entries"}:`,
-			...check.entries.map((entry) => `  | ${entry}`),
+			...verbatim(
+				check.entries.map((entry) => `  | ${entry}`),
+				token,
+			),
 		];
 	}
 	const first = check.located?.[0];
@@ -205,12 +214,19 @@ export function report(check: SquashCheck): string[] {
 	const width = String(check.parsed.split("\n").length).length;
 	return [
 		`::error title=Squash commit unreadable by release-please::${escapeData(summary)}`,
-		"Parser errors:",
-		...check.errors.map((error) => `  | ${error}`),
-		`release-please parses this text (${source}):`,
-		...check.parsed
-			.split(/\r?\n/)
-			.map((line, index) => `  ${String(index + 1).padStart(width)} | ${line}`),
+		...verbatim(
+			[
+				"Parser errors:",
+				...check.errors.map((error) => `  | ${error}`),
+				`release-please parses this text (${source}):`,
+				...check.parsed
+					.split(/\r?\n/)
+					.map(
+						(line, index) => `  ${String(index + 1).padStart(width)} | ${line}`,
+					),
+			],
+			token,
+		),
 	];
 }
 

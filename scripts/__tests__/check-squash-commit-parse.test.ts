@@ -183,22 +183,66 @@ describe("command line", () => {
 			rmSync(root, { recursive: true, force: true });
 		}
 	}
-	const commandLines = (stdout: string) =>
-		stdout.split("\n").filter((line) => line.trimStart().startsWith("::"));
+	// A model of how the Actions runner reads output (actions/runner ActionCommand.cs and
+	// ActionCommandManager.cs): "::name ...::data" after leading whitespace, the older
+	// "##[name ...]data" anywhere in a line, and nothing but the resume token between
+	// "::stop-commands::<token>" and "::<token>::". It treats every name as a known
+	// command, so it reports at least what the runner would process.
+	function commandName(line: string): string | null {
+		const trimmed = line.trimStart();
+		if (trimmed.startsWith("::")) {
+			const end = trimmed.indexOf("::", 2);
+			if (end >= 0) return trimmed.slice(2, end).split(" ")[0] ?? null;
+		}
+		const start = line.indexOf("##[");
+		const end = start < 0 ? -1 : line.indexOf("]", start);
+		return end < 0 ? null : (line.slice(start + 3, end).split(" ")[0] ?? null);
+	}
+	function processedCommands(stdout: string): string[] {
+		const processed: string[] = [];
+		let stopToken: string | null = null;
+		for (const line of stdout.split("\n")) {
+			const name = commandName(line);
+			if (name === null) continue;
+			if (stopToken !== null) {
+				if (name.toLowerCase() === stopToken.toLowerCase()) {
+					processed.push("resume");
+					stopToken = null;
+				}
+				continue;
+			}
+			if (name === "stop-commands") {
+				stopToken = line.trimStart().slice("::stop-commands::".length);
+				expect(stopToken).toMatch(/^[0-9a-f-]{36}$/);
+			}
+			processed.push(name);
+		}
+		expect(stopToken).toBeNull();
+		return processed;
+	}
+	const annotationOf = (stdout: string) =>
+		stdout.split("\n").filter((line) => line.startsWith("::error "));
 
 	test("passes a readable squash commit and prints the entries release-please records", () => {
 		const result = run(pullRequest(t795, fixture("pr795-override-body.txt")));
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
 		expect(result.stdout).toContain(`  | ${t795} (#795)`);
-		expect(commandLines(result.stdout)).toEqual([]);
+		expect(processedCommands(result.stdout)).toEqual([
+			"stop-commands",
+			"resume",
+		]);
 	});
 
 	test("fails #795's original description with one annotation naming the line and the repairs", () => {
 		const result = run(pullRequest(t795, fixture("pr795-body.txt")));
 		expect(result.code).toBe(1);
-		const [annotation, ...others] = commandLines(result.stdout);
-		expect(others).toEqual([]);
+		expect(processedCommands(result.stdout)).toEqual([
+			"error",
+			"stop-commands",
+			"resume",
+		]);
+		const [annotation] = annotationOf(result.stdout);
 		expect(annotation).toStartWith("::error title=");
 		expect(annotation).toContain("Line 103, column 27");
 		expect(annotation).toContain(JSON.stringify(line103));
@@ -207,14 +251,25 @@ describe("command line", () => {
 		expect(result.stdout).toContain(` 103 | ${line103}`);
 	});
 
-	test("never prints description text where the runner would read it as a workflow command", () => {
-		const result = run(
-			pullRequest('Revert "fix: x"', "::stop-commands::token\n::error::forged"),
-		);
-		expect(result.code).toBe(1);
-		const lines = commandLines(result.stdout);
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toStartWith("::error title=");
+	test("the runner processes no workflow command written in the title or description", () => {
+		const forged =
+			"::stop-commands::token\n::error::forged\ntext ##[error]forged\n::token::\n##[set-output name=x]y";
+		const failing = run(pullRequest('Revert "fix: x ##[warning]t"', forged));
+		expect(failing.code).toBe(1);
+		expect(processedCommands(failing.stdout)).toEqual([
+			"error",
+			"stop-commands",
+			"resume",
+		]);
+		expect(failing.stdout).toContain("text ##[error]forged");
+
+		const passing = run(pullRequest("fix: x ##[error]forged", forged));
+		expect(passing.code).toBe(0);
+		expect(passing.stdout).toContain("  | fix: x ##[error]forged (#795)");
+		expect(processedCommands(passing.stdout)).toEqual([
+			"stop-commands",
+			"resume",
+		]);
 	});
 
 	test("an event without a pull request has nothing to check", () => {
