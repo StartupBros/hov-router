@@ -1,0 +1,48 @@
+refactor: drop the startup warning for retired Codex settings after 5.0.0 (#792)
+
+Release 5.0.0 logged one startup warning for each removed Codex feature
+whose environment variables were still set: the WebSocket transport
+(`CCFLARE_CODEX_WS_*`), the cache-key continuity canary, the five cache
+experiments, and the turn-state replay (`CCFLARE_CODEX_TURN_STATE_*`).
+5.0.0 was the first release to carry that warning, and #749 planned its
+removal for the release after. This PR removes it.
+
+## What changes
+
+- Deletes `apps/server/src/removed-codex-settings-warning.ts` and its
+test, and the import and call in `apps/server/src/server.ts`. Nothing
+else imported the module.
+- `docs/configuration.md` and `docs/systemd.md` now say the variables
+are ignored, with no mention of a startup warning. Every retired
+variable name stays listed.
+- `docs/hov-router-migration.md` ("Removed in 5.0.0") now says 5.0.0
+logs the warning and later releases ignore the variables without logging
+anything, the same pattern as the 4.0.0 auto-refresh warning.
+
+Nothing reads the retired variables, so they stay ignored. The only
+behavior change is that the warning lines no longer appear.
+
+## Verification
+
+- `bun run lint` (exit 0; the 16 existing warnings are all in files this
+PR does not touch), `bun run typecheck` (exit 0), `bun run format` (no
+changes).
+- No reference to the deleted module or its exports remains in `apps/`,
+`packages/` or `scripts/`.
+- Live start of the rebuilt binary with a scratch config, zero accounts
+and a non-production port, with one retired variable from each group set
+(`CCFLARE_CODEX_WS_PERCENT`, `CCFLARE_CODEX_TURN_STATE_PERCENT`,
+`CCFLARE_CODEX_CACHE_KEY_CONTINUITY_PERCENT`,
+`CCFLARE_CODEX_CACHE_KEY_SESSION_PERCENT`): no warning and none of the
+names in the log. The published 5.0.0 binary, under the same procedure,
+logs all four warnings.
+- Suites that set the retired variables to prove they are ignored:
+`packages/providers/src/providers/codex/provider.test.ts` 302 pass,
+`packages/providers/src/providers/codex/trace.integration.test.ts` 12
+pass, `packages/proxy/src/__tests__/cache-pacing.test.ts` 20 pass, 0
+fail.
+
+Merging this lets release-please open a 5.0.1 release PR (patch, under
+Improvements).
+
+Refs #749
