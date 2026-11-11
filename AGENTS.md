@@ -65,6 +65,8 @@ Commit prefixes drive the version and changelog (`release-please-config.json`, p
 - `docs:`, `chore:`, `test:`, `style:` alone produce no release
 - `!` or `BREAKING CHANGE` → major
 
+A squash commit is the PR title plus the description, and release-please silently drops any part it cannot parse. The required `prepare` check fails such a PR; the fix is in [docs/hov-router-releases.md](docs/hov-router-releases.md#squash-commits-release-please-can-parse).
+
 `CLAUDE_CLI_VERSION` in `packages/core/src/version.ts` tracks the Claude Code CLI version used in user-agent headers. It is not the product version.
 
 ## PR Review Against Current Main (MANDATORY)

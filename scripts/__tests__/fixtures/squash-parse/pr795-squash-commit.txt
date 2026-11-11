@@ -1,0 +1,147 @@
+fix(codex): pause an account whose token refresh OpenAI refuses (#795)
+
+Refs #794
+
+## What broke
+
+A Codex account whose refresh OpenAI refused kept failing quietly. The
+Codex provider recorded `HTTP 401` whenever OpenAI's error code was
+outside the router's five-entry list, threw a plain `Error` and
+discarded the body. The token manager only quarantines a typed
+`OAuthRefreshTokenError` or a listed code, so the account was never
+flagged for re-login or paused. Its dashboard row showed no
+**Re-authenticate** button, and every request that needed a token
+retried the dead refresh. A production Codex account logged 16 such
+failures in two hours.
+
+Separately, four places told users to run `--reauthenticate`, which
+refuses Codex accounts.
+
+## What this changes
+
+**Classification**
+(`packages/providers/src/providers/codex/provider.ts`). This follows
+OpenAI's Codex CLI (`codex-rs/login/src/auth/manager.rs`), which treats
+every refused refresh 401 as permanent:
+
+- A listed terminal code always throws `OAuthRefreshTokenError`,
+whatever the status.
+- Any other HTTP 401 throws `OAuthRefreshTokenError` too, so the token
+manager flags `requires_reauth`, pauses with `oauth_invalid_grant` and
+raises the auth-failure alert. There are three exceptions. A truncated
+body and an unreadable body never quarantine. A body that names the
+client (`invalid_client`, `unauthorized_client`; RFC 6749 §5.2) is a
+client-authentication failure, not a dead refresh token. The two client
+codes are matched case-insensitively as whole words anywhere in the
+complete body, so a non-standard shape such as `error=invalid_client` or
+an `errors` array still counts. The client exemption overrides only the
+401 rule, never a listed code.
+- `refresh_token_expired` and `refresh_token_invalidated` join the
+shared terminal list (`packages/core/src/errors.ts`). They are the other
+two codes the Codex CLI treats as permanent.
+- The log line carries the HTTP status, plus OpenAI's code when it is a
+listed code, or code-shaped (`^[a-z][a-z0-9_]{1,39}$`) and not contained
+in the attempted refresh token. The `error_description` and the rest of
+the body are never logged.
+
+**Re-login instructions.** One shared `reauthInstruction()`
+(`packages/core/src/reauth-instructions.ts`) names the path that exists
+for each provider:
+
+| Provider | Instruction |
+|---|---|
+| Codex | the dashboard's Re-authenticate |
+| Anthropic | the dashboard, or `--reauthenticate`; CLI only without a
+refresh token |
+| Qwen | the dashboard, or `--reauthenticate` |
+| xAI | `grok --oauth`, then `--reauthenticate` |
+| Others | remove and re-add |
+
+These use it: the CLI refusal, the all-accounts-failed proxy error (its
+pinned prefix is unchanged), the token health monitor and service logs,
+`token-health.ts`, the `--reauthenticate` help line, and the dashboard
+token tooltip. The CLI allow-list (`supportsCliReauthentication`) comes
+from the same table. The dashboard imports it through a new
+`@better-ccflare/core/reauth-instructions` subpath export, not the
+barrel.
+
+**Docs.** `docs/oauth-reauthentication.md` is rewritten dashboard-first.
+It now covers each provider's path, what the router does on a refused
+refresh (and the 60-second refresh backoff after any other failure,
+`TOKEN_REFRESH_BACKOFF_MS`), what a re-login preserves and which pauses
+it lifts. The upstream implementation notes (stale line numbers, a
+"future enhancements" list of features that now exist) are gone. The
+migration guide and three troubleshooting spots stop pointing at
+`--reauthenticate` for every provider, or at remove-and-re-add, which
+loses the account's history.
+
+## Disclosures
+
+- **A temporary 401 now costs one manual re-login.** That is the Codex
+CLI's own trade-off, and the alternative was an account that never asked
+for one.
+- **The client exemption errs toward not pausing.** A dead-token 401
+whose body text happens to contain `invalid_client` or
+`unauthorized_client` as a word is not paused, which is the behavior
+before this change. The opposite error would pause every healthy Codex
+account on a client misconfiguration, and a re-login would not fix it.
+The match decides only the exemption and never reaches a log line.
+- **A codeless 401 reports reason `invalid_grant`** in the pause event
+and alert, because `OAuthRefreshTokenError` clamps unknown codes. The
+log line carries the real status and code.
+- **The shared-list addition also applies to Anthropic and xAI.** A
+refresh refused with `refresh_token_expired` or
+`refresh_token_invalidated` now pauses those accounts for re-login too.
+- **The health monitor now always appends the provider's original
+error** after its instruction. It skips the hint when the original error
+already contains it.
+- **Reason logging is code-only.** It is narrower than "logs OpenAI's
+reason": the description is never logged, because the IdP controls it
+and may echo credential material.
+- **Pre-existing, not fixed here:**
+- The token manager's generation-failure path tests
+`Boolean(getOAuthErrorCode(error))`, which is false for a typed
+`OAuthRefreshTokenError`.
+- The health monitor flags non-OAuth providers that lack an `api_key`,
+and applies its 90-day refresh-token age heuristic to every OAuth
+provider.
+  - A Codex dashboard re-login does not set `refresh_token_issued_at`.
+- The `token-health` / `reauth-needed` subcommands in
+`packages/cli-commands/src/runner.ts` are reachable only through
+`runCli`, which nothing outside tests calls
+(`apps/cli/__tests__/command-hints.test.ts` already exempts them). Only
+the per-account instruction changed in `token-health.ts`; its stale
+`--token-health` hint is left as it was.
+- **Not in scope:**
+- This does not stop a Codex login from dying. It makes a dead one ask
+for a re-login.
+- Qwen refresh behavior is unchanged; only its instruction text changed.
+The qwen-code comparison AGENTS.md asks for applies to Qwen provider or
+streaming changes and was not performed, because none are made here.
+
+## Verification
+
+- 27 affected suites, run one file at a time at the final tree: 423
+pass, 0 fail. Four are new test files. The Codex refresh classification
+tests and the real-provider token-manager tests are new cases in two
+existing files. The client-exemption cases cover JSON, nested `type`, an
+`errors` array, raw text, form-encoded text and HTML, each asserting the
+exact log message, plus a planted negative: `invalid_client` inside a
+longer word still pauses.
+- `bun run lint`, `bun run typecheck`, `bun run format` and the
+dashboard build all exit 0. The formatter changed nothing.
+- An adversarial review (four lenses, each finding checked by a skeptic)
+left three P3 findings standing, all fixed in the second commit:
+- the client exemption compared whole values, so `error=invalid_client`
+text was paused;
+  - no provider test covered a non-JSON client rejection;
+- the doc promised a dashboard **Re-authenticate** button on every
+paused row, which xAI rows never show.
+
+It refuted a P2 asking for Anthropic and xAI tests of the shared code
+list, which `errors.test.ts` and the core helper tests already cover.
+The secrets lens traced no path where body text, `error_description` or
+token material reaches a log, the alert, the pause reason or the
+database.
+- Not verified live: which code OpenAI sent in the production failures
+(the body was discarded, and tokens are not replayed to find out).

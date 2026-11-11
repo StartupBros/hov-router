@@ -486,7 +486,7 @@ Closes #(issue number)
 4. **Documentation**: Ensure docs are updated if needed
 5. **Merge**: Maintainer will merge using "Squash and merge"
 
-**Note**: Every pull request runs two required checks, `managed-routing-foundation` (`.github/workflows/managed-routing-postgres.yml`) and `prepare` (`.github/workflows/prepare-router-artifacts.yml`), and `main` only accepts branches that are up to date with it. Run the local checks above before pushing. The repository has no PR template file; follow the template in this guide.
+**Note**: Every pull request runs two required checks, `managed-routing-foundation` (`.github/workflows/managed-routing-postgres.yml`) and `prepare` (`.github/workflows/prepare-router-artifacts.yml`), and `main` only accepts branches that are up to date with it. `prepare` also fails a pull request whose squash commit release-please cannot parse, and re-runs when you edit the title or description ([how to fix it](hov-router-releases.md#squash-commits-release-please-can-parse)). Run the local checks above before pushing. The repository has no PR template file; follow the template in this guide.
 
 ### After PR is Merged
 

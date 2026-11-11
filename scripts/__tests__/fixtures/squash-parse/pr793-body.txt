@@ -1,0 +1,18 @@
+:robot: I have created a release *beep* *boop*
+---
+
+
+## [5.0.1](https://github.com/StartupBros/hov-router/compare/v5.0.0...v5.0.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **codex:** pause an account whose token refresh OpenAI refuses ([#795](https://github.com/StartupBros/hov-router/issues/795)) ([b469b65](https://github.com/StartupBros/hov-router/commit/b469b65533107fa5ab94cde3fbd744af2b1059ea))
+
+
+### Improvements
+
+* drop the startup warning for retired Codex settings after 5.0.0 ([#792](https://github.com/StartupBros/hov-router/issues/792)) ([0c1d86c](https://github.com/StartupBros/hov-router/commit/0c1d86cfc641dd8e6d8f731d4bbfec24c5839026)), refs [#749](https://github.com/StartupBros/hov-router/issues/749)
+
+---
+This PR was generated with [Release Please](https://github.com/googleapis/release-please). See [documentation](https://github.com/googleapis/release-please#release-please).

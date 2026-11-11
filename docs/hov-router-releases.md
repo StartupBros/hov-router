@@ -236,6 +236,44 @@ artifact jobs retain their separate built-in tokens and existing permissions.
 - Tags are `vX.Y.Z` with no component. The change that merges this automation uses
   `chore` commits and creates no tag or release.
 
+## Squash commits release-please can parse
+
+release-please builds the release PR from the commit messages on `main`. When its
+parser rejects part of a commit, it logs that at debug level, leaves that part out and
+still finishes green. That is how the #795 fix went missing from release PR #793:
+GitHub's 72-column rewrap of the description put a line the parser rejects at the
+start of a line.
+
+So the required `prepare` check (`scripts/check-squash-commit-parse.ts`) rebuilds the
+squash commit GitHub writes by default (the PR title, ` (#N)`, then the description
+rewrapped at 72 columns) and parses it with the pinned release-please parser. On
+failure it prints one annotation naming the line and column, followed by the parsed
+text with line numbers. It re-runs when the title or description is edited.
+
+To fix a failure, do one of these:
+
+- Reword the line it names.
+- Put an override block in the description: a line `BEGIN_COMMIT_OVERRIDE`, the
+  commit message you want, and a line `END_COMMIT_OVERRIDE`. release-please then reads
+  only that text. A mention of the start marker anywhere in the description, even in a
+  sentence, makes release-please read everything after it as the commit message, and
+  the check fails that too.
+- If it fails on line 1, the title has no conventional prefix: retitle the PR.
+
+Limits:
+
+- It checks GitHub's default squash message. A merge that sets its own message, in
+  the merge dialog or with `gh pr merge --subject --body-file` as in the `Release-As`
+  procedure below, is not checked; read back the merged commit as that procedure says.
+- PRs from other repositories merge with `--no-ff` (see `AGENTS.md`) and are skipped.
+- A manual re-run of the workflow replays the title and description the run started
+  with. Edit the description to check new text.
+- A pass means release-please can read the commit, not that it cuts a release:
+  `docs`, `chore`, `test` and `style` alone still produce none.
+
+Remove the step, the script and its test once the pinned release-please parser accepts
+`scripts/__tests__/fixtures/squash-parse/pr795-body.txt` (#797).
+
 ## Intentional first release or explicit version request
 
 An intentional release request can use the engine's `Release-As` commit-body
@@ -419,7 +457,8 @@ wholesale upstream merges ended ([UPSTREAM.md](../UPSTREAM.md)).
 `scripts/__tests__/router-release-workflow.test.ts` fails if one reappears.
 Upstream's Docker publishing workflow was removed earlier: this fork publishes no
 container image, and the [Docker guide](docker.md) builds one from source.
-`prepare-router-artifacts.yml` stays a local, non-publishing preparation check.
+`prepare-router-artifacts.yml` stays a local, non-publishing preparation check; it
+also runs the [squash-commit check](#squash-commits-release-please-can-parse).
 
 ## Evidence required for each release
 

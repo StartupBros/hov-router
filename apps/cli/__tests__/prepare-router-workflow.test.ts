@@ -38,8 +38,11 @@ describe("unpublished HoV Router artifact preparation workflow", () => {
 	test("has a distinct name and only PR/manual triggers without inputs", async () => {
 		const workflow = await readWorkflow();
 		expect(workflow.name).toBe("Prepare HoV Router Artifacts");
+		// "edited" re-runs the squash-commit check when the title or description changes.
 		expect(workflow.on).toEqual({
-			pull_request: null,
+			pull_request: {
+				types: ["opened", "synchronize", "reopened", "edited"],
+			},
 			workflow_dispatch: null,
 		});
 	});
@@ -82,9 +85,16 @@ describe("unpublished HoV Router artifact preparation workflow", () => {
 		expect(steps[3].run).toBe("bun install --frozen-lockfile");
 	});
 
+	test("checks that release-please can parse the squash commit after installation", async () => {
+		const { steps } = (await readWorkflow()).jobs.prepare;
+		expect(steps[4].run).toBe(
+			'bun run scripts/check-squash-commit-parse.ts "$GITHUB_EVENT_PATH"',
+		);
+	});
+
 	test("invokes the helper with a fresh runner-temp output and explains its scope", async () => {
 		const { steps } = (await readWorkflow()).jobs.prepare;
-		const prepare = steps[4];
+		const prepare = steps[5];
 		expect(prepare.run).toContain(
 			'preparation_root="$(mktemp -d "$RUNNER_TEMP/hov-router.XXXXXX")"',
 		);
@@ -98,7 +108,7 @@ describe("unpublished HoV Router artifact preparation workflow", () => {
 	test("has no additional publication, upload, credentials or provenance configuration", async () => {
 		const workflow = await readWorkflow();
 		const { steps } = workflow.jobs.prepare;
-		expect(steps).toHaveLength(5);
+		expect(steps).toHaveLength(6);
 		for (const step of steps) expect(step.env).toBeUndefined();
 		const configuration = JSON.stringify(workflow);
 		for (const forbidden of [
