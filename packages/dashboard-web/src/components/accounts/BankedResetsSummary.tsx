@@ -1,4 +1,5 @@
 import type { BankedResetsSummary as BankedResetsSummaryData } from "@better-ccflare/types";
+import { ChevronDown } from "lucide-react";
 import { formatRelativeReset } from "../../lib/pool-usage";
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from "./status-tones";
 
@@ -68,61 +69,90 @@ export function BankedResetsSummary({
 	now?: number;
 }) {
 	if (!summary || summary.trackedAccounts === 0) return null;
-	// OpenAI's per-account applicable count (summary.appliesNow) stays in the
-	// API but is not shown: it predicts nothing about a reset working (#772).
+	// Applicability stays in the API but predicts nothing about a reset working.
 	const { totalAvailable, soonestExpiresAt, anyStale } = summary;
+	const explanation = (
+		<p className="max-w-prose text-sm text-muted-foreground">
+			A banked reset is a saved reset that restores an account's usage limits
+			ahead of schedule. Each account's limit also resets on its own timer.
+			Using a banked reset is always your choice.
+		</p>
+	);
+
+	// An empty, fresh balance should not push the accounts below a help panel.
+	// Keep held resets, expiry information and stale observations fully visible.
+	if (totalAvailable === 0 && !anyStale && soonestExpiresAt === null) {
+		return (
+			<details
+				aria-label="Banked resets"
+				className="group text-muted-foreground"
+			>
+				<summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 text-xs [&::-webkit-details-marker]:hidden">
+					<span className="font-medium">Banked resets</span>
+					<span className="tabular-nums">0</span>
+					<span className="sr-only">No banked resets held.</span>
+					<ChevronDown
+						aria-hidden="true"
+						className="ml-auto h-4 w-4 shrink-0 group-open:rotate-180"
+					/>
+				</summary>
+				<div className="space-y-2 pb-4">
+					<p className="text-sm">No banked resets held.</p>
+					{explanation}
+				</div>
+			</details>
+		);
+	}
 
 	return (
 		<section
 			aria-label="Banked resets"
-			className="mb-4 space-y-2 rounded-lg border border-border p-4"
+			className="min-w-0 max-w-prose rounded-md border p-3"
 		>
-			<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-				<h3 className="text-sm font-medium">Banked resets</h3>
-				<span className="text-2xl font-semibold tabular-nums">
-					{totalAvailable}
-				</span>
-				<span className="text-sm text-muted-foreground">total</span>
+			<div className="space-y-2">
+				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+					<h3 className="text-sm font-medium">Banked resets</h3>
+					<span className="font-semibold tabular-nums">{totalAvailable}</span>
+					<span className="text-sm text-muted-foreground">total</span>
+					{anyStale && (
+						<span
+							className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
+						>
+							Includes last known values
+						</span>
+					)}
+				</div>
+				{explanation}
+				<p className="text-sm text-muted-foreground">
+					{soonestExpiresAt !== null ? (
+						<span title={describeBankedResetExpiry(soonestExpiresAt)}>
+							Soonest expires{" "}
+							{formatBankedResetExpiryLabel(soonestExpiresAt, now)}
+						</span>
+					) : totalAvailable > 0 ? (
+						"Expiry not reported"
+					) : (
+						"No banked resets held."
+					)}
+				</p>
 				{anyStale && (
-					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}>
-						Includes last known values
-					</span>
+					<p className="text-xs text-muted-foreground">
+						Some accounts have not reported recently. Their last known counts
+						are included, so the real total may differ.
+					</p>
+				)}
+				{totalAvailable > 0 && (
+					<p
+						data-testid="banked-resets-howto"
+						className="text-xs text-muted-foreground"
+					>
+						If you choose to use one, press Use reset on that account below. It
+						asks you to confirm first, and using a reset cannot be undone. The
+						Codex CLI signed in to that account can also redeem one: run{" "}
+						<code>/usage</code> and choose <code>Redeem reset</code>.
+					</p>
 				)}
 			</div>
-			<p className="max-w-prose text-sm text-muted-foreground">
-				A banked reset is a saved reset that restores an account's usage limits
-				ahead of schedule. Each account's limit also resets on its own timer.
-				Using a banked reset is always your choice.
-			</p>
-			<p className="text-sm text-muted-foreground">
-				{soonestExpiresAt !== null ? (
-					<span title={describeBankedResetExpiry(soonestExpiresAt)}>
-						Soonest expires{" "}
-						{formatBankedResetExpiryLabel(soonestExpiresAt, now)}
-					</span>
-				) : totalAvailable > 0 ? (
-					"Expiry not reported"
-				) : (
-					"No banked resets held."
-				)}
-			</p>
-			{anyStale && (
-				<p className="text-xs text-muted-foreground">
-					Some accounts have not reported recently. Their last known counts are
-					included, so the real total may differ.
-				</p>
-			)}
-			{totalAvailable > 0 && (
-				<p
-					data-testid="banked-resets-howto"
-					className="text-xs text-muted-foreground"
-				>
-					If you choose to use one, press Use reset on that account below. It
-					asks you to confirm first, and using a reset cannot be undone. The
-					Codex CLI signed in to that account can also redeem one: run{" "}
-					<code>/usage</code> and choose <code>Redeem reset</code>.
-				</p>
-			)}
 		</section>
 	);
 }

@@ -47,13 +47,7 @@ import {
 	togglePublicValue,
 } from "./accounts/public-value-actions";
 import { Button } from "./ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "./ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "./ui/card";
 
 type AccountCreationClient = Pick<
 	typeof api,
@@ -233,6 +227,26 @@ export function buildRoutingByAccountId(
 	return routingByAccountId;
 }
 
+/** Catch Details setting failures while keeping the page fallback visible. */
+export async function runAccountSetting(
+	accountId: string,
+	operation: () => Promise<unknown>,
+	setSettingsError: (accountId: string, error: string | null) => void,
+	setPageError: (error: string | null) => void,
+	formatError: (error: unknown) => string,
+): Promise<void> {
+	setSettingsError(accountId, null);
+	setPageError(null);
+	try {
+		await operation();
+		setSettingsError(accountId, null);
+	} catch (error) {
+		const message = formatError(error);
+		setSettingsError(accountId, message);
+		setPageError(message);
+	}
+}
+
 export function AccountsTab() {
 	const { formatError } = useApiError();
 	const {
@@ -330,6 +344,23 @@ export function AccountsTab() {
 	// answer must not unmount the dialog that is showing it.
 	const [useResetAccount, setUseResetAccount] = useState<Account | null>(null);
 	const [actionError, setActionError] = useState<string | null>(null);
+	const [settingsErrors, setSettingsErrors] = useState<
+		Record<string, string | null>
+	>({});
+	const setSettingsError = (accountId: string, message: string | null) => {
+		setSettingsErrors((previous) => ({ ...previous, [accountId]: message }));
+	};
+	const clearSettingsError = (accountId: string) =>
+		setSettingsError(accountId, null);
+	const runSetting = (account: Account, operation: () => Promise<unknown>) =>
+		runAccountSetting(
+			account.id,
+			operation,
+			setSettingsError,
+			setActionError,
+			formatError,
+		);
+
 	const accountCreationCallbacks = createAccountCreationCallbacks(
 		api,
 		() => invalidateManagedRouting(FULL_MANAGED_ROUTING_INVALIDATION),
@@ -612,55 +643,43 @@ export function AccountsTab() {
 		}
 	};
 
-	const handleAutoFallbackToggle = async (account: Account) => {
-		try {
+	const handleAutoFallbackToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await api.updateAccountAutoFallback(
 				account.id,
 				!account.autoFallbackEnabled,
 			);
 			await loadAccounts();
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
-	const handleBillingTypeToggle = async (account: Account) => {
-		try {
+	const handleBillingTypeToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await updateBillingType.mutateAsync({
 				accountId: account.id,
 				billingType: account.billingType === "plan" ? "api" : "plan",
 			});
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
-	const handleAutoPauseOnOverageToggle = async (account: Account) => {
-		try {
+	const handleAutoPauseOnOverageToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await api.updateAccountAutoPauseOnOverage(
 				account.id,
 				!account.autoPauseOnOverageEnabled,
 			);
 			await loadAccounts();
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
-	const handleCodexCreditDrainToggle = async (account: Account) => {
-		try {
+	const handleCodexCreditDrainToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await api.updateAccountCodexCreditDrain(
 				account.id,
 				!account.codexCreditDrainEnabled,
 			);
 			await loadAccounts();
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
-	const handlePublicValueToggle = async (account: Account) => {
-		try {
+	const handlePublicValueToggle = (account: Account) =>
+		runSetting(account, async () => {
 			const outcome = await togglePublicValue(account, api);
 			if (outcome.kind === "open-dialog") {
 				// Turning on needs a public label first.
@@ -669,10 +688,7 @@ export function AccountsTab() {
 			}
 			await loadAccounts();
 			setActionError(null);
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
 	const handlePublicValueEditLabel = (account: Account) => {
 		setPublicValueDialog({ account, error: null, isSaving: false });
@@ -731,17 +747,14 @@ export function AccountsTab() {
 		}
 	};
 
-	const handlePeakHoursPauseToggle = async (account: Account) => {
-		try {
+	const handlePeakHoursPauseToggle = (account: Account) =>
+		runSetting(account, async () => {
 			await api.updateAccountPeakHoursPause(
 				account.id,
 				!account.peakHoursPauseEnabled,
 			);
 			await loadAccounts();
-		} catch (err) {
-			setActionError(formatError(err));
-		}
-	};
+		});
 
 	const handleUpdateCustomEndpoint = async (
 		accountId: string,
@@ -769,11 +782,16 @@ export function AccountsTab() {
 
 	if (loading) {
 		return (
-			<Card>
-				<CardContent className="pt-6">
-					<p className="text-muted-foreground">Loading accounts...</p>
-				</CardContent>
-			</Card>
+			<div role="status" aria-label="Loading accounts" className="space-y-4">
+				<p className="text-muted-foreground">Loading accounts...</p>
+				{[0, 1, 2].map((index) => (
+					<div
+						key={index}
+						aria-hidden="true"
+						className="h-36 animate-pulse rounded-lg border bg-muted/40"
+					/>
+				))}
+			</div>
 		);
 	}
 
@@ -782,35 +800,46 @@ export function AccountsTab() {
 	return (
 		<div className="space-y-4">
 			{displayError && (
-				<Card className="border-destructive">
+				<Card role="alert" className="border-destructive">
 					<CardContent className="pt-6">
 						<div className="flex items-center gap-2">
 							<AlertCircle className="h-4 w-4 text-destructive" />
-							<p className="text-destructive">{displayError}</p>
+							<p className="min-w-0 break-words text-destructive">
+								{displayError}
+							</p>
 						</div>
 					</CardContent>
 				</Card>
 			)}
 
-			<Card>
-				{/* Tighter padding on phones: rows are cards inside this card. */}
-				<CardHeader className="p-4 sm:p-6">
-					<div className="flex items-center justify-between gap-4">
+			<Card className="min-w-0 border-0 bg-transparent shadow-none hover:shadow-none">
+				{/* Rows provide their own surfaces; the section stays visually open. */}
+				<CardHeader className="px-0 pb-4 pt-0">
+					<div className="flex flex-wrap items-center justify-between gap-4">
 						<div>
-							<CardTitle>Accounts</CardTitle>
+							<h1 className="text-2xl font-semibold tracking-tight">
+								Accounts
+							</h1>
 							<CardDescription>
-								Every provider account the router can send requests to
+								Provider accounts, usage limits and routing settings
 							</CardDescription>
 						</div>
-						{!adding && (
-							<Button onClick={() => setAdding(true)} size="sm">
-								<Plus className="mr-2 h-4 w-4" />
-								Add Account
-							</Button>
-						)}
+						<div className="flex min-w-0 flex-wrap items-center gap-3">
+							<BankedResetsSummary summary={bankedResets} />
+							{!adding && (
+								<Button
+									onClick={() => setAdding(true)}
+									size="sm"
+									className="min-h-11 text-black hover:text-black"
+								>
+									<Plus className="mr-2 h-4 w-4" />
+									Add Account
+								</Button>
+							)}
+						</div>
 					</div>
 				</CardHeader>
-				<CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+				<CardContent className="space-y-4 p-0">
 					{adding && (
 						<AccountAddForm
 							onAddAccount={handleAddAccount}
@@ -846,8 +875,9 @@ export function AccountsTab() {
 						/>
 					)}
 
-					<BankedResetsSummary summary={bankedResets} />
 					<AccountList
+						settingsErrors={settingsErrors}
+						onClearSettingsError={clearSettingsError}
 						accounts={accounts}
 						routingByAccountId={routingByAccountId}
 						onPauseToggle={handlePauseToggle}

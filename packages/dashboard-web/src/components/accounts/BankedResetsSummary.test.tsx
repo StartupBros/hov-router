@@ -99,6 +99,13 @@ describe("formatBankedResetExpiryLabel", () => {
 });
 
 describe("BankedResetsSummary", () => {
+	it("keeps held resets, expiry and stale warnings visible without opening a disclosure", () => {
+		const html = render(summary({ anyStale: true }));
+		expect(html).not.toContain("<details");
+		expect(html).toContain("Banked resets");
+		expect(html).toContain("Includes last known values");
+		expect(html).toContain("Soonest expires");
+	});
 	it("shows the fleet total without repeating the word resets", () => {
 		const html = render(summary());
 		expect(html).toContain(">Banked resets<");
@@ -162,6 +169,22 @@ describe("BankedResetsSummary", () => {
 		const visible = text(html);
 		expect(visible).toContain("No banked resets held.");
 		expect(howto(html)).toBeNull();
+	});
+
+	it("keeps an empty fresh balance compact without hiding stale-value warnings", () => {
+		const empty = render(
+			summary({ totalAvailable: 0, soonestExpiresAt: null }),
+		);
+		expect(empty).toStartWith("<details");
+		expect(empty).not.toMatch(/^<details[^>]*\bopen/);
+		const header = empty.slice(0, empty.indexOf("</summary>"));
+		expect(header).toContain("Banked resets");
+		expect(header).toContain("No banked resets held.");
+		const stale = render(
+			summary({ totalAvailable: 0, soonestExpiresAt: null, anyStale: true }),
+		);
+		expect(stale).toStartWith("<section");
+		expect(stale).toContain("Includes last known values");
 	});
 
 	it("says when the expiry was not reported", () => {

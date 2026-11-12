@@ -10,11 +10,11 @@
  * renderToStaticMarkup pattern RateLimitProgress.test.tsx uses in this
  * directory.
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import type { BankedResets, FullUsageData } from "@better-ccflare/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Account } from "../../api";
-import { AccountList } from "./AccountList";
+import { AccountList, accountListItems } from "./AccountList";
 import {
 	AccountListItem,
 	CodexCreditDrainControl,
@@ -23,8 +23,111 @@ import {
 import { mergeAccountModelMappings } from "./AccountModelMappingsDialog";
 import type { AccountFamilyRoutingState } from "./account-routing";
 
+// SSR omits closed portals. Exercise provider controls at the content boundary;
+// this mock does not establish browser dialog or focus behavior.
+const dialogPrimitives = await import("../ui/dialog");
+mock.module("../ui/dialog", () => ({
+	...dialogPrimitives,
+	DialogContent: ({ children }: { children: React.ReactNode }) => (
+		<div data-testid="details-content">{children}</div>
+	),
+}));
+
 function noop() {}
+function withoutDetailsContent(html: string): string {
+	const start = html.indexOf('<div data-testid="details-content">');
+	if (start < 0) return html;
+	const tags = /<div\b[^>]*>|<\/div>/g;
+	tags.lastIndex = start;
+	let depth = 0;
+	for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
+		depth += tag[0].startsWith("</") ? -1 : 1;
+		if (depth === 0) return html.slice(0, start) + html.slice(tags.lastIndex);
+	}
+	throw new Error("Unclosed details content");
+}
 async function noopAsync() {}
+
+describe("account scan layout", () => {
+	it("distinguishes unavailable data from an empty collection", () => {
+		const unavailable = renderToStaticMarkup(
+			<AccountList accounts={undefined} {...requiredHandlers} />,
+		);
+		expect(unavailable).toContain("Account data unavailable");
+		expect(unavailable).not.toContain("No accounts yet");
+		expect(
+			renderToStaticMarkup(<AccountList accounts={[]} {...requiredHandlers} />),
+		).toContain("No accounts yet");
+	});
+	it("renders labeled scan controls and result count", () => {
+		const html = renderToStaticMarkup(
+			<AccountList accounts={[makeAccount()]} {...requiredHandlers} />,
+		);
+		for (const text of [
+			"Search accounts",
+			"All providers",
+			"Needs attention",
+			"Paused",
+			"Showing 1 of 1 accounts",
+			'aria-pressed="true"',
+		])
+			expect(html).toContain(text);
+	});
+	it("collapses routine settings and family details while keeping recovery visible", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({ provider: "codex", requiresReauth: true })}
+				{...requiredHandlers}
+				onCodexReauth={noop}
+				onCodexCreditDrainToggle={noop}
+				routingStates={[
+					routingState({ reason: "ambiguous", reasonLabel: "Ambiguous" }),
+				]}
+			/>,
+		);
+		expect(html).toContain('aria-haspopup="dialog"');
+		expect(html).not.toContain("<details");
+		expect(html).toContain("Drain credits");
+		const visible = withoutDetailsContent(html);
+		expect(visible).toContain("Re-authenticate");
+		expect(visible).toContain("Action required");
+		expect(visible).not.toContain("No account block reported");
+	});
+	it("uses the reported normal state without a duplicate fallback label", () => {
+		const allowed = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({ paused: false, rateLimitStatus: "allowed" })}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(allowed).toContain("Allowed");
+		expect(allowed).not.toContain("No account block reported");
+		const unspecified = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({ paused: false })}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(unspecified).toContain("No account block reported");
+	});
+	it("keeps force reset outside disclosures and missing quota explicit", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({
+					paused: false,
+					rateLimitedUntil: Date.now() + 60000,
+					usageUtilization: 20,
+				})}
+				{...requiredHandlers}
+			/>,
+		);
+		const visible = withoutDetailsContent(html);
+		expect(visible).toContain("Force Reset");
+		expect(visible).toContain("Stale lock detected");
+		expect(visible).not.toContain("No account block reported");
+		expect(visible).toContain("Not reported");
+	});
+});
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
 	return {
@@ -117,6 +220,12 @@ describe("account model mapping edits", () => {
 	});
 });
 
+function reauthButton(html: string): string | undefined {
+	return (html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? []).find(
+		(button) => button.includes(">Re-authenticate</button>"),
+	);
+}
+
 describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 	it("renders the derived requiresReauth signal as the same primary recovery action", () => {
 		const account = makeAccount({
@@ -134,7 +243,8 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		expect(html).toContain("Re-authentication required");
 		expect(html).toContain("Refresh token invalid — re-authenticate");
 		expect(html).toContain(">Re-authenticate<");
-		expect(html).toContain("bg-primary text-primary-foreground");
+		expect(reauthButton(html)).toContain(" bg-primary ");
+		expect(reauthButton(html)).toContain("text-black");
 	});
 
 	it("renders reauth-required copy and a primary Re-authenticate button for oauth_invalid_grant", () => {
@@ -153,14 +263,10 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		// regardless of pause reason) -- ">Re-authenticate<" only appears when
 		// pauseStatus.reauthRequired renders the label text inside the button.
 		expect(html).toContain(">Re-authenticate<");
-		// variant="default" (primary) styling on the reauth button, not the
-		// muted "ghost" styling it gets for a non-terminal/unknown reason. The
-		// full cva class combination is asserted (rather than the bare
-		// "bg-primary" substring) because the unrelated Auto-fallback
-		// <Switch> elements always statically include
-		// "data-[state=checked]:bg-primary" in their class list regardless of
-		// pause reason, which would make a bare "bg-primary" check meaningless.
-		expect(html).toContain("bg-primary text-primary-foreground");
+		// Assert the recovery button itself, not unrelated switches that also
+		// carry bg-primary. Dark ink keeps the primary orange action readable.
+		expect(reauthButton(html)).toContain(" bg-primary ");
+		expect(reauthButton(html)).toContain("text-black");
 	});
 
 	it("renders generic Paused copy with no reauth emphasis for a manual pause", () => {
@@ -176,7 +282,7 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		expect(html).toContain("Paused");
 		expect(html).not.toContain("Re-authentication required");
 		expect(html).not.toContain(">Re-authenticate<");
-		expect(html).not.toContain("bg-primary text-primary-foreground");
+		expect(reauthButton(html)).toBeUndefined();
 	});
 
 	it("shows a human-readable known automatic pause reason", () => {
@@ -209,7 +315,7 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		);
 		expect(html).not.toContain("Re-authentication required");
 		expect(html).not.toContain(">Re-authenticate<");
-		expect(html).not.toContain("bg-primary text-primary-foreground");
+		expect(reauthButton(html)).toBeUndefined();
 	});
 });
 
@@ -342,7 +448,7 @@ describe("AccountListItem authoritative family routing", () => {
 	it("keys cards and resolves routing state by immutable account ID", () => {
 		const firstRouting = [routingState({ family: "opus" })];
 		const secondRouting = [routingState({ family: "fable" })];
-		const tree = AccountList({
+		const children = accountListItems({
 			accounts: [
 				makeAccount({ id: "account-a", name: "duplicate-name" }),
 				makeAccount({ id: "account-b", name: "duplicate-name" }),
@@ -352,12 +458,7 @@ describe("AccountListItem authoritative family routing", () => {
 				"account-b": secondRouting,
 			},
 			...requiredHandlers,
-		}) as React.ReactElement<{
-			children: React.ReactElement<{
-				routingStates?: readonly AccountFamilyRoutingState[];
-			}>[];
-		}>;
-		const children = tree.props.children;
+		});
 
 		expect(children.map((child) => child.key)).toEqual([
 			"account-a",
@@ -992,6 +1093,18 @@ describe("account settings switches", () => {
 		);
 	}
 
+	it("gives settings switches explicit 44px targets independent of their borders", () => {
+		const html = render(makeAccount({ provider: "anthropic" }));
+		const switches = html.match(/<button[^>]*role="switch"[^>]*>/g) ?? [];
+		expect(switches.length).toBe(2);
+		for (const control of switches) {
+			expect(control).toContain("after:h-11");
+			expect(control).toContain("after:w-11");
+			expect(control).toContain("after:-translate-x-1/2");
+			expect(control).toContain("after:-translate-y-1/2");
+		}
+	});
+
 	it("offers auto-fallback but no auto-refresh switch on an Anthropic row", () => {
 		const html = render(makeAccount({ provider: "anthropic" }));
 		expect(html).toContain("Auto-fallback:");
@@ -1009,5 +1122,111 @@ describe("account settings switches", () => {
 		expect(html).toContain(
 			"Account resumes when the usage window resets only if auto-fallback is on.",
 		);
+	});
+});
+
+describe("compact hybrid list", () => {
+	it("keeps an empty fresh banked balance in Details, while held resets stay visible", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({
+					provider: "codex",
+					bankedResets: {
+						tracked: true,
+						availableCount: 0,
+						applicableCount: 0,
+						soonestExpiresAt: null,
+						doesNotExpire: false,
+						appliesNow: false,
+						stale: false,
+						observedAt: Date.now(),
+					},
+				})}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(html).toContain("Banked resets:");
+		expect(withoutDetailsContent(html)).not.toContain("Banked resets:");
+	});
+	it("offers a global review action and aligned comparison headings", () => {
+		const html = renderToStaticMarkup(
+			<AccountList
+				accounts={[makeAccount({ requiresReauth: true })]}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(html).toContain('aria-label="Attention across all accounts"');
+		expect(html).toContain("1 needs attention");
+		expect(html).toContain("Review issues");
+		expect(html).toContain("Operational status");
+		expect(html).toContain("5-hour used");
+		expect(html).toContain("Weekly used");
+	});
+	it("uses a dialog trigger instead of inline settings disclosures", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem account={makeAccount()} {...requiredHandlers} />,
+		);
+		expect(html).toContain('aria-haspopup="dialog"');
+		expect(html).toContain("Details");
+		expect(html).not.toContain("<summary");
+	});
+});
+
+describe("Details settings errors", () => {
+	it("passes only the matching account error and renders its alert inside Details", () => {
+		const account = makeAccount();
+		const items = accountListItems({
+			accounts: [account, makeAccount({ id: "other" })],
+			...requiredHandlers,
+			settingsErrors: { [account.id]: "Setting failed" },
+		});
+		expect(items[0]?.props.settingsError).toBe("Setting failed");
+		expect(items[1]?.props.settingsError).toBeUndefined();
+		const html = renderToStaticMarkup(items[0]);
+		expect(html).toContain('role="alert"');
+		expect(html).toContain("Setting failed");
+		expect(withoutDetailsContent(html)).not.toContain("Setting failed");
+	});
+	it("clears the account on both Details open and dismiss", () => {
+		// Execute the row hooks, then invoke the rendered Dialog lifecycle callback.
+		const React = require("react");
+		const internals =
+			React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+		const previous = internals.H;
+		const changes: boolean[] = [];
+		const cleared: string[] = [];
+		internals.H = {
+			useState: () => [false, (value: boolean) => changes.push(value)],
+			useRef: () => ({ current: null }),
+		};
+		let tree: ReturnType<typeof AccountListItem>;
+		const account = makeAccount();
+		try {
+			tree = AccountListItem({
+				account,
+				...requiredHandlers,
+				onClearSettingsError: (id) => cleared.push(id),
+			});
+		} finally {
+			internals.H = previous;
+		}
+		type DialogNode = {
+			props?: { onOpenChange?: (open: boolean) => void; children?: unknown };
+		};
+		function find(node: unknown): DialogNode | undefined {
+			if (!node || typeof node !== "object") return;
+			const element = node as DialogNode;
+			if (element.props?.onOpenChange) return element;
+			for (const child of [element.props?.children].flat(Infinity)) {
+				const found = find(child);
+				if (found) return found;
+			}
+		}
+		const onOpenChange = find(tree)?.props?.onOpenChange;
+		if (!onOpenChange) throw new Error("Details dialog callback missing");
+		onOpenChange(true);
+		onOpenChange(false);
+		expect(changes).toEqual([true, false]);
+		expect(cleared).toEqual([account.id, account.id]);
 	});
 });

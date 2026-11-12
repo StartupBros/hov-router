@@ -1,6 +1,6 @@
 import { computeWindowStartMs, registerUIRefresh } from "@better-ccflare/core";
 import type { AnthropicUsageData, FullUsageData } from "@better-ccflare/types";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { formatRelativeReset } from "../../lib/pool-usage";
 import { cn, formatShortDuration } from "../../lib/utils";
 import {
@@ -13,6 +13,7 @@ import { LiveCountdown } from "../LiveCountdown";
 import { Progress } from "../ui/progress";
 import {
 	collectAnthropicUsageRows,
+	displayLabel,
 	formatWindowName,
 	isWeeklyWindow,
 	severityColor,
@@ -33,6 +34,7 @@ interface CodexUsageExtras {
 }
 
 interface RateLimitProgressProps {
+	compact?: boolean;
 	resetIso: string | null;
 	usageUtilization?: number | null; // Actual utilization from API (0-100)
 	usageWindow?: string | null; // Window name (e.g., "five_hour")
@@ -146,18 +148,20 @@ export function RateLimitProgress({
 	provider,
 	className,
 	showWeekly = false,
+	compact = false,
 }: RateLimitProgressProps) {
+	const refreshId = useId();
 	const [now, setNow] = useState(Date.now());
 
 	useEffect(() => {
 		const unregisterInterval = registerUIRefresh({
-			id: "rate-limit-progress-update",
+			id: `rate-limit-progress-update-${refreshId}`,
 			callback: () => setNow(Date.now()),
 			seconds: 30,
 			description: "Rate limit progress UI update",
 		});
 		return unregisterInterval;
-	}, []);
+	}, [refreshId]);
 
 	// Codex has no usage-polling endpoint, so gaps in its data are routine (the
 	// weekly percentage arrives only piggybacked on real traffic). The weekly bar
@@ -167,7 +171,7 @@ export function RateLimitProgress({
 
 	// Allow null resetIso for providers that show usage data (like NanoGPT in PayG mode)
 	// but still render null if there's no resetIso and no usage data to show
-	if (!isCodex && !resetIso && !usageData && !usageRateLimitedUntil)
+	if (!compact && !isCodex && !resetIso && !usageData && !usageRateLimitedUntil)
 		return null;
 
 	// Show explicit rate-limited state when the Anthropic usage API returned 429
@@ -175,6 +179,7 @@ export function RateLimitProgress({
 	if (
 		usageRateLimitedUntil != null &&
 		!usageData &&
+		!compact &&
 		(provider === "anthropic" || provider === "codex")
 	) {
 		const retryAfterDate = new Date(usageRateLimitedUntil);
@@ -197,7 +202,7 @@ export function RateLimitProgress({
 	}
 
 	// Kilo Gateway: show credit balance in USD instead of a utilization window
-	if (providerShowsCreditsBalance(provider) && usageData) {
+	if (!compact && providerShowsCreditsBalance(provider) && usageData) {
 		const kiloData = usageData as {
 			remainingUsd?: number;
 			totalMicrodollarsAcquired?: number;
@@ -509,6 +514,24 @@ export function RateLimitProgress({
 		}
 	}
 
+	const compactSlots = [
+		{
+			label: "5-hour used",
+			usage: usages.find(
+				(u) => u.window === "five_hour" || u.window === "tokens_limit",
+			),
+		},
+		{
+			label: "Weekly used",
+			usage: usages.find(
+				(u) =>
+					u.window === "seven_day" ||
+					u.window === "weekly" ||
+					u.window === "tokens_limit_weekly",
+			),
+		},
+	];
+
 	const isZaiPeak = provider === "zai" && isZaiPeakHour(now);
 	const isAnthropicPeak = provider === "anthropic" && isAnthropicPeakHour(now);
 	const throttledWindowSet = new Set(usageThrottledWindows);
@@ -531,8 +554,13 @@ export function RateLimitProgress({
 		usageThrottledWindows.some((window) => !renderedWindows.has(window));
 
 	return (
-		<div className={cn("space-y-3", className)}>
-			{provider === "zai" && (
+		<div
+			className={cn(
+				compact ? "grid grid-cols-2 gap-x-4 gap-y-2" : "space-y-3",
+				className,
+			)}
+		>
+			{!compact && provider === "zai" && (
 				<div className="flex items-center gap-2">
 					<span
 						className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${
@@ -548,7 +576,7 @@ export function RateLimitProgress({
 					</span>
 				</div>
 			)}
-			{provider === "anthropic" && (
+			{!compact && provider === "anthropic" && (
 				<div className="flex items-center gap-2">
 					<span
 						className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full ${
@@ -566,7 +594,7 @@ export function RateLimitProgress({
 					</span>
 				</div>
 			)}
-			{hasOrphanThrottledWindow && usageThrottledUntil != null && (
+			{!compact && hasOrphanThrottledWindow && usageThrottledUntil != null && (
 				<div className="flex items-center justify-between">
 					<span className="text-xs text-amber-700 dark:text-amber-400">
 						Usage throttling enabled; requests are being delayed
@@ -584,7 +612,101 @@ export function RateLimitProgress({
 					</span>
 				</div>
 			)}
+			{compact &&
+				compactSlots.map(({ label, usage }) => (
+					<div key={label} className="min-w-0 space-y-1">
+						<p className="text-xs text-muted-foreground xl:sr-only">{label}</p>
+						{usage?.utilization != null &&
+						Number.isFinite(usage.utilization) ? (
+							<>
+								<p className="text-lg font-semibold tabular-nums">
+									{Math.round(usage.utilization)}%
+									{usage.isActive && (
+										<span className="ml-1 text-xs font-medium text-destructive">
+											binding
+										</span>
+									)}
+								</p>
+								<Progress
+									value={usage.utilization}
+									aria-label={label}
+									className="h-1"
+									indicatorClassName={
+										usage.utilization >= 100
+											? "bg-destructive"
+											: "bg-muted-foreground"
+									}
+								/>
+								{usage.resetTime && (
+									<p className="text-xs text-muted-foreground">
+										Resets{" "}
+										{formatRelativeReset(
+											new Date(usage.resetTime).getTime(),
+											now,
+										)}
+									</p>
+								)}
+							</>
+						) : (
+							<p className="text-xs text-muted-foreground">Not reported</p>
+						)}
+					</div>
+				))}
+			{compact &&
+				usageRateLimitedUntil != null &&
+				usageRateLimitedUntil > now && (
+					<p className="col-span-2 text-xs text-amber-700 dark:text-amber-400">
+						Usage data rate limited — retry after{" "}
+						{new Date(usageRateLimitedUntil).toLocaleTimeString()}
+					</p>
+				)}
+			{compact && usageThrottledUntil != null && usageThrottledUntil > now && (
+				<p className="col-span-2 text-xs text-amber-700 dark:text-amber-400">
+					Usage throttling enabled; requests are being delayed.{" "}
+					{formatThrottledUntil(usageThrottledUntil, now).startsWith(
+						"Less than",
+					)
+						? formatThrottledUntil(usageThrottledUntil, now)
+						: `Until ${formatThrottledUntil(usageThrottledUntil, now)}`}
+				</p>
+			)}
+			{compact && providerShowsCreditsBalance(provider) && (
+				<div className="col-span-2">
+					<RateLimitProgress
+						resetIso={resetIso}
+						usageData={usageData}
+						provider={provider}
+					/>
+				</div>
+			)}
 			{usages.map((usage, _index) => {
+				if (compact) {
+					if (
+						!usage.window ||
+						(compactSlots.some((slot) => slot.usage === usage) &&
+							!(usage.utilization != null && usage.utilization >= 100))
+					)
+						return null;
+					return (
+						<p
+							key={usage.window}
+							className="col-span-2 text-xs text-muted-foreground"
+						>
+							{isNanoGPTData && usage.window === "daily" && !usage.resetTime ? (
+								"No subscription (PayG mode)"
+							) : (
+								<>
+									{displayLabel(usage)}:{" "}
+									{usage.utilization == null
+										? "Not reported"
+										: `${Math.round(usage.utilization)}%`}
+								</>
+							)}
+							{usage.isActive ? " — binding" : ""}
+						</p>
+					);
+				}
+
 				const percentage = usage.utilization;
 				// `!= null`, not `!== null`: usage data crosses a JSON boundary through
 				// a cast, so a window missing its percentage field yields `undefined`.
@@ -663,7 +785,7 @@ export function RateLimitProgress({
 							const throttleDisplayUntil =
 								windowThrottleUntil ?? usageThrottledUntil;
 							const windowLabel = usage.window
-								? (usage.label ?? formatWindowName(usage.window))
+								? displayLabel(usage)
 								: "Rate limit";
 							const projectedMessage = computeProjectedMessage(
 								usage.resetTime,
@@ -771,7 +893,7 @@ export function RateLimitProgress({
 							);
 						})()}
 						{usage.resetTime && (
-							<div className="flex items-center justify-between">
+							<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
 								<LiveCountdown
 									target={usage.resetTime}
 									suffix=" until refresh"
@@ -853,7 +975,7 @@ export function RateLimitProgress({
 					const cur = used?.currency ?? spend.currency ?? "USD";
 					const pct = spend.percent ?? null;
 					return (
-						<div className="space-y-2">
+						<div className={compact ? "col-span-2 space-y-2" : "space-y-2"}>
 							<div className="flex items-center justify-between">
 								<span className="text-xs text-muted-foreground">
 									Overage credits

@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, setSystemTime } from "bun:test";
 import type {
 	AnthropicUsageData,
+	FullUsageData,
 	MinimaxUsageData,
 	XaiUsageData,
 } from "@better-ccflare/types";
@@ -15,6 +16,23 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { RateLimitProgress } from "./RateLimitProgress";
 
 describe("RateLimitProgress", () => {
+	it("lets detailed reset timestamps wrap with a gap in narrow dialogs", () => {
+		const reset = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+		const html = renderToStaticMarkup(
+			<RateLimitProgress
+				provider="anthropic"
+				resetIso={reset}
+				usageUtilization={38}
+				usageWindow="five_hour"
+				usageData={{ five_hour: { utilization: 38, resets_at: reset } }}
+			/>,
+		);
+		expect(html).toContain("until refresh");
+		expect(html).toContain("Resets ");
+		expect(html).toContain(
+			'class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1"',
+		);
+	});
 	it("shows the throttling message for Zai tokens_limit windows", () => {
 		const html = renderToStaticMarkup(
 			<RateLimitProgress
@@ -693,5 +711,160 @@ describe("RateLimitProgress undefined utilization", () => {
 
 		expect(html).not.toContain("undefined");
 		expect(html).toContain("N/A");
+	});
+});
+
+describe("compact comparison slots", () => {
+	it("retains generic scoped binding and overage spend outside Details", () => {
+		const html = renderToStaticMarkup(
+			<RateLimitProgress
+				compact
+				showWeekly
+				provider="anthropic"
+				resetIso={null}
+				usageData={
+					{
+						limits: [
+							{
+								kind: "session",
+								group: "session",
+								percent: 32,
+								resets_at: null,
+								scope: null,
+								is_active: false,
+							},
+							{
+								kind: "weekly_all",
+								group: "weekly",
+								percent: 64,
+								resets_at: null,
+								scope: null,
+								is_active: false,
+							},
+							{
+								kind: "weekly_scoped",
+								group: "weekly",
+								percent: 100,
+								resets_at: null,
+								scope: {
+									model: { id: null, display_name: "Fable" },
+									surface: null,
+								},
+								is_active: true,
+							},
+						],
+						spend: {
+							enabled: true,
+							percent: 50,
+							used: { amount_minor: 1234, currency: "USD", exponent: 2 },
+						},
+					} as FullUsageData
+				}
+			/>,
+		);
+		for (const value of [
+			"32%",
+			"64%",
+			"Fable (Weekly)",
+			"100%",
+			"binding",
+			"Overage credits",
+			"USD 12.34",
+		])
+			expect(html).toContain(value);
+	});
+	it("preserves provider windows, balances, spend and PayG notices", () => {
+		const reset = Date.now() + 3600000;
+		const cases: [string, unknown, string[]][] = [
+			[
+				"minimax",
+				{
+					five_hour: { utilization: 21, resetAt: reset },
+					seven_day: { utilization: 43, resetAt: reset },
+				},
+				["21%", "43%"],
+			],
+			[
+				"alibaba-coding-plan",
+				{
+					five_hour: { percentUsed: 22, resetAt: reset },
+					weekly: { percentUsed: 44, resetAt: reset },
+					monthly: { percentUsed: 66, resetAt: reset },
+				},
+				["22%", "44%", "Monthly", "66%"],
+			],
+			[
+				"zai",
+				{
+					tokens_limit: { percentage: 23, resetAt: reset },
+					tokens_limit_weekly: { percentage: 45, resetAt: reset },
+					time_limit: { percentage: 100, resetAt: reset },
+				},
+				["23%", "45%", "Time Quota", "100%"],
+			],
+			[
+				"kilo",
+				{ remainingUsd: 12.34, totalMicrodollarsAcquired: 20000000 },
+				["$12.34 remaining"],
+			],
+			[
+				"nanogpt",
+				{ active: false, daily: {}, monthly: {} },
+				["No subscription (PayG mode)"],
+			],
+			[
+				"codex",
+				{
+					five_hour: { utilization: 72, resets_at: null },
+					seven_day: { utilization: 46, resets_at: null },
+					code_review_used_percent: 67,
+				},
+				["46%", "Code Review", "67%"],
+			],
+		];
+		for (const [provider, usageData, expected] of cases) {
+			const html = renderToStaticMarkup(
+				<RateLimitProgress
+					compact
+					showWeekly
+					provider={provider}
+					resetIso={null}
+					usageData={usageData as FullUsageData}
+				/>,
+			);
+			for (const text of expected) expect(html).toContain(text);
+		}
+	});
+	it("never turns Codex five-hour data or elapsed fallback into used percent", () => {
+		for (const provider of ["codex", "anthropic"]) {
+			const html = renderToStaticMarkup(
+				<RateLimitProgress
+					provider={provider}
+					resetIso={new Date(Date.now() + 3600000).toISOString()}
+					compact
+					showWeekly
+					usageData={
+						provider === "codex"
+							? {
+									five_hour: { utilization: 72, resets_at: null },
+									seven_day: { utilization: 34, resets_at: null },
+								}
+							: null
+					}
+				/>,
+			);
+			expect(html).toContain("5-hour used");
+			expect(html).toContain("Not reported");
+			expect(html).not.toContain("72%");
+			if (provider === "codex") expect(html).toContain("34%");
+		}
+	});
+	it("keeps missing windows explicit", () => {
+		const html = renderToStaticMarkup(
+			<RateLimitProgress provider="openai" resetIso={null} compact />,
+		);
+		expect(html).toContain("5-hour used");
+		expect(html).toContain("Weekly used");
+		expect(html.match(/Not reported/g)?.length).toBe(2);
 	});
 });
