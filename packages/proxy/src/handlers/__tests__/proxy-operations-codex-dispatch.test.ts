@@ -235,18 +235,6 @@ function installCountingCodexAttemptPlanner(
 							provider.extractTierInfo?.(response) ?? Promise.resolve(null),
 					}
 				: {}),
-			...(provider.extractUsageInfo
-				? {
-						extractUsageInfo: (response: Response) =>
-							provider.extractUsageInfo?.(response) ?? Promise.resolve(null),
-					}
-				: {}),
-			...(provider.parseUsage
-				? {
-						parseUsage: (response: Response) =>
-							provider.parseUsage?.(response) ?? Promise.resolve(null),
-					}
-				: {}),
 		};
 		return candidate;
 	};

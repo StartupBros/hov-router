@@ -2207,12 +2207,6 @@ export class CodexProvider extends BaseProvider {
 							this.extractTierInfo?.(response) ?? Promise.resolve(null),
 					}
 				: {}),
-			...(this.extractUsageInfo
-				? {
-						extractUsageInfo: (response: Response) =>
-							this.extractUsageInfo?.(response) ?? Promise.resolve(null),
-					}
-				: {}),
 		});
 	}
 

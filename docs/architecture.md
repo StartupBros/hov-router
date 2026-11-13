@@ -388,7 +388,6 @@ graph TB
         PREP["prepareHeaders()"]
         PARSE["parseRateLimit()"]
         PROC["processResponse()"]
-        USAGE["extractUsageInfo()"]
     end
 
     REG -->|Manages| BASE
@@ -399,14 +398,12 @@ graph TB
     ANTH --> PREP
     ANTH --> PARSE
     ANTH --> PROC
-    ANTH --> USAGE
 ```
 
 **Provider Features:**
 - Provider registration and discovery
 - OAuth token management with PKCE flow
 - Rate limit parsing and tracking
-- Usage metrics extraction
 - Extensible for additional AI providers
 
 ### 6. Database Package (`packages/database`)

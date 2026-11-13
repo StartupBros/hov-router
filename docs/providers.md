@@ -315,9 +315,8 @@ The ZaiProvider extends the BaseProvider class and implements Z.ai-specific func
 
 1. **API Key Authentication**: Uses `x-api-key` header instead of OAuth
 2. **No Tier Information**: Returns null from `extractTierInfo()` - no tier information is used
-3. **Usage Extraction**: Parses token usage from both streaming and non-streaming responses (similar to Anthropic)
-4. **Request Routing**: Routes all requests to `https://api.z.ai/api/anthropic`
-5. **Compatible Response Format**: Z.ai responses follow the same format as Anthropic's API
+3. **Request Routing**: Routes all requests to `https://api.z.ai/api/anthropic`
+4. **Compatible Response Format**: Z.ai responses follow the same format as Anthropic's API
 
 ### Z.ai Request Routing
 
@@ -907,17 +906,13 @@ buildUrl(path: string, query: string): string {
 
 1. **Token Refresh**: Handles OAuth token refresh automatically with detailed error logging
 2. **Rate Limit Detection**: Distinguishes between hard limits and soft warnings
-3. **Usage Extraction**: Parses token usage from both streaming and non-streaming responses
-   - For streaming: Captures initial usage from `message_start` event (capped at 64KB)
-   - For non-streaming: Extracts complete usage from JSON response
-   - Includes cache token breakdown (cache read, cache creation)
-4. **Rate Limit Status**: Automatically detects rate limit status from response headers
-5. **Header Management**: 
+3. **Rate Limit Status**: Automatically detects rate limit status from response headers
+4. **Header Management**: 
    - Removes compression headers (`accept-encoding`, `content-encoding`)
    - Sanitizes proxy headers using `sanitizeProxyHeaders` utility
    - Adds Bearer token authentication
-6. **Streaming Response Capture**: Captures initial streaming responses for analytics
-7. **Cost Tracking**: Extracts cost information from `anthropic-billing-cost` header
+
+The provider does not read token usage. The usage collector (`packages/proxy/src/usage-collector.ts`) reads it once per request, from the reply body or its stream events, including the cache read and cache creation counts. On a non-streaming Anthropic reply, a finite, non-negative `anthropic-billing-cost` header replaces the cost estimated from the pricing catalogue.
 
 ### Rate Limit Status Types
 
@@ -935,24 +930,6 @@ const SOFT_WARNING_STATUSES = new Set([
   "allowed_warning",
   "queueing_soft"
 ]);
-```
-
-### Usage Information Extraction
-
-The provider extracts detailed usage information from responses:
-
-```typescript
-interface UsageInfo {
-  model?: string;
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  costUsd?: number;
-  inputTokens?: number;
-  cacheReadInputTokens?: number;
-  cacheCreationInputTokens?: number;
-  outputTokens?: number;
-}
 ```
 
 ## Provider Interface
@@ -979,7 +956,6 @@ export interface Provider {
   
   // Optional features
   extractTierInfo?(response: Response): Promise<number | null>;
-  extractUsageInfo?(response: Response): Promise<UsageInfo | null>;
   isStreamingResponse?(response: Response): boolean;
 }
 ```
@@ -992,7 +968,6 @@ The BaseProvider abstract class provides default implementations for common func
 - **Rate limit parsing**: Checks unified headers first, then falls back to 429 status with retry-after header
 - **Response processing**: Default pass-through implementation
 - **Streaming detection**: Checks for `text/event-stream` or `stream` in content-type header
-- **Usage extraction**: Default returns null (no usage info)
 
 ## Account Priority System
 
@@ -1196,7 +1171,7 @@ registry.registerProvider(new NewProvider());
 - [ ] Implement all required Provider interface methods
 - [ ] Handle provider-specific headers and authentication
 - [ ] Implement rate limit detection for the provider's format
-- [ ] Add usage tracking if supported by the provider
+- [ ] Return replies in Anthropic format, so the usage collector can read their token usage
 - [ ] Implement OAuth flow if the provider supports it
 - [ ] Add comprehensive error handling
 - [ ] Write unit and integration tests

@@ -408,10 +408,6 @@ function makeAttemptPlanningProvider(
 							?.includes("text/event-stream") ?? false
 					);
 				},
-				async extractUsageInfo() {
-					options.onPlanHook?.("extractUsageInfo", this);
-					return null;
-				},
 			};
 			return candidate;
 		},
@@ -919,10 +915,6 @@ describe("proxyWithAccount — immutable provider attempt plans", () => {
 				provider.parseRateLimit = () => {
 					sourceProviderHookCalls++;
 					return { isRateLimited: false };
-				};
-				provider.extractUsageInfo = async () => {
-					sourceProviderHookCalls++;
-					return null;
 				};
 				return jsonResponse({ error: { type: "overloaded_error" } }, 529);
 			}

@@ -14,6 +14,7 @@ import {
 	AnthropicProvider,
 	OpenAICompatibleProvider,
 } from "@better-ccflare/providers";
+import { transformNonStreamingResponse } from "@better-ccflare/providers/bedrock";
 import type { Account, RequestResponse } from "@better-ccflare/types";
 import type { ProxyContext } from "../handlers";
 import type { StartMessage } from "../worker-messages";
@@ -165,17 +166,12 @@ async function storeThroughEveryWriter(
 				};
 			},
 		});
-		updateAccountMetadata(
-			account,
-			processed,
-			{
-				provider: observedProvider,
-				dbOps: db,
-				asyncWriter: writer,
-				config: { getCodexFiveHourWindowEnabled: () => false },
-			} as unknown as ProxyContext,
-			"r1",
-		);
+		updateAccountMetadata(account, processed, {
+			provider: observedProvider,
+			dbOps: db,
+			asyncWriter: writer,
+			config: { getCodexFiveHourWindowEnabled: () => false },
+		} as unknown as ProxyContext);
 		await Promise.allSettled(providerCalls);
 		await writer.dispose();
 
@@ -259,14 +255,16 @@ it("keeps an Anthropic reply's usage and its billed cost after every writer has 
 });
 
 /**
- * Store an Anthropic-shaped reply through the usage collector alone and
- * return the cost it recorded.
+ * Store one reply through the usage collector alone and return its row.
+ * `body` is the raw body of a non-streaming reply or the SSE text of a
+ * stream.
  */
-async function collectedCost(
+async function collectedRow(
 	providerName: string,
 	responseHeaders: Record<string, string>,
 	isStream: boolean,
-): Promise<number | null> {
+	body: string,
+): Promise<UsageRow | null> {
 	const db = openDb();
 	const collector = new UsageCollector(
 		db,
@@ -278,9 +276,40 @@ async function collectedCost(
 		collector.handleStart(
 			startMessage(providerName, responseHeaders, isStream),
 		);
-		let responseBody: string | null = null;
 		if (isStream) {
-			const sse = [
+			collector.handleChunk("r1", new TextEncoder().encode(body));
+		}
+		await collector.handleEnd({
+			type: "end",
+			requestId: "r1",
+			success: true,
+			responseBody: isStream ? null : Buffer.from(body).toString("base64"),
+		});
+		await collector.drain();
+		return (
+			(await db
+				.getAdapter()
+				.get<UsageRow>(
+					`SELECT ${USAGE_COLUMNS} FROM requests WHERE id = 'r1'`,
+				)) ?? null
+		);
+	} finally {
+		collector.dispose();
+		await db.close();
+	}
+}
+
+/**
+ * Store an Anthropic-shaped reply through the usage collector alone and
+ * return the cost it recorded.
+ */
+async function collectedCost(
+	providerName: string,
+	responseHeaders: Record<string, string>,
+	isStream: boolean,
+): Promise<number | null> {
+	const body = isStream
+		? [
 				`event: message_start\ndata: ${JSON.stringify({
 					type: "message_start",
 					message: {
@@ -296,29 +325,11 @@ async function collectedCost(
 					usage: { output_tokens: 50 },
 				})}\n\n`,
 				`event: message_stop\ndata: {"type":"message_stop"}\n\n`,
-			].join("");
-			collector.handleChunk("r1", new TextEncoder().encode(sse));
-		} else {
-			responseBody = Buffer.from(JSON.stringify(ANTHROPIC_MESSAGE)).toString(
-				"base64",
-			);
-		}
-		await collector.handleEnd({
-			type: "end",
-			requestId: "r1",
-			success: true,
-			responseBody,
-		});
-		await collector.drain();
-		const row = await db
-			.getAdapter()
-			.get<UsageRow>(`SELECT ${USAGE_COLUMNS} FROM requests WHERE id = 'r1'`);
-		expect(row?.output_tokens).toBe(50);
-		return row?.cost_usd ?? null;
-	} finally {
-		collector.dispose();
-		await db.close();
-	}
+			].join("")
+		: JSON.stringify(ANTHROPIC_MESSAGE);
+	const row = await collectedRow(providerName, responseHeaders, isStream, body);
+	expect(row?.output_tokens).toBe(50);
+	return row?.cost_usd ?? null;
 }
 
 it("takes Anthropic's billed cost on a non-streaming reply", async () => {
@@ -372,6 +383,73 @@ it("keeps the estimate when another provider sends the billed-cost header", asyn
 			false,
 		),
 	).toBe(CATALOGUE_ESTIMATE_USD);
+});
+
+// Body shapes the providers' own usage parsers were tested on before #801
+// removed them, now checked where the counts are read: the collector.
+const JSON_HEADERS = { "content-type": "application/json" };
+
+it("stores an empty usage object as unknown input and zero output", async () => {
+	const row = await collectedRow(
+		"anthropic",
+		JSON_HEADERS,
+		false,
+		JSON.stringify({ ...ANTHROPIC_MESSAGE, usage: {} }),
+	);
+
+	expect(row?.model).toBe("claude-sonnet-5");
+	expect(row?.input_tokens).toBeNull();
+	expect(row?.cache_read_input_tokens).toBeNull();
+	expect(row?.cache_creation_input_tokens).toBeNull();
+	expect(row?.output_tokens).toBe(0);
+	expect(row?.total_tokens).toBe(0);
+});
+
+it("stores the request without usage when the body is not JSON", async () => {
+	const row = await collectedRow(
+		"anthropic",
+		JSON_HEADERS,
+		false,
+		"not json at all",
+	);
+
+	expect(row).not.toBeNull();
+	expect(row?.model).toBeNull();
+	expect(row?.input_tokens).toBeNull();
+	expect(row?.output_tokens).toBeNull();
+	expect(row?.total_tokens).toBeNull();
+	expect(row?.cost_usd).toBeNull();
+});
+
+it("stores a converted Bedrock reply's usage, cache tokens included", async () => {
+	const converted = await transformNonStreamingResponse(
+		jsonResponse({
+			output: {
+				message: { role: "assistant", content: [{ text: "Hello" }] },
+			},
+			stopReason: "end_turn",
+			usage: {
+				inputTokens: 7,
+				cacheReadInputTokens: 100,
+				cacheWriteInputTokens: 11,
+				outputTokens: 3,
+				totalTokens: 121,
+			},
+		}),
+	);
+	const row = await collectedRow(
+		"bedrock",
+		JSON_HEADERS,
+		false,
+		await converted.text(),
+	);
+
+	expect(row?.model).toBe("claude-bedrock");
+	expect(row?.input_tokens).toBe(7);
+	expect(row?.cache_read_input_tokens).toBe(100);
+	expect(row?.cache_creation_input_tokens).toBe(11);
+	expect(row?.output_tokens).toBe(3);
+	expect(row?.total_tokens).toBe(121);
 });
 
 it("stores a converted OpenAI-format reply's usage through the real client-forwarding path", async () => {

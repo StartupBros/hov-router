@@ -137,8 +137,6 @@ function customPlan(
 		parseRateLimit: () => ({ isRateLimited: false }),
 		isStreamingResponse: () => false,
 		extractTierInfo: async () => null,
-		extractUsageInfo: async () => null,
-		parseUsage: async () => null,
 		...overrides,
 	};
 }
@@ -679,14 +677,6 @@ describe("materializeProviderAttemptPlan", () => {
 				thisValues.push(this);
 				return 4;
 			},
-			async extractUsageInfo() {
-				thisValues.push(this);
-				return { totalTokens: 9 };
-			},
-			async parseUsage() {
-				thisValues.push(this);
-				return { outputTokens: 2 };
-			},
 		});
 
 		const plan = materializeProviderAttemptPlan(
@@ -729,12 +719,6 @@ describe("materializeProviderAttemptPlan", () => {
 		});
 		expect(plan.isStreamingResponse?.(new Response())).toBe(true);
 		expect(await plan.extractTierInfo?.(new Response())).toBe(4);
-		expect(await plan.extractUsageInfo?.(new Response())).toEqual({
-			totalTokens: 9,
-		});
-		expect(await plan.parseUsage?.(new Response())).toEqual({
-			outputTokens: 2,
-		});
 		expect(thisValues.every((value) => value === provider)).toBe(true);
 	});
 

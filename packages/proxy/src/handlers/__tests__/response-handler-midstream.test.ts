@@ -81,8 +81,6 @@ function makeCtxWithReason() {
 				statusHeader: undefined,
 				remaining: undefined,
 			}),
-			parseUsage: undefined,
-			extractUsageInfo: undefined,
 		},
 		dbOps: {
 			markAccountRateLimited: (
@@ -99,7 +97,6 @@ function makeCtxWithReason() {
 				get: async () => ({ rate_limited_until: null }),
 				run: async () => {},
 			}),
-			updateRequestUsage: async () => {},
 		},
 		asyncWriter: {
 			enqueue: (job: () => void | Promise<void>) => {

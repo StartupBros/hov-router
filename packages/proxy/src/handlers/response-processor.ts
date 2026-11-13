@@ -97,14 +97,12 @@ export function handleRateLimitResponse(
  * @param account - The account to update
  * @param response - The response to extract metadata from
  * @param ctx - The proxy context
- * @param requestId - The request ID for usage tracking
  * @param bypassSession - Whether to bypass session tracking (for cache-keepalive replays)
  */
 export function updateAccountMetadata(
 	account: Account,
 	response: Response,
 	ctx: ProxyContext,
-	_requestId?: string,
 	bypassSession = false,
 ): void {
 	// Update basic usage (with optional bypass)
@@ -233,14 +231,12 @@ export function updateAccountMetadata(
  * @param response - The provider response
  * @param account - The account used
  * @param ctx - The proxy context
- * @param requestId - The request ID for usage tracking
  * @returns Promise resolving to whether the response is rate-limited
  */
 export async function processProxyResponse(
 	response: Response,
 	account: Account,
 	ctx: ProxyContext,
-	requestId?: string,
 	requestMeta?: { headers?: Headers; path?: string },
 	onRateLimit?: (observation: RateLimitObservation) => void | Promise<void>,
 ): Promise<boolean> {
@@ -400,7 +396,7 @@ export async function processProxyResponse(
 		// Also update metadata for rate-limited responses
 		const bypassSession =
 			requestMeta?.headers?.get("x-better-ccflare-bypass-session") === "true";
-		updateAccountMetadata(account, response, ctx, requestId, bypassSession);
+		updateAccountMetadata(account, response, ctx, bypassSession);
 		return true; // Signal rate limit
 	}
 
@@ -409,7 +405,7 @@ export async function processProxyResponse(
 		// Update account metadata in background
 		const bypassSession =
 			requestMeta?.headers?.get("x-better-ccflare-bypass-session") === "true";
-		updateAccountMetadata(account, response, ctx, requestId, bypassSession);
+		updateAccountMetadata(account, response, ctx, bypassSession);
 	}
 
 	if (!rateLimitInfo.isRateLimited && !skipAccountMetadata) {

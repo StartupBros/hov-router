@@ -5156,8 +5156,8 @@ describe("UsageCollector request lifecycle", () => {
 	// costs nothing and for one the pricing catalogue has never heard of, so
 	// without a separate "can this be priced at all" question an unknown gateway
 	// model is recorded as a confident $0 and reads as confirmed upstream
-	// billing. These pin the distinction on the path Claude Code actually
-	// produces, which is where the provider's own calculateCost never runs.
+	// billing. These pin the distinction in the collector, the one place a
+	// request's cost is computed.
 	describe("unknown-model cost on the generic API-key lane", () => {
 		const GATEWAY_MODEL = "zai/glm-5.2-fast";
 

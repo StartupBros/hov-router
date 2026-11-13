@@ -400,20 +400,17 @@ describe("proxyWithAccount — cancels abandoned upstream body on failover", () 
 		// Unlike the no-fallback/auth-failure/model-fallback paths above
 		// (which discard rawResponse directly, before any provider hook
 		// touches it), the native xAI middle-candidate path always runs the
-		// response through provider.processResponse() for classification and
-		// then through updateAccountMetadata() -> extractUsageInfo(), which
-		// unconditionally clones and reads the body (response-processor.ts).
+		// response through provider.processResponse() for classification,
+		// which clones the JSON body, reads the clone and drains the original
+		// (openai/provider.ts).
 		// Per the WHATWG ReadableStreamTee cancel algorithm, once ANY
 		// sibling in a tee graph is read to completion (not cancelled), a
 		// cancel() on another sibling can never propagate to the real
 		// underlying source -- it stays permanently pending at the tee
-		// level. That is intentional per this codebase's own
-		// releaseUnconsumedClone doc comment ("fully draining their inner
-		// clone also closes this one ... cancelling an already-closed
-		// stream here is a harmless, immediately-resolved no-op"): once a
-		// body is read anywhere in its tee graph the underlying resource is
-		// released via normal consumption, and a later cancel() elsewhere
-		// in that graph is correctly a no-op, not a leak. So the meaningful
+		// level. Once a body is read anywhere in its tee graph the
+		// underlying resource is released via normal consumption, and a
+		// later cancel() elsewhere in that graph is correctly a no-op, not
+		// a leak. So the meaningful
 		// invariant to protect here is that the body actually gets READ
 		// (never silently dropped without being touched at all), which
 		// state.pulled verifies.
@@ -446,8 +443,8 @@ describe("proxyWithAccount — cancels abandoned upstream body on failover", () 
 
 	it("does not abandon the native xAI 429 body on the middle-candidate failover (return null)", async () => {
 		// Same reasoning as the 402 test directly above: the body is
-		// consumed via provider.processResponse() / extractUsageInfo(), not
-		// via an explicit cancel() on `response` itself, so state.pulled
+		// consumed via provider.processResponse(), not via an explicit
+		// cancel() on `response` itself, so state.pulled
 		// (not state.released) is the correct no-leak signal here.
 		const { response, state } = observableBodyResponse(
 			429,

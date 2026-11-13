@@ -65,8 +65,6 @@ function makeCtx(opts: {
 				statusHeader: opts.rateLimited ? "rate_limited" : undefined,
 				remaining: undefined,
 			}),
-			parseUsage: undefined,
-			extractUsageInfo: undefined,
 		},
 		dbOps: {
 			markAccountRateLimited: (
@@ -83,7 +81,6 @@ function makeCtx(opts: {
 				get: async () => ({ rate_limited_until: null }),
 				run: async () => {},
 			}),
-			updateRequestUsage: async () => {},
 		},
 		asyncWriter: {
 			enqueue: (job: () => void | Promise<void>) => {
@@ -125,8 +122,6 @@ function makeCtxWithReason(opts: {
 				statusHeader: opts.rateLimited ? "rate_limited" : undefined,
 				remaining: undefined,
 			}),
-			parseUsage: undefined,
-			extractUsageInfo: undefined,
 		},
 		dbOps: {
 			markAccountRateLimited: (
@@ -143,7 +138,6 @@ function makeCtxWithReason(opts: {
 				get: async () => ({ rate_limited_until: null }),
 				run: async () => {},
 			}),
-			updateRequestUsage: async () => {},
 		},
 		asyncWriter: {
 			enqueue: (job: () => void | Promise<void>) => {
@@ -433,7 +427,7 @@ describe("processProxyResponse — 529 overload reason", () => {
 			}),
 		};
 
-		await processProxyResponse(response, account, ctx, undefined, requestMeta);
+		await processProxyResponse(response, account, ctx, requestMeta);
 
 		// Keepalive requests skip cooldown marking
 		expect(calls.markRateLimited).toHaveLength(0);
@@ -455,7 +449,6 @@ describe("processProxyResponse — 529 overload reason", () => {
 			account,
 			ctx,
 			undefined,
-			undefined,
 			(observation) => observations.push(observation),
 		);
 
@@ -473,7 +466,6 @@ describe("processProxyResponse — 529 overload reason", () => {
 			new Response('{"type":"error"}', { status: 529 }),
 			account,
 			ctx,
-			undefined,
 			{
 				headers: new Headers({
 					"x-better-ccflare-keepalive": "true",
@@ -529,7 +521,6 @@ describe("processProxyResponse — rate-limit observation failures", () => {
 			account,
 			ctx,
 			undefined,
-			undefined,
 			() => {
 				observerCalled = true;
 				throw new Error("observer failed");
@@ -559,7 +550,6 @@ describe("processProxyResponse — rate-limit observation failures", () => {
 				new Response('{"error":"rate_limit"}', { status: 429 }),
 				account,
 				ctx,
-				undefined,
 				undefined,
 				async () => {
 					throw new Error("observer rejected");
@@ -595,7 +585,6 @@ describe("processProxyResponse — rate-limit observation failures", () => {
 				new Response('{"error":"rate_limit"}', { status: 429 }),
 				account,
 				ctx,
-				undefined,
 				undefined,
 				() => observationFinished.promise,
 			),
@@ -779,8 +768,6 @@ function makeXaiCtx(opts: {
 			name: "xai",
 			isStreamingResponse: () => false,
 			parseRateLimit: () => opts.rateLimitInfo,
-			parseUsage: undefined,
-			extractUsageInfo: undefined,
 		},
 		dbOps: {
 			markAccountRateLimited: async (
@@ -801,7 +788,6 @@ function makeXaiCtx(opts: {
 				get: async () => ({ rate_limited_until: null }),
 				run: async () => {},
 			}),
-			updateRequestUsage: async () => {},
 		},
 		asyncWriter: {
 			enqueue: (job: () => void | Promise<void>) => {
@@ -835,7 +821,6 @@ describe("processProxyResponse - native xAI capacity classification (R5-R10)", (
 			response,
 			account,
 			ctx,
-			undefined,
 			undefined,
 			(observation) => observations.push(observation),
 		);
@@ -1073,7 +1058,6 @@ describe("processProxyResponse - native xAI capacity classification (R5-R10)", (
 			new Response('{"error":"rate limited"}', { status: 429 }),
 			account,
 			ctx,
-			undefined,
 			undefined,
 			(observation) => observations.push(observation),
 		);

@@ -560,10 +560,10 @@ Environment variables override config file settings:
 **Symptom**: Token usage and costs not updating
 
 **Solutions**:
-1. Usage is extracted from response headers and streaming data
-2. Check for usage extraction errors:
+1. The usage collector reads token counts once per request, from the reply body or its stream events. A reply that carries no usage stores none.
+2. Check what it recorded: start the server with `DEBUG=true LOG_LEVEL=DEBUG` and look for its per-request line:
    ```bash
-   grep "extractUsageInfo" /tmp/better-ccflare-logs/app.log
+   grep "Usage for request" /tmp/better-ccflare-logs/app.log
    ```
 
 3. Verify model pricing data:

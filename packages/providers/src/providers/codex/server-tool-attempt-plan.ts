@@ -15,7 +15,6 @@ import {
 import type {
 	ProviderAttemptPlan,
 	ProviderAttemptPlanContext,
-	ProviderUsageInfo,
 	RateLimitInfo,
 } from "../../types";
 import {
@@ -216,12 +215,6 @@ export interface CodexHostedSearchPlanDelegates {
 	) => Promise<number | undefined>;
 	readonly isStreamingResponse?: (response: Response) => boolean;
 	readonly extractTierInfo?: (response: Response) => Promise<number | null>;
-	readonly extractUsageInfo?: (
-		response: Response,
-	) => Promise<ProviderUsageInfo | null>;
-	readonly parseUsage?: (
-		response: Response,
-	) => Promise<ProviderUsageInfo | null>;
 }
 
 export interface ProcessCodexHostedSearchResponseOptions {
@@ -898,10 +891,6 @@ export function createCodexHostedSearchAttemptPlan(
 		...(delegates.extractTierInfo
 			? { extractTierInfo: delegates.extractTierInfo }
 			: {}),
-		...(delegates.extractUsageInfo
-			? { extractUsageInfo: delegates.extractUsageInfo }
-			: {}),
-		...(delegates.parseUsage ? { parseUsage: delegates.parseUsage } : {}),
 	};
 	return Object.freeze(plan);
 }

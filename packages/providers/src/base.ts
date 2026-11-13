@@ -170,20 +170,6 @@ export abstract class BaseProvider implements Provider {
 	}
 
 	/**
-	 * Extract usage information from response if available
-	 * Default implementation: Return null (no usage info)
-	 */
-	async extractUsageInfo?(_response: Response): Promise<{
-		model?: string;
-		promptTokens?: number;
-		completionTokens?: number;
-		totalTokens?: number;
-		costUsd?: number;
-	} | null> {
-		return null;
-	}
-
-	/**
 	 * Check if the response is a streaming response
 	 * Default implementation: Check for text/event-stream or stream in content-type
 	 */
