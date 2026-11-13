@@ -9,6 +9,7 @@ import type {
 	ExternalUsageSource,
 } from "@better-ccflare/database";
 import { Logger } from "@better-ccflare/logger";
+import { MODEL_ROUTE_PROFILE_MODEL_PREFIX } from "@better-ccflare/proxy";
 import { discoverCodexFiles, streamCodexLines } from "./external-codex-files";
 import {
 	type ParsedCodexSession,
@@ -294,7 +295,19 @@ export class ExternalCodexScanner {
 					? (parsed.get(parentPath) ?? parentSessions.get(parentPath))
 					: undefined;
 				const events: ExternalUsageEvent[] = [];
-				for (const event of suppressCodexReplay(session, parent))
+				// A rollout from any provider but "openai" (older rollouts name none) went to a
+				// custom endpoint such as this router, which already counted it as proxied
+				// requests (#782). A route alias exists only on the router, whatever the provider.
+				// Parsing still runs: the session can be a parent for replay suppression, and
+				// an empty replacement retires rows the rollout was counted with before.
+				const proxied =
+					session.modelProvider !== null && session.modelProvider !== "openai";
+				for (const event of suppressCodexReplay(session, parent)) {
+					if (
+						proxied ||
+						event.model.startsWith(MODEL_ROUTE_PROFILE_MODEL_PREFIX)
+					)
+						continue;
 					events.push({
 						...event,
 						inputTokens: event.inputTokens - event.cachedInputTokens,
@@ -302,6 +315,7 @@ export class ExternalCodexScanner {
 						sourceKind: file.sourceKind,
 						accountId: file.accountId,
 					});
+				}
 				healthy.add(file.path);
 				replacements.push({ path: file.path, events });
 				await new Promise<void>((resolve) => setImmediate(resolve));

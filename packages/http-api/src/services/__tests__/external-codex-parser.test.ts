@@ -302,3 +302,27 @@ test("self-parented fork suppresses the oracle rewritten burst", async () => {
 	expect(self.forked).toBe(true);
 	expect(suppressCodexReplay(self).map((e) => e.totalTokens)).toEqual([12]);
 });
+
+test("first-line session_meta model_provider is carried; absent or non-string stays null", async () => {
+	const withProvider = (provider?: unknown) =>
+		JSON.stringify({
+			type: "session_meta",
+			timestamp: t("10"),
+			payload: { id: "p", model_provider: provider },
+		});
+	const provider = async (lines: string[]) =>
+		(await parseCodexLines(lines)).modelProvider;
+	expect(await provider([withProvider("openai")])).toBe("openai");
+	expect(await provider([withProvider(" better_ccflare ")])).toBe(
+		"better_ccflare",
+	);
+	expect(await provider([withProvider()])).toBeNull();
+	expect(await provider([withProvider(42)])).toBeNull();
+	// Only the first line is session metadata.
+	expect(
+		await provider([
+			event(t("00"), { last_token_usage: usage(9) }),
+			withProvider("better_ccflare"),
+		]),
+	).toBeNull();
+});

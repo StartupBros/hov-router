@@ -789,6 +789,18 @@ export OPENAI_API_KEY=dummy-key
 
 Codex CLI requires an API key to start — use `dummy-key` if Router API key authentication is not enabled, or your real Router API key if it is.
 
+If the same Codex home is listed in `external_codex_homes`, define HoV Router as its own provider instead, so the external usage scanner can tell routed sessions from direct ones and does not count them twice ([External Codex Usage](configuration.md#external-codex-usage)):
+
+```toml
+model_provider = "hov_router"
+
+[model_providers.hov_router]
+name = "HoV Router"
+base_url = "http://127.0.0.1:8080/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+```
+
 Known limitations:
 
 - `previous_response_id` is accepted but ignored — Codex uses this only over WebSocket; for regular HTTP requests it always sends the full conversation history in `input`

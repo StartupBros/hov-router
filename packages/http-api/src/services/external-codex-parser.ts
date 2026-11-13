@@ -26,6 +26,8 @@ export interface ParsedCodexSession {
 	sessionId: string;
 	parentId: string | null;
 	forked: boolean;
+	/** session_meta.model_provider: "openai" when Codex talked to OpenAI itself. */
+	modelProvider: string | null;
 	sessionTimestamp: number | null;
 	burstStart: number | null;
 	events: ParsedCodexEvent[];
@@ -126,6 +128,7 @@ export async function parseCodexLines(
 		sessionId: options.sessionId ?? "unknown",
 		parentId: null,
 		forked: false,
+		modelProvider: null,
 		sessionTimestamp: null,
 		burstStart: null,
 		events: [],
@@ -155,6 +158,7 @@ export async function parseCodexLines(
 			if (value.type === "session_meta") {
 				session.sessionId =
 					typeof payload.id === "string" ? payload.id : session.sessionId;
+				session.modelProvider = text(payload.model_provider);
 				const parent =
 					typeof payload.forked_from_id === "string"
 						? payload.forked_from_id
