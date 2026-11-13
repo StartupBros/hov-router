@@ -361,11 +361,16 @@ function normalizeTokenCount(value: unknown): number | undefined {
 		: undefined;
 }
 
-/** The dollar amount in an `anthropic-billing-cost` header, when it is one. */
+/**
+ * The dollar amount in an `anthropic-billing-cost` header, when the whole
+ * header is one number. Text such as "1.5 USD" or "0,0025" is not a cost.
+ */
 function parseBilledCostUsd(header: string | undefined): number | undefined {
-	if (header === undefined) return undefined;
-	const cost = Number.parseFloat(header);
-	return Number.isFinite(cost) && cost >= 0 ? cost : undefined;
+	const text = header?.trim();
+	if (!text) return undefined;
+	const cost = Number(text);
+	if (!Number.isFinite(cost) || cost < 0) return undefined;
+	return cost === 0 ? 0 : cost;
 }
 
 function captureUsageIterations(usage: unknown, state: RequestState): void {

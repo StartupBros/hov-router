@@ -14,7 +14,10 @@ import {
 	AnthropicProvider,
 	OpenAICompatibleProvider,
 } from "@better-ccflare/providers";
-import { transformNonStreamingResponse } from "@better-ccflare/providers/bedrock";
+import {
+	BedrockProvider,
+	transformNonStreamingResponse,
+} from "@better-ccflare/providers/bedrock";
 import type { Account, RequestResponse } from "@better-ccflare/types";
 import type { ProxyContext } from "../handlers";
 import type { StartMessage } from "../worker-messages";
@@ -349,6 +352,9 @@ it.each([
 	"n/a",
 	"-0.5",
 	"",
+	"0,0025",
+	"1.5 USD",
+	"12abc",
 ])("keeps the estimate when the billed-cost header reads %p", async (header) => {
 	expect(
 		await collectedCost(
@@ -445,6 +451,52 @@ it("stores a converted Bedrock reply's usage, cache tokens included", async () =
 	);
 
 	expect(row?.model).toBe("claude-bedrock");
+	expect(row?.input_tokens).toBe(7);
+	expect(row?.cache_read_input_tokens).toBe(100);
+	expect(row?.cache_creation_input_tokens).toBe(11);
+	expect(row?.output_tokens).toBe(3);
+	expect(row?.total_tokens).toBe(121);
+});
+
+it("stores a streamed Bedrock reply's usage, cache tokens included", async () => {
+	// The real converter puts zero usage in message_start and the counts in
+	// the final message_delta; the collector must keep the later values.
+	async function* converseEvents(): AsyncIterable<Record<string, unknown>> {
+		yield { messageStart: { role: "assistant" } };
+		yield {
+			contentBlockDelta: { contentBlockIndex: 0, delta: { text: "Hello" } },
+		};
+		yield { contentBlockStop: { contentBlockIndex: 0 } };
+		yield { messageStop: { stopReason: "end_turn" } };
+		yield {
+			metadata: {
+				usage: {
+					inputTokens: 7,
+					cacheReadInputTokens: 100,
+					cacheWriteInputTokens: 11,
+					outputTokens: 3,
+					totalTokens: 121,
+				},
+				metrics: { latencyMs: 1 },
+			},
+		};
+	}
+	const stream = (
+		new BedrockProvider() as unknown as {
+			createAnthropicCompatibleStream: (
+				bedrockStream: AsyncIterable<Record<string, unknown>> | undefined,
+				clientModelName: string,
+			) => ReadableStream;
+		}
+	).createAnthropicCompatibleStream(converseEvents(), "claude-sonnet-5");
+	const row = await collectedRow(
+		"bedrock",
+		{ "content-type": "text/event-stream" },
+		true,
+		await new Response(stream).text(),
+	);
+
+	expect(row?.model).toBe("claude-sonnet-5");
 	expect(row?.input_tokens).toBe(7);
 	expect(row?.cache_read_input_tokens).toBe(100);
 	expect(row?.cache_creation_input_tokens).toBe(11);

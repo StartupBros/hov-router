@@ -581,7 +581,7 @@ refreshToken(account): { accessToken: apiKey, expiresAt: +1yr }
 
 ### Error Handling
 - `parseRateLimit()`: Always `isRateLimited: false` (handles 429 inline)
-- Usage extraction from final chunk
+- Usage: the converter copies the final chunk's OpenAI usage into the Anthropic stream, where the usage collector reads it
 
 ### Tool Calling
 Full support: Anthropic `tools` ↔ OpenAI `tools`, streaming args accumulated.
