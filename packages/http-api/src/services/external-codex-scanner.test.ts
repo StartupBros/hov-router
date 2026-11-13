@@ -631,10 +631,8 @@ test("rollouts that ran through a custom provider or a route alias are not count
 			"04",
 		),
 	);
-	const summary = await new ExternalCodexScanner(repo).scan({
-		homes: [home],
-		cloudRoots: [],
-	});
+	const scanner = new ExternalCodexScanner(repo);
+	const summary = await scanner.scan({ homes: [home], cloudRoots: [] });
 	expect(summary.filesScanned).toBe(4);
 	const report = await repo.report();
 	expect(report.reduce((sum, row) => sum + row.totalTokens, 0)).toBe(1900);
@@ -642,6 +640,9 @@ test("rollouts that ran through a custom provider or a route alias are not count
 		"gpt-6-astra",
 		"gpt-6-sol",
 	]);
+	// Skipped rollouts keep their file metadata, so they are not re-read every scan.
+	const again = await scanner.scan({ homes: [home], cloudRoots: [] });
+	expect(again.filesScanned).toBe(0);
 	db.close();
 });
 
