@@ -853,8 +853,8 @@ describe("compact comparison slots", () => {
 					}
 				/>,
 			);
-			expect(html).toContain("5-hour used");
-			expect(html).toContain("Not reported");
+			if (provider === "anthropic") expect(html).toContain("5-hour used");
+			else expect(html).not.toContain("5-hour");
 			expect(html).not.toContain("72%");
 			if (provider === "codex") expect(html).toContain("34%");
 		}
@@ -863,8 +863,51 @@ describe("compact comparison slots", () => {
 		const html = renderToStaticMarkup(
 			<RateLimitProgress provider="openai" resetIso={null} compact />,
 		);
-		expect(html).toContain("5-hour used");
-		expect(html).toContain("Weekly used");
-		expect(html.match(/Not reported/g)?.length).toBe(2);
+		expect(html).toContain("Usage unavailable");
+		expect(html).not.toContain("5-hour");
 	});
+});
+
+it("emphasizes the selected reset in its quota row without duplicating a timestamp", () => {
+	const reset = new Date(Date.now() + 3600000).toISOString();
+	const html = renderToStaticMarkup(
+		<RateLimitProgress
+			compact
+			showWeekly
+			provider="anthropic"
+			resetIso={null}
+			highlightReset={{ label: "Weekly", resetTime: reset }}
+			usageData={{
+				five_hour: { utilization: 20, resets_at: reset },
+				seven_day: { utilization: 40, resets_at: reset },
+			}}
+		/>,
+	);
+	expect(html.match(/<time /g)?.length).toBe(2);
+	expect(html.match(/Sort key;/g)?.length).toBe(1);
+	expect(html).not.toContain("Sort:");
+});
+
+it("compact quotas stack once with labelled accessible reset even when usage is unknown", () => {
+	const reset = new Date(Date.now() + 3600000).toISOString();
+	const html = renderToStaticMarkup(
+		<RateLimitProgress
+			compact
+			showWeekly
+			provider="anthropic"
+			resetIso={null}
+			usageData={{
+				five_hour: { utilization: 100, resets_at: reset },
+				seven_day: { utilization: null, resets_at: reset },
+			}}
+		/>,
+	);
+	expect(html).not.toContain("grid-cols-2");
+	expect(html).toContain("<time");
+	expect(html).toContain(`dateTime="${reset}"`);
+	expect(html).toContain("local time; Resets");
+	// Unknown usage is text, not a misleading zero-filled meter.
+	expect(html.match(/role="progressbar"/g)?.length).toBe(1);
+	expect(html.match(/>100%</g)?.length).toBe(1);
+	expect(html).toContain("Exhausted");
 });

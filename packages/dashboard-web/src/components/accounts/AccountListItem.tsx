@@ -142,6 +142,7 @@ function routingNeedsNotice(state: AccountFamilyRoutingState) {
 	);
 }
 interface AccountListItemProps {
+	sortReset?: { label: string; resetTime: string } | null;
 	settingsError?: string | null;
 	onClearSettingsError?: (accountId: string) => void;
 	account: Account;
@@ -252,6 +253,7 @@ export function PublicValueControl({
 }
 
 export function AccountListItem({
+	sortReset,
 	settingsError,
 	onClearSettingsError,
 	account,
@@ -417,7 +419,7 @@ export function AccountListItem({
 	return (
 		<article
 			aria-label={account.name}
-			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,1.5fr)_4rem_minmax(0,1.5fr)] xl:items-center xl:gap-4 xl:space-y-0 ${
+			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(15rem,1.5fr)_3rem_minmax(0,1.25fr)] xl:items-center xl:gap-4 xl:space-y-0 ${
 				isPrimary
 					? "border-border border-l-2 border-l-primary"
 					: "border-border hover:border-muted-foreground/50"
@@ -996,7 +998,11 @@ export function AccountListItem({
 			</div>
 
 			<div className="min-w-0 border-t pt-3 xl:col-start-3 xl:row-start-1 xl:border-t-0 xl:pt-0">
-				<RateLimitProgress compact {...rateLimitProgressProps} />
+				<RateLimitProgress
+					compact
+					highlightReset={sortReset}
+					{...rateLimitProgressProps}
+				/>
 			</div>
 			{account.provider === "codex" &&
 				account.bankedResets &&

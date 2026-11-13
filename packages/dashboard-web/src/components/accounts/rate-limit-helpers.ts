@@ -169,6 +169,7 @@ export function severityColor(
  */
 export function collectAnthropicLimitRows(
 	limits: UsageLimit[],
+	preserveUnknown = false,
 ): UsageDisplay[] {
 	const rows: UsageDisplay[] = [];
 	// Track every scoped window key already emitted so duplicates get a unique
@@ -176,9 +177,9 @@ export function collectAnthropicLimitRows(
 	// already ends in _<n> (e.g. a "Fable" duplicate vs a model named "Fable 1").
 	const usedWindows = new Set<string>();
 	for (const limit of limits) {
-		if (!limit || limit.percent == null) continue;
+		if (!limit || (!preserveUnknown && limit.percent == null)) continue;
 		const base = {
-			utilization: limit.percent,
+			utilization: limit.percent ?? null,
 			resetTime: limit.resets_at,
 			severity: limit.severity,
 			isActive: limit.is_active === true,
@@ -255,11 +256,12 @@ const LEGACY_MODEL_TIER_WINDOWS = [
 export function collectAnthropicUsageRows(
 	usage: AnthropicUsageData | null | undefined,
 	fallback: { utilization: number | null; resetTime: string | null },
+	preserveUnknown = false,
 ): UsageDisplay[] {
 	// PRIMARY path: the generic limits[] array (disambiguated from NanoGPT's
 	// object-shaped `limits` by Array.isArray).
 	if (usage && Array.isArray(usage.limits)) {
-		const rows = collectAnthropicLimitRows(usage.limits);
+		const rows = collectAnthropicLimitRows(usage.limits, preserveUnknown);
 		// Only take the limits[] result if it produced usable rows. An empty
 		// array, all-null percents, or scoped entries missing a display name
 		// would otherwise blank the card — fall through to the legacy flat windows
@@ -291,7 +293,10 @@ export function collectAnthropicUsageRows(
 	}
 
 	const sevenDay = data.seven_day;
-	if (isUsageWindow(sevenDay) && sevenDay.utilization != null) {
+	if (
+		isUsageWindow(sevenDay) &&
+		(preserveUnknown || sevenDay.utilization != null)
+	) {
 		rows.push({
 			utilization: sevenDay.utilization,
 			window: "seven_day",
