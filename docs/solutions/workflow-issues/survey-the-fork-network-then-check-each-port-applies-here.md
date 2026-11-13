@@ -153,7 +153,7 @@ What step 5 found for each candidate it stopped:
 
 | Candidate | Check that stopped it | Evidence |
 |---|---|---|
-| tombii's streaming-usage idle timeout (Group B in #677) | Call path | `packages/proxy/src/handlers/response-processor.ts:312` reads `} else if (!isStream && ctx.provider.extractUsageInfo) {`, so a stream never reaches the 60 s extraction budget the fix replaces. No PR opened. |
+| tombii's streaming-usage idle timeout (Group B in #677) | Call path | `packages/proxy/src/handlers/response-processor.ts:312` reads `} else if (!isStream && ctx.provider.extractUsageInfo) {`, so a stream never reaches the 60 s extraction budget the fix replaces. No PR opened. #801 later removed that extraction: the usage collector is the only usage writer. |
 | Stored payload compression, zstd or binary blob (#679) | Production config | The managed runner starts the binary with `STORE_PAYLOADS=false` (`scripts/run-ccflare-stack.sh:900`). Default installs keep payloads for 1 day (`packages/config/src/index.ts:1726-1730`). |
 | tombii's in-place 5xx retry, then bench and fail over (#678) | Client behaviour | HoV retries in place only for 529 (`packages/proxy/src/handlers/proxy-operations.ts:7427-7432`), and that is enough. Claude Code, the Anthropic SDK and Codex CLI already retry 5xx: Claude Code per its docs, the SDK and Codex CLI per their source, as checked on 2026-10-31. In production, 149 sessions sent another request within 120 s of a Codex 503, and 141 of them succeeded on the same account. |
 | SijanC147's HTML-to-JSON error envelope on `/v1` (#680) | Kind of harm | The Anthropic SDK decides whether to retry from the status before it reads the body. An HTML page changes the error text, not the retry. Deferred until someone sees one. |

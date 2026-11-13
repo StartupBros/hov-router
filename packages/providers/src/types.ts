@@ -90,18 +90,6 @@ export interface RequestObservation extends UpstreamObservation {
 	bindRequestId(requestId: string): void;
 }
 
-export interface ProviderUsageInfo {
-	model?: string;
-	promptTokens?: number;
-	completionTokens?: number;
-	totalTokens?: number;
-	costUsd?: number;
-	inputTokens?: number;
-	cacheReadInputTokens?: number;
-	cacheCreationInputTokens?: number;
-	outputTokens?: number;
-}
-
 export interface ProviderAttemptPlanContext {
 	readonly request: Request;
 	readonly requestBodyBuffer: ArrayBuffer | null;
@@ -229,12 +217,6 @@ export interface ProviderAttemptPlan {
 	) => Promise<number | undefined>;
 	readonly isStreamingResponse?: (response: Response) => boolean;
 	readonly extractTierInfo?: (response: Response) => Promise<number | null>;
-	readonly extractUsageInfo?: (
-		response: Response,
-	) => Promise<ProviderUsageInfo | null>;
-	readonly parseUsage?: (
-		response: Response,
-	) => Promise<ProviderUsageInfo | null>;
 }
 
 /** Provider-owned endpoint behavior. Advisory counts never prove capacity or entitlement. */
@@ -399,18 +381,6 @@ export interface Provider {
 	 * Extract tier information from response if available
 	 */
 	extractTierInfo?(response: Response): Promise<number | null>;
-
-	/**
-	 * Extract usage information from response if available
-	 */
-	extractUsageInfo?(response: Response): Promise<ProviderUsageInfo | null>;
-
-	/**
-	 * Parse usage information from streaming SSE response if available
-	 * This is called for streaming responses to extract usage from final SSE events
-	 * Falls back to extractUsageInfo for non-streaming responses
-	 */
-	parseUsage?(response: Response): Promise<ProviderUsageInfo | null>;
 
 	/**
 	 * Check if the response is a streaming response

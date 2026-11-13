@@ -551,28 +551,6 @@ describe("MetaProvider", () => {
 		});
 	});
 
-	describe("extractUsageInfo", () => {
-		it("reads Anthropic-shaped usage from a JSON response", async () => {
-			const response = new Response(
-				JSON.stringify({
-					model: "muse-spark-1.2",
-					usage: {
-						input_tokens: 100,
-						output_tokens: 50,
-						cache_read_input_tokens: 20,
-					},
-				}),
-				{ headers: { "content-type": "application/json" } },
-			);
-
-			const usage = await provider.extractUsageInfo(response);
-			expect(usage?.model).toBe("muse-spark-1.2");
-			expect(usage?.inputTokens).toBe(100);
-			expect(usage?.outputTokens).toBe(50);
-			expect(usage?.cacheReadInputTokens).toBe(20);
-		});
-	});
-
 	describe("supportsOAuth", () => {
 		it("is an API-key provider", () => {
 			expect(provider.supportsOAuth()).toBe(false);

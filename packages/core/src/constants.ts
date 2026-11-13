@@ -344,9 +344,6 @@ export const BUFFER_SIZES = {
 	STREAM_BODY_MAX_KB: 256,
 	STREAM_BODY_MAX_BYTES: 256 * 1024, // 256KB default
 
-	// Anthropic provider stream cap
-	ANTHROPIC_STREAM_CAP_BYTES: 32768, // 32KB
-
 	// Stream tee default max bytes
 	STREAM_TEE_MAX_BYTES: 1024 * 1024, // 1MB
 

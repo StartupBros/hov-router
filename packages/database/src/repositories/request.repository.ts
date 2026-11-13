@@ -494,44 +494,6 @@ export class RequestRepository extends BaseRepository<RequestData> {
 		);
 	}
 
-	async updateUsage(
-		requestId: string,
-		usage: RequestData["usage"],
-	): Promise<void> {
-		if (!usage) return;
-
-		await this.run(
-			`
-			UPDATE requests
-			SET
-				model = COALESCE(?, model),
-				prompt_tokens = COALESCE(?, prompt_tokens),
-				completion_tokens = COALESCE(?, completion_tokens),
-				total_tokens = COALESCE(?, total_tokens),
-				cost_usd = COALESCE(?, cost_usd),
-				input_tokens = COALESCE(?, input_tokens),
-				cache_read_input_tokens = COALESCE(?, cache_read_input_tokens),
-				cache_creation_input_tokens = COALESCE(?, cache_creation_input_tokens),
-				output_tokens = COALESCE(?, output_tokens),
-				output_tokens_per_second = COALESCE(?, output_tokens_per_second)
-			WHERE id = ?
-		`,
-			[
-				usage.model || null,
-				usage.promptTokens ?? null,
-				usage.completionTokens ?? null,
-				usage.totalTokens ?? null,
-				usage.costUsd ?? null,
-				usage.inputTokens ?? null,
-				usage.cacheReadInputTokens ?? null,
-				usage.cacheCreationInputTokens ?? null,
-				usage.outputTokens ?? null,
-				usage.tokensPerSecond ?? null,
-				requestId,
-			],
-		);
-	}
-
 	// Payload management
 	async savePayload(id: string, data: unknown): Promise<void> {
 		const json = JSON.stringify(data);

@@ -235,8 +235,6 @@ function makeCodexCtx() {
 				statusHeader: undefined,
 				remaining: undefined,
 			}),
-			parseUsage: undefined,
-			extractUsageInfo: undefined,
 		},
 		// Read by updateAccountMetadata's Codex block once #428 lands, which
 		// picks the usage window a session is riding from the config. Harmless
@@ -251,7 +249,6 @@ function makeCodexCtx() {
 				get: async () => ({ rate_limited_until: null }),
 				run: async () => {},
 			}),
-			updateRequestUsage: async () => {},
 			resetAccountSession: async () => {},
 			recordUsageSnapshot: async (
 				accountId: string,

@@ -382,27 +382,6 @@ describe("XaiProvider", () => {
 		).rejects.not.toBeInstanceOf(OAuthRefreshTokenError);
 	});
 
-	it("extracts cached_tokens from non-stream OpenAI-compatible usage", async () => {
-		const provider = new XaiProvider();
-		const response = new Response(
-			JSON.stringify({
-				model: "grok-4.5",
-				usage: {
-					prompt_tokens: 100,
-					completion_tokens: 10,
-					total_tokens: 110,
-					prompt_tokens_details: { cached_tokens: 40 },
-				},
-			}),
-			{ status: 200, headers: { "content-type": "application/json" } },
-		);
-		const usage = await provider.extractUsageInfo(response);
-		expect(usage?.cacheReadInputTokens).toBe(40);
-		expect(usage?.inputTokens).toBe(60);
-		expect(usage?.promptTokens).toBe(100);
-		expect(usage?.totalTokens).toBe(110);
-	});
-
 	describe("parseRateLimit - native xAI capacity classification (R5-R7)", () => {
 		it("classifies 402 as rate-limited with reason xai_capacity_402, no resetTime", () => {
 			const provider = new XaiProvider();

@@ -8,7 +8,6 @@ import type {
 	ProviderPathCapability,
 	ProviderServerToolHistoryProjector,
 	ProviderServerToolReplayIssuer,
-	ProviderUsageInfo,
 	RateLimitInfo,
 } from "./types";
 
@@ -79,8 +78,6 @@ interface CapturedProviderDescriptor {
 	readonly parseRateLimitFromBody: Provider["parseRateLimitFromBody"];
 	readonly isStreamingResponse: Provider["isStreamingResponse"];
 	readonly extractTierInfo: Provider["extractTierInfo"];
-	readonly extractUsageInfo: Provider["extractUsageInfo"];
-	readonly parseUsage: Provider["parseUsage"];
 }
 
 type ValidatedProviderAttemptPlanContext = Readonly<{
@@ -250,13 +247,6 @@ function captureProviderDescriptor(
 	const extractTierInfo = optionalFunction<
 		NonNullable<Provider["extractTierInfo"]>
 	>(provider.extractTierInfo, "extractTierInfo");
-	const extractUsageInfo = optionalFunction<
-		NonNullable<Provider["extractUsageInfo"]>
-	>(provider.extractUsageInfo, "extractUsageInfo");
-	const parseUsage = optionalFunction<NonNullable<Provider["parseUsage"]>>(
-		provider.parseUsage,
-		"parseUsage",
-	);
 
 	return Object.freeze({
 		providerName,
@@ -275,8 +265,6 @@ function captureProviderDescriptor(
 		parseRateLimitFromBody,
 		isStreamingResponse,
 		extractTierInfo,
-		extractUsageInfo,
-		parseUsage,
 	});
 }
 
@@ -298,9 +286,7 @@ function requireStableProviderDescriptor(
 		current.parseRateLimit !== expected.parseRateLimit ||
 		current.parseRateLimitFromBody !== expected.parseRateLimitFromBody ||
 		current.isStreamingResponse !== expected.isStreamingResponse ||
-		current.extractTierInfo !== expected.extractTierInfo ||
-		current.extractUsageInfo !== expected.extractUsageInfo ||
-		current.parseUsage !== expected.parseUsage
+		current.extractTierInfo !== expected.extractTierInfo
 	) {
 		throw new TypeError("Provider attempt descriptor changed during planning");
 	}
@@ -709,12 +695,6 @@ function materializeCustomPlan(
 	const rawExtractTierInfo = optionalFunction<
 		(response: Response) => Promise<number | null>
 	>(candidate.extractTierInfo, "extractTierInfo");
-	const rawExtractUsageInfo = optionalFunction<
-		(response: Response) => Promise<ProviderUsageInfo | null>
-	>(candidate.extractUsageInfo, "extractUsageInfo");
-	const rawParseUsage = optionalFunction<
-		(response: Response) => Promise<ProviderUsageInfo | null>
-	>(candidate.parseUsage, "parseUsage");
 
 	let plan: ProviderAttemptPlan;
 	plan = {
@@ -759,18 +739,6 @@ function materializeCustomPlan(
 						Reflect.apply(rawExtractTierInfo, plan, [response]),
 				}
 			: {}),
-		...(rawExtractUsageInfo
-			? {
-					extractUsageInfo: (response: Response) =>
-						Reflect.apply(rawExtractUsageInfo, plan, [response]),
-				}
-			: {}),
-		...(rawParseUsage
-			? {
-					parseUsage: (response: Response) =>
-						Reflect.apply(rawParseUsage, plan, [response]),
-				}
-			: {}),
 	};
 	return Object.freeze(plan);
 }
@@ -793,8 +761,6 @@ function materializeLegacyPlan(
 		parseRateLimitFromBody,
 		isStreamingResponse,
 		extractTierInfo,
-		extractUsageInfo,
-		parseUsage,
 	} = providerDescriptor;
 
 	let targetUrl: string;
@@ -890,18 +856,6 @@ function materializeLegacyPlan(
 			? {
 					extractTierInfo: (response: Response) =>
 						Reflect.apply(extractTierInfo, provider, [response]),
-				}
-			: {}),
-		...(extractUsageInfo
-			? {
-					extractUsageInfo: (response: Response) =>
-						Reflect.apply(extractUsageInfo, provider, [response]),
-				}
-			: {}),
-		...(parseUsage
-			? {
-					parseUsage: (response: Response) =>
-						Reflect.apply(parseUsage, provider, [response]),
 				}
 			: {}),
 	};

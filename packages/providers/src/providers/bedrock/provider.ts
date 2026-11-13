@@ -7,7 +7,6 @@ import {
 	type ConverseStreamCommandInput,
 	type ConverseStreamOutput,
 } from "@aws-sdk/client-bedrock-runtime";
-import { estimateCostUSD } from "@better-ccflare/core";
 import { Logger } from "@better-ccflare/logger";
 import type { Account } from "@better-ccflare/types";
 import { BaseProvider } from "../../base";
@@ -35,10 +34,7 @@ import {
 	transformStreamingRequest,
 } from "./request-transformer";
 import {
-	type BedrockConverseResponse,
-	type BedrockUsage,
 	type ClaudeCitation,
-	normalizeBedrockUsage,
 	transformBedrockCitation,
 	transformNonStreamingResponse,
 } from "./response-parser";
@@ -1006,197 +1002,6 @@ export class BedrockProvider extends BaseProvider implements Provider {
 			({ message: failureMessage } = await translateBedrockError(error));
 		}
 		throw new Error(failureMessage);
-	}
-
-	/**
-	 * Extract usage information from Bedrock response
-	 *
-	 * Phase 4 implementation:
-	 * - Parse usage block from non-streaming JSON responses
-	 * - Calculate costs based on model pricing via estimateCostUSD
-	 * - Track cache usage (inputTokens, cacheReadInputTokens, cacheWriteInputTokens)
-	 * - Graceful degradation: returns null on errors (streaming or missing usage)
-	 *
-	 * Note: Streaming usage extraction deferred to Phase 5 (requires SSE parsing)
-	 *
-	 * @param response - Bedrock response
-	 * @returns Usage information or null
-	 */
-	async extractUsageInfo(response: Response): Promise<{
-		model?: string;
-		promptTokens?: number;
-		completionTokens?: number;
-		totalTokens?: number;
-		inputTokens?: number;
-		cacheReadInputTokens?: number;
-		cacheCreationInputTokens?: number;
-		outputTokens?: number;
-		costUsd?: number;
-	} | null> {
-		try {
-			const contentType = response.headers.get("content-type") || "";
-
-			// Only process JSON responses (streaming handled in Phase 5)
-			if (!contentType.includes("application/json")) {
-				return null;
-			}
-
-			const clone = response.clone();
-			const json = (await clone.json()) as BedrockConverseResponse;
-
-			if (!json.usage) {
-				return null;
-			}
-
-			const normalizedUsage = normalizeBedrockUsage(json.usage);
-
-			// Calculate cost (graceful degradation if cost calculation fails)
-			let costUsd: number | undefined;
-			try {
-				costUsd = await estimateCostUSD("bedrock", {
-					inputTokens: normalizedUsage.inputTokens,
-					outputTokens: normalizedUsage.outputTokens,
-					cacheReadInputTokens: normalizedUsage.cacheReadInputTokens,
-					cacheCreationInputTokens: normalizedUsage.cacheCreationInputTokens,
-				});
-			} catch (error) {
-				log.warn(
-					`Failed to calculate Bedrock cost: ${(error as Error).message}`,
-				);
-			}
-
-			return {
-				...normalizedUsage,
-				costUsd,
-			};
-		} catch (error) {
-			log.error(
-				`Failed to extract usage from Bedrock response: ${(error as Error).message}`,
-			);
-			return null;
-		}
-	}
-
-	/**
-	 * Parse usage from streaming SSE response (final event)
-	 *
-	 * Phase 5 implementation:
-	 * - Wait for final SSE event containing usage metadata
-	 * - Extract tokens and calculate cost immediately
-	 * - Return null on parsing errors (graceful degradation per CONTEXT.md)
-	 *
-	 * User decision (CONTEXT.md):
-	 * - "Wait for final SSE event to extract token usage (not incremental parsing)"
-	 * - "If usage extraction fails, log warning and continue (mark usage as null/zero, don't fail request)"
-	 * - "Calculate cost immediately when usage is extracted and store in database"
-	 *
-	 * @param response - Streaming SSE response
-	 * @returns Usage information or null if extraction fails
-	 */
-	async parseUsage(response: Response): Promise<{
-		model?: string;
-		promptTokens?: number;
-		completionTokens?: number;
-		totalTokens?: number;
-		inputTokens?: number;
-		cacheReadInputTokens?: number;
-		cacheCreationInputTokens?: number;
-		outputTokens?: number;
-		costUsd?: number;
-	} | null> {
-		try {
-			const contentType = response.headers.get("content-type") || "";
-
-			// Non-streaming: delegate to extractUsageInfo
-			if (contentType.includes("application/json")) {
-				return this.extractUsageInfo(response);
-			}
-
-			// Streaming: parse SSE events to find final usage
-			if (!contentType.includes("text/event-stream")) {
-				log.warn("parseUsage called on non-SSE response, skipping");
-				return null;
-			}
-
-			// Read entire SSE stream to find final usage event
-			const reader = response.body?.getReader();
-			if (!reader) {
-				log.warn("No response body reader available");
-				return null;
-			}
-
-			const decoder = new TextDecoder();
-			let buffer = "";
-			let usage: BedrockUsage | null = null;
-
-			try {
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-
-					buffer += decoder.decode(value, { stream: true });
-					const lines = buffer.split("\n");
-					buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-					for (const line of lines) {
-						if (!line.startsWith("data: ")) continue;
-
-						const data = line.slice(6).trim();
-						if (data === "[DONE]") continue;
-
-						try {
-							const event = JSON.parse(data);
-
-							// Bedrock SSE format: look for usage in various event types
-							if (event.usage) {
-								usage = event.usage;
-							}
-							// Alternative: message_stop event with usage
-							if (event.type === "message_stop" && event.usage) {
-								usage = event.usage;
-							}
-						} catch {
-							// Ignore malformed JSON events
-						}
-					}
-				}
-			} finally {
-				reader.releaseLock();
-			}
-
-			if (!usage) {
-				log.debug("No usage found in SSE stream");
-				return null;
-			}
-
-			const normalizedUsage = normalizeBedrockUsage(usage);
-
-			// Calculate cost immediately (per CONTEXT.md: "Calculate cost immediately when usage is extracted")
-			let costUsd: number | undefined;
-			try {
-				costUsd = await estimateCostUSD("bedrock", {
-					inputTokens: normalizedUsage.inputTokens,
-					outputTokens: normalizedUsage.outputTokens,
-					cacheReadInputTokens: normalizedUsage.cacheReadInputTokens,
-					cacheCreationInputTokens: normalizedUsage.cacheCreationInputTokens,
-				});
-			} catch (error) {
-				log.warn(
-					`Failed to calculate Bedrock cost: ${(error as Error).message}`,
-				);
-			}
-
-			return {
-				...normalizedUsage,
-				costUsd,
-			};
-		} catch (error) {
-			// Graceful degradation per CONTEXT.md: "If usage extraction fails, log warning and continue"
-			log.warn(
-				`Failed to parse usage from Bedrock SSE stream: ${(error as Error).message}`,
-			);
-			return null;
-		}
 	}
 
 	/**

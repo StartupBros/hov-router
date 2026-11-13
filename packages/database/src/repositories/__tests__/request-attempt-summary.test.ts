@@ -86,7 +86,7 @@ test("SQLite and fake-adapter rows retain tombstones and legacy summaries have n
 	}
 });
 
-test("first terminal attribution survives late usage/save and reads through history", async () => {
+test("first terminal attribution survives a late save and reads through history", async () => {
 	const db = new Database(":memory:");
 	try {
 		ensureSchema(db);
@@ -96,11 +96,6 @@ test("first terminal attribution survives late usage/save and reads through hist
 			...base,
 			routingAttemptSummary: summary,
 			streamTerminalState: "truncated",
-		});
-		await repo.updateUsage(base.id, {
-			model: "late-usage-model",
-			inputTokens: 12,
-			outputTokens: 3,
 		});
 		await repo.save({
 			...base,

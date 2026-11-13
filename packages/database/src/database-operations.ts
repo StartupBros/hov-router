@@ -1802,17 +1802,6 @@ OAuth tokens will need to be re-authenticated.
 		this.notifyRequestsDeleted();
 	}
 
-	async updateRequestUsage(
-		requestId: string,
-		usage: RequestData["usage"],
-	): Promise<void> {
-		await withDatabaseRetry(
-			() => this.requests.updateUsage(requestId, usage),
-			this.retryConfig,
-			"updateRequestUsage",
-		);
-	}
-
 	async saveRequestPayload(id: string, data: unknown): Promise<void> {
 		await withDatabaseRetry(
 			() => this.requests.savePayload(id, data),

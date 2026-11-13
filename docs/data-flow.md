@@ -536,7 +536,7 @@ flowchart LR
     subgraph "Per Request Updates (via AsyncDbWriter)"
         A[Request Start] --> B[enqueue: updateAccountUsage]
         B --> C{Response Type}
-        C -->|Success| D[enqueue: saveRequest<br/>success=true]
+        C -->|Success| D[enqueue: saveRequest<br/>success=true, tokens, cost]
         C -->|Rate Limited| E[enqueue: markAccountRateLimited<br/>+ saveRequest]
         C -->|Error| F[enqueue: saveRequest<br/>with error]
         
@@ -546,9 +546,6 @@ flowchart LR
         
         D --> H[enqueue: updateAccountRateLimitMeta]
         E --> H
-        
-        D --> I[extractUsageInfo]
-        I --> J[enqueue: updateRequestUsage<br/>with cost/tokens]
         
         D --> K[extractTierInfo]
         K --> L[enqueue: updateAccountTier]
@@ -670,11 +667,7 @@ sequenceDiagram
         Request->>AsyncWriter: enqueue(updateAccountTier)
     end
     
-    alt Streaming Response
-        Note over Request: Response sent to client
-        Request->>AsyncWriter: enqueue(updateRequestUsage)
-        Note over AsyncWriter: Usage data queued after extraction
-    end
+    Note over Request,AsyncWriter: The usage collector enqueues saveRequest once the response ends. It carries the token counts and cost, and nothing writes them again.
     
     Note over AsyncWriter,DB: Background Processing (every 100ms)
     

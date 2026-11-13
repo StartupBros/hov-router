@@ -12,7 +12,6 @@ import type {
 } from "@better-ccflare/types";
 import { circuitKeyFor, recordSuccess } from "../circuit-breaker";
 import { recordCodexUsageSnapshot } from "../codex-usage-history";
-import { drainBody } from "./discard-body-cancel";
 import { isInternalProbe, type ProxyContext } from "./proxy-types";
 import {
 	applyRateLimitCooldown,
@@ -29,45 +28,6 @@ export interface RateLimitObservation {
 	accountBenched: boolean;
 	availableAt: number | null;
 	circuitCounted: boolean;
-}
-
-/**
- * Releases a `response.clone()` tee branch that a provider hook (parseUsage /
- * extractUsageInfo) may resolve without ever reading. Per the Streams spec,
- * cancelling one tee branch never settles until every sibling branch has
- * been cancelled or fully read: an abandoned, never-touched clone left
- * lying around can block cancellation of the ORIGINAL response elsewhere
- * (e.g. proxy-operations.ts's discardUnusedResponse on rate-limited
- * failover) forever. BaseProvider's default extractUsageInfo is exactly
- * this case: it returns null without touching `_response` at all.
- *
- * Only acts when `bodyUsed` is still false, i.e. nothing ever started
- * reading this exact clone. Providers that DO consume the body (directly,
- * or via their own internal `response.clone()`) leave `bodyUsed` false on
- * this outer clone too in the common "clone-then-read-the-inner-clone"
- * pattern used by anthropic/openai/base-anthropic-compatible, but fully
- * draining their inner clone also closes this one (tee branches close
- * together once the shared underlying source reaches EOF), so draining an
- * already-closed stream here is a harmless, immediately-resolved no-op.
- * Never awaited by the caller: the drain may itself stay pending on a
- * still-unresolved sibling branch, and this function must never become
- * another place a caller can get stuck waiting.
- *
- * Uses `drainBody`, NOT `body.cancel()`: this repo's own benchmark
- * (bench/drain-strategy-harness.ts) measured `body.cancel()` as a no-op on
- * every released Bun (Bun 1.3.2 ~83 KB/req leak, 1.3.14 ~78 KB/req — both
- * indistinguishable from never calling it at all). Only draining the body
- * to done actually releases the native backing store on stock Bun.
- */
-function releaseUnconsumedClone(clone: Response): void {
-	if (clone.bodyUsed) return;
-	const body = clone.body;
-	if (!body || body.locked) return;
-	// Fire and forget — releasing the buffer must not block the caller, and
-	// a drain that throws must not surface into the response path.
-	drainBody(body).catch(() => {
-		// Best effort only; see function doc above.
-	});
 }
 
 /**
@@ -137,14 +97,12 @@ export function handleRateLimitResponse(
  * @param account - The account to update
  * @param response - The response to extract metadata from
  * @param ctx - The proxy context
- * @param requestId - The request ID for usage tracking
  * @param bypassSession - Whether to bypass session tracking (for cache-keepalive replays)
  */
 export function updateAccountMetadata(
 	account: Account,
 	response: Response,
 	ctx: ProxyContext,
-	requestId?: string,
 	bypassSession = false,
 ): void {
 	// Update basic usage (with optional bypass)
@@ -266,94 +224,6 @@ export function updateAccountMetadata(
 			}
 		}
 	}
-
-	// Extract usage info if supported
-	if (requestId) {
-		// For streaming responses, prefer parseUsage (handles SSE final events)
-		// For non-streaming, use extractUsageInfo (handles JSON responses)
-		const isStream = ctx.provider.isStreamingResponse?.(response) ?? false;
-
-		if (isStream && ctx.provider.parseUsage) {
-			const parseUsage = ctx.provider.parseUsage.bind(ctx.provider);
-			// Cloned eagerly (not inside the IIFE) so a synchronous
-			// response.clone() failure surfaces to the caller immediately
-			// rather than being swallowed by the async try/catch below.
-			const usageClone = response.clone() as Response;
-			(async () => {
-				try {
-					const usageInfo = await parseUsage(usageClone);
-					if (usageInfo) {
-						log.debug(
-							`Extracted streaming usage for account ${account.name}: ${JSON.stringify(usageInfo)}`,
-						);
-						// Store usage info in database
-						try {
-							await ctx.asyncWriter.enqueue(() =>
-								ctx.dbOps.updateRequestUsage(requestId, usageInfo),
-							);
-						} catch (error) {
-							log.warn(`Failed to save usage for request ${requestId}:`, error);
-						}
-					}
-				} catch (error) {
-					log.warn(
-						`Failed to extract streaming usage for account ${account.name}:`,
-						error,
-					);
-				} finally {
-					// Releases the tee branch if parseUsage returned early
-					// (unsupported content-type, no body reader available)
-					// without ever reading it. See releaseUnconsumedClone's
-					// doc comment above for why this uses drainBody, not
-					// body.cancel(). See issue #354.
-					releaseUnconsumedClone(usageClone);
-				}
-			})();
-		} else if (!isStream && ctx.provider.extractUsageInfo) {
-			const extractUsageInfo = ctx.provider.extractUsageInfo.bind(ctx.provider);
-			// Cloned eagerly (not inside the IIFE) so a synchronous
-			// response.clone() failure surfaces to the caller immediately
-			// rather than being swallowed by the async try/catch below. The
-			// clone is consumed by extractUsageInfo (which itself clones
-			// again internally — see providers/anthropic/provider.ts:645);
-			// releasing before that await completes would truncate usage
-			// extraction, which is why release only happens in `finally`.
-			const usageClone = response.clone() as Response;
-			(async () => {
-				try {
-					const usageInfo = await extractUsageInfo(usageClone);
-					if (usageInfo) {
-						log.debug(
-							`Extracted usage info for account ${account.name}: ${JSON.stringify(usageInfo)}`,
-						);
-						// Store usage info in database
-						try {
-							await ctx.asyncWriter.enqueue(() =>
-								ctx.dbOps.updateRequestUsage(requestId, usageInfo),
-							);
-						} catch (error) {
-							log.warn(`Failed to save usage for request ${requestId}:`, error);
-						}
-					}
-				} catch (error) {
-					log.warn(
-						`Failed to extract usage info for account ${account.name}:`,
-						error,
-					);
-				} finally {
-					// After the await, the body is either fully consumed or
-					// the provider's reader was cancelled mid-stream. Either
-					// way the local has no further consumer; release its
-					// body if it is still unlocked. This bounds transient,
-					// concurrency-scaled off-heap retention per in-flight
-					// request — sequential requests are flat (no per-request
-					// growth), but under concurrent load the held clone
-					// compounds.
-					releaseUnconsumedClone(usageClone);
-				}
-			})();
-		}
-	}
 }
 
 /**
@@ -361,14 +231,12 @@ export function updateAccountMetadata(
  * @param response - The provider response
  * @param account - The account used
  * @param ctx - The proxy context
- * @param requestId - The request ID for usage tracking
  * @returns Promise resolving to whether the response is rate-limited
  */
 export async function processProxyResponse(
 	response: Response,
 	account: Account,
 	ctx: ProxyContext,
-	requestId?: string,
 	requestMeta?: { headers?: Headers; path?: string },
 	onRateLimit?: (observation: RateLimitObservation) => void | Promise<void>,
 ): Promise<boolean> {
@@ -528,7 +396,7 @@ export async function processProxyResponse(
 		// Also update metadata for rate-limited responses
 		const bypassSession =
 			requestMeta?.headers?.get("x-better-ccflare-bypass-session") === "true";
-		updateAccountMetadata(account, response, ctx, requestId, bypassSession);
+		updateAccountMetadata(account, response, ctx, bypassSession);
 		return true; // Signal rate limit
 	}
 
@@ -537,7 +405,7 @@ export async function processProxyResponse(
 		// Update account metadata in background
 		const bypassSession =
 			requestMeta?.headers?.get("x-better-ccflare-bypass-session") === "true";
-		updateAccountMetadata(account, response, ctx, requestId, bypassSession);
+		updateAccountMetadata(account, response, ctx, bypassSession);
 	}
 
 	if (!rateLimitInfo.isRateLimited && !skipAccountMetadata) {

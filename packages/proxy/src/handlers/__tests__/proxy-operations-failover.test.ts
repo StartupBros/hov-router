@@ -408,10 +408,6 @@ function makeAttemptPlanningProvider(
 							?.includes("text/event-stream") ?? false
 					);
 				},
-				async extractUsageInfo() {
-					options.onPlanHook?.("extractUsageInfo", this);
-					return null;
-				},
 			};
 			return candidate;
 		},
@@ -919,10 +915,6 @@ describe("proxyWithAccount — immutable provider attempt plans", () => {
 				provider.parseRateLimit = () => {
 					sourceProviderHookCalls++;
 					return { isRateLimited: false };
-				};
-				provider.extractUsageInfo = async () => {
-					sourceProviderHookCalls++;
-					return null;
 				};
 				return jsonResponse({ error: { type: "overloaded_error" } }, 529);
 			}
@@ -3421,9 +3413,9 @@ describe("proxyWithAccount: Codex 529 rate-limited failover does not hang on aba
 		const outcome = await Promise.race([resultPromise, timeoutPromise]);
 
 		// Before the fix: discardUnusedResponse awaits an unboundable
-		// body.cancel() on a tee branch whose siblings (the parseRateLimit
-		// and extractUsageInfo clones) were abandoned without ever being
-		// read or cancelled, so this races the 2s timeout and loses.
+		// body.cancel() on a tee branch whose siblings (body clones taken
+		// for side reads) were abandoned without ever being read or
+		// cancelled, so this races the 2s timeout and loses.
 		expect(outcome).not.toBe(TIMEOUT);
 		expect(outcome).toBeNull();
 

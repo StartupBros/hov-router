@@ -361,6 +361,18 @@ function normalizeTokenCount(value: unknown): number | undefined {
 		: undefined;
 }
 
+/**
+ * The dollar amount in an `anthropic-billing-cost` header, when the whole
+ * header is one number. Text such as "1.5 USD" or "0,0025" is not a cost.
+ */
+function parseBilledCostUsd(header: string | undefined): number | undefined {
+	const text = header?.trim();
+	if (!text) return undefined;
+	const cost = Number(text);
+	if (!Number.isFinite(cost) || cost < 0) return undefined;
+	return cost === 0 ? 0 : cost;
+}
+
 function captureUsageIterations(usage: unknown, state: RequestState): void {
 	if (!usage || typeof usage !== "object") return;
 	const rawIterations = (usage as Record<string, unknown>).iterations;
@@ -1769,6 +1781,16 @@ export class UsageCollector {
 					advisorCostUsd = advisorSum;
 					state.usage.costUsd = total;
 				}
+			}
+
+			// Anthropic states what it billed for a non-streaming reply in a
+			// response header. That figure replaces the catalogue estimate,
+			// advisor spend included; a streaming reply keeps the estimate.
+			if (startMessage.providerName === "anthropic" && !startMessage.isStream) {
+				const billedCostUsd = parseBilledCostUsd(
+					startMessage.responseHeaders["anthropic-billing-cost"],
+				);
+				if (billedCostUsd !== undefined) state.usage.costUsd = billedCostUsd;
 			}
 
 			// Calculate tokens per second - zai specific vs other providers

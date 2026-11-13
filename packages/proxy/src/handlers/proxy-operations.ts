@@ -533,10 +533,6 @@ function bindProviderAttemptPlan(plan: ProviderAttemptPlan): Provider {
 			? { isStreamingResponse: plan.isStreamingResponse }
 			: {}),
 		...(plan.extractTierInfo ? { extractTierInfo: plan.extractTierInfo } : {}),
-		...(plan.extractUsageInfo
-			? { extractUsageInfo: plan.extractUsageInfo }
-			: {}),
-		...(plan.parseUsage ? { parseUsage: plan.parseUsage } : {}),
 	};
 	return Object.freeze(boundProvider);
 }
@@ -7254,10 +7250,8 @@ export async function proxyWithAccount(
 		// native one. Raw provider SSE is never parsed by the Anthropic classifier.
 		//
 		// Keep native Anthropic header-based rate-limit policy separate and ahead of
-		// body access. processProxyResponse starts a background usage clone for
-		// successful streams, and that tee sibling would make cancellation of a
-		// pre-commit stall wait indefinitely. In Bun, merely reading Response.body
-		// before a later classification clone can also disturb the retained branch.
+		// body access. In Bun, merely reading Response.body before a later
+		// classification clone can disturb the retained branch.
 		const officialCodexPrecommitSseRetryRouteEligible =
 			!irreversibleSearchDispatchCommitted() &&
 			attemptPlan.providerName === "codex" &&
@@ -7788,7 +7782,6 @@ export async function proxyWithAccount(
 				responseForRateLimitCheck,
 				account,
 				attemptProxyContext(),
-				requestMeta.id,
 				requestMeta,
 				(observation) => {
 					rateLimitObservation = observation;

@@ -518,7 +518,6 @@ The dashboard exposes a "Compact database" button that runs these for you. Expec
 #### Request Tracking
 - `saveRequestMeta(id, method, path, accountUsed, statusCode, timestamp?)`: Save basic request metadata
 - `saveRequest(id, method, path, ...)`: Log request with full metadata including usage and agent info
-- `updateRequestUsage(requestId, usage)`: Update token usage after request completion
 - `saveRequestPayload(id, data)`: Store request/response JSON
 - `getRequestPayload(id)`: Retrieve specific payload
 - `listRequestPayloadsWithAccountNames(limit?)`: List payloads with account names

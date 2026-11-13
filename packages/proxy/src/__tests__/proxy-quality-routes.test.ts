@@ -1169,15 +1169,10 @@ describe("prewarmed native catalogs", () => {
 			expect(state?.conversations[0]?.lastSuccessfulDecision?.value).toEqual(
 				history[0].qualityDecision,
 			);
-			await operations.updateRequestUsage(history[0].id, {
-				model: "gpt-6-astra",
-				inputTokens: 15,
-				outputTokens: 7,
-			});
-			const late = await (
+			const summary = await (
 				await createRequestsSummaryHandler(operations.getAdapter())()
 			).json();
-			expect(late[0].qualityDecision).toEqual(history[0].qualityDecision);
+			expect(summary[0].qualityDecision).toEqual(history[0].qualityDecision);
 			const detail = await (
 				await createRequestsDetailHandler(operations)()
 			).json();
@@ -2503,12 +2498,16 @@ describe("prewarmed native catalogs", () => {
 		"cancel",
 	])("nonstream %s settles exactly once without a home or replay", async (ending) => {
 		let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+		let upstreamCancelled = false;
 		upstream = () =>
 			new Response(
 				new ReadableStream<Uint8Array>({
 					start(c) {
 						controller = c;
 						c.enqueue(new TextEncoder().encode('{"type":"message"'));
+					},
+					cancel() {
+						upstreamCancelled = true;
 					},
 				}),
 				{ headers: { "content-type": "application/json" } },
@@ -2520,10 +2519,10 @@ describe("prewarmed native catalogs", () => {
 			const cancelled = response.body?.cancel();
 			await flush();
 			expect(settlement).toHaveBeenCalledTimes(1);
-			// The existing usage clone owns the other tee branch. Release that
-			// synthetic source after observing cancellation, not before it.
-			controller.close();
 			await cancelled;
+			// No usage clone holds a second branch of the reply any more (#801),
+			// so the client's cancel reaches the upstream body itself.
+			expect(upstreamCancelled).toBe(true);
 		} else {
 			const reading = response.text();
 			if (ending === "error") {
