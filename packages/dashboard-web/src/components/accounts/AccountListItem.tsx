@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
 	AlertCircle,
+	ChevronDown,
 	Edit2,
 	Ellipsis,
 	Globe,
@@ -13,7 +14,7 @@ import {
 	Trash2,
 	Zap,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useId, useState } from "react";
 import type { Account } from "../../api";
 import {
 	providerShowsWeeklyUsage,
@@ -24,13 +25,6 @@ import { OAuthTokenStatusWithBoundary } from "../OAuthTokenStatus";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogTitle,
-	DialogTrigger,
-} from "../ui/dialog";
-import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
@@ -38,6 +32,7 @@ import {
 	DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Switch } from "../ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import type { AccountFamilyRoutingState } from "./account-routing";
 import { accountUsageWindows } from "./account-usage-windows";
 import { BankedResetsStatus } from "./BankedResetsStatus";
@@ -283,15 +278,11 @@ export function AccountListItem({
 }: AccountListItemProps) {
 	const [isRefreshingUsage, setIsRefreshingUsage] = useState(false);
 	const [detailsOpen, setDetailsOpen] = useState(false);
-	const detailsTriggerRef = useRef<HTMLButtonElement>(null);
-	const afterDetailsClose = useRef<(() => void) | null>(null);
+	const detailsId = useId();
+	const [detailsTab, setDetailsTab] = useState("usage");
 	const changeDetailsOpen = (open: boolean) => {
 		onClearSettingsError?.(account.id);
 		setDetailsOpen(open);
-	};
-	const closeDetailsThen = (openDialog: () => void) => {
-		afterDetailsClose.current = openDialog;
-		changeDetailsOpen(false);
 	};
 	const quietBankedBalance =
 		account.provider === "codex" &&
@@ -442,7 +433,7 @@ export function AccountListItem({
 	return (
 		<article
 			aria-label={account.name}
-			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,3.2fr)_minmax(0,0.9fr)_10.5rem] xl:items-center xl:gap-3 xl:space-y-0 ${
+			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,3.2fr)_minmax(0,0.9fr)_11rem] xl:items-center xl:gap-3 xl:space-y-0 ${
 				isPrimary
 					? "border-border border-l-2 border-l-primary"
 					: "border-border hover:border-muted-foreground/50"
@@ -526,356 +517,22 @@ export function AccountListItem({
 							<Pause className="h-4 w-4" />
 						)}
 					</Button>
-					{/* modal={false}: every item opens a Radix dialog, and a modal menu
-					    closing underneath one can leave pointer-events disabled on body. */}
-					<Dialog open={detailsOpen} onOpenChange={changeDetailsOpen}>
-						<DialogTrigger asChild>
-							<Button
-								variant="ghost"
-								size="sm"
-								className="min-h-11"
-								ref={detailsTriggerRef}
-								aria-label={`Details for ${account.name}`}
-							>
-								Details
-							</Button>
-						</DialogTrigger>
-						<DialogContent
-							className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto [&>button]:h-11 [&>button]:w-11"
-							onCloseAutoFocus={(event) => {
-								const openDialog = afterDetailsClose.current;
-								if (!openDialog) return;
-								afterDetailsClose.current = null;
-								// Finish the old focus scope before opening another modal, and
-								// give that modal a mounted trigger to return focus to.
-								event.preventDefault();
-								detailsTriggerRef.current?.focus();
-								openDialog();
-							}}
-						>
-							<DialogTitle className="break-words pr-10">
-								{account.name}
-							</DialogTitle>
-							<DialogDescription>
-								Settings &amp; account details
-							</DialogDescription>
-							<div className="flex flex-wrap items-center gap-3 text-sm">
-								<span className="tabular-nums">
-									{presenter.requestCount.toLocaleString()} requests
-								</span>
-								<Button
-									variant="outline"
-									className="min-h-11"
-									onClick={() => onPauseToggle(account)}
-								>
-									{account.paused ? "Resume account" : "Pause account"}
-								</Button>
-								{canRefreshUsage && (
-									<Button
-										variant="ghost"
-										size="sm"
-										className="h-11 w-11 p-0"
-										disabled={isRefreshingUsage}
-										onClick={async () => {
-											setIsRefreshingUsage(true);
-											try {
-												await onRefreshUsage(account);
-											} finally {
-												setIsRefreshingUsage(false);
-											}
-										}}
-										aria-label="Refresh usage"
-										title={
-											account.provider === "codex"
-												? "Refresh usage data (free ChatGPT usage endpoint; falls back to a minimal quota-consuming request on custom endpoints or when the free endpoint fails)"
-												: "Refresh usage data (restarts usage polling and refreshes token if expired)"
-										}
-									>
-										<RefreshCw
-											className={`h-3.5 w-3.5 ${isRefreshingUsage ? "animate-spin" : ""}`}
-										/>
-									</Button>
-								)}
-							</div>
-							<p
-								className="text-xs text-muted-foreground"
-								title={presenter.rateLimitStatus}
-							>
-								Local status: {formatRateLimitStatus(presenter.rateLimitStatus)}
-							</p>
-							{settingsError && (
-								<p role="alert" className="text-sm text-destructive">
-									{settingsError}
-								</p>
-							)}
-							{account.provider === "codex" && account.bankedResets && (
-								<BankedResetsStatus
-									resets={account.bankedResets}
-									accountName={account.name}
-									onUseReset={
-										onUseReset
-											? () => closeDetailsThen(() => onUseReset(account))
-											: undefined
-									}
-								/>
-							)}
-							<RateLimitProgress {...rateLimitProgressProps} />
-							<p className="text-xs text-muted-foreground">
-								The comparison shows reported quota windows. An absent window is
-								not zero usage or unlimited capacity; provider reset times are
-								separate from local retry delays.
-							</p>
-							{routingStates.length > 0 && (
-								<section
-									aria-label={`Family routing for ${account.name}`}
-									className="group space-y-2"
-								>
-									<h4 className="text-sm font-medium">Family routing</h4>
-									<div className="flex flex-wrap gap-2">
-										{routingStates.map((state) => {
-											const availability = routingAvailabilityOverlay(state);
-											const actionRequired =
-												state.reason === "ambiguous" ||
-												state.reason === "new_billing_class";
-											const reasonDuplicatesMembership =
-												state.membershipLabel === "Manual" &&
-												state.reason === "manual_override";
-
-											return (
-												<div
-													key={`${state.family}:${state.comboId ?? "none"}`}
-													className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/20 px-2 py-1.5 text-xs"
-												>
-													<Badge variant="outline">
-														{formatRoutingFamily(state.family)}
-													</Badge>
-													{state.membershipLabel && (
-														<Badge
-															variant={
-																state.membershipLabel === "Managed"
-																	? "outline"
-																	: "secondary"
-															}
-														>
-															{state.membershipLabel}
-														</Badge>
-													)}
-													{state.logicalModel && (
-														<span>{state.logicalModel}</span>
-													)}
-													{state.tier !== null && (
-														<span>Tier {state.tier}</span>
-													)}
-													{state.reasonLabel && !reasonDuplicatesMembership && (
-														<span className="text-muted-foreground">
-															{state.reasonLabel}
-														</span>
-													)}
-													{actionRequired && (
-														<Badge variant="warning">Action required</Badge>
-													)}
-													{state.managedRouteAvailable && (
-														<>
-															<Badge variant="warning">
-																Managed route available
-															</Badge>
-															<span className="text-muted-foreground">
-																Review in Combos
-															</span>
-														</>
-													)}
-													{availability && (
-														<>
-															<Badge
-																variant={availability.variant}
-																title={state.availabilityLabel ?? undefined}
-															>
-																{availability.label}
-															</Badge>
-															<span className="text-muted-foreground">
-																membership is unchanged
-															</span>
-														</>
-													)}
-												</div>
-											);
-										})}
-									</div>
-								</section>
-							)}
-							<div className="space-y-4 py-2">
-								{" "}
-								{hasSettings && (
-									<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-										{showAutoFeatures && (
-											<div className={SETTING_CLASS}>
-												<span className="text-xs text-muted-foreground">
-													Auto-fallback:
-												</span>
-												<Switch
-													className={SETTING_SWITCH_CLASS}
-													checked={account.autoFallbackEnabled}
-													aria-label={`Auto-fallback for ${account.name}`}
-													onCheckedChange={() => onAutoFallbackToggle(account)}
-													title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
-												/>
-											</div>
-										)}
-										{showPlanBilling && (
-											<div className={SETTING_CLASS}>
-												<span className="text-xs text-muted-foreground">
-													Plan billing:
-												</span>
-												<Switch
-													className={SETTING_SWITCH_CLASS}
-													checked={account.billingType === "plan"}
-													aria-label={`Plan billing for ${account.name}`}
-													onCheckedChange={() => onBillingTypeToggle(account)}
-													title="Toggle plan billing for this account"
-												/>
-											</div>
-										)}
-										{showAutoPause && onAutoPauseOnOverageToggle && (
-											<div className={SETTING_CLASS}>
-												<span className="text-xs text-muted-foreground">
-													Auto-pause on overage:
-												</span>
-												<Switch
-													className={SETTING_SWITCH_CLASS}
-													checked={account.autoPauseOnOverageEnabled ?? false}
-													aria-label={`Auto-pause on overage for ${account.name}`}
-													onCheckedChange={() =>
-														onAutoPauseOnOverageToggle(account)
-													}
-													title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if auto-fallback is on."
-												/>
-											</div>
-										)}
-										{showCreditDrain && onCodexCreditDrainToggle && (
-											<CodexCreditDrainControl
-												account={account}
-												onToggle={onCodexCreditDrainToggle}
-											/>
-										)}
-										{onPublicValueToggle && (
-											<PublicValueControl
-												account={account}
-												onToggle={(selected) => {
-													if (selected.publicValueEnabled) {
-														onPublicValueToggle(selected);
-													} else {
-														closeDetailsThen(() =>
-															onPublicValueToggle(selected),
-														);
-													}
-												}}
-												onEditLabel={
-													onPublicValueEditLabel
-														? (selected) => {
-																closeDetailsThen(() =>
-																	onPublicValueEditLabel(selected),
-																);
-															}
-														: undefined
-												}
-											/>
-										)}
-										{showPeakHoursPause && onPeakHoursPauseToggle && (
-											<div className={SETTING_CLASS}>
-												<span className="text-xs text-muted-foreground">
-													Peak hours pause:
-												</span>
-												<Switch
-													className={SETTING_SWITCH_CLASS}
-													checked={account.peakHoursPauseEnabled ?? false}
-													aria-label={`Peak hours pause for ${account.name}`}
-													onCheckedChange={() =>
-														onPeakHoursPauseToggle(account)
-													}
-													title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
-												/>
-											</div>
-										)}
-									</div>
-								)}
-								<div className="flex min-w-0 flex-wrap gap-3 text-xs text-muted-foreground">
-									{" "}
-									{account.provider === "bedrock" && bedrockProfile && (
-										<>
-											<span className="whitespace-nowrap">
-												Profile: {bedrockProfile}
-											</span>
-											{bedrockRegion && (
-												<span
-													className="inline-flex items-center gap-1 whitespace-nowrap"
-													title={`Region: ${bedrockRegion}`}
-												>
-													<Globe className="h-3 w-3" />
-													{bedrockRegion}
-												</span>
-											)}
-											{bedrockCrossRegionMode && (
-												<span title="Cross-region inference mode">
-													{bedrockCrossRegionMode}
-												</span>
-											)}
-										</>
-									)}
-									{account.provider !== "bedrock" && account.customEndpoint && (
-										<span
-											className="inline-flex items-center gap-1 whitespace-nowrap"
-											title={`Custom endpoint: ${account.customEndpoint}`}
-										>
-											<Globe className="h-3 w-3" />
-											custom endpoint
-										</span>
-									)}
-									{modelMappingCount > 0 && (
-										<span className="inline-flex items-center gap-1 whitespace-nowrap">
-											<Hash className="h-3 w-3" />
-											{modelMappingCount} model{" "}
-											{modelMappingCount === 1 ? "mapping" : "mappings"}
-										</span>
-									)}
-								</div>{" "}
-								{showSessionInfo && (
-									<span className="whitespace-nowrap tabular-nums text-muted-foreground">
-										{sessionInfo}
-									</span>
-								)}{" "}
-								{account.sessionStats && (
-									<div className="text-xs text-muted-foreground">
-										Session: {account.sessionStats.requests} req
-										{" · "}↑{formatTokenCount(account.sessionStats.inputTokens)}{" "}
-										in
-										{" · "}✦
-										{formatTokenCount(
-											account.sessionStats.cacheCreationInputTokens,
-										)}{" "}
-										cache↑
-										{" · "}✦
-										{formatTokenCount(
-											account.sessionStats.cacheReadInputTokens,
-										)}{" "}
-										cache↓
-										{" · "}↓
-										{formatTokenCount(account.sessionStats.outputTokens)} out
-										{account.sessionStats.planCostUsd > 0 && (
-											<>
-												{" · "}${account.sessionStats.planCostUsd.toFixed(2)}{" "}
-												plan
-											</>
-										)}
-										{account.sessionStats.apiCostUsd > 0 && (
-											<>
-												{" · "}${account.sessionStats.apiCostUsd.toFixed(2)} api
-											</>
-										)}
-									</div>
-								)}
-							</div>
-						</DialogContent>
-					</Dialog>
+					<Button
+						variant={detailsOpen ? "secondary" : "ghost"}
+						size="sm"
+						className="min-h-11 gap-1 px-2"
+						aria-label={`Details for ${account.name}`}
+						aria-expanded={detailsOpen}
+						aria-controls={detailsId}
+						onClick={() => changeDetailsOpen(!detailsOpen)}
+					>
+						Details
+						<ChevronDown
+							className={`h-4 w-4 ${detailsOpen ? "rotate-180" : ""}`}
+							aria-hidden="true"
+						/>
+					</Button>
+					{/* A non-modal menu can hand focus to the existing confirmation dialogs. */}
 					<DropdownMenu modal={false}>
 						<DropdownMenuTrigger asChild>
 							<Button
@@ -1129,6 +786,371 @@ export function AccountListItem({
 					)}
 				</div>
 			)}
+
+			<section
+				id={detailsId}
+				aria-label={`Details for ${account.name}`}
+				hidden={!detailsOpen}
+				className="min-w-0 border-t pt-3 xl:col-span-full"
+			>
+				{detailsOpen && (
+					<Tabs
+						value={detailsTab}
+						onValueChange={setDetailsTab}
+						className="min-w-0"
+					>
+						{settingsError && (
+							<p role="alert" className="mb-3 text-sm text-destructive">
+								{settingsError}
+							</p>
+						)}
+						<TabsList
+							aria-label={`Account details for ${account.name}`}
+							className="h-auto min-h-11 w-full justify-start rounded-none border-b bg-transparent p-0 sm:w-auto"
+						>
+							{["usage", "routing", "settings"].map((tab) => (
+								<TabsTrigger
+									key={tab}
+									value={tab}
+									className="min-h-11 flex-1 rounded-none border-b-2 border-transparent px-4 capitalize data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none sm:flex-none"
+								>
+									{tab}
+								</TabsTrigger>
+							))}
+						</TabsList>
+
+						<TabsContent value="usage" className="max-w-4xl space-y-4 py-3">
+							<div className="flex flex-wrap items-center gap-3 text-sm">
+								<span className="tabular-nums">
+									{presenter.requestCount.toLocaleString()} requests
+								</span>
+								<Button
+									variant="outline"
+									className="min-h-11"
+									onClick={() => onPauseToggle(account)}
+								>
+									{account.paused ? "Resume account" : "Pause account"}
+								</Button>
+								{canRefreshUsage && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-11 w-11 p-0"
+										disabled={isRefreshingUsage}
+										onClick={async () => {
+											setIsRefreshingUsage(true);
+											try {
+												await onRefreshUsage(account);
+											} finally {
+												setIsRefreshingUsage(false);
+											}
+										}}
+										aria-label="Refresh usage"
+										title={
+											account.provider === "codex"
+												? "Refresh usage data (free ChatGPT usage endpoint; falls back to a minimal quota-consuming request on custom endpoints or when the free endpoint fails)"
+												: "Refresh usage data (restarts usage polling and refreshes token if expired)"
+										}
+									>
+										<RefreshCw
+											className={`h-3.5 w-3.5 ${isRefreshingUsage ? "animate-spin" : ""}`}
+										/>
+									</Button>
+								)}
+							</div>
+							<p
+								className="text-xs text-muted-foreground"
+								title={presenter.rateLimitStatus}
+							>
+								Local status: {formatRateLimitStatus(presenter.rateLimitStatus)}
+							</p>
+							{account.provider === "codex" && account.bankedResets && (
+								<BankedResetsStatus
+									resets={account.bankedResets}
+									accountName={account.name}
+									onUseReset={
+										onUseReset ? () => onUseReset(account) : undefined
+									}
+								/>
+							)}
+							<RateLimitProgress {...rateLimitProgressProps} />
+							<p className="text-xs text-muted-foreground">
+								The comparison shows reported quota windows. An absent window is
+								not zero usage or unlimited capacity; provider reset times are
+								separate from local retry delays.
+							</p>
+							{showSessionInfo && (
+								<span className="tabular-nums text-muted-foreground">
+									{sessionInfo}
+								</span>
+							)}
+							{account.sessionStats && (
+								<div className="text-xs text-muted-foreground">
+									Session: {account.sessionStats.requests} req
+									{" · "}↑{formatTokenCount(account.sessionStats.inputTokens)}{" "}
+									in
+									{" · "}✦
+									{formatTokenCount(
+										account.sessionStats.cacheCreationInputTokens,
+									)}{" "}
+									cache↑
+									{" · "}✦
+									{formatTokenCount(account.sessionStats.cacheReadInputTokens)}{" "}
+									cache↓
+									{" · "}↓{formatTokenCount(account.sessionStats.outputTokens)}{" "}
+									out
+									{account.sessionStats.planCostUsd > 0 && (
+										<>
+											{" · "}${account.sessionStats.planCostUsd.toFixed(2)} plan
+										</>
+									)}
+									{account.sessionStats.apiCostUsd > 0 && (
+										<>
+											{" · "}${account.sessionStats.apiCostUsd.toFixed(2)} api
+										</>
+									)}
+								</div>
+							)}
+						</TabsContent>
+						<TabsContent value="routing" className="space-y-4 py-3">
+							{routingStates.length > 0 && (
+								<section
+									aria-label={`Family routing for ${account.name}`}
+									className="group space-y-2"
+								>
+									<h4 className="text-sm font-medium">Family routing</h4>
+									<div className="flex flex-wrap gap-2">
+										{routingStates.map((state) => {
+											const availability = routingAvailabilityOverlay(state);
+											const actionRequired =
+												state.reason === "ambiguous" ||
+												state.reason === "new_billing_class";
+											const reasonDuplicatesMembership =
+												state.membershipLabel === "Manual" &&
+												state.reason === "manual_override";
+
+											return (
+												<div
+													key={`${state.family}:${state.comboId ?? "none"}`}
+													className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/20 px-2 py-1.5 text-xs"
+												>
+													<Badge variant="outline">
+														{formatRoutingFamily(state.family)}
+													</Badge>
+													{state.membershipLabel && (
+														<Badge
+															variant={
+																state.membershipLabel === "Managed"
+																	? "outline"
+																	: "secondary"
+															}
+														>
+															{state.membershipLabel}
+														</Badge>
+													)}
+													{state.logicalModel && (
+														<span>{state.logicalModel}</span>
+													)}
+													{state.tier !== null && (
+														<span>Tier {state.tier}</span>
+													)}
+													{state.reasonLabel && !reasonDuplicatesMembership && (
+														<span className="text-muted-foreground">
+															{state.reasonLabel}
+														</span>
+													)}
+													{actionRequired && (
+														<Badge variant="warning">Action required</Badge>
+													)}
+													{state.managedRouteAvailable && (
+														<>
+															<Badge variant="warning">
+																Managed route available
+															</Badge>
+															<span className="text-muted-foreground">
+																Review in Combos
+															</span>
+														</>
+													)}
+													{availability && (
+														<>
+															<Badge
+																variant={availability.variant}
+																title={state.availabilityLabel ?? undefined}
+															>
+																{availability.label}
+															</Badge>
+															<span className="text-muted-foreground">
+																membership is unchanged
+															</span>
+														</>
+													)}
+												</div>
+											);
+										})}
+									</div>
+								</section>
+							)}
+							<div className="flex min-w-0 flex-wrap gap-3 text-xs text-muted-foreground">
+								{" "}
+								{account.provider === "bedrock" && bedrockProfile && (
+									<>
+										<span className="whitespace-nowrap">
+											Profile: {bedrockProfile}
+										</span>
+										{bedrockRegion && (
+											<span
+												className="inline-flex items-center gap-1 whitespace-nowrap"
+												title={`Region: ${bedrockRegion}`}
+											>
+												<Globe className="h-3 w-3" />
+												{bedrockRegion}
+											</span>
+										)}
+										{bedrockCrossRegionMode && (
+											<span title="Cross-region inference mode">
+												{bedrockCrossRegionMode}
+											</span>
+										)}
+									</>
+								)}
+								{account.provider !== "bedrock" && account.customEndpoint && (
+									<span
+										className="inline-flex items-center gap-1 whitespace-nowrap"
+										title={`Custom endpoint: ${account.customEndpoint}`}
+									>
+										<Globe className="h-3 w-3" />
+										custom endpoint
+									</span>
+								)}
+								{modelMappingCount > 0 && (
+									<span className="inline-flex items-center gap-1 whitespace-nowrap">
+										<Hash className="h-3 w-3" />
+										{modelMappingCount} model{" "}
+										{modelMappingCount === 1 ? "mapping" : "mappings"}
+									</span>
+								)}
+							</div>
+
+							{routingStates.length === 0 && (
+								<p className="text-sm text-muted-foreground">
+									No family routing assignments reported.
+								</p>
+							)}
+							<div className="flex flex-wrap gap-2">
+								<Button
+									variant="outline"
+									className="min-h-11"
+									onClick={() => onPriorityChange(account)}
+								>
+									Change priority…
+								</Button>
+								{onCustomEndpointChange && (
+									<Button
+										variant="outline"
+										className="min-h-11"
+										onClick={() => onCustomEndpointChange(account)}
+									>
+										Custom endpoint…
+									</Button>
+								)}
+								{onModelMappingsChange && (
+									<Button
+										variant="outline"
+										className="min-h-11"
+										onClick={() => onModelMappingsChange(account)}
+									>
+										Model mappings…
+									</Button>
+								)}
+							</div>
+						</TabsContent>
+						<TabsContent value="settings" className="space-y-4 py-3">
+							{hasSettings && (
+								<div className="grid gap-x-8 gap-y-3 sm:grid-cols-2 xl:grid-cols-3">
+									{showAutoFeatures && (
+										<div className={SETTING_CLASS}>
+											<span className="text-xs text-muted-foreground">
+												Auto-fallback:
+											</span>
+											<Switch
+												className={SETTING_SWITCH_CLASS}
+												checked={account.autoFallbackEnabled}
+												aria-label={`Auto-fallback for ${account.name}`}
+												onCheckedChange={() => onAutoFallbackToggle(account)}
+												title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
+											/>
+										</div>
+									)}
+									{showPlanBilling && (
+										<div className={SETTING_CLASS}>
+											<span className="text-xs text-muted-foreground">
+												Plan billing:
+											</span>
+											<Switch
+												className={SETTING_SWITCH_CLASS}
+												checked={account.billingType === "plan"}
+												aria-label={`Plan billing for ${account.name}`}
+												onCheckedChange={() => onBillingTypeToggle(account)}
+												title="Toggle plan billing for this account"
+											/>
+										</div>
+									)}
+									{showAutoPause && onAutoPauseOnOverageToggle && (
+										<div className={SETTING_CLASS}>
+											<span className="text-xs text-muted-foreground">
+												Auto-pause on overage:
+											</span>
+											<Switch
+												className={SETTING_SWITCH_CLASS}
+												checked={account.autoPauseOnOverageEnabled ?? false}
+												aria-label={`Auto-pause on overage for ${account.name}`}
+												onCheckedChange={() =>
+													onAutoPauseOnOverageToggle(account)
+												}
+												title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if auto-fallback is on."
+											/>
+										</div>
+									)}
+									{showCreditDrain && onCodexCreditDrainToggle && (
+										<CodexCreditDrainControl
+											account={account}
+											onToggle={onCodexCreditDrainToggle}
+										/>
+									)}
+									{onPublicValueToggle && (
+										<PublicValueControl
+											account={account}
+											onToggle={onPublicValueToggle}
+											onEditLabel={onPublicValueEditLabel}
+										/>
+									)}
+									{showPeakHoursPause && onPeakHoursPauseToggle && (
+										<div className={SETTING_CLASS}>
+											<span className="text-xs text-muted-foreground">
+												Peak hours pause:
+											</span>
+											<Switch
+												className={SETTING_SWITCH_CLASS}
+												checked={account.peakHoursPauseEnabled ?? false}
+												aria-label={`Peak hours pause for ${account.name}`}
+												onCheckedChange={() => onPeakHoursPauseToggle(account)}
+												title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
+											/>
+										</div>
+									)}
+								</div>
+							)}
+
+							{!hasSettings && (
+								<p className="text-sm text-muted-foreground">
+									No additional settings for this provider.
+								</p>
+							)}
+						</TabsContent>
+					</Tabs>
+				)}
+			</section>
 		</article>
 	);
 }

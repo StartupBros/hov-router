@@ -1,10 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { BankedResets, RedeemResetResponse } from "@better-ccflare/types";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { Account } from "../../api";
 import type { RedeemResetAnswer } from "../../lib/redeem-reset";
 import { Dialog } from "../ui/dialog";
 import type { ResetFlowState } from "./reset-redemption-flow";
-import { UseResetPanel } from "./UseResetDialog";
+import { UseResetDialog, UseResetPanel } from "./UseResetDialog";
 
 const ID = "3f2b8c1e-7a4d-4b9e-9c21-5d6e7f8a9b0c";
 const NOW = Date.UTC(2026, 10, 3, 12, 0);
@@ -92,6 +93,45 @@ function buttons(html: string): Array<{ tag: string; label: string }> {
 		(match) => ({ tag: match[1], label: text(match[2]) }),
 	);
 }
+
+describe("UseResetDialog return focus", () => {
+	for (const connected of [true, false]) {
+		it(`restores only a still-connected opener (connected=${connected})`, () => {
+			const React = require("react");
+			const internals =
+				React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+			const previous = internals.H;
+			const events: string[] = [];
+			const opener = {
+				isConnected: connected,
+				focus: () => events.push("focus"),
+			};
+			let slot = 0;
+			internals.H = {
+				useState: () => [slot++ === 0 ? flow("confirm") : opener, () => {}],
+				useRef: () => ({ current: false }),
+			};
+			try {
+				const tree = UseResetDialog({
+					account: {
+						id: "acc-1",
+						name: "codex-pro-1",
+						bankedResets: resets,
+					} as Account,
+					redeem: async () => ({ kind: "no_answer" }),
+					onClose: () => {},
+				});
+				expect(tree).not.toBeNull();
+				tree?.props.children.props.onCloseAutoFocus({
+					preventDefault: () => events.push("prevent"),
+				});
+				expect(events).toEqual(connected ? ["prevent", "focus"] : []);
+			} finally {
+				internals.H = previous;
+			}
+		});
+	}
+});
 
 describe("UseResetPanel confirmation (R9, KTD12)", () => {
 	it("states each effect and the cost before anything is sent", () => {

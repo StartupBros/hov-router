@@ -12,7 +12,8 @@
  */
 import { describe, expect, it, mock } from "bun:test";
 import type { BankedResets, FullUsageData } from "@better-ccflare/types";
-import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactElement, ReactNode } from "react";
+import { renderToStaticMarkup as renderClosedMarkup } from "react-dom/server";
 import type { Account } from "../../api";
 import { AccountList, accountListItems } from "./AccountList";
 import {
@@ -23,21 +24,33 @@ import {
 import { mergeAccountModelMappings } from "./AccountModelMappingsDialog";
 import type { AccountFamilyRoutingState } from "./account-routing";
 
-// SSR omits closed portals. Exercise provider controls at the content boundary;
-// this mock does not establish browser dialog or focus behavior.
-const dialogPrimitives = await import("../ui/dialog");
-mock.module("../ui/dialog", () => ({
-	...dialogPrimitives,
-	DialogContent: ({ children }: { children: React.ReactNode }) => (
-		<div data-testid="details-content">{children}</div>
-	),
+// Static provider-contract coverage renders the row expanded and all tab bodies.
+// Browser acceptance separately drives the real disclosure, tabs and focus behavior.
+const tabsPrimitives = await import("../ui/tabs");
+mock.module("../ui/tabs", () => ({
+	...tabsPrimitives,
+	TabsContent: ({
+		children,
+		value,
+	}: {
+		children: ReactNode;
+		value: string;
+	}) => <div data-tab-content={value}>{children}</div>,
 }));
+function renderToStaticMarkup(node: ReactNode): string {
+	const row = node as ReactElement;
+	return renderClosedMarkup(
+		row?.type === AccountListItem
+			? rowTree(row.props as Parameters<typeof AccountListItem>[0], true)
+			: node,
+	);
+}
 
 function noop() {}
 function withoutDetailsContent(html: string): string {
-	const start = html.indexOf('<div data-testid="details-content">');
+	const start = html.search(/<section[^>]*aria-label="Details for /);
 	if (start < 0) return html;
-	const tags = /<div\b[^>]*>|<\/div>/g;
+	const tags = /<section\b[^>]*>|<\/section>/g;
 	tags.lastIndex = start;
 	let depth = 0;
 	for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
@@ -94,7 +107,7 @@ describe("account scan layout", () => {
 				]}
 			/>,
 		);
-		expect(html).toContain('aria-haspopup="dialog"');
+		expect(html).toContain('aria-expanded="true"');
 		expect(html).not.toContain("<details");
 		expect(html).toContain("Drain credits");
 		const visible = withoutDetailsContent(html);
@@ -796,10 +809,11 @@ describe("AccountListItem banked resets", () => {
 		return makeAccount({ provider: "codex", paused: false, bankedResets });
 	}
 
-	it("renders the account's banked resets as its own group below the status line", () => {
+	it("renders full banked reset controls as their own group below Usage statistics", () => {
 		const html = render(codex(tracked));
 		const group = html.indexOf(
 			'<fieldset aria-label="Banked resets for acc-1"',
+			html.indexOf('data-tab-content="usage"'),
 		);
 		expect(group).toBeGreaterThan(-1);
 		expect(html).toContain("cannot be undone");
@@ -1171,13 +1185,20 @@ describe("compact hybrid list", () => {
 		expect(html).toContain("Quota used · resets in");
 		expect(withoutDetailsContent(html)).toContain("Usage unavailable");
 	});
-	it("uses a dialog trigger instead of inline settings disclosures", () => {
-		const html = renderToStaticMarkup(
+	it("starts collapsed with a button controlling an inline account region", () => {
+		const html = renderClosedMarkup(
 			<AccountListItem account={makeAccount()} {...requiredHandlers} />,
 		);
-		expect(html).toContain('aria-haspopup="dialog"');
-		expect(html).toContain("Details");
-		expect(html).not.toContain("<summary");
+		const trigger = html.match(
+			/<button[^>]*aria-label="Details for acc-1"[^>]*>/,
+		)?.[0];
+		expect(trigger).toBeDefined();
+		expect(trigger).toContain('aria-expanded="false"');
+		expect(trigger).not.toContain('aria-haspopup="dialog"');
+		const regionId = trigger?.match(/aria-controls="([^"]+)"/)?.[1];
+		expect(regionId).toBeTruthy();
+		expect(html).toContain(`<section id="${regionId}"`);
+		expect(html).not.toContain('role="tablist"');
 	});
 });
 
@@ -1196,47 +1217,26 @@ describe("Details settings errors", () => {
 		expect(html).toContain("Setting failed");
 		expect(withoutDetailsContent(html)).not.toContain("Setting failed");
 	});
-	it("clears the account on both Details open and dismiss", () => {
-		// Execute the row hooks, then invoke the rendered Dialog lifecycle callback.
-		const React = require("react");
-		const internals =
-			React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
-		const previous = internals.H;
-		const changes: boolean[] = [];
-		const cleared: string[] = [];
-		internals.H = {
-			useState: () => [false, (value: boolean) => changes.push(value)],
-			useRef: () => ({ current: null }),
-		};
-		let tree: ReturnType<typeof AccountListItem>;
-		const account = makeAccount();
-		try {
-			tree = AccountListItem({
-				account,
-				...requiredHandlers,
-				onClearSettingsError: (id) => cleared.push(id),
-			});
-		} finally {
-			internals.H = previous;
+	it("clears the matching error when opening and collapsing Details", () => {
+		for (const open of [false, true]) {
+			const changes: unknown[] = [];
+			const cleared: string[] = [];
+			const account = makeAccount();
+			const tree = rowTree(
+				{
+					account,
+					...requiredHandlers,
+					onClearSettingsError: (id) => cleared.push(id),
+				},
+				open,
+				changes,
+			);
+			const trigger = treeNodes(tree).find((n) => n.props["aria-controls"]);
+			expect(trigger?.props["aria-expanded"]).toBe(open);
+			(trigger?.props.onClick as () => void)();
+			expect(changes).toEqual([!open]);
+			expect(cleared).toEqual([account.id]);
 		}
-		type DialogNode = {
-			props?: { onOpenChange?: (open: boolean) => void; children?: unknown };
-		};
-		function find(node: unknown): DialogNode | undefined {
-			if (!node || typeof node !== "object") return;
-			const element = node as DialogNode;
-			if (element.props?.onOpenChange) return element;
-			for (const child of [element.props?.children].flat(Infinity)) {
-				const found = find(child);
-				if (found) return found;
-			}
-		}
-		const onOpenChange = find(tree)?.props?.onOpenChange;
-		if (!onOpenChange) throw new Error("Details dialog callback missing");
-		onOpenChange(true);
-		onOpenChange(false);
-		expect(changes).toEqual([true, false]);
-		expect(cleared).toEqual([account.id, account.id]);
 	});
 });
 
@@ -1284,42 +1284,30 @@ it("represents a matching scoped binding inline and preserves unmatched exceptio
 	expect(html).toContain("binding");
 });
 
-it("hands Details reset confirmation off after closing and restoring the trigger focus", () => {
+function rowTree(
+	props: Parameters<typeof AccountListItem>[0],
+	open: boolean,
+	changes: unknown[] = [],
+) {
 	const React = require("react");
 	const internals =
 		React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
 	const previous = internals.H;
-	const events: string[] = [];
-	let refIndex = 0;
+	let index = 0;
 	internals.H = {
-		useState: () => [false, (open: boolean) => events.push(`open:${open}`)],
-		useRef: () => ({
-			current:
-				refIndex++ === 0 ? { focus: () => events.push("focus trigger") } : null,
-		}),
+		useState: (initial: unknown) => [
+			index++ === 1 ? open : initial,
+			(value: unknown) => changes.push(value),
+		],
+		useId: () => "account-details-test",
 	};
-	let tree: ReturnType<typeof AccountListItem>;
 	try {
-		tree = AccountListItem({
-			account: makeAccount({
-				provider: "codex",
-				bankedResets: {
-					tracked: true,
-					availableCount: 2,
-					applicableCount: 0,
-					appliesNow: false,
-					soonestExpiresAt: null,
-					doesNotExpire: false,
-					stale: false,
-					observedAt: null,
-				},
-			}),
-			...requiredHandlers,
-			onUseReset: () => events.push("confirm"),
-		});
+		return AccountListItem(props);
 	} finally {
 		internals.H = previous;
 	}
+}
+function treeNodes(tree: unknown): { props: Record<string, unknown> }[] {
 	const nodes: { props: Record<string, unknown> }[] = [];
 	function visit(node: unknown) {
 		if (!node || typeof node !== "object") return;
@@ -1334,29 +1322,110 @@ it("hands Details reset confirmation off after closing and restoring the trigger
 		}
 	}
 	visit(tree);
-	const reset = nodes.find((n) => n.props.onUseReset && !n.props.compact);
-	const modal = nodes.find((n) => n.props.onCloseAutoFocus);
+	return nodes;
+}
+it("opens reset confirmation directly without collapsing the account panel", () => {
+	const events: unknown[] = [];
+	const account = makeAccount({
+		provider: "codex",
+		bankedResets: {
+			tracked: true,
+			availableCount: 2,
+			applicableCount: 0,
+			appliesNow: false,
+			soonestExpiresAt: null,
+			doesNotExpire: false,
+			stale: false,
+			observedAt: null,
+		},
+	});
+	const tree = rowTree(
+		{
+			account,
+			...requiredHandlers,
+			onUseReset: (selected) => events.push(selected),
+		},
+		true,
+		events,
+	);
+	const reset = treeNodes(tree).find(
+		(n) => n.props.onUseReset && !n.props.compact,
+	);
 	expect(reset).toBeDefined();
-	expect(modal).toBeDefined();
 	(reset?.props.onUseReset as () => void)();
-	expect(events).toEqual(["open:false"]);
-	(
-		modal?.props.onCloseAutoFocus as (event: {
-			preventDefault: () => void;
-		}) => void
-	)({ preventDefault: () => events.push("prevent old focus") });
+	expect(events).toEqual([account]);
+});
+it("opens public value confirmation and label editing without collapsing Settings", () => {
+	const account = makeAccount();
+	const events: unknown[] = [];
+	const toggle = (selected: Account) => events.push(["toggle", selected]);
+	const edit = (selected: Account) => events.push(["edit", selected]);
+	const tree = rowTree(
+		{
+			account,
+			...requiredHandlers,
+			onPublicValueToggle: toggle,
+			onPublicValueEditLabel: edit,
+		},
+		true,
+		events,
+	);
+	const control = treeNodes(tree).find((n) => n.props.onEditLabel);
+	expect(control).toBeDefined();
+	(control?.props.onToggle as (account: Account) => void)(account);
+	(control?.props.onEditLabel as (account: Account) => void)(account);
 	expect(events).toEqual([
-		"open:false",
-		"prevent old focus",
-		"focus trigger",
-		"confirm",
+		["toggle", account],
+		["edit", account],
 	]);
-	(
-		modal?.props.onCloseAutoFocus as (event: {
-			preventDefault: () => void;
-		}) => void
-	)({ preventDefault: () => events.push("duplicate") });
-	expect(events).toHaveLength(4);
+});
+it("groups usage, routing and settings into named touch-sized tabs", () => {
+	const html = renderToStaticMarkup(
+		<AccountListItem
+			account={makeAccount({ customEndpoint: "https://gateway.example/v1" })}
+			{...requiredHandlers}
+		/>,
+	);
+	expect(html).toContain('role="tablist"');
+	for (const tab of ["usage", "routing", "settings"])
+		expect(html).toContain(`data-tab-content="${tab}"`);
+	const triggers = html.match(/<button[^>]*role="tab"[^>]*>/g) ?? [];
+	expect(triggers).toHaveLength(3);
+	for (const tab of triggers) expect(tab).toContain("min-h-11");
+	const usage = html.indexOf('data-tab-content="usage"');
+	const routing = html.indexOf('data-tab-content="routing"');
+	const settings = html.indexOf('data-tab-content="settings"');
+	expect(html.indexOf("requests", usage)).toBeLessThan(routing);
+	expect(html.indexOf("custom endpoint", routing)).toBeLessThan(settings);
+	expect(html.indexOf("Auto-fallback:", settings)).toBeGreaterThan(settings);
+});
+it("keeps settings errors before the tab content, not inside a single tab", () => {
+	const html = renderToStaticMarkup(
+		<AccountListItem
+			account={makeAccount()}
+			{...requiredHandlers}
+			settingsError="Setting failed"
+		/>,
+	);
+	expect(html.indexOf('role="alert"')).toBeGreaterThan(
+		html.indexOf("<section id="),
+	);
+	expect(html.indexOf('role="alert"')).toBeLessThan(
+		html.indexOf('data-tab-content="usage"'),
+	);
+});
+it("uses unique detail regions for multiple account rows", () => {
+	const html = renderClosedMarkup(
+		<AccountList
+			accounts={[makeAccount(), makeAccount({ id: "acc-2", name: "second" })]}
+			{...requiredHandlers}
+		/>,
+	);
+	const ids = [...html.matchAll(/<section id="([^"]+)"/g)].map(
+		(match) => match[1],
+	);
+	expect(ids).toHaveLength(2);
+	expect(new Set(ids).size).toBe(2);
 });
 
 it("retains a visible exception if a binding observation differs from the quota stack", () => {

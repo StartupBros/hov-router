@@ -14,14 +14,31 @@ import {
 	createAccountCreationCallbacks,
 } from "./AccountsTab";
 
-// Closed Radix portals are absent from SSR. Render the content boundary so
-// this cache-wiring test still verifies the family data offered in Details.
-const dialogPrimitives = await import("./ui/dialog");
-mock.module("./ui/dialog", () => ({
-	...dialogPrimitives,
-	DialogContent: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
+// Exercise the real row's Routing tab from the production query-cache wiring.
+// SSR cannot click the disclosure; only its local open/tab state is supplied here.
+const rowModule = await import("./accounts/AccountListItem");
+const RealAccountListItem = rowModule.AccountListItem;
+mock.module("./accounts/AccountListItem", () => ({
+	...rowModule,
+	AccountListItem: (props: Parameters<typeof RealAccountListItem>[0]) => {
+		const React = require("react");
+		const internals =
+			React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+		const previous = internals.H;
+		let index = 0;
+		internals.H = {
+			...previous,
+			useState: (initial: unknown) => {
+				const slot = index++;
+				return [slot === 1 ? true : slot === 2 ? "routing" : initial, () => {}];
+			},
+		};
+		try {
+			return RealAccountListItem(props);
+		} finally {
+			internals.H = previous;
+		}
+	},
 }));
 
 const creationMethodNames = [
