@@ -86,9 +86,9 @@ describe("account scan layout", () => {
 			"Next reset (soonest)",
 			"Weekly reset (soonest)",
 			"5-hour reset (soonest)",
-			"Weekly remaining (most)",
-			"5-hour remaining (most)",
-			"Quota used · resets in",
+			"Weekly used (lowest first)",
+			"5-hour used (lowest first)",
+			"Usage · resets in",
 			'aria-pressed="true"',
 		])
 			expect(html).toContain(text);
@@ -109,11 +109,11 @@ describe("account scan layout", () => {
 		);
 		expect(html).toContain('aria-expanded="true"');
 		expect(html).not.toContain("<details");
-		expect(html).toContain("Drain credits");
+		expect(html).toContain("Use purchased credits");
 		const visible = withoutDetailsContent(html);
 		expect(visible).toContain("Re-authenticate");
 		expect(visible).toContain("Action required");
-		expect(visible).not.toContain("Not blocked");
+		expect(visible).not.toContain("No local block");
 	});
 	it("uses the reported normal state without a duplicate fallback label", () => {
 		const allowed = renderToStaticMarkup(
@@ -123,14 +123,14 @@ describe("account scan layout", () => {
 			/>,
 		);
 		expect(allowed).toContain("Allowed");
-		expect(allowed).not.toContain("Not blocked");
+		expect(allowed).not.toContain("No local block");
 		const unspecified = renderToStaticMarkup(
 			<AccountListItem
 				account={makeAccount({ paused: false })}
 				{...requiredHandlers}
 			/>,
 		);
-		expect(unspecified).toContain("Not blocked");
+		expect(unspecified).toContain("No local block");
 	});
 	it("keeps force reset outside disclosures and missing quota explicit", () => {
 		const html = renderToStaticMarkup(
@@ -144,9 +144,9 @@ describe("account scan layout", () => {
 			/>,
 		);
 		const visible = withoutDetailsContent(html);
-		expect(visible).toContain("Force Reset");
-		expect(visible).toContain("Stale lock detected");
-		expect(visible).not.toContain("Not blocked");
+		expect(visible).toContain("Clear cooldown");
+		expect(visible).toContain("Possible stale cooldown");
+		expect(visible).not.toContain("No local block");
 		expect(visible).toContain("Usage unavailable");
 	});
 });
@@ -397,7 +397,7 @@ describe("AccountListItem authoritative family routing", () => {
 			);
 
 			expect(html).toContain(expected);
-			expect(html).toContain("membership is unchanged");
+			expect(html).toContain("route assignment unchanged");
 		});
 	}
 
@@ -627,7 +627,7 @@ describe("AccountListItem (binding constraint display)", () => {
 	it("renders nothing when the server sent no binding constraint", () => {
 		// Older servers omit the field entirely — no empty row, no placeholder.
 		const html = render(makeAccount({ paused: false }));
-		expect(html).not.toContain("Binding limit");
+		expect(html).not.toContain("Closest limit");
 	});
 
 	it("marks a family-scoped cap as not counted in the routing percentage", () => {
@@ -648,10 +648,12 @@ describe("AccountListItem (binding constraint display)", () => {
 			}),
 		);
 
-		expect(html).toContain("Binding limit");
+		expect(html).toContain("Closest limit");
 		expect(html).toContain("Fable (Weekly)");
 		expect(html).toContain("100%");
-		expect(html).toContain("model-scoped, not counted in the routing % above");
+		expect(html).toContain(
+			"applies to this model, separate from account-wide usage",
+		);
 	});
 
 	it("labels an account-wide constraint as account-wide", () => {
@@ -670,10 +672,11 @@ describe("AccountListItem (binding constraint display)", () => {
 			}),
 		);
 
-		expect(html).toContain("Binding limit");
+		expect(html).toContain("Closest limit");
 		expect(html).toContain("5-hour");
 		expect(html).toContain("account-wide");
-		expect(html).not.toContain("model-scoped");
+		expect(html).not.toContain("limit for this model");
+		expect(html).not.toContain("applies to this model");
 	});
 
 	it("keeps the routing utilization badge alongside the binding constraint", () => {
@@ -697,7 +700,7 @@ describe("AccountListItem (binding constraint display)", () => {
 			}),
 		);
 
-		expect(html).toContain("Binding limit");
+		expect(html).toContain("Closest limit");
 		expect(html).toContain("64%");
 		expect(html).toContain("100%");
 	});
@@ -717,18 +720,18 @@ describe("AccountListItem Codex credit drain toggle", () => {
 		);
 	}
 
-	it("renders the Drain credits switch for codex rows with the spend warning", () => {
+	it("renders the Use purchased credits switch for codex rows with the spend warning", () => {
 		const html = render(makeAccount({ provider: "codex" }), noop);
-		expect(html).toContain("Drain credits:");
+		expect(html).toContain("Use purchased credits");
 		expect(html).toContain("spends purchased credits");
 	});
 
 	it("does not render for non-codex rows or without a handler", () => {
 		expect(render(makeAccount({ provider: "anthropic" }), noop)).not.toContain(
-			"Drain credits:",
+			"Use purchased credits",
 		);
 		expect(render(makeAccount({ provider: "codex" }))).not.toContain(
-			"Drain credits:",
+			"Use purchased credits",
 		);
 	});
 
@@ -739,7 +742,7 @@ describe("AccountListItem Codex credit drain toggle", () => {
 		);
 		const off = render(makeAccount({ provider: "codex" }), noop);
 		const drainSwitch = (html: string) =>
-			html.slice(html.indexOf("Drain credits:"));
+			html.slice(html.indexOf("Use purchased credits"));
 		expect(drainSwitch(on)).toContain('aria-checked="true"');
 		expect(drainSwitch(off)).not.toContain('aria-checked="true"');
 	});
@@ -869,7 +872,7 @@ describe("AccountListItem banked resets", () => {
 });
 
 describe("AccountListItem header at phone width", () => {
-	// At 390px a rate-limited card put Force Reset, Refresh usage, Pause and More
+	// At 390px a rate-limited card put Clear cooldown, Refresh usage, Pause and More
 	// beside the name. The name column had a zero flex basis, so it got the ~48px
 	// left over and `overflow-wrap: anywhere` split "pro-primary-wmgm" into five
 	// mid-word pieces. The column now claims 8rem before the actions may sit
@@ -898,7 +901,7 @@ describe("AccountListItem header at phone width", () => {
 
 	it("gives the name column a real basis so the actions wrap below it", () => {
 		const { html, column } = header();
-		expect(html).toContain("Force Reset");
+		expect(html).toContain("Clear cooldown");
 		expect(column).toContain("flex-[1_1_8rem]");
 		expect(column).not.toMatch(/\bflex-1\b/);
 		expect(html).toContain('class="ml-auto flex shrink-0 flex-wrap');
@@ -952,16 +955,17 @@ describe("AccountListItem public value toggle", () => {
 	it("renders for every provider and not without a handler", () => {
 		for (const provider of ["anthropic", "codex", "zai"]) {
 			expect(render(makeAccount({ provider }), noop)).toContain(
-				"Public value:",
+				"Share value publicly",
 			);
 		}
-		expect(render(makeAccount())).not.toContain("Public value:");
+		expect(render(makeAccount())).not.toContain("Share value publicly");
 	});
 
 	it("reflects publicValueEnabled", () => {
 		const on = render(makeAccount({ publicValueEnabled: true }), noop);
 		const off = render(makeAccount(), noop);
-		const sw = (html: string) => html.slice(html.indexOf("Public value:"));
+		const sw = (html: string) =>
+			html.slice(html.indexOf("Share value publicly"));
 		expect(sw(on)).toContain('aria-checked="true"');
 		expect(sw(off)).not.toContain('aria-checked="true"');
 	});
@@ -1130,20 +1134,31 @@ describe("account settings switches", () => {
 
 	it("offers auto-fallback but no auto-refresh switch on an Anthropic row", () => {
 		const html = render(makeAccount({ provider: "anthropic" }));
-		expect(html).toContain("Auto-fallback:");
+		expect(html).toContain("Return after reset");
 		expect(html).not.toContain("Auto-refresh");
+	});
+
+	it("explains automatic return and paid-usage detection in visible text", () => {
+		const html = render(makeAccount({ provider: "anthropic" }));
+		const text = html.replace(/<[^>]+>/g, "");
+		expect(text).toContain("Switch back from lower-priority accounts");
+		expect(text).toContain("Some paid usage may occur before detection.");
 	});
 
 	it("keeps the peak-hours toggle on a zai row", () => {
 		const html = render(makeAccount({ provider: "zai" }));
-		expect(html).toContain("Peak hours pause:");
+		expect(html).toContain("Pause during peak hours");
+		expect(html.replace(/<[^>]+>/g, "")).toContain(
+			"Pause Monday–Friday from 14:00–18:00 Singapore time.",
+		);
+		expect(html).not.toContain("Pause daily");
 		expect(html).not.toContain("Auto-refresh");
 	});
 
 	it("says an overage pause resumes at window reset only with auto-fallback on", () => {
 		const html = render(makeAccount({ provider: "anthropic" }));
 		expect(html).toContain(
-			"Account resumes when the usage window resets only if auto-fallback is on.",
+			"Account resumes when the usage window resets only if Return after reset is on.",
 		);
 	});
 });
@@ -1180,9 +1195,9 @@ describe("compact hybrid list", () => {
 		);
 		expect(html).toContain('aria-label="Attention across all accounts"');
 		expect(html).toContain("1 needs attention");
-		expect(html).toContain("Review issues");
-		expect(html).toContain("Operational status");
-		expect(html).toContain("Quota used · resets in");
+		expect(html).toContain("Review accounts");
+		expect(html).toContain("Router status");
+		expect(html).toContain("Usage · resets in");
 		expect(withoutDetailsContent(html)).toContain("Usage unavailable");
 	});
 	it("starts collapsed with a button controlling an inline account region", () => {
@@ -1280,8 +1295,8 @@ it("represents a matching scoped binding inline and preserves unmatched exceptio
 	expect(html).not.toContain('data-testid="binding-constraint"');
 	expect(html).toContain("Fable (Weekly)");
 	expect(html).toContain("Exhausted");
-	expect(html).toContain("model-scoped");
-	expect(html).toContain("binding");
+	expect(html).toContain("limit for this model");
+	expect(html).toContain("currently limiting");
 });
 
 function rowTree(
@@ -1397,7 +1412,9 @@ it("groups usage, routing and settings into named touch-sized tabs", () => {
 	const settings = html.indexOf('data-tab-content="settings"');
 	expect(html.indexOf("requests", usage)).toBeLessThan(routing);
 	expect(html.indexOf("custom endpoint", routing)).toBeLessThan(settings);
-	expect(html.indexOf("Auto-fallback:", settings)).toBeGreaterThan(settings);
+	expect(html.indexOf("Return after reset", settings)).toBeGreaterThan(
+		settings,
+	);
 });
 it("keeps settings errors before the tab content, not inside a single tab", () => {
 	const html = renderToStaticMarkup(

@@ -308,7 +308,7 @@ export function RateLimitProgress({
 			)}
 			{compact && (
 				<p className="text-xs text-muted-foreground xl:hidden">
-					Quota used · resets in
+					Usage · resets in
 				</p>
 			)}
 			{compact && usages.length === 0 && (
@@ -387,14 +387,14 @@ export function RateLimitProgress({
 								{(exhausted || binding) && (
 									<span
 										className="ml-1"
-										title={`${exhausted ? "Exhausted. " : ""}${binding ? "Binding limit. " : ""}${usage.window?.startsWith("seven_day_") ? "This is a model-scoped limit, separate from account-wide usage." : "Account-wide limit."}`}
+										title={`${exhausted ? "Exhausted. " : ""}${binding ? "Currently limiting. " : ""}${usage.window?.startsWith("seven_day_") ? "This limit applies to this model, separately from account-wide usage." : "Account-wide limit."}`}
 									>
 										<span aria-hidden="true">{exhausted ? "!" : "•"}</span>
 										<span className="sr-only">
 											{exhausted ? "Exhausted; " : ""}
-											{binding ? "binding; " : ""}
+											{binding ? "currently limiting; " : ""}
 											{usage.window?.startsWith("seven_day_")
-												? "model-scoped limit"
+												? "limit for this model"
 												: "account-wide limit"}
 										</span>
 									</span>
@@ -556,7 +556,7 @@ export function RateLimitProgress({
 											{isAvailable ? `${percentage?.toFixed(0)}%` : "N/A"}
 											{usage.isActive && (
 												<span className="ml-1.5 text-[11px] font-medium uppercase tracking-wide text-red-700 dark:text-red-400">
-													binding
+													limiting
 												</span>
 											)}
 										</span>
@@ -640,7 +640,7 @@ export function RateLimitProgress({
 							<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
 								<LiveCountdown
 									target={usage.resetTime}
-									suffix=" until refresh"
+									suffix=" until reset"
 									className="text-xs text-muted-foreground"
 								/>
 								<span className="text-xs text-muted-foreground">
@@ -722,7 +722,7 @@ export function RateLimitProgress({
 						<div className={compact ? "col-span-2 space-y-2" : "space-y-2"}>
 							<div className="flex items-center justify-between">
 								<span className="text-xs text-muted-foreground">
-									Overage credits
+									Extra usage spent
 								</span>
 								<span className="text-xs font-medium text-muted-foreground">
 									{amount != null
@@ -735,7 +735,7 @@ export function RateLimitProgress({
 							{pct != null && (
 								<Progress
 									value={Math.min(100, Math.max(0, pct))}
-									aria-label="Overage credits"
+									aria-label="Extra usage spent"
 									className="h-2"
 								/>
 							)}
