@@ -1156,10 +1156,10 @@ export function AccountListItem({
 												checked={account.peakHoursPauseEnabled ?? false}
 												aria-label={`Pause during peak hours for ${account.name}`}
 												onCheckedChange={() => onPeakHoursPauseToggle(account)}
-												title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
+												title="Automatically pause this account during Zai peak hours (Monday–Friday, 14:00–18:00 SGT)"
 											/>
 											<p className="basis-full text-xs text-muted-foreground">
-												Pause daily from 14:00–18:00 Singapore time.
+												Pause Monday–Friday from 14:00–18:00 Singapore time.
 											</p>
 										</div>
 									)}

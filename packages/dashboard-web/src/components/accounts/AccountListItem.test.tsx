@@ -1148,6 +1148,10 @@ describe("account settings switches", () => {
 	it("keeps the peak-hours toggle on a zai row", () => {
 		const html = render(makeAccount({ provider: "zai" }));
 		expect(html).toContain("Pause during peak hours");
+		expect(html.replace(/<[^>]+>/g, "")).toContain(
+			"Pause Monday–Friday from 14:00–18:00 Singapore time.",
+		);
+		expect(html).not.toContain("Pause daily");
 		expect(html).not.toContain("Auto-refresh");
 	});
 
