@@ -19,11 +19,14 @@ import type { ProxyContext } from "../handlers";
 import type { StartMessage } from "../worker-messages";
 
 // Isolate the pricing catalogue: these fixtures must never fetch models.dev.
+// Every priced reply estimates to this amount, so a stored cost shows
+// whether the billed-cost header replaced the estimate.
+const CATALOGUE_ESTIMATE_USD = 0.01;
 const actualCore = await import("@better-ccflare/core");
 mock.module("@better-ccflare/core", () => ({
 	...actualCore,
 	isModelPriced: async () => false,
-	estimateCostUSD: async () => 0,
+	estimateCostUSD: async () => CATALOGUE_ESTIMATE_USD,
 }));
 afterAll(() => mock.module("@better-ccflare/core", () => actualCore));
 const usageCollectorModule = await import("../usage-collector");
@@ -68,7 +71,11 @@ function makeAccount(provider: string): Account {
 	} as Account;
 }
 
-function startMessage(providerName: string, response: Response): StartMessage {
+function startMessage(
+	providerName: string,
+	responseHeaders: Record<string, string>,
+	isStream = false,
+): StartMessage {
 	return {
 		type: "start",
 		messageId: "m1",
@@ -80,9 +87,9 @@ function startMessage(providerName: string, response: Response): StartMessage {
 		requestHeaders: {},
 		requestBody: null,
 		project: null,
-		responseStatus: response.status,
-		responseHeaders: Object.fromEntries(response.headers.entries()),
-		isStream: false,
+		responseStatus: 200,
+		responseHeaders,
+		isStream,
 		providerName,
 		accountBillingType: null,
 		accountAutoPauseOnOverageEnabled: null,
@@ -127,7 +134,12 @@ async function storeThroughEveryWriter(
 		const processed = await provider.processResponse(upstream, account);
 		const collectorCopy = processed.clone();
 
-		collector.handleStart(startMessage(providerName, processed));
+		collector.handleStart(
+			startMessage(
+				providerName,
+				Object.fromEntries(processed.headers.entries()),
+			),
+		);
 		await collector.handleEnd({
 			type: "end",
 			requestId: "r1",
@@ -214,27 +226,26 @@ it("keeps an OpenAI-format reply's token counts after every writer has run", asy
 	expect(row.total_tokens).toBe(1329);
 });
 
+const ANTHROPIC_MESSAGE = {
+	id: "msg_usage",
+	type: "message",
+	role: "assistant",
+	model: "claude-sonnet-5",
+	content: [{ type: "text", text: "hi" }],
+	stop_reason: "end_turn",
+	usage: {
+		input_tokens: 1000,
+		cache_read_input_tokens: 200,
+		cache_creation_input_tokens: 10,
+		output_tokens: 50,
+	},
+};
+
 it("keeps an Anthropic reply's usage and its billed cost after every writer has run", async () => {
 	const row = await storeThroughEveryWriter(
 		"anthropic",
 		new AnthropicProvider(),
-		jsonResponse(
-			{
-				id: "msg_usage",
-				type: "message",
-				role: "assistant",
-				model: "claude-sonnet-5",
-				content: [{ type: "text", text: "hi" }],
-				stop_reason: "end_turn",
-				usage: {
-					input_tokens: 1000,
-					cache_read_input_tokens: 200,
-					cache_creation_input_tokens: 10,
-					output_tokens: 50,
-				},
-			},
-			{ "anthropic-billing-cost": "0.0025" },
-		),
+		jsonResponse(ANTHROPIC_MESSAGE, { "anthropic-billing-cost": "0.0025" }),
 	);
 
 	expect(row.model).toBe("claude-sonnet-5");
@@ -243,8 +254,124 @@ it("keeps an Anthropic reply's usage and its billed cost after every writer has 
 	expect(row.cache_creation_input_tokens).toBe(10);
 	expect(row.output_tokens).toBe(50);
 	expect(row.total_tokens).toBe(1260);
-	// The cost Anthropic billed wins over the catalogue estimate (0 here).
+	// The cost Anthropic billed wins over the catalogue estimate.
 	expect(row.cost_usd).toBe(0.0025);
+});
+
+/**
+ * Store an Anthropic-shaped reply through the usage collector alone and
+ * return the cost it recorded.
+ */
+async function collectedCost(
+	providerName: string,
+	responseHeaders: Record<string, string>,
+	isStream: boolean,
+): Promise<number | null> {
+	const db = openDb();
+	const collector = new UsageCollector(
+		db,
+		new AsyncDbWriter(),
+		() => false,
+		() => {},
+	);
+	try {
+		collector.handleStart(
+			startMessage(providerName, responseHeaders, isStream),
+		);
+		let responseBody: string | null = null;
+		if (isStream) {
+			const sse = [
+				`event: message_start\ndata: ${JSON.stringify({
+					type: "message_start",
+					message: {
+						...ANTHROPIC_MESSAGE,
+						content: [],
+						stop_reason: null,
+						usage: { ...ANTHROPIC_MESSAGE.usage, output_tokens: 1 },
+					},
+				})}\n\n`,
+				`event: message_delta\ndata: ${JSON.stringify({
+					type: "message_delta",
+					delta: { stop_reason: "end_turn" },
+					usage: { output_tokens: 50 },
+				})}\n\n`,
+				`event: message_stop\ndata: {"type":"message_stop"}\n\n`,
+			].join("");
+			collector.handleChunk("r1", new TextEncoder().encode(sse));
+		} else {
+			responseBody = Buffer.from(JSON.stringify(ANTHROPIC_MESSAGE)).toString(
+				"base64",
+			);
+		}
+		await collector.handleEnd({
+			type: "end",
+			requestId: "r1",
+			success: true,
+			responseBody,
+		});
+		await collector.drain();
+		const row = await db
+			.getAdapter()
+			.get<UsageRow>(`SELECT ${USAGE_COLUMNS} FROM requests WHERE id = 'r1'`);
+		expect(row?.output_tokens).toBe(50);
+		return row?.cost_usd ?? null;
+	} finally {
+		collector.dispose();
+		await db.close();
+	}
+}
+
+it("takes Anthropic's billed cost on a non-streaming reply", async () => {
+	expect(
+		await collectedCost(
+			"anthropic",
+			{
+				"content-type": "application/json",
+				"anthropic-billing-cost": "0.0025",
+			},
+			false,
+		),
+	).toBe(0.0025);
+});
+
+it.each([
+	"n/a",
+	"-0.5",
+	"",
+])("keeps the estimate when the billed-cost header reads %p", async (header) => {
+	expect(
+		await collectedCost(
+			"anthropic",
+			{ "content-type": "application/json", "anthropic-billing-cost": header },
+			false,
+		),
+	).toBe(CATALOGUE_ESTIMATE_USD);
+});
+
+it("keeps the estimate on a streaming Anthropic reply", async () => {
+	expect(
+		await collectedCost(
+			"anthropic",
+			{
+				"content-type": "text/event-stream",
+				"anthropic-billing-cost": "0.0025",
+			},
+			true,
+		),
+	).toBe(CATALOGUE_ESTIMATE_USD);
+});
+
+it("keeps the estimate when another provider sends the billed-cost header", async () => {
+	expect(
+		await collectedCost(
+			"anthropic-compatible",
+			{
+				"content-type": "application/json",
+				"anthropic-billing-cost": "0.0025",
+			},
+			false,
+		),
+	).toBe(CATALOGUE_ESTIMATE_USD);
 });
 
 it("stores a converted OpenAI-format reply's usage through the real client-forwarding path", async () => {
