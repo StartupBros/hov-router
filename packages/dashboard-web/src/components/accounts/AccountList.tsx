@@ -232,7 +232,7 @@ export function AccountList(props: AccountListProps) {
 			<div className="overflow-hidden rounded-md border">
 				<div
 					aria-hidden="true"
-					className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,3.2fr)_minmax(0,0.9fr)_10.5rem] gap-3 border-b bg-muted/20 px-3 py-3 text-xs text-muted-foreground xl:grid"
+					className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,3.2fr)_minmax(0,0.9fr)_11rem] gap-3 border-b bg-muted/20 px-3 py-3 text-xs text-muted-foreground xl:grid"
 				>
 					<span>Account</span>
 					<span>Quota used · resets in</span>

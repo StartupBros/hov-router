@@ -183,6 +183,13 @@ export function UseResetDialog({
 	onClose: () => void;
 }) {
 	const [flow, setFlow] = useState<ResetFlowState>(() => openResetFlow());
+	// Controller-mounted dialogs have no Radix trigger to restore focus to.
+	const [returnFocusTo] = useState(() =>
+		typeof document !== "undefined" &&
+		document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null,
+	);
 	// State updates land after the next render; the ref stops a fast second
 	// click from sending before the buttons disable.
 	const sendingRef = useRef(false);
@@ -213,7 +220,14 @@ export function UseResetDialog({
 				if (!open && !sendingRef.current) onClose();
 			}}
 		>
-			<DialogContent className="max-w-md">
+			<DialogContent
+				className="max-w-md"
+				onCloseAutoFocus={(event) => {
+					if (!returnFocusTo?.isConnected) return;
+					event.preventDefault();
+					returnFocusTo.focus();
+				}}
+			>
 				<UseResetPanel
 					accountName={account.name}
 					resets={resets}
