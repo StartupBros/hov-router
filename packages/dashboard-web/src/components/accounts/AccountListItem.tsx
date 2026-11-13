@@ -88,7 +88,8 @@ function rateLimitStatusTone(status: string): StatusTone {
 const EMPTY_SESSION_INFO = new Set(["", "-", "No active session"]);
 
 /** Label + switch pair used in the per-account settings row. */
-const SETTING_CLASS = "flex min-h-11 min-w-0 flex-wrap items-center gap-2";
+const SETTING_CLASS =
+	"flex min-h-11 min-w-0 flex-wrap content-start items-center gap-x-2 gap-y-1";
 // Explicit dimensions avoid the switch's border shrinking an inset-based target.
 const SETTING_SWITCH_CLASS =
 	"relative after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']";
@@ -180,14 +181,18 @@ export function CodexCreditDrainControl({
 }) {
 	return (
 		<div className={SETTING_CLASS}>
-			<span className="text-xs text-muted-foreground">Drain credits:</span>
+			<span className="text-sm font-medium">Use purchased credits</span>
 			<Switch
 				className={SETTING_SWITCH_CLASS}
 				checked={account.codexCreditDrainEnabled ?? false}
-				aria-label={`Drain credits for ${account.name}`}
+				aria-label={`Use purchased credits for ${account.name}`}
 				onCheckedChange={() => onToggle(account)}
 				title={`Lets ${PRODUCT_NAME} keep routing to this account after its plan window is spent, which spends purchased credits. Applies only while fresh usage data confirms credits are available.`}
 			/>
+			<p className="basis-full text-xs text-muted-foreground">
+				Continue after the plan limit using purchased credits. This spends
+				money.
+			</p>
 			{account.codexCreditDrainServing && (
 				<span
 					className="text-xs font-medium text-amber-700 dark:text-amber-400"
@@ -217,14 +222,18 @@ export function PublicValueControl({
 	const enabled = account.publicValueEnabled ?? false;
 	return (
 		<div className={SETTING_CLASS}>
-			<span className="text-xs text-muted-foreground">Public value:</span>
+			<span className="text-sm font-medium">Share value publicly</span>
 			<Switch
 				className={SETTING_SWITCH_CLASS}
 				checked={enabled}
-				aria-label={`Public value for ${account.name}`}
+				aria-label={`Share value publicly for ${account.name}`}
 				onCheckedChange={() => onToggle(account)}
 				title="Publishes this account's subscription value on the public House of Vibe site under a public label (never the account name)."
 			/>
+			<p className="basis-full text-xs text-muted-foreground">
+				Show subscription value on the public site under a separate public
+				label.
+			</p>
 			{enabled && account.publicValueLabel && (
 				<span
 					className="text-xs font-medium"
@@ -482,12 +491,12 @@ export function AccountListItem({
 							onClick={() => onForceResetRateLimit(account)}
 							title={
 								staleLockDetected
-									? "Reset stale rate limit lock (usage shows capacity available)"
-									: "Force clear rate limit state from database"
+									? "Clear a possibly stale router cooldown. Provider usage limits are unchanged."
+									: "Clear the router’s saved rate-limit state. Provider usage limits are unchanged."
 							}
 						>
 							<RefreshCw className="h-3.5 w-3.5" />
-							Force Reset
+							Clear cooldown
 						</Button>
 					)}
 					{reauth && reauthRequired && (
@@ -602,13 +611,14 @@ export function AccountListItem({
 
 			{showForceReset && (
 				<p className="text-xs text-muted-foreground xl:col-span-full">
-					Force Reset clears local state; it does not restore provider quota.
+					Clear cooldown removes the router’s block, not the provider’s usage
+					limit.
 				</p>
 			)}
 			{/* Concise local status; diagnostics and request totals live in Details. */}
 			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-sm [&>span]:max-w-full [&>span]:whitespace-normal xl:col-start-3 xl:row-start-1 xl:flex-col xl:items-start">
 				<span className="text-xs font-medium text-muted-foreground xl:sr-only">
-					Operational status
+					Router status
 				</span>
 				{!reauthRequired &&
 					!presenter.isPaused &&
@@ -619,7 +629,7 @@ export function AccountListItem({
 					!presenter.isRateLimited &&
 					!showRateLimitStatus && (
 						<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
-							Not blocked
+							No local block
 						</span>
 					)}
 				{isBlockedByLegacyLock && !isHardLimited && (
@@ -678,16 +688,16 @@ export function AccountListItem({
 							account.rateLimitedUntil as number,
 						).toLocaleString()}
 					>
-						Local retry:{" "}
+						Router retry:{" "}
 						{new Date(account.rateLimitedUntil as number).toLocaleTimeString()}
 					</span>
 				)}
 				{staleLockDetected && (
 					<span
 						className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
-						title="Stale lock detected: usage data shows available capacity but account is still rate-limited"
+						title="Reported usage is below 100%, but the router still has a rate-limit block. Provider capacity is not guaranteed."
 					>
-						Stale lock detected
+						Possible stale cooldown
 					</span>
 				)}
 				{isUsageThrottled && (
@@ -772,16 +782,16 @@ export function AccountListItem({
 				>
 					{bindingConstraint.divergesFromRouting ? (
 						<>
-							Binding limit: {bindingConstraint.label}{" "}
+							Closest limit: {bindingConstraint.label}{" "}
 							{Math.round(bindingConstraint.utilization)}%
 							{bindingConstraint.scope === "family"
-								? " — model-scoped, not counted in the routing % above"
-								: " — not the window shown above"}
+								? " used — applies to this model, separate from account-wide usage"
+								: " used — a different window from the routing limit"}
 						</>
 					) : (
 						<>
-							Binding limit: {bindingConstraint.label}{" "}
-							{Math.round(bindingConstraint.utilization)}% — account-wide
+							Closest limit: {bindingConstraint.label}{" "}
+							{Math.round(bindingConstraint.utilization)}% used — account-wide
 						</>
 					)}
 				</div>
@@ -862,7 +872,8 @@ export function AccountListItem({
 								className="text-xs text-muted-foreground"
 								title={presenter.rateLimitStatus}
 							>
-								Local status: {formatRateLimitStatus(presenter.rateLimitStatus)}
+								Reported status:{" "}
+								{formatRateLimitStatus(presenter.rateLimitStatus)}
 							</p>
 							{account.provider === "codex" && account.bankedResets && (
 								<BankedResetsStatus
@@ -918,7 +929,7 @@ export function AccountListItem({
 									aria-label={`Family routing for ${account.name}`}
 									className="group space-y-2"
 								>
-									<h4 className="text-sm font-medium">Family routing</h4>
+									<h4 className="text-sm font-medium">Model-family routes</h4>
 									<div className="flex flex-wrap gap-2">
 										{routingStates.map((state) => {
 											const availability = routingAvailabilityOverlay(state);
@@ -981,7 +992,7 @@ export function AccountListItem({
 																{availability.label}
 															</Badge>
 															<span className="text-muted-foreground">
-																membership is unchanged
+																route assignment unchanged
 															</span>
 														</>
 													)}
@@ -1034,7 +1045,7 @@ export function AccountListItem({
 
 							{routingStates.length === 0 && (
 								<p className="text-sm text-muted-foreground">
-									No family routing assignments reported.
+									No model-family routes reported for this account.
 								</p>
 							)}
 							<div className="flex flex-wrap gap-2">
@@ -1070,23 +1081,25 @@ export function AccountListItem({
 								<div className="grid gap-x-8 gap-y-3 sm:grid-cols-2 xl:grid-cols-3">
 									{showAutoFeatures && (
 										<div className={SETTING_CLASS}>
-											<span className="text-xs text-muted-foreground">
-												Auto-fallback:
+											<span className="text-sm font-medium">
+												Return after reset
 											</span>
 											<Switch
 												className={SETTING_SWITCH_CLASS}
 												checked={account.autoFallbackEnabled}
-												aria-label={`Auto-fallback for ${account.name}`}
+												aria-label={`Return after reset for ${account.name}`}
 												onCheckedChange={() => onAutoFallbackToggle(account)}
 												title="Automatically switch back to this account from lower-priority ones when its rate limit resets. Requires multiple accounts with different priorities."
 											/>
+											<p className="basis-full text-xs text-muted-foreground">
+												Switch back from lower-priority accounts when this
+												account’s limit resets.
+											</p>
 										</div>
 									)}
 									{showPlanBilling && (
 										<div className={SETTING_CLASS}>
-											<span className="text-xs text-muted-foreground">
-												Plan billing:
-											</span>
+											<span className="text-sm font-medium">Plan billing</span>
 											<Switch
 												className={SETTING_SWITCH_CLASS}
 												checked={account.billingType === "plan"}
@@ -1094,22 +1107,30 @@ export function AccountListItem({
 												onCheckedChange={() => onBillingTypeToggle(account)}
 												title="Toggle plan billing for this account"
 											/>
+											<p className="basis-full text-xs text-muted-foreground">
+												Classify this account as plan-billed rather than
+												pay-as-you-go.
+											</p>
 										</div>
 									)}
 									{showAutoPause && onAutoPauseOnOverageToggle && (
 										<div className={SETTING_CLASS}>
-											<span className="text-xs text-muted-foreground">
-												Auto-pause on overage:
+											<span className="text-sm font-medium">
+												Pause on extra usage
 											</span>
 											<Switch
 												className={SETTING_SWITCH_CLASS}
 												checked={account.autoPauseOnOverageEnabled ?? false}
-												aria-label={`Auto-pause on overage for ${account.name}`}
+												aria-label={`Pause on extra usage for ${account.name}`}
 												onCheckedChange={() =>
 													onAutoPauseOnOverageToggle(account)
 												}
-												title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if auto-fallback is on."
+												title="Automatically pause account when overage usage is detected. Note: detection only happens when Anthropic API reports overage, so some overage usage may occur before pausing. Account resumes when the usage window resets only if Return after reset is on."
 											/>
+											<p className="basis-full text-xs text-muted-foreground">
+												Pause when the provider reports extra usage. Some paid
+												usage may occur before detection.
+											</p>
 										</div>
 									)}
 									{showCreditDrain && onCodexCreditDrainToggle && (
@@ -1127,16 +1148,19 @@ export function AccountListItem({
 									)}
 									{showPeakHoursPause && onPeakHoursPauseToggle && (
 										<div className={SETTING_CLASS}>
-											<span className="text-xs text-muted-foreground">
-												Peak hours pause:
+											<span className="text-sm font-medium">
+												Pause during peak hours
 											</span>
 											<Switch
 												className={SETTING_SWITCH_CLASS}
 												checked={account.peakHoursPauseEnabled ?? false}
-												aria-label={`Peak hours pause for ${account.name}`}
+												aria-label={`Pause during peak hours for ${account.name}`}
 												onCheckedChange={() => onPeakHoursPauseToggle(account)}
 												title="Automatically pause this account during Zai peak hours (14:00–18:00 SGT)"
 											/>
+											<p className="basis-full text-xs text-muted-foreground">
+												Pause daily from 14:00–18:00 Singapore time.
+											</p>
 										</div>
 									)}
 								</div>

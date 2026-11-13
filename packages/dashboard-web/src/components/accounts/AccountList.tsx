@@ -89,7 +89,7 @@ export function AccountList(props: AccountListProps) {
 							<p className="text-xs text-muted-foreground">
 								{[
 									view.attentionReasons.reconnect &&
-										`${view.attentionReasons.reconnect} reconnect`,
+										`${view.attentionReasons.reconnect} to reconnect`,
 									view.attentionReasons.limited &&
 										`${view.attentionReasons.limited} limited or throttled`,
 									view.attentionReasons.routing &&
@@ -109,7 +109,7 @@ export function AccountList(props: AccountListProps) {
 							setStatus("attention");
 						}}
 					>
-						Review issues
+						Review accounts
 					</button>
 				</section>
 			)}
@@ -209,9 +209,9 @@ export function AccountList(props: AccountListProps) {
 			</div>
 			{sort !== "priority" && (
 				<p className="text-xs text-muted-foreground">
-					View order only — routing priority is unchanged.
+					Sorting changes this view, not routing priority.
 					{sort.endsWith("reset") &&
-						" Reset sort key is emphasized; unknown or elapsed resets come last."}
+						" The highlighted reset determines the order. Missing or past resets appear last."}
 				</p>
 			)}
 			{view.accounts.length === 0 && (
@@ -235,24 +235,24 @@ export function AccountList(props: AccountListProps) {
 					className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,3.2fr)_minmax(0,0.9fr)_11rem] gap-3 border-b bg-muted/20 px-3 py-3 text-xs text-muted-foreground xl:grid"
 				>
 					<span>Account</span>
-					<span>Quota used · resets in</span>
-					<span>Status</span>
+					<span>Usage · resets in</span>
+					<span>Router status</span>
 					<span>Actions</span>
 				</div>
 				{accountListItems({ ...props, accounts: view.accounts }, sort)}
 			</div>
 			<details className="text-xs text-muted-foreground">
 				<summary className="flex min-h-11 cursor-pointer items-center">
-					How routing works
+					About usage and routing
 				</summary>
 				<p>
-					Lower priority numbers route first among eligible accounts. Allowed
-					means no local block, not guaranteed provider capacity. Force Reset
-					clears only local state, not provider quota. Local retry and provider
-					reset times are separate. Missing usage is not zero. Family membership
-					determines eligible routes; temporary availability does not change
-					membership. Binding limits can differ from account-wide routing
-					utilization. Review actionable family notices in Combos.
+					Lower priority numbers route first among eligible accounts. Router
+					status shows local blocks, not guaranteed provider capacity. Clear
+					cooldown removes a router block; it does not reset provider usage. A
+					provider reset and a router retry are separate timers. Missing usage
+					is not zero or unlimited. Model-specific limits may run out before the
+					account-wide limit. Manage model-family assignments and routing
+					notices in Combos.
 				</p>
 			</details>
 		</div>

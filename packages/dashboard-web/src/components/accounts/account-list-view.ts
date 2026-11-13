@@ -5,13 +5,13 @@ import { accountUsageWindows } from "./account-usage-windows";
 import { pauseStatusDisplay } from "./pause-status";
 import { displayLabel } from "./rate-limit-helpers";
 export const ACCOUNT_SORTS = [
-	["priority", "Priority"],
+	["priority", "Routing priority"],
 	["name", "Name A–Z"],
 	["next-reset", "Next reset (soonest)"],
 	["weekly-reset", "Weekly reset (soonest)"],
 	["five-hour-reset", "5-hour reset (soonest)"],
-	["weekly-remaining", "Weekly remaining (most)"],
-	["five-hour-remaining", "5-hour remaining (most)"],
+	["weekly-remaining", "Weekly used (lowest first)"],
+	["five-hour-remaining", "5-hour used (lowest first)"],
 ] as const;
 export type AccountListSort = (typeof ACCOUNT_SORTS)[number][0];
 export function accountSortWindow(

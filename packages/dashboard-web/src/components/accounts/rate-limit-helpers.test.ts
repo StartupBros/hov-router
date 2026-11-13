@@ -467,8 +467,10 @@ describe("formatRateLimitStatus", () => {
 		);
 	});
 
-	it("leaves statuses without a countdown readable", () => {
-		expect(formatRateLimitStatus("usage_exhausted")).toBe("Usage exhausted");
+	it("keeps warnings distinct without promising available provider capacity", () => {
+		expect(formatRateLimitStatus("allowed")).toBe("Allowed");
+		expect(formatRateLimitStatus("allowed_warning")).toBe("Allowed · warning");
 		expect(formatRateLimitStatus("OK")).toBe("OK");
+		expect(formatRateLimitStatus("usage_exhausted")).toBe("Usage exhausted");
 	});
 });

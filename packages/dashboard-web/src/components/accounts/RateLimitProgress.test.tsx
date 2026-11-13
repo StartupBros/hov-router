@@ -27,7 +27,7 @@ describe("RateLimitProgress", () => {
 				usageData={{ five_hour: { utilization: 38, resets_at: reset } }}
 			/>,
 		);
-		expect(html).toContain("until refresh");
+		expect(html).toContain("until reset");
 		expect(html).toContain("Resets ");
 		expect(html).toContain(
 			'class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1"',
@@ -137,7 +137,7 @@ describe("RateLimitProgress", () => {
 		expect(html).toContain("100%");
 		// severity critical -> red indicator; is_active -> "binding" marker.
 		expect(html).toContain("bg-red-500");
-		expect(html).toContain("binding");
+		expect(html).toContain("limiting");
 		// Session / Weekly group headers.
 		expect(html).toContain("Session");
 		expect(html).toContain("Weekly");
@@ -575,7 +575,7 @@ describe("RateLimitProgress codex extras: code-review row + live countdowns", ()
 		expect(html).toContain("Code Review");
 		expect(html).toContain("7%");
 		// The countdown ticks live via LiveCountdown, not the old static "Xh Ym" text.
-		expect(html).toContain("1h 30m 0s until refresh");
+		expect(html).toContain("1h 30m 0s until reset");
 	});
 
 	it("omits the Code Review row entirely when code_review_used_percent is absent (extras dropped between polls)", () => {
@@ -622,7 +622,7 @@ describe("RateLimitProgress codex extras: code-review row + live countdowns", ()
 		// Code Review is the last row pushed -- everything after its label is
 		// its own row markup, which must have no countdown (no resetTime).
 		const codeReviewRowHtml = html.split("Code Review").at(-1) ?? "";
-		expect(codeReviewRowHtml).not.toContain("until refresh");
+		expect(codeReviewRowHtml).not.toContain("until reset");
 		expect(codeReviewRowHtml).not.toContain("resetting…");
 	});
 
@@ -666,7 +666,7 @@ describe("RateLimitProgress codex extras: code-review row + live countdowns", ()
 			/>,
 		);
 		// Under a minute: seconds only, per the LiveCountdown contract.
-		expect(html).toContain("45s until refresh");
+		expect(html).toContain("45s until reset");
 		expect(html).not.toContain("Ready to refresh");
 	});
 
@@ -688,7 +688,7 @@ describe("RateLimitProgress codex extras: code-review row + live countdowns", ()
 		);
 		expect(html).toContain("resetting…");
 		expect(html).not.toContain("Ready to refresh");
-		expect(html).not.toContain("resetting… until refresh");
+		expect(html).not.toContain("resetting… until reset");
 	});
 });
 
@@ -767,8 +767,8 @@ describe("compact comparison slots", () => {
 			"64%",
 			"Fable (Weekly)",
 			"100%",
-			"binding",
-			"Overage credits",
+			"currently limiting",
+			"Extra usage spent",
 			"USD 12.34",
 		])
 			expect(html).toContain(value);

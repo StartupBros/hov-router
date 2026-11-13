@@ -339,7 +339,10 @@ export function collectAnthropicUsageRows(
 export function formatRateLimitStatus(status: string): string {
 	const match = status.match(/^(.*?)\s*\((\d+)m\)$/);
 	const base = (match ? match[1] : status).replace(/_/g, " ");
-	const label = base.charAt(0).toUpperCase() + base.slice(1);
+	const label =
+		base.toLowerCase() === "allowed warning"
+			? "Allowed · warning"
+			: base.charAt(0).toUpperCase() + base.slice(1);
 	return match
 		? `${label} · resets in ${formatShortDuration(Number(match[2]) * 60000)}`
 		: label;
