@@ -553,3 +553,127 @@ test("metadata database failures propagate instead of being treated as file fail
 		h.db.close();
 	}
 });
+
+async function realRepository() {
+	const { Database } = await import("bun:sqlite");
+	const { BunSqlAdapter } = await import(
+		"../../../database/src/adapters/bun-sql-adapter"
+	);
+	const { runMigrations } = await import("../../../database/src/migrations");
+	const { ExternalUsageRepository } = await import(
+		"../../../database/src/repositories/external-usage.repository"
+	);
+	const db = new Database(":memory:");
+	runMigrations(db);
+	return { db, repo: new ExternalUsageRepository(new BunSqlAdapter(db)) };
+}
+const rolloutLine = (type: string, timestamp: string, payload: unknown) =>
+	JSON.stringify({ type, timestamp, payload });
+const rollout = (
+	id: string,
+	provider: string | undefined,
+	turns: Array<[model: string, tokens: number]>,
+	minute: string,
+) =>
+	[
+		rolloutLine(
+			"session_meta",
+			`2026-10-18T00:${minute}:00Z`,
+			provider === undefined ? { id } : { id, model_provider: provider },
+		),
+		...turns.flatMap(([model, n], i) => [
+			rolloutLine("turn_context", `2026-10-18T00:${minute}:0${i}Z`, {
+				model,
+			}),
+			rolloutLine("event_msg", `2026-10-18T00:${minute}:1${i}Z`, {
+				type: "token_count",
+				info: {
+					last_token_usage: {
+						input_tokens: n,
+						cached_input_tokens: 0,
+						output_tokens: 0,
+						reasoning_output_tokens: 0,
+						total_tokens: n,
+					},
+				},
+			}),
+		]),
+	].join("\n");
+
+test("rollouts that ran through a custom provider or a route alias are not counted (#782)", async () => {
+	const { db, repo } = await realRepository();
+	const home = await mkdtemp(join(tmpdir(), "proxied-"));
+	dirs.push(home);
+	await mkdir(join(home, "sessions"));
+	const write = (name: string, body: string) =>
+		writeFile(join(home, "sessions", name), body);
+	await write(
+		"rollout-direct.jsonl",
+		rollout("direct", "openai", [["gpt-6-astra", 100]], "01"),
+	);
+	await write(
+		"rollout-legacy.jsonl",
+		rollout("legacy", undefined, [["gpt-6-astra", 200]], "02"),
+	);
+	await write(
+		"rollout-proxied.jsonl",
+		rollout("proxied", "better_ccflare", [["gpt-6-astra", 400]], "03"),
+	);
+	await write(
+		"rollout-alias.jsonl",
+		rollout(
+			"alias",
+			"openai",
+			[
+				["claude-bccf-route-codex-pool-astra", 800],
+				["gpt-6-sol", 1600],
+			],
+			"04",
+		),
+	);
+	const summary = await new ExternalCodexScanner(repo).scan({
+		homes: [home],
+		cloudRoots: [],
+	});
+	expect(summary.filesScanned).toBe(4);
+	const report = await repo.report();
+	expect(report.reduce((sum, row) => sum + row.totalTokens, 0)).toBe(1900);
+	expect(report.map((row) => row.model).sort()).toEqual([
+		"gpt-6-astra",
+		"gpt-6-sol",
+	]);
+	db.close();
+});
+
+test("a counted rollout that later shows a custom provider loses its rows (#782)", async () => {
+	const { db, repo } = await realRepository();
+	const home = await mkdtemp(join(tmpdir(), "proxied-heal-"));
+	dirs.push(home);
+	await mkdir(join(home, "sessions"));
+	const path = join(home, "sessions", "rollout-heal.jsonl");
+	const total = async () =>
+		(await repo.report()).reduce((sum, row) => sum + row.totalTokens, 0);
+	const scanner = new ExternalCodexScanner(repo);
+	await writeFile(
+		path,
+		rollout("heal", undefined, [["gpt-6-astra", 300]], "05"),
+	);
+	await scanner.scan({ homes: [home], cloudRoots: [] });
+	expect(await total()).toBe(300);
+	await writeFile(
+		path,
+		rollout(
+			"heal",
+			"better_ccflare",
+			[
+				["gpt-6-astra", 300],
+				["gpt-6-astra", 50],
+			],
+			"05",
+		),
+	);
+	const second = await scanner.scan({ homes: [home], cloudRoots: [] });
+	expect(second.filesScanned).toBe(1);
+	expect(await total()).toBe(0);
+	db.close();
+});

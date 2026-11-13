@@ -254,6 +254,17 @@ Both settings are unset by default, which leaves scanning off.
   name is missing or matches more than one Codex account is skipped, and so is a
   malformed entry; each is reported in the scan summary's `skippedCloudRoots`.
 
+Usage the proxy already counted is skipped. Codex records the model provider in each
+rollout's `session_meta`. A rollout whose provider is anything but `openai` (older
+rollouts name none) went to a custom endpoint, so none of its usage is counted. Nor is
+usage under a route-profile model (`claude-bccf-route-…`), whatever the provider.
+Rows already stored from such a rollout are removed the next time its file changes.
+Codex pointed at the proxy with `openai_base_url` or `OPENAI_BASE_URL` can still record
+the provider as `openai`, and its usage under a plain model name then reads as direct
+usage. Give the proxy its own `[model_providers.<name>]` block instead (see
+[Codex CLI as a Client](reference.md#codex-cli-as-a-client)), or leave that home out of
+`external_codex_homes`.
+
 When either setting is present, the server scans 30 seconds after startup and every
 5 minutes afterwards. `better-ccflare --scan-external-codex [--json]` runs one scan
 and prints the summary plus a per-model, per-account report. A database lease keeps
