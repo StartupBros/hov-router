@@ -199,7 +199,7 @@ export function BankedResetsStatus({
 					<Button
 						variant="outline"
 						size="sm"
-						className="ml-auto h-7"
+						className="ml-auto min-h-11"
 						disabled={!action.enabled}
 						aria-describedby={detailId}
 						onClick={onUseReset}

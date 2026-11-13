@@ -299,6 +299,10 @@ describe("BankedResetsStatus Use reset button (R8)", () => {
 		expect(button(render(held))).toBeNull();
 	});
 
+	it("keeps the Details reset action a 44px touch target without a row wrapper", () => {
+		expect(button(withButton(held))).toContain("min-h-11");
+	});
+
 	it("is enabled on any fresh held count, whatever OpenAI's applicable count says (#772)", () => {
 		for (const [applicableCount, appliesNow] of [
 			[2, true],
