@@ -13,6 +13,8 @@ import { formatShortDuration } from "../../lib/utils";
 
 /** A single progress-bar row rendered by RateLimitProgress. */
 export interface UsageDisplay {
+	/** Placeholder for an absent window, distinct from a reported unknown value. */
+	synthetic?: boolean;
 	utilization: number | null;
 	/** Internal window key (drives pace marker + reset formatting). */
 	window: string | null;
@@ -286,6 +288,7 @@ export function collectAnthropicUsageRows(
 		});
 	} else {
 		rows.push({
+			synthetic: fallback.utilization == null && fallback.resetTime == null,
 			utilization: fallback.utilization,
 			window: "five_hour",
 			resetTime: fallback.resetTime,
@@ -303,14 +306,19 @@ export function collectAnthropicUsageRows(
 			resetTime: sevenDay.resets_at,
 		});
 	} else {
-		rows.push({ utilization: null, window: "seven_day", resetTime: null });
+		rows.push({
+			synthetic: true,
+			utilization: null,
+			window: "seven_day",
+			resetTime: null,
+		});
 	}
 
 	for (const key of LEGACY_MODEL_TIER_WINDOWS) {
 		const window = data[key];
 		if (
 			isUsageWindow(window) &&
-			window.utilization != null &&
+			(preserveUnknown || window.utilization != null) &&
 			window.resets_at !== null
 		) {
 			rows.push({

@@ -101,7 +101,10 @@ describe("formatBankedResetExpiryLabel", () => {
 describe("BankedResetsSummary", () => {
 	it("keeps held resets, expiry and stale warnings visible without opening a disclosure", () => {
 		const html = render(summary({ anyStale: true }));
-		expect(html).not.toContain("<details");
+		expect(html).toContain("<details");
+		expect(html.slice(0, html.indexOf("</summary>"))).toContain(
+			"Includes last known values",
+		);
 		expect(html).toContain("Banked resets");
 		expect(html).toContain("Includes last known values");
 		expect(html).toContain("Soonest expires");
@@ -183,7 +186,7 @@ describe("BankedResetsSummary", () => {
 		const stale = render(
 			summary({ totalAvailable: 0, soonestExpiresAt: null, anyStale: true }),
 		);
-		expect(stale).toStartWith("<section");
+		expect(stale).toStartWith("<details");
 		expect(stale).toContain("Includes last known values");
 	});
 
@@ -232,8 +235,12 @@ describe("BankedResetsSummary", () => {
 		expect(visible).not.toMatch(BANNED);
 	});
 
-	it("renders nothing without tracked Codex accounts or before data loads", () => {
-		expect(render(summary({ trackedAccounts: 0, totalAvailable: 0 }))).toBe("");
-		expect(render(undefined)).toBe("");
+	it("distinguishes untracked accounts and unknown summary from fresh zero", () => {
+		expect(
+			render(summary({ trackedAccounts: 0, totalAvailable: 0 })),
+		).toContain("Not tracked");
+		const unknown = render(undefined);
+		expect(unknown).toContain("not read yet");
+		expect(unknown).not.toContain("No banked resets held");
 	});
 });

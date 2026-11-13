@@ -113,7 +113,7 @@ export function AccountList(props: AccountListProps) {
 					</button>
 				</section>
 			)}
-			<div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+			<div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
 				<div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row">
 					<label className="relative flex min-w-0 flex-1 items-center">
 						<Search
@@ -170,7 +170,7 @@ export function AccountList(props: AccountListProps) {
 					</select>
 				</label>
 				<fieldset
-					className="flex min-w-0 flex-wrap items-center gap-1 xl:shrink-0"
+					className="flex min-w-0 flex-wrap items-center gap-1 xl:col-span-full"
 					aria-label="Filter by account status"
 				>
 					{(
@@ -232,14 +232,11 @@ export function AccountList(props: AccountListProps) {
 			<div className="overflow-hidden rounded-md border">
 				<div
 					aria-hidden="true"
-					className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(15rem,1.5fr)_3rem_minmax(0,1.25fr)] gap-4 border-b bg-muted/20 px-3 py-3 text-xs text-muted-foreground xl:grid"
+					className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,3.2fr)_minmax(0,0.9fr)_10.5rem] gap-3 border-b bg-muted/20 px-3 py-3 text-xs text-muted-foreground xl:grid"
 				>
 					<span>Account</span>
-					<span>Operational status</span>
-					<div>
-						Limits<span className="block font-normal">Used · resets in</span>
-					</div>
-					<span>Priority</span>
+					<span>Quota used · resets in</span>
+					<span>Status</span>
 					<span>Actions</span>
 				</div>
 				{accountListItems({ ...props, accounts: view.accounts }, sort)}
