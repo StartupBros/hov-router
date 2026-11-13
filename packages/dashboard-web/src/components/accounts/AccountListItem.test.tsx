@@ -75,8 +75,7 @@ describe("account scan layout", () => {
 			"5-hour reset (soonest)",
 			"Weekly remaining (most)",
 			"5-hour remaining (most)",
-			"Limits",
-			"Used · resets in",
+			"Quota used · resets in",
 			'aria-pressed="true"',
 		])
 			expect(html).toContain(text);
@@ -101,7 +100,7 @@ describe("account scan layout", () => {
 		const visible = withoutDetailsContent(html);
 		expect(visible).toContain("Re-authenticate");
 		expect(visible).toContain("Action required");
-		expect(visible).not.toContain("No account block reported");
+		expect(visible).not.toContain("Not blocked");
 	});
 	it("uses the reported normal state without a duplicate fallback label", () => {
 		const allowed = renderToStaticMarkup(
@@ -111,14 +110,14 @@ describe("account scan layout", () => {
 			/>,
 		);
 		expect(allowed).toContain("Allowed");
-		expect(allowed).not.toContain("No account block reported");
+		expect(allowed).not.toContain("Not blocked");
 		const unspecified = renderToStaticMarkup(
 			<AccountListItem
 				account={makeAccount({ paused: false })}
 				{...requiredHandlers}
 			/>,
 		);
-		expect(unspecified).toContain("No account block reported");
+		expect(unspecified).toContain("Not blocked");
 	});
 	it("keeps force reset outside disclosures and missing quota explicit", () => {
 		const html = renderToStaticMarkup(
@@ -134,8 +133,8 @@ describe("account scan layout", () => {
 		const visible = withoutDetailsContent(html);
 		expect(visible).toContain("Force Reset");
 		expect(visible).toContain("Stale lock detected");
-		expect(visible).not.toContain("No account block reported");
-		expect(visible).toContain("Not reported");
+		expect(visible).not.toContain("Not blocked");
+		expect(visible).toContain("Usage unavailable");
 	});
 });
 
@@ -1169,8 +1168,8 @@ describe("compact hybrid list", () => {
 		expect(html).toContain("1 needs attention");
 		expect(html).toContain("Review issues");
 		expect(html).toContain("Operational status");
-		expect(html).toContain("5-hour used");
-		expect(html).toContain("Weekly used");
+		expect(html).toContain("Quota used · resets in");
+		expect(withoutDetailsContent(html)).toContain("Usage unavailable");
 	});
 	it("uses a dialog trigger instead of inline settings disclosures", () => {
 		const html = renderToStaticMarkup(
@@ -1239,4 +1238,145 @@ describe("Details settings errors", () => {
 		expect(changes).toEqual([true, false]);
 		expect(cleared).toEqual([account.id, account.id]);
 	});
+});
+
+it("keeps priority in identity and lifetime requests and refresh in Details", () => {
+	const html = renderToStaticMarkup(
+		<AccountListItem
+			account={makeAccount({ priority: 31, requestCount: 1234 })}
+			{...requiredHandlers}
+		/>,
+	);
+	const visible = withoutDetailsContent(html);
+	expect(visible.match(/Priority /g)).toHaveLength(1);
+	expect(visible).not.toContain("1,234 requests");
+	expect(html).toContain("1,234 requests");
+	expect(visible).not.toContain('aria-label="Refresh usage"');
+	expect(html).toContain('aria-label="Refresh usage"');
+});
+
+it("represents a matching scoped binding inline and preserves unmatched exceptions", () => {
+	const reset = new Date(Date.now() + 3600000).toISOString();
+	const account = makeAccount({
+		usageWindow: "seven_day",
+		usageUtilization: 32,
+		usageData: {
+			seven_day: { utilization: 32, resets_at: reset },
+			seven_day_fable: { utilization: 100, resets_at: reset },
+		},
+		bindingConstraint: {
+			window: "seven_day_fable",
+			utilization: 100,
+			resetAtMs: Date.parse(reset),
+			scope: "family",
+			modelFamily: "fable",
+		},
+	});
+	const html = withoutDetailsContent(
+		renderToStaticMarkup(
+			<AccountListItem account={account} {...requiredHandlers} />,
+		),
+	);
+	expect(html).not.toContain('data-testid="binding-constraint"');
+	expect(html).toContain("Fable (Weekly)");
+	expect(html).toContain("Exhausted");
+	expect(html).toContain("model-scoped");
+	expect(html).toContain("binding");
+});
+
+it("hands Details reset confirmation off after closing and restoring the trigger focus", () => {
+	const React = require("react");
+	const internals =
+		React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+	const previous = internals.H;
+	const events: string[] = [];
+	let refIndex = 0;
+	internals.H = {
+		useState: () => [false, (open: boolean) => events.push(`open:${open}`)],
+		useRef: () => ({
+			current:
+				refIndex++ === 0 ? { focus: () => events.push("focus trigger") } : null,
+		}),
+	};
+	let tree: ReturnType<typeof AccountListItem>;
+	try {
+		tree = AccountListItem({
+			account: makeAccount({
+				provider: "codex",
+				bankedResets: {
+					tracked: true,
+					availableCount: 2,
+					applicableCount: 0,
+					appliesNow: false,
+					soonestExpiresAt: null,
+					doesNotExpire: false,
+					stale: false,
+					observedAt: null,
+				},
+			}),
+			...requiredHandlers,
+			onUseReset: () => events.push("confirm"),
+		});
+	} finally {
+		internals.H = previous;
+	}
+	const nodes: { props: Record<string, unknown> }[] = [];
+	function visit(node: unknown) {
+		if (!node || typeof node !== "object") return;
+		if (Array.isArray(node)) {
+			node.forEach(visit);
+			return;
+		}
+		const element = node as { props?: Record<string, unknown> };
+		if (element.props) {
+			nodes.push(element as { props: Record<string, unknown> });
+			visit(element.props.children);
+		}
+	}
+	visit(tree);
+	const reset = nodes.find((n) => n.props.onUseReset && !n.props.compact);
+	const modal = nodes.find((n) => n.props.onCloseAutoFocus);
+	expect(reset).toBeDefined();
+	expect(modal).toBeDefined();
+	(reset?.props.onUseReset as () => void)();
+	expect(events).toEqual(["open:false"]);
+	(
+		modal?.props.onCloseAutoFocus as (event: {
+			preventDefault: () => void;
+		}) => void
+	)({ preventDefault: () => events.push("prevent old focus") });
+	expect(events).toEqual([
+		"open:false",
+		"prevent old focus",
+		"focus trigger",
+		"confirm",
+	]);
+	(
+		modal?.props.onCloseAutoFocus as (event: {
+			preventDefault: () => void;
+		}) => void
+	)({ preventDefault: () => events.push("duplicate") });
+	expect(events).toHaveLength(4);
+});
+
+it("retains a visible exception if a binding observation differs from the quota stack", () => {
+	const account = makeAccount({
+		usageWindow: "seven_day",
+		usageData: { seven_day: { utilization: 32, resets_at: null } },
+		bindingConstraint: {
+			window: "seven_day",
+			utilization: 100,
+			resetAtMs: null,
+			scope: "account",
+			modelFamily: null,
+		},
+	});
+	const visible = withoutDetailsContent(
+		renderToStaticMarkup(
+			<AccountListItem account={account} {...requiredHandlers} />,
+		),
+	);
+	expect(visible).toContain('data-testid="binding-constraint"');
+	expect(visible).toContain("100%");
+	expect(visible).toContain("32%");
 });

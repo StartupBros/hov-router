@@ -3,6 +3,7 @@ import { normalizeResetMs } from "../../lib/pool-usage";
 import { providerShowsWeeklyUsage } from "../../utils/provider-utils";
 import {
 	collectAnthropicUsageRows,
+	isUsageWindow,
 	type UsageDisplay,
 } from "./rate-limit-helpers";
 
@@ -102,6 +103,9 @@ export function accountUsageWindows(
 		// object-shaped `limits` — disambiguated with Array.isArray.
 		("five_hour" in usageData ||
 			"seven_day" in usageData ||
+			Object.entries(usageData).some(
+				([key, value]) => key.startsWith("seven_day_") && isUsageWindow(value),
+			) ||
 			Array.isArray((usageData as { limits?: unknown }).limits)) &&
 		!isAlibabaData &&
 		!isMinimaxData &&
@@ -286,15 +290,15 @@ export function accountUsageWindows(
 		);
 	} else if (
 		providerShowsWeeklyUsage(provider) &&
-		usageUtilization !== null &&
-		usageUtilization !== undefined &&
+		((usageUtilization !== null && usageUtilization !== undefined) ||
+			(compact && resetIsoValue(resetIso) != null)) &&
 		usageWindow &&
 		// Never let the 5-hour window back in for Codex through this fallback.
 		!(isCodex && usageWindow === "five_hour")
 	) {
 		// Fallback: show only the most restrictive window
 		usages.push({
-			utilization: usageUtilization,
+			utilization: usageUtilization ?? null,
 			window: usageWindow,
 			resetTime: resetIso,
 		});
@@ -345,18 +349,14 @@ export function accountUsageWindows(
 		}
 	}
 
-	if (compact && provider === "anthropic") {
-		for (const window of ["five_hour", "seven_day"]) {
-			if (!usages.some((row) => row.window === window)) {
-				usages.push({ window, utilization: null, resetTime: null });
-			}
-		}
-	}
 	if (compact && isCodex && !usages.some((row) => row.window === "seven_day")) {
 		usages.unshift({ window: "seven_day", utilization: null, resetTime: null });
 	}
 	return {
-		usages: usages.map((row) => ({
+		usages: (compact && provider === "anthropic"
+			? usages.filter((row) => !row.synthetic)
+			: usages
+		).map((row) => ({
 			...row,
 			resetTime: resetIsoValue(row.resetTime),
 		})),

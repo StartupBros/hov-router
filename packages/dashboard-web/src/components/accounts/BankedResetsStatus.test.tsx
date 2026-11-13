@@ -341,3 +341,36 @@ describe("BankedResetsStatus Use reset button (R8)", () => {
 		}
 	});
 });
+
+it("compact balances disclose explanations and preserve fresh, stale and unknown distinctions", () => {
+	for (const resets of [
+		held,
+		{ ...held, stale: true },
+		{ ...held, availableCount: 0 },
+		{ ...held, availableCount: null },
+	]) {
+		const html = renderToStaticMarkup(
+			<BankedResetsStatus
+				compact
+				resets={resets}
+				accountName="codex-pro-1"
+				now={NOW}
+				onUseReset={() => {}}
+			/>,
+		);
+		expect(html).toContain("<details");
+		const header = html.slice(0, html.indexOf("</summary>"));
+		expect(header).toContain("Banked resets:");
+		if (resets.availableCount === null)
+			expect(header).toContain("not read yet");
+		if (resets.stale) {
+			expect(header).toContain("Last known");
+			expect(html).toContain('disabled=""');
+		}
+		if (resets.availableCount === 2) {
+			expect(header).toContain("Nov 30, 2026 UTC");
+			expect(html).toContain("Use reset");
+		}
+		expect(html).toContain('aria-label="Banked resets for codex-pro-1"');
+	}
+});

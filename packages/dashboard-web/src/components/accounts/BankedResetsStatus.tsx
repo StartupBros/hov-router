@@ -1,4 +1,5 @@
 import type { BankedResets } from "@better-ccflare/types";
+import { ChevronDown } from "lucide-react";
 import { useId } from "react";
 import { Button } from "../ui/button";
 import {
@@ -36,7 +37,15 @@ export function bankedResetsRowState(
  * The expiry chunk. It may wrap on a narrow screen, but only between its
  * parts: the date and the countdown each stay on one line.
  */
-function ExpiryChunk({ resets, now }: { resets: BankedResets; now: number }) {
+function ExpiryChunk({
+	resets,
+	now,
+	compact = false,
+}: {
+	resets: BankedResets;
+	now: number;
+	compact?: boolean;
+}) {
 	const { soonestExpiresAt, doesNotExpire, availableCount } = resets;
 	if (soonestExpiresAt === null) {
 		return (
@@ -56,7 +65,9 @@ function ExpiryChunk({ resets, now }: { resets: BankedResets; now: number }) {
 			{note && (
 				<>
 					{" "}
-					<span className="whitespace-nowrap">({note})</span>
+					<span className={compact ? "sr-only" : "whitespace-nowrap"}>
+						({note})
+					</span>
 				</>
 			)}
 			{doesNotExpire && "; at least one does not expire"}
@@ -82,7 +93,9 @@ export function BankedResetsStatus({
 	accountName,
 	now = Date.now(),
 	onUseReset,
+	compact = false,
 }: {
+	compact?: boolean;
 	resets: BankedResets;
 	accountName: string;
 	now?: number;
@@ -120,6 +133,47 @@ export function BankedResetsStatus({
 	// right after it, and the detail line says when it was read.
 	if (showsStale) detail = staleDetail(resets.observedAt);
 	if (action?.shown && action.note) detail = `${detail} ${action.note}`;
+
+	if (compact)
+		return (
+			<fieldset
+				aria-label={`Banked resets for ${accountName}`}
+				className="min-w-0 text-xs"
+			>
+				<details className="group">
+					<summary className="flex min-h-11 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+						<span>Banked resets:</span>
+						<span className="text-foreground tabular-nums">{value}</span>
+						{showsStale && (
+							<span className={STATUS_TONE_CLASS.warning}>Last known</span>
+						)}
+						{holdsResets && <ExpiryChunk resets={resets} now={now} compact />}
+						<ChevronDown
+							aria-hidden="true"
+							className="h-3 w-3 shrink-0 group-open:rotate-180"
+						/>
+						<span className="sr-only">
+							Banked reset details and confirmation
+						</span>
+					</summary>
+					<p id={detailId} className="py-1 text-muted-foreground">
+						{detail}
+					</p>
+					{action?.shown && (
+						<Button
+							variant="outline"
+							size="sm"
+							className="min-h-11"
+							disabled={!action.enabled}
+							aria-describedby={detailId}
+							onClick={onUseReset}
+						>
+							Use reset
+						</Button>
+					)}
+				</details>
+			</fieldset>
+		);
 
 	return (
 		// A fieldset is a native group; min-w-0 drops its min-content width so the

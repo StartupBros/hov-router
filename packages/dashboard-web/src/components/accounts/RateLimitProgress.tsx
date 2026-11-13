@@ -19,6 +19,7 @@ import {
 } from "./rate-limit-helpers";
 
 interface RateLimitProgressProps {
+	bindingWindow?: string | null;
 	compact?: boolean;
 	highlightReset?: { label: string; resetTime: string } | null;
 	resetIso: string | null;
@@ -134,6 +135,7 @@ export function RateLimitProgress({
 	showWeekly = false,
 	compact = false,
 	highlightReset,
+	bindingWindow,
 }: RateLimitProgressProps) {
 	const refreshId = useId();
 	const [now, setNow] = useState(Date.now());
@@ -248,7 +250,7 @@ export function RateLimitProgress({
 	return (
 		<div
 			className={cn(
-				compact ? "@container min-w-0 space-y-2" : "space-y-3",
+				compact ? "@container min-w-0 space-y-1.5" : "space-y-3",
 				className,
 			)}
 		>
@@ -305,10 +307,12 @@ export function RateLimitProgress({
 				</div>
 			)}
 			{compact && (
-				<p className="flex justify-between gap-2 text-xs text-muted-foreground xl:hidden">
-					<span>Limits</span>
-					<span>Used · resets in</span>
+				<p className="text-xs text-muted-foreground xl:hidden">
+					Quota used · resets in
 				</p>
+			)}
+			{compact && usages.length === 0 && (
+				<p className="text-xs text-muted-foreground">Usage unavailable</p>
 			)}
 			{compact &&
 				usageRateLimitedUntil != null &&
@@ -363,7 +367,7 @@ export function RateLimitProgress({
 						percentage >= 0;
 					const exhausted = known && percentage >= 100;
 					const label = displayLabel(usage);
-					const longLabel = label.length > 8;
+					const binding = usage.isActive || usage.window === bindingWindow;
 					const highlighted =
 						highlightReset?.label === label &&
 						highlightReset.resetTime === usage.resetTime;
@@ -371,22 +375,37 @@ export function RateLimitProgress({
 						<fieldset
 							key={`${usage.window}:${usage.label ?? "default"}`}
 							aria-label={`${label} used`}
-							className="grid min-w-0 grid-cols-[3.25rem_minmax(2rem,1fr)_2.75rem] items-center gap-x-2 gap-y-1 text-xs @[15rem]:grid-cols-[3.25rem_minmax(2rem,1fr)_2.75rem_4.75rem]"
+							className="grid min-w-0 grid-cols-[minmax(0,7rem)_minmax(2rem,1fr)_2.5rem] items-center gap-x-2 gap-y-1 text-xs @[28rem]:grid-cols-[minmax(0,7rem)_minmax(2rem,1fr)_2.5rem_4.75rem]"
 						>
 							<span
 								className={cn(
 									"text-muted-foreground",
-									longLabel && "col-span-full",
+									binding && "font-medium text-foreground",
 								)}
 							>
 								{label}
+								{(exhausted || binding) && (
+									<span
+										className="ml-1"
+										title={`${exhausted ? "Exhausted. " : ""}${binding ? "Binding limit. " : ""}${usage.window?.startsWith("seven_day_") ? "This is a model-scoped limit, separate from account-wide usage." : "Account-wide limit."}`}
+									>
+										<span aria-hidden="true">{exhausted ? "!" : "•"}</span>
+										<span className="sr-only">
+											{exhausted ? "Exhausted; " : ""}
+											{binding ? "binding; " : ""}
+											{usage.window?.startsWith("seven_day_")
+												? "model-scoped limit"
+												: "account-wide limit"}
+										</span>
+									</span>
+								)}
 							</span>
 							{known ? (
 								<>
 									<Progress
 										value={Math.min(100, percentage)}
 										aria-label={`${label} used`}
-										className={cn("h-1 min-w-0", longLabel && "col-span-2")}
+										className="h-1 min-w-0"
 										indicatorClassName={
 											exhausted ? "bg-destructive" : "bg-muted-foreground"
 										}
@@ -401,19 +420,14 @@ export function RateLimitProgress({
 									</span>
 								</>
 							) : (
-								<span
-									className={cn(
-										"col-span-2 text-muted-foreground",
-										longLabel && "col-span-3",
-									)}
-								>
+								<span className={cn("col-span-2 text-muted-foreground")}>
 									Not reported
 								</span>
 							)}
 							{usage.resetTime ? (
 								<time
 									className={cn(
-										"col-span-full text-muted-foreground tabular-nums @[15rem]:col-span-1 @[15rem]:text-right",
+										"col-span-full text-muted-foreground tabular-nums @[28rem]:col-span-1 @[28rem]:text-right",
 										highlighted && "font-semibold text-foreground",
 									)}
 									dateTime={usage.resetTime}
@@ -429,15 +443,8 @@ export function RateLimitProgress({
 										: formatRelativeReset(Date.parse(usage.resetTime), now)}
 								</time>
 							) : (
-								<span className="col-span-full text-muted-foreground @[15rem]:col-span-1 @[15rem]:text-right">
+								<span className="col-span-full text-muted-foreground @[28rem]:col-span-1 @[28rem]:text-right">
 									<span className="sr-only">Reset </span>unknown
-								</span>
-							)}
-							{(exhausted || usage.isActive) && (
-								<span className="col-span-full font-medium text-foreground">
-									{exhausted ? "Exhausted" : ""}
-									{exhausted && usage.isActive ? " · " : ""}
-									{usage.isActive ? "binding" : ""}
 								</span>
 							)}
 						</fieldset>

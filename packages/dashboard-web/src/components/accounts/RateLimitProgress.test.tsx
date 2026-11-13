@@ -853,7 +853,7 @@ describe("compact comparison slots", () => {
 					}
 				/>,
 			);
-			if (provider === "anthropic") expect(html).toContain("5-hour used");
+			if (provider === "anthropic") expect(html).toContain("Usage unavailable");
 			else expect(html).not.toContain("5-hour");
 			expect(html).not.toContain("72%");
 			if (provider === "codex") expect(html).toContain("34%");
@@ -910,4 +910,61 @@ it("compact quotas stack once with labelled accessible reset even when usage is 
 	expect(html.match(/role="progressbar"/g)?.length).toBe(1);
 	expect(html.match(/>100%</g)?.length).toBe(1);
 	expect(html).toContain("Exhausted");
+});
+
+it("omits synthetic windows but retains reported unknown reset windows", () => {
+	const reset = new Date(Date.now() + 3600000).toISOString();
+	for (const usageData of [
+		{ limits: [{ kind: "weekly_all", percent: null, resets_at: reset }] },
+		{ seven_day: { utilization: null, resets_at: reset } },
+	]) {
+		const html = renderToStaticMarkup(
+			<RateLimitProgress
+				compact
+				showWeekly
+				provider="anthropic"
+				resetIso={null}
+				usageData={usageData as FullUsageData}
+			/>,
+		);
+		expect(html).not.toContain("5-hour");
+		expect(html).toContain('aria-label="Weekly used"');
+		expect(html).toContain(`dateTime="${reset}"`);
+		expect(html).toContain("Not reported");
+		expect(html).not.toContain('role="progressbar"');
+	}
+});
+
+it("retains an unknown legacy scoped window with its known reset", () => {
+	const reset = new Date(Date.now() + 3600000).toISOString();
+	const html = renderToStaticMarkup(
+		<RateLimitProgress
+			compact
+			showWeekly
+			provider="anthropic"
+			resetIso={null}
+			usageData={{ seven_day_fable: { utilization: null, resets_at: reset } }}
+		/>,
+	);
+	expect(html).toContain("Fable (Weekly)");
+	expect(html).toContain(`dateTime="${reset}"`);
+	expect(html).not.toContain("5-hour used");
+});
+
+it("retains a reported summary window with unknown usage and a known reset", () => {
+	const reset = new Date(Date.now() + 3600000).toISOString();
+	const html = renderToStaticMarkup(
+		<RateLimitProgress
+			compact
+			showWeekly
+			provider="anthropic"
+			resetIso={reset}
+			usageWindow="seven_day"
+			usageUtilization={null}
+		/>,
+	);
+	expect(html).toContain('aria-label="Weekly used"');
+	expect(html).toContain(`dateTime="${reset}"`);
+	expect(html).toContain("Not reported");
+	expect(html).not.toContain("5-hour");
 });

@@ -39,11 +39,13 @@ import {
 } from "../ui/dropdown-menu";
 import { Switch } from "../ui/switch";
 import type { AccountFamilyRoutingState } from "./account-routing";
+import { accountUsageWindows } from "./account-usage-windows";
 import { BankedResetsStatus } from "./BankedResetsStatus";
 import { pauseStatusDisplay } from "./pause-status";
 import { RateLimitProgress } from "./RateLimitProgress";
 import {
 	describeBindingConstraint,
+	displayLabel,
 	formatRateLimitStatus,
 } from "./rate-limit-helpers";
 import {
@@ -400,6 +402,27 @@ export function AccountListItem({
 		provider: account.provider,
 		showWeekly: providerShowsWeeklyUsage(account.provider),
 	};
+
+	const visibleWindows = accountUsageWindows({
+		...rateLimitProgressProps,
+		compact: true,
+	}).usages;
+	// Match the exact window, scope, value and reset. A same-named limit with
+	// different observations must retain its exception instead of disappearing.
+	const representedBinding = visibleWindows.find((row) => {
+		const constraint = account.bindingConstraint;
+		return (
+			constraint &&
+			!row.synthetic &&
+			row.window === constraint.window &&
+			row.utilization === constraint.utilization &&
+			(row.resetTime ? Date.parse(row.resetTime) : null) ===
+				constraint.resetAtMs &&
+			(constraint.scope === "family") ===
+				!!row.window?.startsWith("seven_day_") &&
+			displayLabel(row) === bindingConstraint?.label
+		);
+	});
 	const showAutoFeatures = providerSupportsAutoFeatures(account.provider);
 	const showPlanBilling = providerSupportsCustomBilling(account.provider);
 	const showAutoPause =
@@ -419,7 +442,7 @@ export function AccountListItem({
 	return (
 		<article
 			aria-label={account.name}
-			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(15rem,1.5fr)_3rem_minmax(0,1.25fr)] xl:items-center xl:gap-4 xl:space-y-0 ${
+			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,3.2fr)_minmax(0,0.9fr)_10.5rem] xl:items-center xl:gap-3 xl:space-y-0 ${
 				isPrimary
 					? "border-border border-l-2 border-l-primary"
 					: "border-border hover:border-muted-foreground/50"
@@ -439,9 +462,7 @@ export function AccountListItem({
 								Primary
 							</span>
 						)}
-						<span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground xl:hidden">
-							Priority {account.priority}
-						</span>
+
 						{codexUsageExtras?.plan_type && (
 							<span className="px-2 py-0.5 text-xs font-medium bg-secondary text-secondary-foreground rounded-full">
 								{codexUsageExtras.plan_type}
@@ -454,11 +475,14 @@ export function AccountListItem({
 						/>
 					</div>
 					{/* No bullet separators: they strand at line ends when this wraps. */}
-					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
 						<span>{account.provider}</span>
+						<span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+							Priority {account.priority}
+						</span>
 					</div>
 				</div>
-				<div className="ml-auto flex shrink-0 flex-wrap items-center gap-1 min-w-0 max-w-full justify-end xl:col-start-5 xl:row-start-1">
+				<div className="ml-auto flex shrink-0 flex-wrap items-center gap-1 min-w-0 max-w-full justify-end xl:col-start-4 xl:row-start-1">
 					{showForceReset && (
 						<Button
 							variant="outline"
@@ -487,32 +511,7 @@ export function AccountListItem({
 							Re-authenticate
 						</Button>
 					)}
-					{canRefreshUsage && (
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-11 w-11 p-0"
-							disabled={isRefreshingUsage}
-							onClick={async () => {
-								setIsRefreshingUsage(true);
-								try {
-									await onRefreshUsage(account);
-								} finally {
-									setIsRefreshingUsage(false);
-								}
-							}}
-							aria-label="Refresh usage"
-							title={
-								account.provider === "codex"
-									? "Refresh usage data (free ChatGPT usage endpoint; falls back to a minimal quota-consuming request on custom endpoints or when the free endpoint fails)"
-									: "Refresh usage data (restarts usage polling and refreshes token if expired)"
-							}
-						>
-							<RefreshCw
-								className={`h-3.5 w-3.5 ${isRefreshingUsage ? "animate-spin" : ""}`}
-							/>
-						</Button>
-					)}
+
 					<Button
 						variant="ghost"
 						size="sm"
@@ -560,18 +559,72 @@ export function AccountListItem({
 							<DialogDescription>
 								Settings &amp; account details
 							</DialogDescription>
+							<div className="flex flex-wrap items-center gap-3 text-sm">
+								<span className="tabular-nums">
+									{presenter.requestCount.toLocaleString()} requests
+								</span>
+								<Button
+									variant="outline"
+									className="min-h-11"
+									onClick={() => onPauseToggle(account)}
+								>
+									{account.paused ? "Resume account" : "Pause account"}
+								</Button>
+								{canRefreshUsage && (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-11 w-11 p-0"
+										disabled={isRefreshingUsage}
+										onClick={async () => {
+											setIsRefreshingUsage(true);
+											try {
+												await onRefreshUsage(account);
+											} finally {
+												setIsRefreshingUsage(false);
+											}
+										}}
+										aria-label="Refresh usage"
+										title={
+											account.provider === "codex"
+												? "Refresh usage data (free ChatGPT usage endpoint; falls back to a minimal quota-consuming request on custom endpoints or when the free endpoint fails)"
+												: "Refresh usage data (restarts usage polling and refreshes token if expired)"
+										}
+									>
+										<RefreshCw
+											className={`h-3.5 w-3.5 ${isRefreshingUsage ? "animate-spin" : ""}`}
+										/>
+									</Button>
+								)}
+							</div>
+							<p
+								className="text-xs text-muted-foreground"
+								title={presenter.rateLimitStatus}
+							>
+								Local status: {formatRateLimitStatus(presenter.rateLimitStatus)}
+							</p>
 							{settingsError && (
 								<p role="alert" className="text-sm text-destructive">
 									{settingsError}
 								</p>
 							)}
-							{quietBankedBalance && account.bankedResets && (
+							{account.provider === "codex" && account.bankedResets && (
 								<BankedResetsStatus
 									resets={account.bankedResets}
 									accountName={account.name}
+									onUseReset={
+										onUseReset
+											? () => closeDetailsThen(() => onUseReset(account))
+											: undefined
+									}
 								/>
 							)}
-							<RateLimitProgress {...rateLimitProgressProps} />{" "}
+							<RateLimitProgress {...rateLimitProgressProps} />
+							<p className="text-xs text-muted-foreground">
+								The comparison shows reported quota windows. An absent window is
+								not zero usage or unlimited capacity; provider reset times are
+								separate from local retry delays.
+							</p>
 							{routingStates.length > 0 && (
 								<section
 									aria-label={`Family routing for ${account.name}`}
@@ -890,17 +943,13 @@ export function AccountListItem({
 				</div>
 			</div>
 
-			<div className="hidden text-sm tabular-nums xl:block xl:col-start-4 xl:row-start-1">
-				<span className="xl:sr-only">Priority </span>
-				{account.priority}
-			</div>
 			{showForceReset && (
 				<p className="text-xs text-muted-foreground xl:col-span-full">
 					Force Reset clears local state; it does not restore provider quota.
 				</p>
 			)}
-			{/* Status first, then counters. */}
-			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-sm [&>span]:max-w-full [&>span]:whitespace-normal xl:col-start-2 xl:row-start-1 xl:flex-col xl:items-start">
+			{/* Concise local status; diagnostics and request totals live in Details. */}
+			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-sm [&>span]:max-w-full [&>span]:whitespace-normal xl:col-start-3 xl:row-start-1 xl:flex-col xl:items-start">
 				<span className="text-xs font-medium text-muted-foreground xl:sr-only">
 					Operational status
 				</span>
@@ -913,7 +962,7 @@ export function AccountListItem({
 					!presenter.isRateLimited &&
 					!showRateLimitStatus && (
 						<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
-							No account block reported
+							Not blocked
 						</span>
 					)}
 				{isBlockedByLegacyLock && !isHardLimited && (
@@ -945,7 +994,11 @@ export function AccountListItem({
 							aria-hidden="true"
 							className="h-1.5 w-1.5 rounded-full bg-current"
 						/>
-						{formatRateLimitStatus(presenter.rateLimitStatus)}
+						{formatRateLimitStatus(
+							presenter.rateLimitStatus.toLowerCase().startsWith("allowed")
+								? presenter.rateLimitStatus.replace(/\s*\(\d+m\)$/, "")
+								: presenter.rateLimitStatus,
+						)}
 					</span>
 				)}
 				{presenter.isRateLimited && (
@@ -958,6 +1011,18 @@ export function AccountListItem({
 							Account is rate limited. Requests are rejected until the limit
 							resets.
 						</span>
+					</span>
+				)}
+
+				{isBlockedByLegacyLock && (
+					<span
+						className="text-xs text-muted-foreground"
+						title={new Date(
+							account.rateLimitedUntil as number,
+						).toLocaleString()}
+					>
+						Local retry:{" "}
+						{new Date(account.rateLimitedUntil as number).toLocaleTimeString()}
 					</span>
 				)}
 				{staleLockDetected && (
@@ -981,9 +1046,6 @@ export function AccountListItem({
 						Usage rate limited
 					</span>
 				)}
-				<span className="whitespace-nowrap tabular-nums text-muted-foreground">
-					{presenter.requestCount.toLocaleString()} requests
-				</span>
 
 				{codexCreditsBalance !== null && (
 					<span className="whitespace-nowrap tabular-nums text-muted-foreground">
@@ -997,24 +1059,26 @@ export function AccountListItem({
 				)}
 			</div>
 
-			<div className="min-w-0 border-t pt-3 xl:col-start-3 xl:row-start-1 xl:border-t-0 xl:pt-0">
+			<div className="min-w-0 border-t pt-3 xl:col-start-2 xl:row-start-1 xl:border-t-0 xl:pt-0">
 				<RateLimitProgress
 					compact
+					bindingWindow={representedBinding?.window}
 					highlightReset={sortReset}
 					{...rateLimitProgressProps}
 				/>
+				{account.provider === "codex" &&
+					account.bankedResets &&
+					!quietBankedBalance && (
+						<div className="mt-1">
+							<BankedResetsStatus
+								compact
+								resets={account.bankedResets}
+								accountName={account.name}
+								onUseReset={onUseReset ? () => onUseReset(account) : undefined}
+							/>
+						</div>
+					)}
 			</div>
-			{account.provider === "codex" &&
-				account.bankedResets &&
-				!quietBankedBalance && (
-					<div className="xl:col-span-full [&_button]:min-h-11">
-						<BankedResetsStatus
-							resets={account.bankedResets}
-							accountName={account.name}
-							onUseReset={onUseReset ? () => onUseReset(account) : undefined}
-						/>
-					</div>
-				)}
 
 			{routingStates.some(routingNeedsNotice) && (
 				<section
@@ -1040,7 +1104,7 @@ export function AccountListItem({
 				</section>
 			)}
 
-			{bindingConstraint && (
+			{bindingConstraint && !representedBinding && (
 				// Deliberately NOT a replacement for the routing utilization badge
 				// above: routing asks how much account-wide capacity is left, this
 				// asks what is actually stopping you. Collapsing the two is what let

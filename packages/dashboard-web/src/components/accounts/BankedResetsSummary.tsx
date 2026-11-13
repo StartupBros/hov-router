@@ -68,7 +68,24 @@ export function BankedResetsSummary({
 	summary: BankedResetsSummaryData | undefined;
 	now?: number;
 }) {
-	if (!summary || summary.trackedAccounts === 0) return null;
+	if (!summary || summary.trackedAccounts === 0)
+		return (
+			<details
+				aria-label="Banked resets"
+				className="text-xs text-muted-foreground"
+			>
+				<summary className="min-h-11 cursor-pointer py-3">
+					Banked resets · {summary ? "Not tracked" : "not read yet"}
+				</summary>
+				<p className="max-w-prose pb-3">
+					{summary
+						? "No accounts currently report banked resets."
+						: "Waiting for banked reset data. Missing data is not a zero balance."}{" "}
+					A banked reset restores usage limits early. Using one is optional,
+					asks for confirmation and cannot be undone.
+				</p>
+			</details>
+		);
 	// Applicability stays in the API but predicts nothing about a reset working.
 	const { totalAvailable, soonestExpiresAt, anyStale } = summary;
 	const explanation = (
@@ -79,51 +96,21 @@ export function BankedResetsSummary({
 		</p>
 	);
 
-	// An empty, fresh balance should not push the accounts below a help panel.
-	// Keep held resets, expiry information and stale observations fully visible.
-	if (totalAvailable === 0 && !anyStale && soonestExpiresAt === null) {
-		return (
-			<details
-				aria-label="Banked resets"
-				className="group text-muted-foreground"
-			>
-				<summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 text-xs [&::-webkit-details-marker]:hidden">
-					<span className="font-medium">Banked resets</span>
-					<span className="tabular-nums">0</span>
-					<span className="sr-only">No banked resets held.</span>
-					<ChevronDown
-						aria-hidden="true"
-						className="ml-auto h-4 w-4 shrink-0 group-open:rotate-180"
-					/>
-				</summary>
-				<div className="space-y-2 pb-4">
-					<p className="text-sm">No banked resets held.</p>
-					{explanation}
-				</div>
-			</details>
-		);
-	}
-
 	return (
-		<section
+		<details
 			aria-label="Banked resets"
-			className="min-w-0 max-w-prose rounded-md border p-3"
+			className="group min-w-0 text-muted-foreground"
 		>
-			<div className="space-y-2">
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-					<h3 className="text-sm font-medium">Banked resets</h3>
-					<span className="font-semibold tabular-nums">{totalAvailable}</span>
-					<span className="text-sm text-muted-foreground">total</span>
-					{anyStale && (
-						<span
-							className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
-						>
-							Includes last known values
-						</span>
-					)}
-				</div>
-				{explanation}
-				<p className="text-sm text-muted-foreground">
+			<summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 text-xs [&::-webkit-details-marker]:hidden">
+				<span className="font-medium">Banked resets</span>
+				<span className="font-semibold tabular-nums">{totalAvailable}</span>
+				<span className="text-sm text-muted-foreground">total</span>
+				{anyStale && (
+					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}>
+						Includes last known values
+					</span>
+				)}
+				<span>
 					{soonestExpiresAt !== null ? (
 						<span title={describeBankedResetExpiry(soonestExpiresAt)}>
 							Soonest expires{" "}
@@ -134,7 +121,14 @@ export function BankedResetsSummary({
 					) : (
 						"No banked resets held."
 					)}
-				</p>
+				</span>
+				<ChevronDown
+					aria-hidden="true"
+					className="h-4 w-4 shrink-0 group-open:rotate-180"
+				/>
+			</summary>
+			<div className="max-w-prose space-y-2 py-2">
+				{explanation}
 				{anyStale && (
 					<p className="text-xs text-muted-foreground">
 						Some accounts have not reported recently. Their last known counts
@@ -153,6 +147,6 @@ export function BankedResetsSummary({
 					</p>
 				)}
 			</div>
-		</section>
+		</details>
 	);
 }
