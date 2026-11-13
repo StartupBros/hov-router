@@ -1,5 +1,5 @@
 import { computeWindowStartMs, registerUIRefresh } from "@better-ccflare/core";
-import type { AnthropicUsageData, FullUsageData } from "@better-ccflare/types";
+import type { FullUsageData } from "@better-ccflare/types";
 import { useEffect, useId, useState } from "react";
 import { formatRelativeReset } from "../../lib/pool-usage";
 import { cn, formatShortDuration } from "../../lib/utils";
@@ -7,34 +7,20 @@ import {
 	isAnthropicPeakHour,
 	isZaiPeakHour,
 	providerShowsCreditsBalance,
-	providerShowsWeeklyUsage,
 } from "../../utils/provider-utils";
 import { LiveCountdown } from "../LiveCountdown";
 import { Progress } from "../ui/progress";
+import { accountUsageWindows } from "./account-usage-windows";
 import {
-	collectAnthropicUsageRows,
 	displayLabel,
 	formatWindowName,
 	isWeeklyWindow,
 	severityColor,
-	type UsageDisplay,
 } from "./rate-limit-helpers";
-
-/**
- * Codex-only usage extras (plan_type, credits_balance,
- * code_review_used_percent, code_review_resets_at) come from the free
- * wham/usage poller and can be ABSENT from usageData at any moment -- live
- * traffic overwrites cached extras between polls. Not part of the public
- * FullUsageData union (see @better-ccflare/types), so every read here is
- * null-safe and simply omits the corresponding element when absent.
- */
-interface CodexUsageExtras {
-	code_review_used_percent?: number | null;
-	code_review_resets_at?: string | null;
-}
 
 interface RateLimitProgressProps {
 	compact?: boolean;
+	highlightReset?: { label: string; resetTime: string } | null;
 	resetIso: string | null;
 	usageUtilization?: number | null; // Actual utilization from API (0-100)
 	usageWindow?: string | null; // Window name (e.g., "five_hour")
@@ -46,8 +32,6 @@ interface RateLimitProgressProps {
 	className?: string;
 	showWeekly?: boolean; // Whether to show weekly usage as well
 }
-
-const WINDOW_MS = 5 * 60 * 60 * 1000; // 5 hours in milliseconds
 
 function computeExpectedPct(
 	resetTime: string | null,
@@ -149,6 +133,7 @@ export function RateLimitProgress({
 	className,
 	showWeekly = false,
 	compact = false,
+	highlightReset,
 }: RateLimitProgressProps) {
 	const refreshId = useId();
 	const [now, setNow] = useState(Date.now());
@@ -226,311 +211,18 @@ export function RateLimitProgress({
 		}
 	}
 
-	const resetTime = resetIso ? new Date(resetIso).getTime() : Date.now();
-
-	// Determine which usage windows to display
-	const usages: UsageDisplay[] = [];
-
-	// Check if this is NanoGPT usage data (has 'active' and 'daily' properties)
-	const isNanoGPTData =
-		usageData &&
-		"active" in usageData &&
-		"daily" in usageData &&
-		"monthly" in usageData;
-
-	// Check if this is Zai usage data (has 'time_limit' and 'tokens_limit' properties)
-	const isZaiData =
-		usageData && ("time_limit" in usageData || "tokens_limit" in usageData);
-
-	// Check if this is xAI/Grok usage data
-	const isXaiData = usageData && "credits" in usageData;
-
-	// Check if this is Alibaba Coding Plan usage data
-	const isAlibabaData =
-		usageData && "five_hour" in usageData && "weekly" in usageData;
-
-	// Check if this is MiniMax Token Plan usage data. The fetcher normalizes
-	// MiniMax's native `weekly_*` fields into a canonical `seven_day` window
-	// (see minimax-usage-fetcher.ts) with camelCase `resetAt` (epoch ms) on the
-	// inner object — distinct from Anthropic-style snake_case `resets_at`
-	// (ISO string). We disambiguate by inspecting the inner shape, not the
-	// provider name, so this also tolerates any future fetcher that adopts the
-	// same canonical convention. Without this guard a MiniMax payload falls
-	// into the Anthropic render branch below, `isUsageWindow` rejects both
-	// inner windows (no `resets_at`), and the 7d row collapses to "N/A".
-	const isMinimaxData = (() => {
-		if (!usageData || typeof usageData !== "object") return false;
-		if (!("five_hour" in usageData) && !("seven_day" in usageData)) {
-			return false;
-		}
-		// Anthropic-style: snake_case `resets_at` (string). MiniMax: camelCase
-		// `resetAt` (number, epoch ms). Require every present inner window
-		// to match the MiniMax shape — rejects payloads where one window
-		// looks like MiniMax and another looks like Anthropic, and rejects
-		// empty-object inner windows that would otherwise render "undefined%".
-		for (const key of ["five_hour", "seven_day"] as const) {
-			const obj = (usageData as Record<string, unknown>)[key];
-			if (obj === undefined || obj === null) continue;
-			if (typeof obj !== "object") return false;
-			const o = obj as Record<string, unknown>;
-			if (!("resetAt" in o) || "resets_at" in o) return false;
-		}
-		return true;
-	})();
-
-	// Anthropic-style quota data is shared by Anthropic and Codex; detect by shape, not provider name.
-	const hasAnthropicStyleData =
-		usageData != null &&
-		// Legacy flat windows OR the new generic limits[] array. Never NanoGPT's
-		// object-shaped `limits` — disambiguated with Array.isArray.
-		(("five_hour" in usageData && "seven_day" in usageData) ||
-			Array.isArray((usageData as { limits?: unknown }).limits)) &&
-		!isAlibabaData &&
-		!isMinimaxData &&
-		!isZaiData &&
-		!isNanoGPTData;
-
-	if (isAlibabaData && showWeekly) {
-		const alibabaData = usageData as {
-			five_hour: { percentUsed: number; resetAt: number | null };
-			weekly: { percentUsed: number; resetAt: number | null };
-			monthly: { percentUsed: number; resetAt: number | null };
-		};
-		usages.push({
-			utilization: alibabaData.five_hour.percentUsed,
-			window: "five_hour",
-			resetTime: alibabaData.five_hour.resetAt
-				? new Date(alibabaData.five_hour.resetAt).toISOString()
-				: null,
-		});
-		usages.push({
-			utilization: alibabaData.weekly.percentUsed,
-			window: "weekly",
-			resetTime: alibabaData.weekly.resetAt
-				? new Date(alibabaData.weekly.resetAt).toISOString()
-				: null,
-		});
-		usages.push({
-			utilization: alibabaData.monthly.percentUsed,
-			window: "monthly",
-			resetTime: alibabaData.monthly.resetAt
-				? new Date(alibabaData.monthly.resetAt).toISOString()
-				: null,
-		});
-	} else if (isMinimaxData && showWeekly) {
-		// MiniMax Token Plan usage data — show 5-hour and 7-day windows from
-		// each window's own `utilization` and `resetAt` (camelCase, epoch ms).
-		// Do NOT collapse to a single `usageUtilization` row: that fallback
-		// takes the most-restrictive window across all accounts and hides
-		// the second window entirely.
-		const minimaxData = usageData as {
-			five_hour?: {
-				utilization: number | null;
-				resetAt: number | null;
-			} | null;
-			seven_day?: {
-				utilization: number | null;
-				resetAt: number | null;
-			} | null;
-		};
-		const fiveHourUtil = minimaxData.five_hour?.utilization;
-		if (typeof fiveHourUtil === "number") {
-			usages.push({
-				utilization: fiveHourUtil,
-				window: "five_hour",
-				resetTime:
-					minimaxData.five_hour &&
-					typeof minimaxData.five_hour.resetAt === "number"
-						? new Date(minimaxData.five_hour.resetAt).toISOString()
-						: null,
-			});
-		}
-		const sevenDayUtil = minimaxData.seven_day?.utilization;
-		if (typeof sevenDayUtil === "number") {
-			usages.push({
-				utilization: sevenDayUtil,
-				window: "seven_day",
-				resetTime:
-					minimaxData.seven_day &&
-					typeof minimaxData.seven_day.resetAt === "number"
-						? new Date(minimaxData.seven_day.resetAt).toISOString()
-						: null,
-			});
-		}
-	} else if (isXaiData && showWeekly) {
-		// xAI/Grok usage data - show Grok Build credits utilization.
-		const xaiData = usageData as {
-			credits?: { utilization: number; resets_at: string | null };
-		};
-		if (xaiData.credits) {
-			usages.push({
-				utilization: xaiData.credits.utilization,
-				window: "credits",
-				resetTime: xaiData.credits.resets_at,
-			});
-		}
-	} else if (isZaiData && showWeekly) {
-		// Zai usage data - show tokens_limit (5-hour token quota) and time_limit (peak-hour limit)
-		const zaiData = usageData as {
-			time_limit?: { percentage: number; resetAt: number } | null;
-			tokens_limit?: { percentage: number; resetAt: number } | null;
-			tokens_limit_weekly?: { percentage: number; resetAt: number } | null;
-		};
-
-		// Tokens limit usage (5-hour token quota)
-		if (zaiData.tokens_limit) {
-			usages.push({
-				utilization: zaiData.tokens_limit.percentage,
-				window: "tokens_limit",
-				resetTime: zaiData.tokens_limit.resetAt
-					? new Date(zaiData.tokens_limit.resetAt).toISOString()
-					: null,
-			});
-		}
-
-		// Weekly token quota (absent on single-window plans)
-		if (zaiData.tokens_limit_weekly) {
-			usages.push({
-				utilization: zaiData.tokens_limit_weekly.percentage,
-				window: "tokens_limit_weekly",
-				resetTime: zaiData.tokens_limit_weekly.resetAt
-					? new Date(zaiData.tokens_limit_weekly.resetAt).toISOString()
-					: null,
-			});
-		}
-
-		// Time limit usage (peak-hour quota)
-		if (zaiData.time_limit) {
-			usages.push({
-				utilization: zaiData.time_limit.percentage,
-				window: "time_limit",
-				resetTime: zaiData.time_limit.resetAt
-					? new Date(zaiData.time_limit.resetAt).toISOString()
-					: null,
-			});
-		}
-	} else if (isNanoGPTData && showWeekly) {
-		// NanoGPT usage data - show daily and monthly windows
-		const nanogptData = usageData as {
-			active: boolean;
-			daily: { percentUsed: number; resetAt: number };
-			monthly: { percentUsed: number; resetAt: number };
-		};
-
-		// Only show usage if subscription is active
-		if (nanogptData.active) {
-			// Daily usage
-			if (nanogptData.daily) {
-				usages.push({
-					utilization: nanogptData.daily.percentUsed * 100, // Convert 0-1 to 0-100
-					window: "daily",
-					resetTime: new Date(nanogptData.daily.resetAt).toISOString(),
-				});
-			}
-
-			// Monthly usage
-			if (nanogptData.monthly) {
-				usages.push({
-					utilization: nanogptData.monthly.percentUsed * 100, // Convert 0-1 to 0-100
-					window: "monthly",
-					resetTime: new Date(nanogptData.monthly.resetAt).toISOString(),
-				});
-			}
-		} else {
-			// PayG mode - show that no subscription is active
-			usages.push({
-				utilization: null,
-				window: "daily",
-				resetTime: null,
-			});
-		}
-	} else if (hasAnthropicStyleData && showWeekly) {
-		// Anthropic usage data - show 5-hour, weekly, and any per-model weekly
-		// tier (opus, sonnet, and future tiers such as Fable) generically.
-		const rows = collectAnthropicUsageRows(
-			usageData as unknown as AnthropicUsageData,
-			{
-				utilization: usageUtilization ?? null,
-				resetTime: resetIso,
-			},
-		);
-		// Codex: drop the 5-hour row entirely. Its percentage is either absent or
-		// borrowed from the time-elapsed fallback, so the bar showed how much of
-		// the window had passed as if it were consumption. The weekly window is
-		// what actually limits a Codex account, and it is the only bar kept here.
-		usages.push(
-			...(isCodex ? rows.filter((row) => row.window !== "five_hour") : rows),
-		);
-	} else if (
-		providerShowsWeeklyUsage(provider) &&
-		usageUtilization !== null &&
-		usageUtilization !== undefined &&
-		usageWindow &&
-		// Never let the 5-hour window back in for Codex through this fallback.
-		!(isCodex && usageWindow === "five_hour")
-	) {
-		// Fallback: show only the most restrictive window
-		usages.push({
-			utilization: usageUtilization,
-			window: usageWindow,
-			resetTime: resetIso,
-		});
-	} else if (isCodex) {
-		// Back door closed: the time-based bar below is hardcoded to a 5-hour
-		// window, so without this branch removing the Codex 5h row above would just
-		// bring it back through here whenever data is missing. Show the weekly
-		// window as unavailable instead — the render path already prints "N/A" and
-		// "Data unavailable" for a null utilization.
-		usages.push({ utilization: null, window: "seven_day", resetTime: null });
-	} else {
-		// Use time-based percentage for non-Anthropic or when no usage data is available
-		const percentage = Math.min(
-			100,
-			Math.max(0, ((now - (resetTime - WINDOW_MS)) / WINDOW_MS) * 100),
-		);
-		usages.push({
-			utilization: percentage as number | null,
-			window: null,
-			resetTime: resetIso,
-		});
-	}
-
-	// Codex code-review quota: a flat scalar pair on usageData (NOT a
-	// window-shaped object -- see api-usage.ts), rendered as its own row
-	// styled like the other window bars. Absent whenever the wham/usage
-	// poller hasn't reported it yet or a live-traffic snapshot dropped it.
-	if (provider === "codex" && showWeekly && usageData) {
-		const codexExtras = usageData as CodexUsageExtras;
-		if (
-			typeof codexExtras.code_review_used_percent === "number" &&
-			Number.isFinite(codexExtras.code_review_used_percent)
-		) {
-			usages.push({
-				utilization: codexExtras.code_review_used_percent,
-				window: "code_review",
-				resetTime: codexExtras.code_review_resets_at ?? null,
-				label: "Code Review",
-			});
-		}
-	}
-
-	const compactSlots = [
+	const { usages, isNanoGPTData, hasAnthropicStyleData } = accountUsageWindows(
 		{
-			label: "5-hour used",
-			usage: usages.find(
-				(u) => u.window === "five_hour" || u.window === "tokens_limit",
-			),
+			resetIso,
+			usageUtilization,
+			usageWindow,
+			usageData,
+			provider,
+			showWeekly,
+			compact,
 		},
-		{
-			label: "Weekly used",
-			usage: usages.find(
-				(u) =>
-					u.window === "seven_day" ||
-					u.window === "weekly" ||
-					u.window === "tokens_limit_weekly",
-			),
-		},
-	];
+		now,
+	);
 
 	const isZaiPeak = provider === "zai" && isZaiPeakHour(now);
 	const isAnthropicPeak = provider === "anthropic" && isAnthropicPeakHour(now);
@@ -556,7 +248,7 @@ export function RateLimitProgress({
 	return (
 		<div
 			className={cn(
-				compact ? "grid grid-cols-2 gap-x-4 gap-y-2" : "space-y-3",
+				compact ? "@container min-w-0 space-y-2" : "space-y-3",
 				className,
 			)}
 		>
@@ -612,46 +304,12 @@ export function RateLimitProgress({
 					</span>
 				</div>
 			)}
-			{compact &&
-				compactSlots.map(({ label, usage }) => (
-					<div key={label} className="min-w-0 space-y-1">
-						<p className="text-xs text-muted-foreground xl:sr-only">{label}</p>
-						{usage?.utilization != null &&
-						Number.isFinite(usage.utilization) ? (
-							<>
-								<p className="text-lg font-semibold tabular-nums">
-									{Math.round(usage.utilization)}%
-									{usage.isActive && (
-										<span className="ml-1 text-xs font-medium text-destructive">
-											binding
-										</span>
-									)}
-								</p>
-								<Progress
-									value={usage.utilization}
-									aria-label={label}
-									className="h-1"
-									indicatorClassName={
-										usage.utilization >= 100
-											? "bg-destructive"
-											: "bg-muted-foreground"
-									}
-								/>
-								{usage.resetTime && (
-									<p className="text-xs text-muted-foreground">
-										Resets{" "}
-										{formatRelativeReset(
-											new Date(usage.resetTime).getTime(),
-											now,
-										)}
-									</p>
-								)}
-							</>
-						) : (
-							<p className="text-xs text-muted-foreground">Not reported</p>
-						)}
-					</div>
-				))}
+			{compact && (
+				<p className="flex justify-between gap-2 text-xs text-muted-foreground xl:hidden">
+					<span>Limits</span>
+					<span>Used · resets in</span>
+				</p>
+			)}
 			{compact &&
 				usageRateLimitedUntil != null &&
 				usageRateLimitedUntil > now && (
@@ -672,38 +330,117 @@ export function RateLimitProgress({
 			)}
 			{compact && providerShowsCreditsBalance(provider) && (
 				<div className="col-span-2">
-					<RateLimitProgress
-						resetIso={resetIso}
-						usageData={usageData}
-						provider={provider}
-					/>
+					{!usageData || !("remainingUsd" in usageData) ? (
+						<p className="text-xs text-muted-foreground">Credits unavailable</p>
+					) : (
+						<RateLimitProgress
+							resetIso={resetIso}
+							usageData={usageData}
+							provider={provider}
+						/>
+					)}
 				</div>
 			)}
 			{usages.map((usage, _index) => {
 				if (compact) {
-					if (
-						!usage.window ||
-						(compactSlots.some((slot) => slot.usage === usage) &&
-							!(usage.utilization != null && usage.utilization >= 100))
-					)
-						return null;
+					if (providerShowsCreditsBalance(provider)) return null;
+					if (isNanoGPTData && usage.window === "daily" && !usage.resetTime)
+						return (
+							<p key="payg" className="text-xs text-muted-foreground">
+								No subscription (PayG mode)
+							</p>
+						);
+					if (!usage.window)
+						return (
+							<p key="unavailable" className="text-xs text-muted-foreground">
+								Usage unavailable
+							</p>
+						);
+					const percentage = usage.utilization;
+					const known =
+						percentage != null &&
+						Number.isFinite(percentage) &&
+						percentage >= 0;
+					const exhausted = known && percentage >= 100;
+					const label = displayLabel(usage);
+					const longLabel = label.length > 8;
+					const highlighted =
+						highlightReset?.label === label &&
+						highlightReset.resetTime === usage.resetTime;
 					return (
-						<p
-							key={usage.window}
-							className="col-span-2 text-xs text-muted-foreground"
+						<fieldset
+							key={`${usage.window}:${usage.label ?? "default"}`}
+							aria-label={`${label} used`}
+							className="grid min-w-0 grid-cols-[3.25rem_minmax(2rem,1fr)_2.75rem] items-center gap-x-2 gap-y-1 text-xs @[15rem]:grid-cols-[3.25rem_minmax(2rem,1fr)_2.75rem_4.75rem]"
 						>
-							{isNanoGPTData && usage.window === "daily" && !usage.resetTime ? (
-								"No subscription (PayG mode)"
-							) : (
+							<span
+								className={cn(
+									"text-muted-foreground",
+									longLabel && "col-span-full",
+								)}
+							>
+								{label}
+							</span>
+							{known ? (
 								<>
-									{displayLabel(usage)}:{" "}
-									{usage.utilization == null
-										? "Not reported"
-										: `${Math.round(usage.utilization)}%`}
+									<Progress
+										value={Math.min(100, percentage)}
+										aria-label={`${label} used`}
+										className={cn("h-1 min-w-0", longLabel && "col-span-2")}
+										indicatorClassName={
+											exhausted ? "bg-destructive" : "bg-muted-foreground"
+										}
+									/>
+									<span
+										className={cn(
+											"text-right tabular-nums",
+											exhausted && "font-medium",
+										)}
+									>
+										{Math.round(percentage)}%
+									</span>
 								</>
+							) : (
+								<span
+									className={cn(
+										"col-span-2 text-muted-foreground",
+										longLabel && "col-span-3",
+									)}
+								>
+									Not reported
+								</span>
 							)}
-							{usage.isActive ? " — binding" : ""}
-						</p>
+							{usage.resetTime ? (
+								<time
+									className={cn(
+										"col-span-full text-muted-foreground tabular-nums @[15rem]:col-span-1 @[15rem]:text-right",
+										highlighted && "font-semibold text-foreground",
+									)}
+									dateTime={usage.resetTime}
+									title={new Date(usage.resetTime).toLocaleString()}
+								>
+									<span className="sr-only">
+										{highlighted ? "Sort key; " : ""}
+										{new Date(usage.resetTime).toLocaleString()} local time;
+										Resets{" "}
+									</span>
+									{Date.parse(usage.resetTime) <= now
+										? "Due"
+										: formatRelativeReset(Date.parse(usage.resetTime), now)}
+								</time>
+							) : (
+								<span className="col-span-full text-muted-foreground @[15rem]:col-span-1 @[15rem]:text-right">
+									<span className="sr-only">Reset </span>unknown
+								</span>
+							)}
+							{(exhausted || usage.isActive) && (
+								<span className="col-span-full font-medium text-foreground">
+									{exhausted ? "Exhausted" : ""}
+									{exhausted && usage.isActive ? " · " : ""}
+									{usage.isActive ? "binding" : ""}
+								</span>
+							)}
+						</fieldset>
 					);
 				}
 

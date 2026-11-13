@@ -2,7 +2,13 @@ import { AlertCircle, Search, X } from "lucide-react";
 import { useState } from "react";
 import type { Account } from "../../api";
 import { AccountListItem } from "./AccountListItem";
-import { type AccountListStatus, accountListView } from "./account-list-view";
+import {
+	ACCOUNT_SORTS,
+	type AccountListSort,
+	type AccountListStatus,
+	accountListView,
+	accountSortWindow,
+} from "./account-list-view";
 import type { AccountFamilyRoutingState } from "./account-routing";
 
 interface AccountListProps {
@@ -35,12 +41,13 @@ interface AccountListProps {
 
 export function AccountList(props: AccountListProps) {
 	const { accounts, routingByAccountId } = props;
+	const [sort, setSort] = useState<AccountListSort>("priority");
 	const [search, setSearch] = useState("");
 	const [provider, setProvider] = useState("");
 	const [status, setStatus] = useState<AccountListStatus>("all");
 	const view = accountListView(
 		accounts ?? [],
-		{ search, provider, status },
+		{ search, provider, status, sort },
 		routingByAccountId,
 	);
 	const clear = () => {
@@ -148,6 +155,20 @@ export function AccountList(props: AccountListProps) {
 						</select>
 					</label>
 				</div>
+				<label className="flex min-w-0 items-center gap-2 text-sm">
+					<span>Sort</span>
+					<select
+						value={sort}
+						onChange={(e) => setSort(e.target.value as AccountListSort)}
+						className="h-11 min-w-0 rounded-md border bg-background px-2"
+					>
+						{ACCOUNT_SORTS.map(([value, label]) => (
+							<option key={value} value={value}>
+								{label}
+							</option>
+						))}
+					</select>
+				</label>
 				<fieldset
 					className="flex min-w-0 flex-wrap items-center gap-1 xl:shrink-0"
 					aria-label="Filter by account status"
@@ -186,6 +207,13 @@ export function AccountList(props: AccountListProps) {
 					</button>
 				)}
 			</div>
+			{sort !== "priority" && (
+				<p className="text-xs text-muted-foreground">
+					View order only — routing priority is unchanged.
+					{sort.endsWith("reset") &&
+						" Reset sort key is emphasized; unknown or elapsed resets come last."}
+				</p>
+			)}
 			{view.accounts.length === 0 && (
 				<div className="rounded-lg border border-dashed p-6 text-center">
 					<p className="font-medium">No matching accounts</p>
@@ -204,18 +232,17 @@ export function AccountList(props: AccountListProps) {
 			<div className="overflow-hidden rounded-md border">
 				<div
 					aria-hidden="true"
-					className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,1.5fr)_4rem_minmax(0,1.5fr)] gap-4 border-b bg-muted/20 px-3 py-3 text-xs text-muted-foreground xl:grid"
+					className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(15rem,1.5fr)_3rem_minmax(0,1.25fr)] gap-4 border-b bg-muted/20 px-3 py-3 text-xs text-muted-foreground xl:grid"
 				>
 					<span>Account</span>
 					<span>Operational status</span>
-					<div className="grid grid-cols-2 gap-4">
-						<span>5-hour used %</span>
-						<span>Weekly used %</span>
+					<div>
+						Limits<span className="block font-normal">Used · resets in</span>
 					</div>
 					<span>Priority</span>
 					<span>Actions</span>
 				</div>
-				{accountListItems({ ...props, accounts: view.accounts })}
+				{accountListItems({ ...props, accounts: view.accounts }, sort)}
 			</div>
 			<details className="text-xs text-muted-foreground">
 				<summary className="flex min-h-11 cursor-pointer items-center">
@@ -236,16 +263,22 @@ export function AccountList(props: AccountListProps) {
 }
 
 /** Keep immutable keys and routing lookup together when filters change. */
-export function accountListItems({
-	settingsErrors,
-	accounts,
-	routingByAccountId,
-	...handlers
-}: AccountListProps) {
+export function accountListItems(
+	{
+		settingsErrors,
+		accounts,
+		routingByAccountId,
+		...handlers
+	}: AccountListProps,
+	sort: AccountListSort = "priority",
+) {
 	return (accounts ?? []).map((account) => (
 		<AccountListItem
 			key={account.id}
 			account={account}
+			sortReset={
+				sort.endsWith("reset") ? accountSortWindow(account, sort) : undefined
+			}
 			settingsError={settingsErrors?.[account.id]}
 			routingStates={routingByAccountId?.[account.id]}
 			isPrimary={account.isPrimary}

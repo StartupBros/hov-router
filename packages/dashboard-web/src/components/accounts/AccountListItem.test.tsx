@@ -69,9 +69,19 @@ describe("account scan layout", () => {
 			"Needs attention",
 			"Paused",
 			"Showing 1 of 1 accounts",
+			"Sort",
+			"Next reset (soonest)",
+			"Weekly reset (soonest)",
+			"5-hour reset (soonest)",
+			"Weekly remaining (most)",
+			"5-hour remaining (most)",
+			"Limits",
+			"Used · resets in",
 			'aria-pressed="true"',
 		])
 			expect(html).toContain(text);
+		// The view-order explanation appears only after choosing a non-default sort.
+		expect(html).not.toContain("View order only");
 	});
 	it("collapses routine settings and family details while keeping recovery visible", () => {
 		const html = renderToStaticMarkup(
