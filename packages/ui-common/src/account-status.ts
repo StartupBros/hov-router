@@ -42,13 +42,20 @@ export function classifyAccountStatus(input: AccountStatusInput, now: number) {
 		"queueing_hard",
 		"payment_required",
 	].some((p) => reportedStatus.toLowerCase().startsWith(p));
+	// The API synthesizes this label from the local deadline, not a provider header.
+	const generatedCooldown =
+		/^Rate limited \(\d+m\)$/.test(reportedStatus) &&
+		typeof input.rateLimitedUntil === "number" &&
+		Number.isFinite(input.rateLimitedUntil);
 	const hard =
 		clearableHard ||
-		/^(rate limited|rate limited until|queueing hard|payment required)(?:$|\s)/.test(
-			base,
-		);
+		(!generatedCooldown &&
+			/^(rate limited|rate limited until|queueing hard|payment required)(?:$|\s)/.test(
+				base,
+			));
 	const soft = base === "allowed_warning" || base === "queueing_soft";
-	const normal = ["ok", "allowed", "paused", ""].includes(base) || soft;
+	const normal =
+		["ok", "allowed", "paused", ""].includes(base) || soft || generatedCooldown;
 	let reason: AccountStatusReason;
 	if (reauth) reason = "reauth";
 	else if (input.paused) reason = "paused";

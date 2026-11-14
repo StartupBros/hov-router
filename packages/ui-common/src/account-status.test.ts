@@ -61,6 +61,59 @@ test("precedence, independent signals and frozen clear-cooldown predicate", () =
 			.clearCooldown,
 	).toBe(false);
 });
+test("API-generated cooldown labels expire with their numeric deadline", () => {
+	const snapshot = {
+		rateLimitStatus: "Rate limited (1m)",
+		rateLimitedUntil: now + 30_000,
+	};
+	expect(classifyAccountStatus(snapshot, now).reason).toBe("cooldown");
+	for (const clock of [
+		snapshot.rateLimitedUntil,
+		snapshot.rateLimitedUntil + 1,
+	]) {
+		const status = classifyAccountStatus(snapshot, clock);
+		expect(status.reason).toBe("normal");
+		expect(status.label).toBe("Not blocked");
+		expect(status.capacityAttention).toBe(false);
+		expect(status.overview).toBe(false);
+		expect(status.clearCooldown).toBe(false);
+		expect(status.reportedStatus).toBe(snapshot.rateLimitStatus);
+	}
+	expect(
+		classifyAccountStatus(
+			{ ...snapshot, usageThrottledUntil: now + 60_000 },
+			snapshot.rateLimitedUntil,
+		).reason,
+	).toBe("pacing");
+});
+test("cooldown expiry preserves independent hard statuses and unknown deadlines", () => {
+	for (const rateLimitStatus of [
+		"rate_limited (1m)",
+		"blocked",
+		"queueing_hard",
+		"payment_required",
+		"Rate limited",
+		"Rate limited until tomorrow",
+	]) {
+		const status = classifyAccountStatus(
+			{ rateLimitStatus, rateLimitedUntil: now },
+			now,
+		);
+		expect(status.reason).toBe("hard-limit");
+		expect(status.capacityAttention).toBe(true);
+	}
+	for (const rateLimitedUntil of [undefined, null, NaN, Infinity]) {
+		expect(
+			classifyAccountStatus(
+				{
+					rateLimitStatus: "Rate limited (1m)",
+					rateLimitedUntil,
+				},
+				now,
+			).reason,
+		).toBe("hard-limit");
+	}
+});
 test("finite future clocks only, no utilization-derived exhaustion", () => {
 	for (const until of [now, now - 1, NaN, Infinity]) {
 		const s = classifyAccountStatus(
