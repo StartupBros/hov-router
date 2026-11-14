@@ -145,7 +145,15 @@ export function accountListView(
 			)
 			.sort((a, b) => {
 				const sort = filters.sort ?? "priority";
-				if (sort === "priority") return 0;
+				// The router picks the lowest priority number among active accounts.
+				// Names break ties so rows hold still between polls; Primary and
+				// request counts change with every poll, so ordering never reads them.
+				if (sort === "priority")
+					return (
+						Number(a.paused) - Number(b.paused) ||
+						a.priority - b.priority ||
+						a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+					);
 				if (sort === "name")
 					return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
 				const left = accountSortWindow(a, sort, now)?.value;

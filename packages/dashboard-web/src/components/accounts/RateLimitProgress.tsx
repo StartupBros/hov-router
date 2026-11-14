@@ -7,6 +7,7 @@ import { cn, formatShortDuration } from "../../lib/utils";
 import {
 	isAnthropicPeakHour,
 	isZaiPeakHour,
+	providerHasNoQuotaTracking,
 	providerShowsCreditsBalance,
 } from "../../utils/provider-utils";
 import { LiveCountdown } from "../LiveCountdown";
@@ -121,6 +122,20 @@ function computeProjectedMessage(
 		return `Runs out ${formatShortDuration(remaining - timeToExhaustMs)} before reset`;
 	}
 	return `Resets ${formatShortDuration(timeToExhaustMs - remaining)} before exhaustion`;
+}
+
+/** Compact empty state: untracked by design reads differently from missing data. */
+function MissingQuota({ provider }: { provider: string }) {
+	return providerHasNoQuotaTracking(provider) ? (
+		<p
+			className="text-xs text-muted-foreground"
+			title="The router doesn't poll this provider for quota or credit usage."
+		>
+			Quota not tracked
+		</p>
+	) : (
+		<p className="text-xs text-muted-foreground">Usage unavailable</p>
+	);
 }
 
 export function RateLimitProgress({
@@ -292,9 +307,11 @@ export function RateLimitProgress({
 					Usage · resets in
 				</p>
 			)}
-			{compact && usages.length === 0 && (
-				<p className="text-xs text-muted-foreground">Usage unavailable</p>
-			)}
+			{compact &&
+				usages.length === 0 &&
+				!providerShowsCreditsBalance(provider) && (
+					<MissingQuota provider={provider} />
+				)}
 			{refreshDelayed && usageRateLimitedUntil != null && (
 				<p className="col-span-2 text-xs text-amber-700 dark:text-amber-400">
 					Usage refresh delayed — retry after{" "}
@@ -334,11 +351,7 @@ export function RateLimitProgress({
 							</p>
 						);
 					if (!usage.window)
-						return (
-							<p key="unavailable" className="text-xs text-muted-foreground">
-								Usage unavailable
-							</p>
-						);
+						return <MissingQuota key="unavailable" provider={provider} />;
 					const percentage = usage.utilization;
 					const known =
 						percentage != null &&

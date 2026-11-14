@@ -146,15 +146,16 @@ test("missing, partial and nonfinite utilization never become inferred remaining
 		equal[1],
 	);
 });
-test("search trims and matches name/provider without changing input order", () => {
+test("search trims and matches name/provider without mutating the input", () => {
 	const accounts = [
 		account("Beta"),
 		account("alpha"),
 		account("Other", { provider: "anthropic" }),
 	];
+	// Equal priorities list by name in the default routing order.
 	expect(
 		accountListView(accounts, { search: " CODEX " }).accounts.map((a) => a.id),
-	).toEqual(["Beta", "alpha"]);
+	).toEqual(["alpha", "Beta"]);
 	expect(
 		accountListView(accounts, { search: " ALP " }).accounts.map((a) => a.id),
 	).toEqual(["alpha"]);
@@ -192,7 +193,8 @@ test("reviewing attention restores the global set and paused includes reauth pau
 			provider: "",
 			status: "attention",
 		}).accounts.map((a) => a.id),
-	).toEqual(["auth", "lock"]);
+		// Routing order lists the active account before the paused one.
+	).toEqual(["lock", "auth"]);
 	expect(
 		accountListView(accounts, { status: "paused" }).accounts.map((a) => a.id),
 	).toEqual(["auth", "manual"]);
@@ -294,12 +296,17 @@ test("negative quota percentages do not imply spare capacity", () => {
 	expect(accountSortWindow(invalid, "five-hour-remaining", now)).toBeNull();
 });
 
-test("view sorts are stable, filtered, immutable and default to input order", () => {
+test("view sorts are stable, filtered, immutable and default to routing order", () => {
 	const input = [account("Zulu"), account("alpha"), account("Alpha")];
 	expect(
 		accountListView(input, { sort: "name" }).accounts.map((a) => a.id),
 	).toEqual(["alpha", "Alpha", "Zulu"]);
-	expect(accountListView(input).accounts).toEqual(input);
+	// Equal priorities fall back to the name, not to the API's request-count order.
+	expect(accountListView(input).accounts.map((a) => a.id)).toEqual([
+		"alpha",
+		"Alpha",
+		"Zulu",
+	]);
 	expect(
 		accountListView(input, { sort: "name", search: "alpha" }).counts.all,
 	).toBe(3);
@@ -346,4 +353,30 @@ test("attention separates exhausted capacity from usage refresh and expires loca
 		expect(
 			needsAccountAttention(account("soft", { rateLimitStatus }), [], now),
 		).toBe(false);
+});
+test("routing priority lists active accounts first, then lower priority numbers, then names", () => {
+	// Primary and request counts change with every poll; ordering never reads them.
+	const input = [
+		account("gateway", { priority: 100, requestCount: 900 }),
+		account("paused-low", { priority: 30, paused: true }),
+		account("beta", { priority: 30, isPrimary: true }),
+		account("Alpha", { priority: 30, requestCount: 1 }),
+		account("grok", { priority: 50 }),
+		account("paused-high", { priority: 100, paused: true }),
+	];
+	const expected = [
+		"Alpha",
+		"beta",
+		"grok",
+		"gateway",
+		"paused-low",
+		"paused-high",
+	];
+	expect(accountListView(input).accounts.map((a) => a.id)).toEqual(expected);
+	expect(
+		accountListView(input, { sort: "priority" }).accounts.map((a) => a.id),
+	).toEqual(expected);
+	expect(
+		accountListView(input, { sort: "name" }).accounts.map((a) => a.id),
+	).toEqual(["Alpha", "beta", "gateway", "grok", "paused-high", "paused-low"]);
 });

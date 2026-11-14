@@ -866,6 +866,43 @@ describe("compact comparison slots", () => {
 		expect(html).toContain("Usage unavailable");
 		expect(html).not.toContain("5-hour");
 	});
+	it("says quota is not tracked for providers the router never polls", () => {
+		const cooldownReset = new Date(Date.now() + 3600000).toISOString();
+		for (const provider of [
+			"openai-compatible",
+			"openrouter",
+			"anthropic-compatible",
+		])
+			for (const resetIso of [null, cooldownReset]) {
+				const html = renderToStaticMarkup(
+					<RateLimitProgress provider={provider} resetIso={resetIso} compact />,
+				);
+				expect(html).toContain("Quota not tracked");
+				expect(html).not.toContain("Usage unavailable");
+				expect(html).not.toContain("%");
+			}
+	});
+	it("gives credits-balance providers only their credits line", () => {
+		for (const [usageData, credits] of [
+			[null, "Credits unavailable"],
+			[
+				{ remainingUsd: 12.34, totalMicrodollarsAcquired: 20000000 },
+				"$12.34 remaining",
+			],
+		] as const) {
+			const html = renderToStaticMarkup(
+				<RateLimitProgress
+					provider="kilo"
+					resetIso={null}
+					compact
+					usageData={usageData as FullUsageData | null}
+				/>,
+			);
+			expect(html).toContain(credits);
+			expect(html).not.toContain("Usage unavailable");
+			expect(html).not.toContain("Quota not tracked");
+		}
+	});
 });
 
 it("emphasizes the selected reset in its quota row without duplicating a timestamp", () => {

@@ -1,7 +1,12 @@
 /**
  * Utility functions for provider-specific logic in the web UI
  */
-import { getDefaultEndpoint, PROVIDER_NAMES } from "@better-ccflare/types";
+import {
+	getDefaultEndpoint,
+	isKnownProvider,
+	PROVIDER_NAMES,
+	supportsUsageTracking,
+} from "@better-ccflare/types";
 
 /**
  * Check if a provider supports auto-fallback
@@ -73,6 +78,21 @@ export function providerShowsWeeklyUsage(provider: string): boolean {
  */
 export function providerShowsCreditsBalance(provider: string): boolean {
 	return provider === PROVIDER_NAMES.KILO;
+}
+
+/**
+ * True when the router has no quota source for a provider: the usage poller
+ * skips it (supportsUsageTracking) and the page has no quota-window or credit
+ * view for it. Unknown providers return false, so missing data there still
+ * reads as unavailable rather than untracked.
+ */
+export function providerHasNoQuotaTracking(provider: string): boolean {
+	return (
+		isKnownProvider(provider) &&
+		!supportsUsageTracking(provider) &&
+		!providerShowsWeeklyUsage(provider) &&
+		!providerShowsCreditsBalance(provider)
+	);
 }
 
 /**
