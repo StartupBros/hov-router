@@ -23,6 +23,7 @@ import {
 } from "./AccountListItem";
 import { mergeAccountModelMappings } from "./AccountModelMappingsDialog";
 import type { AccountFamilyRoutingState } from "./account-routing";
+import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from "./status-tones";
 
 // Static provider-contract coverage renders the row expanded and all tab bodies.
 // Browser acceptance separately drives the real disclosure, tabs and focus behavior.
@@ -62,6 +63,57 @@ function withoutDetailsContent(html: string): string {
 async function noopAsync() {}
 
 describe("account scan layout", () => {
+	it("pairs status color with a decorative icon and the unchanged label", () => {
+		const examples: {
+			input: Partial<Account>;
+			tone: keyof typeof STATUS_TONE_CLASS;
+			icon: string;
+			label: string;
+		}[] = [
+			{
+				input: { rateLimitStatus: "allowed" },
+				tone: "ok",
+				icon: "circle-check",
+				label: "Not blocked",
+			},
+			{
+				input: { rateLimitStatus: "allowed_warning" },
+				tone: "warning",
+				icon: "triangle-alert",
+				label: "Not blocked",
+			},
+			{
+				input: { rateLimitStatus: "blocked" },
+				tone: "bad",
+				icon: "circle-x",
+				label: "Reported hard limit",
+			},
+			{
+				input: { paused: true, pauseReason: "manual" },
+				tone: "muted",
+				icon: "pause",
+				label: "Paused (manual)",
+			},
+		];
+		for (const { input, tone, icon, label } of examples) {
+			const html = withoutDetailsContent(
+				renderToStaticMarkup(
+					<AccountListItem
+						account={makeAccount({ paused: false, ...input })}
+						{...requiredHandlers}
+					/>,
+				),
+			);
+			const start = html.indexOf(
+				`class="${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS[tone]}"`,
+			);
+			expect(start).toBeGreaterThanOrEqual(0);
+			const pill = html.slice(start, html.indexOf("</span>", start));
+			expect(pill).toContain(`lucide-${icon}`);
+			expect(pill).toContain('aria-hidden="true"');
+			expect(pill).toContain(label);
+		}
+	});
 	it("shows a single cooldown state over saved allowed, and soft observations never promise rejection", () => {
 		const cooldown = withoutDetailsContent(
 			renderToStaticMarkup(

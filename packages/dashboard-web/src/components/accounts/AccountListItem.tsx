@@ -2,6 +2,8 @@ import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
 	ChevronDown,
+	CircleCheck,
+	CircleX,
 	Edit2,
 	Ellipsis,
 	Globe,
@@ -11,6 +13,7 @@ import {
 	Play,
 	RefreshCw,
 	Trash2,
+	TriangleAlert,
 	Zap,
 } from "lucide-react";
 import { useId, useState } from "react";
@@ -44,6 +47,13 @@ import {
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from "./status-tones";
 
 export { BankedResetsStatus } from "./BankedResetsStatus";
+
+const STATUS_ICON = {
+	ok: CircleCheck,
+	warning: TriangleAlert,
+	bad: CircleX,
+	muted: Pause,
+};
 
 function formatTokenCount(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -289,6 +299,7 @@ export function AccountListItem({
 		!account.bankedResets.stale;
 	const presenter = new AccountPresenter(account, now);
 	const status = presenter.status;
+	const StatusIcon = STATUS_ICON[status.tone];
 	// Display-only: the window actually closest to blocking this account,
 	// including per-model caps that the routing utilization deliberately omits.
 	const bindingConstraint = describeBindingConstraint(
@@ -592,9 +603,12 @@ export function AccountListItem({
 							? "Refresh token invalid — re-authenticate"
 							: status.reason === "pacing"
 								? "Pacing may apply to specific model windows, not every request."
-								: undefined
+								: status.reason === "normal"
+									? "No reported hard limit or current router block. Provider capacity is not guaranteed."
+									: undefined
 					}
 				>
+					<StatusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 					{status.reason === "paused" && pauseReasonLabel
 						? `Paused (${pauseReasonLabel})`
 						: status.label}
