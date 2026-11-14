@@ -51,3 +51,27 @@ test("empty or unrecognized generic rows fall back, code review reset-only remai
 			?.resetTime,
 	).toBe(reset);
 });
+test("providers the router never polls get no invented usage row without a reset", () => {
+	const now = Date.parse("2029-12-31T22:00:00.000Z");
+	for (const provider of [
+		"openai-compatible",
+		"openrouter",
+		"anthropic-compatible",
+	])
+		expect(
+			accountUsageWindows({ provider, resetIso: null }, now).usages,
+		).toEqual([]);
+});
+test("an elapsed-time row from a cooldown reset is marked synthetic, never a quota window", () => {
+	const now = Date.parse("2029-12-31T22:00:00.000Z");
+	const { usages } = accountUsageWindows(
+		{ provider: "openai-compatible", resetIso: reset },
+		now,
+	);
+	expect(usages).toHaveLength(1);
+	expect(usages[0]).toMatchObject({
+		window: null,
+		synthetic: true,
+		resetTime: reset,
+	});
+});

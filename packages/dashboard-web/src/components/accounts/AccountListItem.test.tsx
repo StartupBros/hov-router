@@ -288,6 +288,57 @@ describe("account scan layout", () => {
 		);
 		expect(unspecified).toContain("Ready");
 	});
+	it("never claims a limit for a provider the router does not poll", () => {
+		const cooldownReset = new Date(Date.now() + 3600000).toISOString();
+		for (const rateLimitReset of [null, cooldownReset]) {
+			const visible = withoutDetailsContent(
+				renderToStaticMarkup(
+					<AccountListItem
+						account={makeAccount({
+							paused: false,
+							provider: "openai-compatible",
+							rateLimitStatus: "allowed",
+							rateLimitReset,
+						})}
+						{...requiredHandlers}
+					/>,
+				),
+			);
+			expect(visible).not.toContain("at limit");
+			expect(visible).toContain("Quota not tracked");
+		}
+	});
+	it("keeps the name line to the name; plan and Primary join the metadata line", () => {
+		const primary = withoutDetailsContent(
+			renderToStaticMarkup(
+				<AccountListItem
+					account={makeAccount({
+						paused: false,
+						provider: "codex",
+						usageData: { plan_type: "pro" } as unknown as FullUsageData,
+					})}
+					isPrimary
+					{...requiredHandlers}
+				/>,
+			),
+		);
+		const metadata = primary.indexOf(">codex<");
+		expect(metadata).toBeGreaterThan(primary.indexOf("</h3>"));
+		expect(primary.indexOf(">Primary<")).toBeGreaterThan(metadata);
+		expect(primary.indexOf(">pro<")).toBeGreaterThan(metadata);
+		// The Primary marker is drawn inside the row, so no row's content box,
+		// and no account name, shifts against the column header.
+		const other = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({ paused: false })}
+				{...requiredHandlers}
+			/>,
+		);
+		expect(primary).toContain("shadow-[inset_2px_0_0_var(--color-primary)]");
+		expect(other).not.toContain("shadow-[inset_2px_0_0_var(--color-primary)]");
+		expect(primary).not.toContain("border-l-");
+		expect(other).not.toContain("border-l-");
+	});
 	it("names a full visible window beside a ready status", () => {
 		const reset = new Date(Date.now() + 3600000).toISOString();
 		const usageData = {
@@ -607,6 +658,48 @@ describe("AccountListItem authoritative family routing", () => {
 			expect(html).toContain("route assignment unchanged");
 		});
 	}
+
+	// The server copies these account-wide states into every family
+	// (availabilityFor in account-routing-operations.ts); the status column
+	// already shows them once, so the row must not repeat them per family.
+	for (const [availability, account] of [
+		["paused", { paused: true, pauseReason: "manual" }],
+		["requires_reauth", { paused: false, requiresReauth: true }],
+		["rate_limited", { paused: false, rateLimitedUntil: Date.now() + 600000 }],
+	] as const) {
+		it(`leaves the account-wide ${availability} state to the status column`, () => {
+			const visible = withoutDetailsContent(
+				renderToStaticMarkup(
+					<AccountListItem
+						account={makeAccount(account)}
+						{...requiredHandlers}
+						routingStates={[
+							routingState({ family: "fable", availability }),
+							routingState({ availability }),
+						]}
+					/>,
+				),
+			);
+			expect(visible).not.toContain('aria-label="Routing notices"');
+			expect(visible).not.toMatch(/(Fable|Opus): /);
+		});
+	}
+
+	it("keeps a row notice for a family-specific model exhaustion", () => {
+		const visible = withoutDetailsContent(
+			renderToStaticMarkup(
+				<AccountListItem
+					account={makeAccount({ paused: false })}
+					{...requiredHandlers}
+					routingStates={[
+						routingState({ family: "fable", availability: "model_exhausted" }),
+					]}
+				/>,
+			),
+		);
+		expect(visible).toContain('aria-label="Routing notices"');
+		expect(visible).toContain("Model exhausted");
+	});
 
 	for (const [reason, expected, actionRequired] of [
 		["excluded", "Excluded from managed routing", false],

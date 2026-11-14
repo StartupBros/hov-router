@@ -312,13 +312,27 @@ export function accountUsageWindows(
 			}),
 		);
 	} else {
-		const windowMs = 5 * 60 * 60 * 1000;
-		const resetTime = resetIso ? Date.parse(resetIso) : now;
-		const percentage = Math.min(
-			100,
-			Math.max(0, ((now - (resetTime - windowMs)) / windowMs) * 100),
-		);
-		usages.push({ utilization: percentage, window: null, resetTime: resetIso });
+		// No quota data: the only evidence is a cooldown reset. Without one there
+		// is nothing to show (an elapsed time measured from "now" read as 100%
+		// used). With one, the row is time elapsed, not consumption, so it is
+		// marked synthetic and never counts as a window at its limit.
+		const resetValue = resetIsoValue(resetIso);
+		if (resetValue != null) {
+			const windowMs = 5 * 60 * 60 * 1000;
+			const percentage = Math.min(
+				100,
+				Math.max(
+					0,
+					((now - (Date.parse(resetValue) - windowMs)) / windowMs) * 100,
+				),
+			);
+			usages.push({
+				utilization: percentage,
+				window: null,
+				resetTime: resetIso,
+				synthetic: true,
+			});
+		}
 	}
 
 	// Codex code-review quota: a flat scalar pair on usageData (NOT a

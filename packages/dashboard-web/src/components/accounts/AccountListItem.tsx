@@ -127,11 +127,14 @@ function routingAvailabilityOverlay(
 }
 
 function routingNeedsNotice(state: AccountFamilyRoutingState) {
+	// The server copies the account's pause, re-login and cooldown into every
+	// family. The status column shows those once; the row notice is kept for
+	// facts that differ by family. Details still lists every family's state.
 	return (
 		state.reason === "ambiguous" ||
 		state.reason === "new_billing_class" ||
 		state.managedRouteAvailable ||
-		(state.availability !== null && state.availability !== "available")
+		state.availability === "model_exhausted"
 	);
 }
 interface AccountListItemProps {
@@ -426,8 +429,10 @@ export function AccountListItem({
 		<article
 			aria-label={account.name}
 			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(12.5rem,1.6fr)_minmax(0,3.2fr)_minmax(10rem,0.9fr)_11rem] xl:items-center xl:gap-3 xl:space-y-0 ${
+				// The Primary marker is an inset shadow, not a border, so every row
+				// keeps the column header's content box and names share one edge.
 				isPrimary
-					? "border-border border-l-2 border-l-primary"
+					? "border-border shadow-[inset_2px_0_0_var(--color-primary)]"
 					: "border-border hover:border-muted-foreground/50"
 			}`}
 		>
@@ -436,21 +441,12 @@ export function AccountListItem({
 			    instead of squeezing it into a sliver. */}
 			<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 xl:contents">
 				<div className="min-w-0 flex-[1_1_8rem] space-y-1 xl:col-start-1 xl:row-start-1">
-					<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+					{/* The name line holds only the name and its token health, so the
+					    icon never wraps away from the name it describes. */}
+					<div className="flex min-w-0 items-center">
 						<h3 className="min-w-0 break-words font-medium leading-tight">
 							{account.name}
 						</h3>
-						{isPrimary && (
-							<span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-foreground">
-								Primary
-							</span>
-						)}
-
-						{codexUsageExtras?.plan_type && (
-							<span className="px-2 py-0.5 text-xs font-medium bg-secondary text-secondary-foreground rounded-full">
-								{codexUsageExtras.plan_type}
-							</span>
-						)}
 						<OAuthTokenStatusWithBoundary
 							accountName={account.name}
 							hasRefreshToken={account.hasRefreshToken}
@@ -460,9 +456,22 @@ export function AccountListItem({
 					{/* No bullet separators: they strand at line ends when this wraps. */}
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
 						<span>{account.provider}</span>
-						<span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+						{codexUsageExtras?.plan_type && (
+							<span className="rounded-full bg-secondary px-2 py-0.5 font-medium text-secondary-foreground">
+								{codexUsageExtras.plan_type}
+							</span>
+						)}
+						<span className="whitespace-nowrap tabular-nums">
 							Priority {account.priority}
 						</span>
+						{isPrimary && (
+							<span
+								className="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-foreground"
+								title="The account the router picks next"
+							>
+								Primary
+							</span>
+						)}
 					</div>
 				</div>
 				<div className="ml-auto flex shrink-0 flex-wrap items-center gap-1 min-w-0 max-w-full justify-end xl:col-start-4 xl:row-start-1">
