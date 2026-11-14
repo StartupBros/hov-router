@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Account } from "../../api";
+import { useDialogSubmission } from "../../hooks/useDialogSubmission";
 import { Button } from "../ui/button";
 import {
 	Dialog,
@@ -19,6 +20,16 @@ interface AccountPriorityDialogProps {
 	onUpdatePriority: (accountId: string, priority: number) => Promise<void>;
 }
 
+export function parseAccountPriority(value: string): number | null {
+	const number = Number(value);
+	return value.trim() &&
+		Number.isInteger(number) &&
+		number >= 0 &&
+		number <= 100
+		? number
+		: null;
+}
+
 export function AccountPriorityDialog({
 	account,
 	isOpen,
@@ -28,41 +39,46 @@ export function AccountPriorityDialog({
 	const [priority, setPriority] = useState(
 		account?.priority?.toString() || "0",
 	);
-	const [isUpdating, setIsUpdating] = useState(false);
+	const submission = useDialogSubmission(account?.id, isOpen);
+	const isUpdating = submission.pending;
+	const [validationError, setValidationError] = useState("");
 
+	const initialAccount = useRef(account);
+	initialAccount.current = account;
+	const accountId = account?.id;
 	// Reset priority when account changes or dialog opens
 	useEffect(() => {
+		if (!isOpen || !accountId) return;
+		const account = initialAccount.current;
 		if (account) {
 			setPriority(account.priority?.toString() || "0");
 		}
-	}, [account]);
+		setValidationError("");
+	}, [accountId, isOpen]);
 
 	const handleUpdate = async () => {
 		if (!account) return;
 
-		const priorityValue = parseInt(priority, 10);
-		if (
-			Number.isNaN(priorityValue) ||
-			priorityValue < 0 ||
-			priorityValue > 100
-		) {
+		if (!submission.canSubmit()) return;
+		submission.clearError();
+		const priorityValue = parseAccountPriority(priority);
+		if (priorityValue === null) {
+			setValidationError("Enter a whole number from 0 to 100.");
 			return;
 		}
-
-		setIsUpdating(true);
-		try {
-			await onUpdatePriority(account.id, priorityValue);
-			onOpenChange(false);
-		} catch (error) {
-			console.error("Failed to update priority:", error);
-		} finally {
-			setIsUpdating(false);
-		}
+		setValidationError("");
+		await submission.submit(
+			() => onUpdatePriority(account.id, priorityValue),
+			() => onOpenChange(false),
+		);
 	};
 
 	return (
-		<Dialog open={isOpen} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[425px]">
+		<Dialog
+			open={isOpen}
+			onOpenChange={(open) => submission.close(() => onOpenChange(open))}
+		>
+			<DialogContent closeDisabled={isUpdating} className="sm:max-w-[425px]">
 				<DialogHeader>
 					<DialogTitle>Change Account Priority</DialogTitle>
 					<DialogDescription>
@@ -77,6 +93,7 @@ export function AccountPriorityDialog({
 						</Label>
 						<Input
 							id="priority"
+							disabled={isUpdating}
 							type="number"
 							min="0"
 							max="100"
@@ -90,11 +107,17 @@ export function AccountPriorityDialog({
 						from 0 to 100.
 					</div>
 				</div>
-				<DialogFooter>
+				{(validationError || submission.error) && (
+					<p role="alert" className="text-sm text-destructive">
+						{validationError || submission.error}
+					</p>
+				)}
+				<DialogFooter className="[&>button]:min-h-11">
 					<Button
 						type="button"
 						variant="outline"
-						onClick={() => onOpenChange(false)}
+						disabled={isUpdating}
+						onClick={() => submission.close(() => onOpenChange(false))}
 					>
 						Cancel
 					</Button>

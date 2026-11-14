@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { useDialogSubmission } from "../../hooks/useDialogSubmission";
 import { getDefaultEndpointForProvider } from "../../utils/provider-utils";
 import { Button } from "../ui/button";
 import {
@@ -38,17 +39,19 @@ export function AccountCustomEndpointDialog({
 	const [customEndpoint, setCustomEndpoint] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const errorId = useId();
+	const submission = useDialogSubmission(account?.id, isOpen, isLoading);
+	const busy = submission.pending;
 
+	const initialAccount = useRef(account);
+	initialAccount.current = account;
+	const accountId = account?.id;
 	// Initialize custom endpoint when dialog opens or account changes
 	useEffect(() => {
-		if (isOpen && account) {
-			setCustomEndpoint(account.customEndpoint || "");
-		} else if (!isOpen) {
-			// Reset when dialog closes
-			setCustomEndpoint("");
-			setError(null);
-		}
-	}, [isOpen, account]);
+		if (!isOpen || !accountId) return;
+		const account = initialAccount.current;
+		setCustomEndpoint(account?.customEndpoint || "");
+		setError(null);
+	}, [isOpen, accountId]);
 
 	const validateEndpoint = (endpoint: string): boolean => {
 		if (!endpoint) return true; // Empty is fine (use default)
@@ -61,7 +64,8 @@ export function AccountCustomEndpointDialog({
 	};
 
 	const handleSave = async () => {
-		if (!account) return;
+		if (!account || !submission.canSubmit()) return;
+		submission.clearError();
 
 		if (customEndpoint && !validateEndpoint(customEndpoint)) {
 			setError(
@@ -71,15 +75,10 @@ export function AccountCustomEndpointDialog({
 		}
 
 		setError(null);
-		try {
-			await onUpdateEndpoint(account.id, customEndpoint.trim() || null);
-			onOpenChange(false);
-			setCustomEndpoint("");
-		} catch (err) {
-			setError(
-				err instanceof Error ? err.message : "Failed to update custom endpoint",
-			);
-		}
+		await submission.submit(
+			() => onUpdateEndpoint(account.id, customEndpoint.trim() || null),
+			() => onOpenChange(false),
+		);
 	};
 
 	const defaultPlaceholder = account?.provider
@@ -87,8 +86,11 @@ export function AccountCustomEndpointDialog({
 		: "https://api.anthropic.com";
 
 	return (
-		<Dialog open={isOpen} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[425px]">
+		<Dialog
+			open={isOpen}
+			onOpenChange={(open) => submission.close(() => onOpenChange(open))}
+		>
+			<DialogContent closeDisabled={busy} className="sm:max-w-[425px]">
 				<DialogHeader>
 					<DialogTitle>Custom Endpoint</DialogTitle>
 					<DialogDescription>
@@ -107,6 +109,7 @@ export function AccountCustomEndpointDialog({
 						<Label htmlFor="customEndpoint">Custom Endpoint</Label>
 						<Input
 							id="customEndpoint"
+							disabled={busy}
 							value={customEndpoint}
 							onChange={(e) => {
 								setCustomEndpoint(e.target.value);
@@ -127,17 +130,22 @@ export function AccountCustomEndpointDialog({
 						)}
 					</div>
 				</div>
-				<DialogFooter>
+				{submission.error && (
+					<p role="alert" className="text-sm text-destructive">
+						{submission.error}
+					</p>
+				)}
+				<DialogFooter className="[&>button]:min-h-11">
 					<Button
 						type="button"
 						variant="outline"
-						onClick={() => onOpenChange(false)}
-						disabled={isLoading}
+						onClick={() => submission.close(() => onOpenChange(false))}
+						disabled={busy}
 					>
 						Cancel
 					</Button>
-					<Button type="button" onClick={handleSave} disabled={isLoading}>
-						{isLoading ? "Saving..." : "Save"}
+					<Button type="button" onClick={handleSave} disabled={busy}>
+						{busy ? "Saving..." : "Save"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

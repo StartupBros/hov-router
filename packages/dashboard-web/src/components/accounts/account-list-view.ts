@@ -1,8 +1,8 @@
+import { classifyAccountStatus } from "@better-ccflare/ui-common";
 import type { Account } from "../../api";
 import { providerShowsWeeklyUsage } from "../../utils/provider-utils";
 import type { AccountFamilyRoutingState } from "./account-routing";
 import { accountUsageWindows } from "./account-usage-windows";
-import { pauseStatusDisplay } from "./pause-status";
 import { displayLabel } from "./rate-limit-helpers";
 export const ACCOUNT_SORTS = [
 	["priority", "Routing priority"],
@@ -68,29 +68,17 @@ export function accountSortWindow(
 }
 
 export type AccountListStatus = "all" | "attention" | "paused";
-type AttentionReason = "reconnect" | "limited" | "routing";
+type AttentionReason = "reconnect" | "limited" | "refresh" | "routing";
 
 function accountAttentionReason(
 	account: Account,
 	routing: readonly AccountFamilyRoutingState[] = [],
 	now = Date.now(),
 ): AttentionReason | null {
-	if (
-		account.requiresReauth ||
-		pauseStatusDisplay(account.pauseReason).reauthRequired
-	)
-		return "reconnect";
-	if (
-		/^(rate_limited|blocked|queueing_hard|payment_required)/i.test(
-			account.rateLimitStatus ?? "",
-		) ||
-		[
-			account.rateLimitedUntil,
-			account.usageRateLimitedUntil,
-			account.usageThrottledUntil,
-		].some((until) => typeof until === "number" && until > now)
-	)
-		return "limited";
+	const status = classifyAccountStatus(account, now);
+	if (status.reauth) return "reconnect";
+	if (status.capacityAttention) return "limited";
+	if (status.refreshDelayed) return "refresh";
 	if (
 		routing.some(
 			(state) =>
@@ -126,7 +114,7 @@ export function accountListView(
 	now = Date.now(),
 ) {
 	const search = filters.search?.trim().toLowerCase() ?? "";
-	const attentionReasons = { reconnect: 0, limited: 0, routing: 0 };
+	const attentionReasons = { reconnect: 0, limited: 0, refresh: 0, routing: 0 };
 	for (const account of accounts) {
 		const reason = accountAttentionReason(account, routing[account.id], now);
 		if (reason) attentionReasons[reason]++;
@@ -137,6 +125,7 @@ export function accountListView(
 			attention:
 				attentionReasons.reconnect +
 				attentionReasons.limited +
+				attentionReasons.refresh +
 				attentionReasons.routing,
 			paused: accounts.filter((a) => a.paused).length,
 		},

@@ -58,7 +58,7 @@ describe("RateLimitProgress", () => {
 		);
 
 		expect(html).toContain(
-			"Usage throttling enabled; requests are being delayed",
+			"Pacing active; affected windows may delay requests",
 		);
 		expect(html).toContain("Usage (5-hour)");
 	});
@@ -190,7 +190,7 @@ describe("RateLimitProgress", () => {
 		);
 
 		expect(html).toContain(
-			"Usage throttling enabled; requests are being delayed",
+			"Pacing active; affected windows may delay requests",
 		);
 		expect(html).not.toContain("Until");
 		expect(html).toContain("Less than 1 minute");
@@ -538,7 +538,7 @@ describe("RateLimitProgress", () => {
 		);
 
 		expect(html).toContain(
-			"Usage throttling enabled; requests are being delayed",
+			"Pacing active; affected windows may delay requests",
 		);
 		expect(html).not.toContain("Usage (5-hour)");
 	});
@@ -967,4 +967,51 @@ it("retains a reported summary window with unknown usage and a known reset", () 
 	expect(html).toContain(`dateTime="${reset}"`);
 	expect(html).toContain("Not reported");
 	expect(html).not.toContain("5-hour");
+});
+
+it("keeps monthly quota without reset distinct from explicit NanoGPT inactivity in both layouts", () => {
+	for (const compact of [false, true]) {
+		const html = renderToStaticMarkup(
+			<RateLimitProgress
+				compact={compact}
+				provider="alibaba-coding-plan"
+				resetIso={null}
+				showWeekly
+				usageData={
+					{
+						five_hour: { percentUsed: 20, resetAt: null },
+						weekly: { percentUsed: 30, resetAt: null },
+						monthly: { percentUsed: 45, resetAt: null },
+					} as unknown as FullUsageData
+				}
+			/>,
+		);
+		expect(html).toContain("45%");
+		expect(html).not.toContain("PayG");
+	}
+});
+it("expires refresh and orphan pacing notices for cached and uncached data in both modes", () => {
+	for (const compact of [false, true])
+		for (const usageData of [
+			null,
+			{ seven_day: { utilization: 30, resets_at: null } },
+		])
+			for (const deadline of [Date.now() - 1000, Infinity, NaN]) {
+				const html = renderToStaticMarkup(
+					<RateLimitProgress
+						compact={compact}
+						provider="codex"
+						resetIso={null}
+						showWeekly
+						usageData={usageData}
+						usageRateLimitedUntil={deadline}
+						usageThrottledUntil={deadline}
+						usageThrottledWindows={["five_hour"]}
+					/>,
+				);
+				expect(html).not.toContain("requests are being delayed");
+				expect(html).not.toContain("Pacing active");
+				expect(html).not.toContain("retry after");
+				expect(html).not.toContain("Retry after");
+			}
 });

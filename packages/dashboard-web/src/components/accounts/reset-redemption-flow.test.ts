@@ -121,9 +121,9 @@ describe("describeRedeemAnswer: what happened (R12)", () => {
 
 	it("takes the spend from the count, not the reply (KTD11)", () => {
 		const spend: Array<[RedeemResetSpend, RegExp]> = [
-			["spent", /A credit was spent/],
-			["not_spent", /No credit was spent/],
-			["not_confirmed", /Not confirmed yet whether a credit was spent/],
+			["spent", /A banked reset was used/],
+			["not_spent", /No banked reset was used/],
+			["not_confirmed", /Not confirmed yet whether a banked reset was used/],
 		];
 		for (const [value, words] of spend) {
 			expect(
@@ -134,7 +134,7 @@ describe("describeRedeemAnswer: what happened (R12)", () => {
 		const text = allText(
 			result({ outcome: "nothing_to_reset", spend: "spent" }),
 		);
-		expect(text).not.toMatch(/No credit was spent/);
+		expect(text).not.toMatch(/No banked reset was used/);
 	});
 
 	it("shows the count before and after when both are known", () => {

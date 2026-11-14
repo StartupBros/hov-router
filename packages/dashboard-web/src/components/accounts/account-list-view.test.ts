@@ -218,6 +218,7 @@ test("attention reasons count each account once and ignore view filters", () => 
 	expect(view.attentionReasons).toEqual({
 		reconnect: 2,
 		limited: 1,
+		refresh: 0,
 		routing: 1,
 	});
 });
@@ -328,4 +329,21 @@ test("reset and remaining sorts reject stale and invalid data and exclude scoped
 		expect(
 			accountListView(input, { sort }, {}, now).accounts.map((a) => a.id),
 		).toEqual(["later", "soon", "expired", "invalid"]);
+});
+
+test("attention separates exhausted capacity from usage refresh and expires locally", () => {
+	const now = 100000;
+	const exhausted = account("exhausted", {
+		rateLimitStatus: "usage_exhausted (20m)",
+	});
+	const refresh = account("refresh", { usageRateLimitedUntil: now + 1 });
+	expect(needsAccountAttention(exhausted, [], now)).toBe(true);
+	expect(
+		accountListView([refresh], {}, {}, now).attentionReasons,
+	).toMatchObject({ refresh: 1, limited: 0 });
+	expect(needsAccountAttention(refresh, [], now + 1)).toBe(false);
+	for (const rateLimitStatus of ["queueing_soft", "unknown future"])
+		expect(
+			needsAccountAttention(account("soft", { rateLimitStatus }), [], now),
+		).toBe(false);
 });

@@ -1,5 +1,6 @@
+import { registerUIRefresh } from "@better-ccflare/core";
 import { AlertCircle, Search, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Account } from "../../api";
 import { AccountListItem } from "./AccountListItem";
 import {
@@ -41,6 +42,18 @@ interface AccountListProps {
 
 export function AccountList(props: AccountListProps) {
 	const { accounts, routingByAccountId } = props;
+	const [now, setNow] = useState(Date.now);
+	const clockId = useId();
+	useEffect(
+		() =>
+			registerUIRefresh({
+				id: `account-list-status-${clockId}`,
+				callback: () => setNow(Date.now()),
+				seconds: 30,
+				description: "Account status and attention expiry",
+			}),
+		[clockId],
+	);
 	const [sort, setSort] = useState<AccountListSort>("priority");
 	const [search, setSearch] = useState("");
 	const [provider, setProvider] = useState("");
@@ -49,6 +62,7 @@ export function AccountList(props: AccountListProps) {
 		accounts ?? [],
 		{ search, provider, status, sort },
 		routingByAccountId,
+		now,
 	);
 	const clear = () => {
 		setSearch("");
@@ -91,7 +105,9 @@ export function AccountList(props: AccountListProps) {
 									view.attentionReasons.reconnect &&
 										`${view.attentionReasons.reconnect} to reconnect`,
 									view.attentionReasons.limited &&
-										`${view.attentionReasons.limited} limited or throttled`,
+										`${view.attentionReasons.limited} limited or paced`,
+									view.attentionReasons.refresh &&
+										`${view.attentionReasons.refresh} usage refresh delayed`,
 									view.attentionReasons.routing &&
 										`${view.attentionReasons.routing} routing notice${view.attentionReasons.routing === 1 ? "" : "s"}`,
 								]
@@ -239,7 +255,7 @@ export function AccountList(props: AccountListProps) {
 					<span>Router status</span>
 					<span>Actions</span>
 				</div>
-				{accountListItems({ ...props, accounts: view.accounts }, sort)}
+				{accountListItems({ ...props, accounts: view.accounts }, sort, now)}
 			</div>
 			<details className="text-xs text-muted-foreground">
 				<summary className="flex min-h-11 cursor-pointer items-center">
@@ -268,13 +284,17 @@ export function accountListItems(
 		...handlers
 	}: AccountListProps,
 	sort: AccountListSort = "priority",
+	now = Date.now(),
 ) {
 	return (accounts ?? []).map((account) => (
 		<AccountListItem
 			key={account.id}
 			account={account}
+			now={now}
 			sortReset={
-				sort.endsWith("reset") ? accountSortWindow(account, sort) : undefined
+				sort.endsWith("reset")
+					? accountSortWindow(account, sort, now)
+					: undefined
 			}
 			settingsError={settingsErrors?.[account.id]}
 			routingStates={routingByAccountId?.[account.id]}

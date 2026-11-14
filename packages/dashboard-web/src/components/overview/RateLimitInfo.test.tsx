@@ -90,7 +90,9 @@ describe("RateLimitInfo", () => {
 			/>,
 		);
 
-		expect(html).toContain("Usage exhausted · resets in 44h 47m");
+		expect(html).toContain("Usage exhausted");
+		expect(html).toContain("See usage windows for reset times");
+		expect(html).not.toContain("44h 47m");
 		expect(html).not.toContain("usage_exhausted");
 	});
 
@@ -101,4 +103,52 @@ describe("RateLimitInfo", () => {
 
 		expect(html).toBe("");
 	});
+});
+it("shares cooldown evidence and excludes soft, unknown and refresh-only observations", () => {
+	const html = renderToStaticMarkup(
+		<RateLimitInfo
+			accounts={[
+				mkAccount({
+					id: "cool",
+					name: "cool",
+					rateLimitStatus: "allowed",
+					rateLimitedUntil: Date.now() + 60000,
+				}),
+				mkAccount({
+					id: "soft",
+					name: "soft-only",
+					rateLimitStatus: "queueing_soft",
+				}),
+				mkAccount({
+					id: "unknown",
+					name: "unknown-only",
+					rateLimitStatus: "new_status",
+				}),
+				mkAccount({
+					id: "refresh",
+					name: "refresh-only",
+					usageRateLimitedUntil: Date.now() + 60000,
+				}),
+			]}
+		/>,
+	);
+	expect(html).toContain("Cooling down");
+	expect(html).toContain("Router retry");
+	for (const name of ["soft-only", "unknown-only", "refresh-only"])
+		expect(html).not.toContain(name);
+});
+it("never pairs usage exhaustion with an unrelated header reset", () => {
+	const html = renderToStaticMarkup(
+		<RateLimitInfo
+			accounts={[
+				mkAccount({
+					rateLimitStatus: "usage_exhausted",
+					rateLimitReset: new Date(Date.now() + 60000).toISOString(),
+				}),
+			]}
+		/>,
+	);
+	expect(html).toContain("Usage exhausted");
+	expect(html).not.toContain("Resets in");
+	expect(html).not.toContain("(local)");
 });

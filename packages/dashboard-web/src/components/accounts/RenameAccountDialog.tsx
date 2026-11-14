@@ -1,4 +1,5 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { useDialogSubmission } from "../../hooks/useDialogSubmission";
 import { Button } from "../ui/button";
 import {
 	Dialog,
@@ -15,7 +16,7 @@ interface RenameAccountDialogProps {
 	isOpen: boolean;
 	currentName: string;
 	onClose: () => void;
-	onRename: (newName: string) => void;
+	onRename: (newName: string) => void | Promise<void>;
 	isLoading?: boolean;
 }
 
@@ -29,9 +30,18 @@ export function RenameAccountDialog({
 	const [newName, setNewName] = useState(currentName);
 	const [error, setError] = useState("");
 	const errorId = useId();
+	const submission = useDialogSubmission(currentName, isOpen, isLoading);
+	const busy = submission.pending;
+	useEffect(() => {
+		if (!isOpen) return;
+		setNewName(currentName);
+		setError("");
+	}, [currentName, isOpen]);
 
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
+		if (!submission.canSubmit()) return;
+		submission.clearError();
 
 		// Validate new name
 		const trimmedName = newName.trim();
@@ -49,11 +59,11 @@ export function RenameAccountDialog({
 		}
 
 		setError("");
-		onRename(trimmedName);
+		void submission.submit(() => onRename(trimmedName), onClose);
 	};
 
 	const handleOpenChange = (open: boolean) => {
-		if (!open) {
+		if (!open && submission.canSubmit()) {
 			setNewName(currentName);
 			setError("");
 			onClose();
@@ -62,7 +72,7 @@ export function RenameAccountDialog({
 
 	return (
 		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
-			<DialogContent>
+			<DialogContent closeDisabled={busy}>
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
 						<DialogTitle>Rename Account</DialogTitle>
@@ -82,7 +92,7 @@ export function RenameAccountDialog({
 								}}
 								placeholder="Enter new account name"
 								autoFocus
-								disabled={isLoading}
+								disabled={busy}
 								aria-invalid={error ? true : undefined}
 								aria-describedby={error ? errorId : undefined}
 							/>
@@ -97,17 +107,22 @@ export function RenameAccountDialog({
 							)}
 						</div>
 					</div>
-					<DialogFooter>
+					{submission.error && (
+						<p role="alert" className="text-sm text-destructive">
+							{submission.error}
+						</p>
+					)}
+					<DialogFooter className="[&>button]:min-h-11">
 						<Button
 							type="button"
 							variant="outline"
 							onClick={() => handleOpenChange(false)}
-							disabled={isLoading}
+							disabled={busy}
 						>
 							Cancel
 						</Button>
-						<Button type="submit" disabled={isLoading}>
-							{isLoading ? "Renaming..." : "Rename"}
+						<Button type="submit" disabled={busy}>
+							{busy ? "Renaming..." : "Rename"}
 						</Button>
 					</DialogFooter>
 				</form>

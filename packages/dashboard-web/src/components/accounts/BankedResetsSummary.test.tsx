@@ -244,3 +244,11 @@ describe("BankedResetsSummary", () => {
 		expect(unknown).not.toContain("No banked resets held");
 	});
 });
+
+it("does not turn an unread or stale zero aggregate into none held", () => {
+	const html = render(
+		summary({ totalAvailable: 0, soonestExpiresAt: null, anyStale: true }),
+	);
+	expect(html).not.toContain("No banked resets held");
+	expect(html).toContain("current balance may be unknown");
+});
