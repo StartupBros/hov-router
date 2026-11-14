@@ -1,6 +1,7 @@
 ---
 title: A drift alert naming a new Claude model means the bundled catalog lags, not that routing failed
 date: 2026-10-15
+last_updated: 2026-11-14
 category: integration-issues
 module: model-catalog
 problem_type: integration_issue
@@ -89,13 +90,19 @@ The long-context fix has to work per request. The tier depends on each request's
 ## Prevention
 
 - **Treat the alert as a registration task, not an incident.** When the drift alert names a new same-family Claude id, check the served model before anything else. Compare `original_model` with `model` / `routed_model` in the requests table (prod DB, `sqlite3 -readonly`). A wrong served model is the only routing signal. Then register the model using every item in the Solution list, in one PR.
-- **Register fast for a tiered model.** A window that closes during the lag stores a breakdown without the long-context split. It re-prices as unpriced, and nothing rebuilds a closed window from the requests table: `--rebuild-windows` never re-closes a closed row. Two `seven_day` windows with Haiku 5.5 tokens closed during the lag. They were unpriced then because the model had no era. After PR #515 they re-price as unpriced again, because their stored breakdown has no split (issue #520, open). Advisor usage has a related limit: `advisor_usage` sums iterations, so its long-context classification is per entry, not per call (issue #519, open).
+- **Register fast for a tiered model.** A window that closes during the lag stores a breakdown without the long-context split. It re-prices as unpriced, and nothing rebuilds a closed Claude window from the requests table. `--rebuild-windows` never re-closes a closed row. The one rebuild path, `reaggregateClosedWindows` in `packages/http-api/src/services/usage-window-ledger.ts` (PR #543), runs only when a window's external Codex usage changes, and only while request retention still covers the window's start and still holds every request the window counted. Two `seven_day` windows with Haiku 5.5 tokens closed during the lag. They were unpriced then because the model had no era. After PR #515 they re-price as unpriced again, because their stored breakdown has no split (issue #520, open). Advisor usage has a related limit: `advisor_usage` sums iterations, so its long-context classification is per entry, not per call (issue #519, open).
 - **Guardrails that exist (from PR #390):**
   - `packages/core/src/pricing.test.ts`, "has complete bundled rates for every bundled Claude model id".
   - `packages/core/src/value-pricing.test.ts`, "has a list-price era for every bundled Claude model id".
 
   Both fail when an id joins `CLAUDE_MODEL_IDS` without rates or an era. `packages/core/src/model-mappings.test.ts` also checks that every bundled id passes the pass-through shape guard.
-- **The gap with no general guardrail.** Nothing fails when a model has a bundled pricing tier (`cost.tiers` in `pricing.ts`) but no matching `longContext` rates on its list-price era. The era parity test passes an empty long-context subset, so a flat era still passes, and today only a Haiku-5.5-specific assertion covers the pairing. When a model has a tier, add both halves together, plus a test that values a request above the threshold at the tier rate. `LONG_CONTEXT_PROMPT_TOKENS` is a single global threshold. A model whose tier starts at a different size needs the split extended, not a second constant.
+- **Guardrails that exist (from PRs #778 and #779):**
+  - Each time the models.dev catalogue is fetched or read from its disk cache (the bundled fallback is skipped), a `model_routing_drift` `catalog_new_model` alert names a first-party model released in the last 30 days that is missing from `CLAUDE_MODEL_IDS` or has no list-price era. An info-level alert also names one missing from the Auto lane's support table (`findCatalogNewModels` in `packages/core/src/catalog-diff.ts`). This can fire before any request uses the model.
+  - A warning fires when a model's catalogue rates differ from its current list-price era (`findEraRateMismatches`, same file).
+  - A warning fires when a window closes holding tokens the list-price table could not price, with the cause (`evaluateClosedWindowPricing` in `packages/http-api/src/services/alerts.ts`).
+  - A request naming a first-party model the catalogue lacks starts one background catalogue refetch (`noteUnknownModel` in `packages/core/src/pricing.ts`). The unknown-model drift check also covers the served and advisor models, not only the requested one.
+  - `packages/core/src/value-pricing.test.ts`, "starts every model's first era at the era floor", so a window that opened before a model's launch still prices its tokens.
+- **The gap with no general guardrail.** Nothing fails when a model has a bundled pricing tier (`cost.tiers` in `pricing.ts`) but no matching `longContext` rates on its list-price era. The era parity test passes an empty long-context subset, so a flat era still passes, and today only a Haiku-5.5-specific assertion covers the pairing. The era rate alert from PR #778 does not catch it either: it compares long-context rates only when the era already has `longContext`. When a model has a tier, add both halves together, plus a test that values a request above the threshold at the tier rate. `LONG_CONTEXT_PROMPT_TOKENS` is a single global threshold. A model whose tier starts at a different size needs the split extended, not a second constant.
 
 ## Related Issues
 
@@ -103,7 +110,9 @@ The long-context fix has to work per request. The tier depends on each request's
 - PR #517: request-derived alerts name the account instead of its id.
 - PR #362: same-family pass-through on bare-alias combo slots.
 - PR #390: the Sonnet 5.5 registration, which added the two parity tests.
+- PR #778: catalogue-gap, era-rate and unpriced-window alerts, and the first-sight catalogue refetch. PR #779: the era-floor test.
 - Open issues: #513 (Auto lightweight lane does not admit Haiku 5.5), #514 (`temperature`/`top_p` forwarded to 5.5 targets), #519 (advisor tier classification is per entry), #520 (pre-split closed windows stay unpriced).
 - `docs/solutions/observability/diagnose-new-model-cache-alerts-by-context-mix-and-sample-support.md`: the other alert that follows a new model release.
 - `docs/solutions/integration-issues/route-profile-expected-physical-model-checked-before-provider-defaults.md`: route profiles, which carried most of this traffic to other providers.
 - `docs/solutions/integration-issues/claude-code-websearch-refused-as-no-implementation.md`: forced tool choice on the 5.5 models.
+- `docs/solutions/integration-issues/unpriced-route-alias-tokens-meant-proxied-codex-usage-counted-twice.md`: unpriced tokens that came from counting the same Codex usage twice, not from a missing price.
