@@ -446,9 +446,10 @@ long-context split is missing.
 They are kept apart from priced value rather than treated as free, so an incomplete window reads
 as incomplete instead of cheap. Re-pricing works only from what a window stored when it closed.
 A closed window is rebuilt from individual requests only when its external usage changes (see
-External usage), and only while every request it counted is still retained. As a result, tokens
-left unpriced for lack of a rate or era become priced once one is added, while tokens left
-unpriced for lack of stored detail stay unpriced.
+External usage), and only while retained request history still reaches back to the window's
+start and holds every request it counted. As a result, tokens left unpriced for lack of a rate
+or era become priced once one is added, while tokens left unpriced for lack of stored detail
+stay unpriced.
 
 ### External usage
 
@@ -461,10 +462,10 @@ any usage under a route-profile name, which only the router serves. External usa
 name therefore means the same usage was counted twice, not that a price is missing (see Unpriced
 tokens). A session that reached the router but logged itself as direct use cannot be told apart:
 its usage is counted twice under an ordinary model name and prices normally, so only matching it
-against the router's requests reveals it. When
-a closed window's external usage changes, the window is rebuilt from the router's requests plus
-its current external usage, but only while every request it counted is still retained;
-otherwise it keeps what it stored when it closed.
+against the router's requests reveals it. When a closed window's external usage changes, the
+window is rebuilt from the router's requests plus its current external usage, but only while
+retained request history still reaches back to the window's start and holds every request it
+counted; otherwise it keeps what it stored when it closed.
 
 ### Public subscription value
 
