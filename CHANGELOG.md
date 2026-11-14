@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.1.1](https://github.com/StartupBros/hov-router/compare/v5.1.0...v5.1.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **dashboard:** list accounts in routing order and stop inventing quota rows ([#819](https://github.com/StartupBros/hov-router/issues/819)) ([9aeb7a5](https://github.com/StartupBros/hov-router/commit/9aeb7a53261f76f2b7005691af47a4a796fbf2ba)), refs [#808](https://github.com/StartupBros/hov-router/issues/808) [#766](https://github.com/StartupBros/hov-router/issues/766)
+* **dashboard:** replace defensive account status copy ([#815](https://github.com/StartupBros/hov-router/issues/815)) ([6a2cee0](https://github.com/StartupBros/hov-router/commit/6a2cee0fd3c16396586751e3d784f51db97f2f6a)), refs [#808](https://github.com/StartupBros/hov-router/issues/808) [#766](https://github.com/StartupBros/hov-router/issues/766)
+
 ## [5.1.0](https://github.com/StartupBros/hov-router/compare/v5.0.1...v5.1.0) (2026-11-14)
 
 

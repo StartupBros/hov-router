@@ -1,6 +1,6 @@
 {
 	"name": "better-ccflare",
-	"version": "5.1.0",
+	"version": "5.1.1",
 	"description": "HoV Router - a load balancer proxy for Claude Code across multiple account providers",
 	"license": "MIT",
 	"repository": {
