@@ -83,6 +83,16 @@ td.id { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-
 tr.gap td { background: var(--gap-bg); }
 ol.axes li { margin: 0.4rem 0; }
 footer.composition-signal { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.85rem; color: var(--muted); }
+article.idea { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.2rem; margin: 1.2rem 0; }
+article.idea .idea-id { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; margin: 0 0 0.2rem; }
+article.idea dl { margin: 0.6rem 0 0; }
+article.idea dt { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 0.7rem; }
+article.idea dd { margin: 0.15rem 0 0; }
+nav.jump ol { margin: 0.4rem 0 1rem; }
+.chip { display: inline-block; background: var(--chip-bg); border-radius: 999px; padding: 0.05rem 0.55rem; font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+td.who { font-size: 0.88rem; color: var(--muted); }
+a { color: var(--accent); }
+h3.sub { margin-top: 1.6rem; }
 </style>
 </head>
 <body>
@@ -90,7 +100,7 @@ footer.composition-signal { margin-top: 3rem; padding-top: 1rem; border-top: 1px
 
 <header>
   <h1>Ideation: Similar AI routers</h1>
-  <p class="meta-line">Date: <time datetime="2026-11-14">2026-11-14</time></p>
+  <p class="meta-line">Date: <time datetime="2026-11-14">2026-11-14</time> (second pass, replaces the 10:13Z cut)</p>
   <div class="focus"><b>Focus</b>all existing similar AI routers, and make sure ours is the absolute best</div>
   <details class="doc-meta">
     <summary>Document metadata</summary>
@@ -101,39 +111,169 @@ footer.composition-signal { margin-top: 3rem; padding-top: 1rem; border-top: 1px
   </details>
 </header>
 
-<p class="lede">None of the 16 candidates survived. The routers in this class already ship rotation, stickiness, and failover. HoV Router already has those, and the proposals that would have made it "the best" on paper either undo a hold rule that exists because breaking it caused an outage, or restate a written measurement method as a missing feature. The bar was not lowered to fill a list.</p>
+<p class="lede">On a documentation-level read of 16 projects, with nothing installed or measured, HoV Router is not the best in its class today, and no router in the class can show that it is. On routing correctness it is level with or ahead of the field. It is behind on how it protects the logins it holds and on who can install it. Anthropic's usage policy, effective 12 November 2026, now names services that route requests through consumer subscriptions; whether one owner's own accounts fall under it is not settled by any vendor text found, and that is the operator's call. Four ideas survived out of 20 candidates and 5 combinations: close the port by default, encrypt account tokens at rest, cap spend on metered fallback, and a sealed export of accounts. The first pass looked only inside the routing engine and kept nothing. This pass compared the whole product with the field.</p>
 
 <section id="grounding-context">
   <h2>Grounding Context</h2>
   <p class="eyebrow">Codebase Context</p>
-  <p>HoV Router is a self-hosted load balancer for the operator's own provider accounts. It does not create quota. If every eligible account is unavailable, the request can still fail. Production is a Linux x86_64 binary behind a guard, SQLite only, deployed from <code>origin/main</code>. The README paste prompt is the setup path. macOS and native Windows installs are unverified. There is no npm package, container image, or binary for another platform.</p>
-  <p>Shipped account choice is <code>session</code> (the default), <code>least-used</code>, <code>session-affinity</code>, and <code>session-drain-soonest</code> with a strict variant. Drain-soonest does not rank by weekly reset alone. A fresh assignment sorts by fallback rung and tier, then weekly pace band, then earliest known future weekly reset as a tie-break inside one band. The worked example is the point of that order: an account at 66% with 66 hours left (<code>hot</code>) outranks one that resets sooner but only needs a slow burn. Codex owners stay until they are unavailable. Anthropic owners stay only while the prompt cache is certainly warm, meaning the previous turn was less than 5 minutes ago, and for at most 30 minutes. Sessions on a 1-hour cache TTL may still be warm after 5 minutes. The same paragraph says they move as before.</p>
-  <p>A child home is kept only by <code>session-affinity</code> and sticky <code>session-drain-soonest</code>. The default <code>session</code> strategy, <code>least-used</code>, and strict drain-soonest order every child turn again. That split is the written design. The dashboard offers Session and the two drain-soonest modes. It hides <code>least-used</code> and <code>session-affinity</code>. The comment calls both per-request spreading that can get accounts banned. The load-balancing doc calls <code>session-affinity</code> a spread of concurrent clients that still keeps cache locality inside each client. The comment is looser than the doc. The hide matches the documented spread.</p>
-  <p>A rate-limit hold's scope, duration, and evidence must name the same window. An upstream instruction may only shorten a hold. The usage cache is in-memory. After a restart, an unattributed reset takes a short backoff (30 seconds, doubling, capped at 5 minutes), not the far reset of a model window. That fix exists because honoring the wrong reset benched three healthy accounts 19 seconds after a deploy. Model-scoped windows stay out of account-wide utilization. Counting a Fable-only cap there removes every lane. Last-route protection was scoped and dropped: once wrong holds are capped at 5 minutes, a correct hold means the capacity is not there. Still open, and already written, not new: a pool-floor alarm, rendering <code>bindingConstraint</code> on the dashboard, and one eligibility predicate.</p>
-  <p><code>requests.timestamp</code> is when the row was saved, not when the request started. Start is that timestamp minus <code>response_time_ms</code>. Of the switches that looked like remaps, 83% were two lanes interleaved in one session partition. Cache cost is judged by cache-write volume, not hit rate. Routing decisions are not logged at the default warn level, so the requests table is the measurement source, and the method for reading it is already written. A route alias is never priced. The Codex double-count was a second ingestion of the router's own proxied requests. The fix makes the scanner skip those rollouts. Pricing the alias would have hidden the duplicate. A window whose requests have aged out of retention is left unchanged, because a rebuild that cannot see every request it counted is unsafe.</p>
-  <p>A hosted tool dispatch cannot be released by retry or failover. That claim is about hosted dispatch, not about the first byte of an ordinary response. An authorized candidate is an account, a logical model, a physical model, and a rung. Mid-stream failover is already out.</p>
-  <p>The paste prompt tells the agent to verify a real request with the owner's help, and to report missing evidence as pending. That is the permitted owner-assisted path. It does not authorize a scripted call against an Anthropic account, and it does not refuse an unverified platform.</p>
-  <p>The class around it, from public project docs read as vendor claims, not as checked code. Account poolers (TeamClaude, maxpool, shunt, accountant, noria, codex-lb, codex-multi-auth) stretch one person's own subscriptions. Provider routers (CLIProxyAPI, OmniRoute, claude-code-router, 9router, opencodex) send traffic to many model vendors and sometimes bolt a pool on. Star counts sit on the any-model routers. That is one surveyor's inference, not a demand study. The upstream tombii README still describes a session strategy only. This fork has already left that description behind. Vendor READMEs are single-source.</p>
-  <p>What those docs treat as the difference between a usable router and a good one: classify the failure before retrying, cool an account down without sending probe traffic, pin a conversation to the account that holds the prompt cache, and check a budget before the request. This fork already pins, as an opt-in strategy with a 5-minute warm bound, and it already removed probes. No surveyed gateway documents cost-aware routing for a flat-rate subscription, which is the case that matters here. Reported postmortems judge a router by a failure the user sees rather than a green probe, by not failing over mid-stream, by an affinity clock that matches the real cache TTL, and by a cost figure that matches the bill. The 1-hour-versus-5-minute case is the one place this fork has written the opposite choice on purpose.</p>
-  <p>A Register article dated 20 February 2026, and maxpool's own README, are reported to say Anthropic banned third-party use of consumer OAuth tokens. Those pages were not re-fetched for this cut. A 12 November 2026 policy date came from a secondary site, not from Anthropic's policy page, and is not a basis. Becoming a resale proxy for other people's subscriptions is out. So is restoring PostgreSQL, npm publish, multi-arch or signed publishers, a container workflow, auto-refresh probes, a semantic cache of agent turns, mid-stream failover, pricing a route alias, gating on an inferred vendor field, lengthening a hold from an upstream header, writing a home before an accepted success, or ranking before the authorized set is compiled.</p>
+  <p>HoV Router is a self-hosted load balancer for one operator's own provider accounts, with a dashboard for usage, cost and errors. Production is one Linux x86_64 binary behind a guard process, SQLite only. The setup path is a prompt the operator pastes to a coding agent. The product was read at commit <code>9508061e</code>.</p>
+
+  <h3 class="sub">How it compares</h3>
+  <p>Sixteen projects were read on 2026-11-14: nine account poolers and seven multi-provider routers. "Source" means the project's code was read. "Docs" means only its own documentation was read, which is a vendor claim. Our column comes from one read of the code; the facts marked ✓ and every file-and-line citation in this pass were read a second time.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Capability</th><th>Field</th><th>HoV Router</th></tr></thead>
+    <tbody>
+      <tr><td colspan="3"><b>Level or ahead</b></td></tr>
+      <tr><td>Fail over only before the first byte</td><td class="who">Class consensus. TeamClaude also inspects an error inside a 200 (docs).</td><td>Yes, and fails over on an error frame inside a 200 (<code>packages/proxy/src/anthropic-precommit-rescue.ts</code>, per the code inventory).</td></tr>
+      <tr><td>Per-model weekly windows</td><td class="who">TeamClaude only (docs).</td><td>Yes. The account is excluded for that model family only.</td></tr>
+      <tr><td>Session and cache stickiness</td><td class="who">Everyone. No project documents a 5-minute-versus-1-hour cache rule.</td><td>Yes: 5-hour pin, 5-minute warm hold for Anthropic, opt-in 1-hour rewrite.</td></tr>
+      <tr><td>Usage from headers and the provider's usage endpoint</td><td class="who">TeamClaude, codex-lb (source).</td><td>Yes, for more providers.</td></tr>
+      <tr><td>Told when capacity returns</td><td class="who">codex-lb "try again in N s" (docs).</td><td>Yes ✓. The pool-exhausted 503 carries <code>next_available_at</code> and <code>retry-after</code> (<code>packages/proxy/src/handlers/routing-terminal.ts:566-601</code>).</td></tr>
+      <tr><td>Build provenance</td><td class="who">opencodex signs Linux assets (docs). 9router, OmniRoute and CLIProxyAPI had critical or high advisories in 2026.</td><td>Git SHA embedded and attestation-verified; <code>/health</code> reports it. No advisory search was run on this repo.</td></tr>
+      <tr><td>Per-request record and value page</td><td class="who">No pooler or router publishes a cache-hit or quota-stretch figure.</td><td>Per-request rows, Window Value page, public value endpoint, written method. No published figure either.</td></tr>
+      <tr><td colspan="3"><b>Behind</b></td></tr>
+      <tr><td>Default bind and first-run auth</td><td class="who">claude-code-router binds 127.0.0.1 (docs).</td><td>Binds <code>0.0.0.0</code> ✓ (<code>apps/server/src/server.ts:2554</code>). Auth is off until a first key exists ✓ (<code>packages/http-api/src/services/auth-service.ts:188</code>).</td></tr>
+      <tr><td>Account tokens at rest</td><td class="who">claude-proxy AES-256-GCM, accountant OS keychain (docs).</td><td>Plain <code>TEXT</code> columns ✓ (<code>packages/database/src/migrations.ts:574-576</code>).</td></tr>
+      <tr><td>Backup or export of accounts</td><td class="who">codex-lb auth import, TeamClaude token sync (docs).</td><td>None found.</td></tr>
+      <tr><td>Spend limit on pay-per-use lanes</td><td class="who">opencodex opt-in consent, claude-proxy daily USD limit, prodex key budgets (docs).</td><td>A <code>daily_spend</code> alert only ✓. Nothing stops traffic.</td></tr>
+      <tr><td>Install reach</td><td class="who">Nearly all ship macOS, Windows and arm64 builds, installers or desktop apps.</td><td>One linux-amd64 asset, Docker from source, no installer or self-update.</td></tr>
+      <tr><td>Client keys with limits</td><td class="who">claude-code-router, codex-lb, prodex (docs).</td><td>Hashed keys, two roles, no limits. A per-session request governor exists, off by default.</td></tr>
+      <tr><td>Fleet forecast</td><td class="who">TeamClaude "all out at / first back at" (source header), codex-lb depletion risk (source).</td><td>Per-window estimate and an at-risk list. No fleet roll-up.</td></tr>
+      <tr><td>Alert channels</td><td class="who">claude-rotate panel alerts, opencodex reset notices (docs).</td><td>Webhook only. No alert type for an empty pool.</td></tr>
+      <tr><td>Metrics export</td><td class="who">codex-lb Prometheus (source), prodex several formats (docs). None of the seven large routers.</td><td>None.</td></tr>
+      <tr><td>Routing rules as data</td><td class="who">claude-code-router rules and scripts (docs), CLIProxyAPI hot reload (source).</td><td>Combos in the database; route profiles from an environment variable.</td></tr>
+      <tr><td>Inbound protocols</td><td class="who">Most translate Anthropic, OpenAI Chat, Responses and Gemini.</td><td>Messages and Responses. Chat Completions inbound is unsettled.</td></tr>
+      <tr><td colspan="3"><b>Out by decision</b></td></tr>
+      <tr><td>Imitating the official client's fingerprint</td><td class="who">CLIProxyAPI "cloaking" (source), OmniRoute, 9router (docs).</td><td>Not done.</td></tr>
+      <tr><td>Hold a request until a window resets</td><td class="who">TeamClaude (opt-in), maxpool up to 24 h, claude-rotate (docs).</td><td>Cut twice. The guard retries a 503 for up to 600 s; the router does not park.</td></tr>
+      <tr><td>Warm-up or probe requests</td><td class="who">codex-lb limit warm-up (docs).</td><td>Removed.</td></tr>
+      <tr><td>Multi-user sharing, SSO, resale</td><td class="who">codex-lb and prodex OIDC and SCIM; sub2api and claude-relay-service resale (not read).</td><td>Single owner.</td></tr>
+      <tr><td>Mid-stream failover, semantic cache, tool-result compression</td><td class="who">One 11-star project; OmniRoute; OmniRoute and 9router (source for 9router).</td><td>Out.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Stars, as a popularity signal only: OmniRoute 87,275; CLIProxyAPI 58,529; claude-code-router 38,148; 9router 32,396; opencodex 18,512; codex-lb 3,440; codex-multi-auth 566; TeamClaude 496; upstream better-ccflare 280. The large numbers sit on any-model routers, not on account poolers.</p>
+  <p>What users of those projects complain about, by comment count: repeated re-login (codex-lb #1085, 63 comments), a thread stuck on a dead pinned account (#1707), a 17-minute SQLite lock (#1682), a rotation gateway invalidating every OAuth token (codex-multi-auth #495), accounts marked exhausted with quota left (CLIProxyAPI #3491), and streams cut after 30 s of silence (#5545). Missing routing strategies do not appear near the top.</p>
+
+  <h3 class="sub">Provider terms</h3>
+  <p>The first pass said the 12 November policy date "is not a basis". It is now. Anthropic's <a href="https://www.anthropic.com/legal/aup">Usage Policy</a> shows "Nov 12, 2026" and bars providing access to Claude through unauthorized means, including "services that route requests through consumer subscriptions or misrepresent the product or client being used". The page was fetched twice today by separate agents. "Unauthorized" is not defined, and one agent reports the bullet is absent from a March 2026 archive copy. The multiple-accounts bullet is limited by purpose: "to avoid detection", to get around guardrails, or to repeat violating inputs.</p>
+  <p>The <a href="https://code.claude.com/docs/en/legal-and-compliance">Claude Code legal page</a> says OAuth "is designed to support ordinary use of Claude Code and other native Anthropic applications", that developers may not route requests through plan credentials "on behalf of their users", and that they "may not collect, store, or intermediate Claude.ai credentials or session tokens". The <a href="https://www.anthropic.com/legal/consumer-terms">Consumer Terms</a> bar automated access except through an API key (one fetch). OpenAI's <a href="https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites">Help Center</a> describes a permitted path for a ChatGPT plan in "supported open-source tools" (one fetch), and a user's question about a single-operator multi-account proxy, openai/codex #41664, has no OpenAI answer.</p>
+  <p>Read plainly, the Anthropic sentence describes what any subscription router does. No vendor text found says whether one owner routing their own Claude Code traffic across their own subscriptions is "unauthorized", and no vendor statement of a ban for that case was found. Two first-hand suspension reports exist and are unverified. This page does not settle the question. It affects how much to invest in subscription-specific features, and it is the operator's call.</p>
+
+  <h3 class="sub">Limits of this survey</h3>
+  <ul>
+    <li>Competitor capabilities are mostly documentation claims. Code was read for codex-lb's balancer, OmniRoute's strategy and classifier files, CLIProxyAPI's selector, 9router's fallback and compression, and a few others.</li>
+    <li>General LLM gateways (LiteLLM, Portkey and similar) were read at README level in the first pass only. claude-swap (4,705 stars), claude-relay-service (12,809) and sub2api (46,018) were found and not read.</li>
+    <li>No competitor was installed or run. No measurement was taken on this router.</li>
+    <li>Five items in our own inventory are undetermined: combo hot reload, the default of model-scoped capacity routing, whether route profiles are re-read, Chat Completions inbound, and 402/403 handling.</li>
+  </ul>
 </section>
 
 <section id="topic-axes">
   <h2>Topic Axes</h2>
   <ol class="axes">
-    <li><b>Account choice:</b> which authorized account is tried, and on what evidence.</li>
-    <li><b>Stickiness and failover:</b> when a home stays, and what kind of failure is allowed to move it.</li>
-    <li><b>The record:</b> what a request row and a usage window are allowed to say.</li>
-    <li><b>Client contract:</b> what the client can rely on once a byte or a tool call has started.</li>
-    <li><b>Who can run it:</b> the setup promise, the verified platform, and whose accounts are in the pool.</li>
+    <li><b>Capacity at the edge:</b> what happens to a request when the pool is thin, a limit is ambiguous, or the process restarts.</li>
+    <li><b>Credential and exposure safety:</b> how account tokens, the listening port, re-login and recovery are protected.</li>
+    <li><b>Operator visibility:</b> what the operator learns without opening the dashboard, and what can be exported.</li>
+    <li><b>Client and protocol reach:</b> which clients and request shapes work, and what the router does to the request.</li>
+    <li><b>Who can run it, and on what terms:</b> install reach, onboarding, client keys, and how the product scopes itself against provider terms.</li>
   </ol>
+  <p>The first pass used five routing-internal axes (account choice, stickiness and failover, the record, client contract, who can run it). Its 16 cuts are carried forward in the rejection table under those axes.</p>
 </section>
 
 <section id="ranked-ideas">
   <h2>Ranked Ideas</h2>
-  <p>No idea survived. Sixteen candidates were cut, including three combinations. Each one either restated a decision the docs already made, cited a measurement method as if it were a missing routing rule, or would break a hold invariant those docs exist to protect.</p>
-  <p>The three items still open in the rate-limit note were not added back to fill the list. A pool-floor alarm, a dashboard render of <code>bindingConstraint</code>, and one eligibility predicate are already written there. The candidates that touched them asked for a different surface, or for a withhold the same note warns against.</p>
-  <p>What would change this cut is a measurement this page does not contain. The remap note already says how to read it from the requests table: start clock, true conversation parent, cache-write volume. A result that showed the default strategy's child reordering writing more cache than the 5-minute hold saves, or a confirmed failure class that leaves a warm home in place, would be new evidence. Neither was run here.</p>
+  <nav class="jump" aria-label="Ranked ideas">
+    <ol>
+      <li><a href="#s1">S1 · Closed by default</a></li>
+      <li><a href="#s2">S2 · Account tokens encrypted at rest</a></li>
+      <li><a href="#s3">S3 · A hard spend cap on metered fallback</a></li>
+      <li><a href="#s4">S4 · Sealed export and import of accounts</a></li>
+    </ol>
+  </nav>
+  <p>Four survivors, fewer than the usual five to seven. Three axes produced none. Each candidate was checked against the code; these four are the ones whose gap was confirmed and which no standing decision rules out. They were candidates N1, N2, N7 and N3, which is why those numbers are missing from the rejection table.</p>
+
+  <article class="idea" id="s1">
+    <p class="idea-id">S1</p>
+    <h3>Closed by default</h3>
+    <dl>
+      <dt>Description</dt>
+      <dd>Bind <code>127.0.0.1</code> unless the operator widens it. On first start, create an admin key and print it once. Refuse to start on a non-loopback address with no key. Add one exposure line to <code>--doctor</code>: bind address, auth state, TLS, and how many credentials are stored in plain text. Rewrite the top of <code>docs/security.md</code>, which still says "No Authentication" and "No HTTPS" (lines 11 and 14) although keys and TLS flags exist.</dd>
+      <dt>Axis</dt><dd>Credential and exposure safety</dd>
+      <dt>Basis</dt>
+      <dd><code>direct:</code> <code>apps/server/src/server.ts:2554</code> reads <code>const hostname = process.env.BETTER_CCFLARE_HOST || "0.0.0.0";</code>. <code>packages/http-api/src/services/auth-service.ts:188</code> reads "If no API keys are configured, authentication is disabled". <code>docs/security.md:29</code> has listed "bind to localhost only" as an immediate action since its October 2025 review. <code>external:</code> 9router had about 15 advisories in 2026 including an unauthenticated remote-code-execution flaw, and OmniRoute and CLIProxyAPI had critical or high ones (advisory listings read, not reproduced).</dd>
+      <dt>Rationale</dt>
+      <dd>A router that is reachable and unauthenticated hands out every login it holds. The documented agent setup already sets the loopback address (<code>docs/agent-setup.md:39</code>) and production binds loopback behind the guard, so the exposed case is anyone who starts the binary another way, and anyone whose agent skips the optional key step (<code>docs/agent-setup.md:53</code>). The audience cannot judge that risk for themselves.</dd>
+      <dt>Downsides</dt>
+      <dd>It changes a default. Docker must listen on all interfaces inside the container, so the image needs an explicit setting. An existing install reached over a LAN with no key would refuse to start after upgrade until the operator sets one or the other. No incident on this router is cited; the evidence is the competitors' record.</dd>
+      <dt>Confidence</dt><dd>80%</dd>
+      <dt>Complexity</dt><dd>Medium</dd>
+    </dl>
+  </article>
+
+  <article class="idea" id="s2">
+    <p class="idea-id">S2</p>
+    <h3>Account tokens encrypted at rest</h3>
+    <dl>
+      <dt>Description</dt>
+      <dd>Encrypt <code>access_token</code>, <code>refresh_token</code> and <code>api_key</code> with AES-256-GCM, using a key the router generates into a root-only file outside the SQLite database. Re-encrypt rows as they are read. <code>--doctor</code> reports how many remain in plain text.</dd>
+      <dt>Axis</dt><dd>Credential and exposure safety</dd>
+      <dt>Basis</dt>
+      <dd><code>direct:</code> <code>packages/database/src/migrations.ts:574-576</code> declares <code>api_key TEXT</code>, <code>refresh_token TEXT</code>, <code>access_token TEXT</code>. <code>docs/security.md:30</code> reads "Plaintext Tokens: OAuth tokens stored unencrypted. Implement AES-256-GCM encryption." The cipher is already in the repo for request payloads (<code>packages/database/src/payload-encryption.ts:4</code>). <code>external:</code> claude-proxy and accountant protect tokens at rest (docs); 9router had advisories for database export exposure and a key leak.</dd>
+      <dt>Rationale</dt>
+      <dd>The database file is copied more often than the host is broken into: snapshots, <code>.dump</code> files, a support bundle, a backup. Today each copy is a set of live subscription logins. With the key outside the file, a copy is useless on its own.</dd>
+      <dt>Downsides</dt>
+      <dd>It does not protect against someone with root on the host, who can read the key. The change touches the one table that holds every login, so a migration bug locks the operator out of all accounts at once. An older binary cannot read the ciphertext, which complicates rollback. Lose the key file and every account needs a fresh login. It is also an investment in holding subscription tokens, so its value depends on the open terms question above.</dd>
+      <dt>Confidence</dt><dd>70%</dd>
+      <dt>Complexity</dt><dd>Medium</dd>
+    </dl>
+  </article>
+
+  <article class="idea" id="s3">
+    <p class="idea-id">S3</p>
+    <h3>A hard spend cap on metered fallback</h3>
+    <dl>
+      <dt>Description</dt>
+      <dd>A dollars-per-day balance for pay-per-use accounts. When the day's metered spend reaches it, the router stops selecting those accounts, returns the normal thin-pool response, and alerts. The operator raises the balance by hand. Spend is counted on accepted successes and on the real upstream model, never on a route alias.</dd>
+      <dt>Axis</dt><dd>Capacity at the edge</dd>
+      <dt>Basis</dt>
+      <dd><code>reasoned:</code> the only spend control found is an alert. <code>packages/config/src/index.ts:967</code> defines <code>alert_daily_spend_usd</code> and <code>packages/types/src/alerts.ts:14</code> lists <code>daily_spend</code> as an alert type; two searches for a cap or budget on accounts and combos found none. An alert tells the operator after the money is spent; an agent in a loop does not wait. <code>external:</code> opencodex gates pay-per-use targets behind consent, claude-proxy has per-user daily dollar limits, prodex has key budgets (all docs).</dd>
+      <dt>Rationale</dt>
+      <dd>The moment the subscription pool runs dry is the moment an unattended agent spills onto an API key. A fixed ceiling makes that spill safe to leave on, which is the only form of "more capacity at the edge" that does not break a standing decision.</dd>
+      <dt>Downsides</dt>
+      <dd>No overspend incident on this router is cited; this is reasoned, not observed. It rests on an absence search, and overage and credit-drain handling in <code>packages/proxy/src/handlers/</code> was not read line by line. It was not determined whether an API-key account in the default pool is already chosen by priority without a combo; if so, a cap changes behaviour for existing installs and needs an "unlimited" default. Cost is an estimate from the price table, and unpriced tokens already show as partial, so the cap can under-count.</dd>
+      <dt>Confidence</dt><dd>55%</dd>
+      <dt>Complexity</dt><dd>Medium</dd>
+    </dl>
+  </article>
+
+  <article class="idea" id="s4">
+    <p class="idea-id">S4</p>
+    <h3>Sealed export and import of accounts</h3>
+    <dl>
+      <dt>Description</dt>
+      <dd>One command writes accounts, combos, family assignments, client keys and settings into a single passphrase-encrypted file. A second command restores it on a fresh host and lists which accounts still need a login. Build it after S2, on the same envelope.</dd>
+      <dt>Axis</dt><dd>Credential and exposure safety</dd>
+      <dt>Basis</dt>
+      <dd><code>reasoned:</code> a search of the CLI, docs and scripts for account export, import or backup found only the deploy script's backup of the systemd pin (<code>scripts/deploy-ccflare.sh:603-604</code>). The database file is therefore the only backup, and it is plain text until S2. <code>external:</code> codex-lb imports auth files and TeamClaude syncs tokens between machines (docs); OmniRoute #15190 is an empty database after an update.</dd>
+      <dt>Rationale</dt>
+      <dd>A lost disk or a move to a new machine costs every login. Repeated re-login is the most-commented complaint in the class.</dd>
+      <dt>Downsides</dt>
+      <dd>A restore while the original node is still running puts one refresh token in two places. The first to refresh invalidates the other, which is the failure in codex-multi-auth #495. The restore must refuse or warn unless the source is retired. Tokens that rotated since the export need a login anyway, so the saving is partial. This is the weakest of the four. Like S2, it invests in holding subscription tokens, so it depends on the open terms question above.</dd>
+      <dt>Confidence</dt><dd>45%</dd>
+      <dt>Complexity</dt><dd>Medium</dd>
+    </dl>
+  </article>
+
+  <h3 class="sub">Real but small</h3>
+  <p>These are true gaps that did not earn a card. They are listed so the rejection table does not hide them.</p>
+  <ul>
+    <li><b>Fleet roll-up.</b> "All out at" and "first back at" across accounts do not exist; the per-window data does (<code>packages/http-api/src/handlers/usage-windows.ts:37</code>). A small aggregation.</li>
+    <li><b>No alert type for an empty pool.</b> Already written as the pool-floor alarm.</li>
+    <li><b>Stale security doc.</b> <code>docs/security.md:11</code> and <code>:14</code> contradict the code. Folded into S1.</li>
+    <li><b>Chat Completions inbound.</b> The path is recognised in provider code (<code>packages/providers/src/provider-attempt-plan.ts:35</code>), and no inbound translator was found. Unsettled.</li>
+  </ul>
 </section>
 
 <section id="rejection-summary">
@@ -144,6 +284,31 @@ footer.composition-signal { margin-top: 3rem; padding-top: 1rem; border-top: 1px
       <tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr>
     </thead>
     <tbody>
+      <tr id="n4"><td class="id">N4</td><td>Fleet gauge endpoint for status lines and the error body</td><td>Two of its three parts exist: a per-session status-line endpoint (<code>docs/api-http.md:245</code>) and <code>next_available_at</code> in the 503 body. What is left is the small roll-up listed above.</td></tr>
+      <tr id="n5"><td class="id">N5</td><td>Push digest and pool-state notices</td><td>A second channel on top of the pool-floor alarm, which is already written. The weekly digest has no evidence of demand.</td></tr>
+      <tr id="n6"><td class="id">N6</td><td>Reproducible measurement report with CSV and Prometheus</td><td>Nobody has asked for it, and no figure exists yet to report. It becomes worth doing once a measurement is run.</td></tr>
+      <tr id="n8"><td class="id">N8</td><td>Hold a request in the router until a reset</td><td>A close variant of C9. Holding creates no capacity, and the client is already told when to retry.</td></tr>
+      <tr id="n9"><td class="id">N9</td><td>Automatic redeem of a Codex banked reset</td><td>A reset is scarce and one-way. A threshold that misfires wastes it, and the only evidence of demand is one competitor's flag.</td></tr>
+      <tr id="n10"><td class="id">N10</td><td>Routing rules as data with a preview</td><td>A power-user engine for an audience that pastes a prompt. No complaint or request points at it.</td></tr>
+      <tr id="n11"><td class="id">N11</td><td>Chat Completions shim and a client-compatibility report</td><td>The gap is unconfirmed, and no member is known to use a client that needs it.</td></tr>
+      <tr id="n12"><td class="id">N12</td><td>"Mutations applied" ledger on each request</td><td>Adds request-row columns, which C8 already cut. The only cited harm is one unverified report about a different router.</td></tr>
+      <tr id="n13"><td class="id">N13</td><td>Installer and self-update with rollback</td><td>The coding agent does the install from the paste prompt, and the deploy script already restores the previous pin on failure. A self-updater that swaps the binary is a new way to break a working install.</td></tr>
+      <tr id="n14"><td class="id">N14</td><td>Agent keys with a window-share cap</td><td>The per-session request governor already exists for runaway agents (<code>packages/proxy/src/session-governor.ts:15</code>), off by default. Turning it on comes first.</td></tr>
+      <tr id="n15"><td class="id">N15</td><td>"What this router never does" statement</td><td>Mostly a document. The claims are not enforced by code, so the statement can drift from the build.</td></tr>
+      <tr id="n16"><td class="id">N16</td><td>Per-provider switch to API-key-only</td><td>Pausing or removing the subscription accounts already does this. A switch adds nothing an operator cannot do today.</td></tr>
+      <tr id="n17"><td class="id">N17</td><td>Terms watch with change alerts</td><td>A ledger of quotes is process with no code that reads it, and the check makes the router fetch vendor pages.</td></tr>
+      <tr id="n18"><td class="id">N18</td><td>Single-account mode</td><td>Its fallback half is S3 and its pacing half is the existing pre-request pace check. No evidence was gathered on how many accounts members hold.</td></tr>
+      <tr id="n19"><td class="id">N19</td><td>Hold no long-lived Anthropic refresh token</td><td>Feasibility unverified, and the token manager owns refresh by design. It risks adding re-logins, the class's top complaint.</td></tr>
+      <tr id="n20"><td class="id">N20</td><td>Re-login as a pushed recovery</td><td>A successful re-login already resumes the account (<code>packages/http-api/src/handlers/oauth.ts:268-273</code>). Only a link in the alert text is missing.</td></tr>
+      <tr id="k1"><td class="id">K1</td><td>Sealed appliance (S1 + S2 + S4)</td><td>The parts ship better separately. S1 does not need the key design.</td></tr>
+      <tr id="k2"><td class="id">K2</td><td>Runway everywhere (N4 + N5)</td><td>Inherits both cuts.</td></tr>
+      <tr id="k3"><td class="id">K3</td><td>Stated posture (N12 + N15 + N16 + N17)</td><td>Mostly statements. Its one code part, N12, is cut.</td></tr>
+      <tr id="k4"><td class="id">K4</td><td>Safe update (N13 + S4 snapshot)</td><td>Inherits N13's cut.</td></tr>
+      <tr id="k5"><td class="id">K5</td><td>Thin-pool contract (S3 + N4 + N9)</td><td>Adds nothing to S3. The error-body line exists.</td></tr>
+      <tr id="axis2-visibility" class="gap"><td class="id">—</td><td>Axis: Operator visibility</td><td>No survivor. Candidates N4, N5 and N6 were layers on surfaces that exist or on work already written.</td></tr>
+      <tr id="axis2-reach" class="gap"><td class="id">—</td><td>Axis: Client and protocol reach</td><td>No survivor. Candidates N10, N11 and N12 had no evidence that this audience needs them.</td></tr>
+      <tr id="axis2-who" class="gap"><td class="id">—</td><td>Axis: Who can run it, and on what terms</td><td>No survivor. Install reach is the widest gap in the comparison, and the standing decision against new publisher workflows rules out the direct fix. Reopening that decision is the operator's call, not an idea.</td></tr>
+      <tr class="gap"><td class="id">—</td><td colspan="2"><b>First pass, 10:13Z.</b> The rows below are its 16 cuts and its five axis rows, unchanged.</td></tr>
       <tr id="c1">
         <td class="id">C1</td>
         <td>The default path keeps the child home</td>
@@ -254,7 +419,7 @@ footer.composition-signal { margin-top: 3rem; padding-top: 1rem; border-top: 1px
   </div>
 </section>
 
-<footer class="composition-signal">Composed 2026-11-14T10:13Z by ce-ideate from the request “all existing similar AI routers, and make sure ours is the absolute best.”</footer>
+<footer class="composition-signal">Composed 2026-11-14T11:16Z by ce-ideate with deep-research sourcing, from the request “all existing similar AI routers, and make sure ours is the absolute best”. Second pass: 16 projects read, 20 candidates and 5 combinations, 4 survivors. Replaces the 10:13Z first pass and carries its cuts forward.</footer>
 
 </main>
 </body>
