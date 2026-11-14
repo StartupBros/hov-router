@@ -24,6 +24,36 @@ test("normal, soft and unknown observations never claim rejection", () => {
 	expect(s.reportedStatus).toBe("future_value");
 	expect(s.overview).toBe(false);
 });
+test("labels state the routing outcome instead of a negation", () => {
+	const examples = [
+		{ input: { rateLimitStatus: "allowed" }, label: "Ready" },
+		{ input: {}, label: "Ready" },
+		{ input: { usageRateLimitedUntil: now + 1 }, label: "Ready" },
+		{
+			input: { rateLimitStatus: "allowed_warning" },
+			label: "Provider warning",
+		},
+		{
+			input: { rateLimitStatus: "queueing_soft (2m)" },
+			label: "Provider warning",
+		},
+		{ input: { rateLimitedUntil: now + 1 }, label: "Cooling down" },
+		{ input: { rateLimitStatus: "usage_exhausted" }, label: "Usage exhausted" },
+		{ input: { rateLimitStatus: "blocked" }, label: "Reported hard limit" },
+		{ input: { usageThrottledUntil: now + 1 }, label: "Pacing active" },
+		{ input: { rateLimitStatus: "future_status" }, label: "Status unknown" },
+		{ input: { paused: true }, label: "Paused" },
+		{
+			input: { paused: true, requiresReauth: true },
+			label: "Reconnect required",
+		},
+	];
+	for (const { input, label } of examples) {
+		expect(classifyAccountStatus(input, now).label).toBe(label);
+	}
+	for (const input of examples.map((e) => e.input))
+		expect(classifyAccountStatus(input, now).label).not.toBe("Not blocked");
+});
 test("presentation colors distinguish clear, caution, blocked and paused states", () => {
 	const examples = [
 		{ input: { rateLimitStatus: "allowed" }, tone: "ok" },
@@ -92,7 +122,7 @@ test("API-generated cooldown labels expire with their numeric deadline", () => {
 	]) {
 		const status = classifyAccountStatus(snapshot, clock);
 		expect(status.reason).toBe("normal");
-		expect(status.label).toBe("Not blocked");
+		expect(status.label).toBe("Ready");
 		expect(status.capacityAttention).toBe(false);
 		expect(status.overview).toBe(false);
 		expect(status.clearCooldown).toBe(false);

@@ -69,18 +69,19 @@ describe("account scan layout", () => {
 			tone: keyof typeof STATUS_TONE_CLASS;
 			icon: string;
 			label: string;
+			detail?: string;
 		}[] = [
 			{
 				input: { rateLimitStatus: "allowed" },
 				tone: "ok",
 				icon: "circle-check",
-				label: "Not blocked",
+				label: "Ready",
 			},
 			{
 				input: { rateLimitStatus: "allowed_warning" },
 				tone: "warning",
 				icon: "triangle-alert",
-				label: "Not blocked",
+				label: "Provider warning",
 			},
 			{
 				input: { rateLimitStatus: "blocked" },
@@ -92,10 +93,17 @@ describe("account scan layout", () => {
 				input: { paused: true, pauseReason: "manual" },
 				tone: "muted",
 				icon: "pause",
-				label: "Paused (manual)",
+				label: "Paused",
+			},
+			{
+				input: { paused: true, pauseReason: "overage" },
+				tone: "muted",
+				icon: "pause",
+				label: "Paused",
+				detail: "Auto-paused: overage",
 			},
 		];
-		for (const { input, tone, icon, label } of examples) {
+		for (const { input, tone, icon, label, detail } of examples) {
 			const html = withoutDetailsContent(
 				renderToStaticMarkup(
 					<AccountListItem
@@ -111,8 +119,50 @@ describe("account scan layout", () => {
 			const pill = html.slice(start, html.indexOf("</span>", start));
 			expect(pill).toContain(`lucide-${icon}`);
 			expect(pill).toContain('aria-hidden="true"');
-			expect(pill).toContain(label);
+			const text = pill.slice(pill.indexOf(">") + 1).replace(/<[^>]*>/g, "");
+			expect(text).toBe(label);
+			if (detail) expect(html).toContain(`>${detail}<`);
+			else expect(html).not.toContain("Auto-paused");
 		}
+	});
+	it("states refresh delay and secondary pacing once per row", () => {
+		const soon = Date.now() + 10 * 60 * 1000;
+		// Count visible text only; the pill tooltip may repeat the notice.
+		const occurrences = (html: string, text: string) =>
+			html.replace(/<[^>]*>/g, " ").split(text).length - 1;
+		const delayed = withoutDetailsContent(
+			renderToStaticMarkup(
+				<AccountListItem
+					account={makeAccount({
+						paused: false,
+						rateLimitStatus: "allowed",
+						usageRateLimitedUntil: soon,
+					})}
+					{...requiredHandlers}
+				/>,
+			),
+		);
+		expect(occurrences(delayed, "Usage refresh delayed")).toBe(1);
+		expect(delayed).toContain(
+			'title="Usage refresh delayed; the usage shown may be out of date."',
+		);
+		const pacedCooldown = withoutDetailsContent(
+			renderToStaticMarkup(
+				<AccountListItem
+					account={makeAccount({
+						paused: false,
+						rateLimitStatus: "allowed",
+						rateLimitedUntil: soon,
+						usageThrottledUntil: soon,
+						usageThrottledWindows: ["seven_day"],
+					})}
+					{...requiredHandlers}
+				/>,
+			),
+		);
+		expect(pacedCooldown).toContain("Cooling down");
+		expect(occurrences(pacedCooldown, "Pacing active")).toBe(1);
+		expect(pacedCooldown).not.toContain("may be model-specific");
 	});
 	it("shows a single cooldown state over saved allowed, and soft observations never promise rejection", () => {
 		const cooldown = withoutDetailsContent(
@@ -130,7 +180,7 @@ describe("account scan layout", () => {
 		);
 		expect(cooldown).toContain("Cooling down");
 		expect(cooldown).toContain("Router retry");
-		expect(cooldown).not.toContain("Not blocked");
+		expect(cooldown).not.toContain(">Ready<");
 		for (const rateLimitStatus of [
 			"queueing_soft",
 			"allowed_warning",
@@ -146,6 +196,7 @@ describe("account scan layout", () => {
 			);
 			expect(html).not.toContain("Requests are rejected");
 			expect(html).not.toContain("Clear cooldown");
+			expect(html).not.toContain("not a hard block");
 		}
 	});
 	it("disables both Resume controls for reauthentication pauses", () => {
@@ -224,7 +275,9 @@ describe("account scan layout", () => {
 				{...requiredHandlers}
 			/>,
 		);
-		expect(withoutDetailsContent(allowed)).toContain("Not blocked");
+		expect(withoutDetailsContent(allowed)).toContain("Ready");
+		expect(allowed).not.toContain("Provider capacity is not guaranteed");
+		expect(allowed).not.toContain("at limit");
 		expect(withoutDetailsContent(allowed)).not.toContain("Allowed");
 		expect(allowed).not.toContain("No local block");
 		const unspecified = renderToStaticMarkup(
@@ -233,7 +286,55 @@ describe("account scan layout", () => {
 				{...requiredHandlers}
 			/>,
 		);
-		expect(unspecified).toContain("Not blocked");
+		expect(unspecified).toContain("Ready");
+	});
+	it("names a full visible window beside a ready status", () => {
+		const reset = new Date(Date.now() + 3600000).toISOString();
+		const usageData = {
+			seven_day: { utilization: 32, resets_at: reset },
+			seven_day_fable: { utilization: 100, resets_at: reset },
+		};
+		const full = withoutDetailsContent(
+			renderToStaticMarkup(
+				<AccountListItem
+					account={makeAccount({
+						paused: false,
+						rateLimitStatus: "allowed",
+						usageWindow: "seven_day",
+						usageUtilization: 32,
+						usageData,
+					})}
+					{...requiredHandlers}
+				/>,
+			),
+		);
+		expect(full).toContain("Ready");
+		expect(full).toContain("Fable (Weekly) at limit");
+		for (const account of [
+			makeAccount({
+				paused: false,
+				usageWindow: "seven_day",
+				usageUtilization: 32,
+				usageData: {
+					...usageData,
+					seven_day_fable: { utilization: 99, resets_at: reset },
+				},
+			}),
+			makeAccount({
+				paused: true,
+				pauseReason: "manual",
+				usageWindow: "seven_day",
+				usageUtilization: 32,
+				usageData,
+			}),
+		])
+			expect(
+				withoutDetailsContent(
+					renderToStaticMarkup(
+						<AccountListItem account={account} {...requiredHandlers} />,
+					),
+				),
+			).not.toContain("at limit");
 	});
 	it("keeps force reset outside disclosures and missing quota explicit", () => {
 		const html = renderToStaticMarkup(
@@ -248,7 +349,9 @@ describe("account scan layout", () => {
 		);
 		const visible = withoutDetailsContent(html);
 		expect(visible).toContain("Clear cooldown");
+		expect(visible).not.toContain("removes the router’s block");
 		expect(visible).toContain("Possible stale cooldown");
+		expect(visible).not.toContain("Provider capacity is not guaranteed");
 		expect(visible).not.toContain("No local block");
 		expect(visible).toContain("Usage unavailable");
 	});
@@ -419,7 +522,8 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 			/>,
 		);
 
-		expect(html).toContain("Paused (failure threshold)");
+		expect(html).toContain(">Auto-paused: repeated failures<");
+		expect(html).not.toContain("Paused (failure threshold)");
 	});
 
 	it("renders generic Paused copy with no reauth emphasis for an unrecognized pause reason", () => {
