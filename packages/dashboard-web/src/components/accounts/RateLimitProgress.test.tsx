@@ -882,6 +882,27 @@ describe("compact comparison slots", () => {
 				expect(html).not.toContain("%");
 			}
 	});
+	it("gives credits-balance providers only their credits line", () => {
+		for (const [usageData, credits] of [
+			[null, "Credits unavailable"],
+			[
+				{ remainingUsd: 12.34, totalMicrodollarsAcquired: 20000000 },
+				"$12.34 remaining",
+			],
+		] as const) {
+			const html = renderToStaticMarkup(
+				<RateLimitProgress
+					provider="kilo"
+					resetIso={null}
+					compact
+					usageData={usageData as FullUsageData | null}
+				/>,
+			);
+			expect(html).toContain(credits);
+			expect(html).not.toContain("Usage unavailable");
+			expect(html).not.toContain("Quota not tracked");
+		}
+	});
 });
 
 it("emphasizes the selected reset in its quota row without duplicating a timestamp", () => {

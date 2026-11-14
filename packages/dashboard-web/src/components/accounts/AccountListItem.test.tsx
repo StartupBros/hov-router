@@ -662,10 +662,18 @@ describe("AccountListItem authoritative family routing", () => {
 	// The server copies these account-wide states into every family
 	// (availabilityFor in account-routing-operations.ts); the status column
 	// already shows them once, so the row must not repeat them per family.
-	for (const [availability, account] of [
-		["paused", { paused: true, pauseReason: "manual" }],
-		["requires_reauth", { paused: false, requiresReauth: true }],
-		["rate_limited", { paused: false, rateLimitedUntil: Date.now() + 600000 }],
+	for (const [availability, account, statusLabel] of [
+		["paused", { paused: true, pauseReason: "manual" }, "Paused"],
+		[
+			"requires_reauth",
+			{ paused: false, requiresReauth: true },
+			"Reconnect required",
+		],
+		[
+			"rate_limited",
+			{ paused: false, rateLimitedUntil: Date.now() + 600000 },
+			"Cooling down",
+		],
 	] as const) {
 		it(`leaves the account-wide ${availability} state to the status column`, () => {
 			const visible = withoutDetailsContent(
@@ -682,6 +690,8 @@ describe("AccountListItem authoritative family routing", () => {
 			);
 			expect(visible).not.toContain('aria-label="Routing notices"');
 			expect(visible).not.toMatch(/(Fable|Opus): /);
+			// The state the row no longer repeats must still be in the status column.
+			expect(visible).toContain(`>${statusLabel}<`);
 		});
 	}
 

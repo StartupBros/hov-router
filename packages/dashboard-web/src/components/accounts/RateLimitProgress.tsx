@@ -307,7 +307,11 @@ export function RateLimitProgress({
 					Usage · resets in
 				</p>
 			)}
-			{compact && usages.length === 0 && <MissingQuota provider={provider} />}
+			{compact &&
+				usages.length === 0 &&
+				!providerShowsCreditsBalance(provider) && (
+					<MissingQuota provider={provider} />
+				)}
 			{refreshDelayed && usageRateLimitedUntil != null && (
 				<p className="col-span-2 text-xs text-amber-700 dark:text-amber-400">
 					Usage refresh delayed — retry after{" "}

@@ -126,15 +126,24 @@ function routingAvailabilityOverlay(
 	}
 }
 
+// The server copies the account's pause, re-login and cooldown into every
+// family (availabilityFor in account-routing-operations.ts). The status column
+// shows those once, so the row notice skips them; any other unavailable state
+// differs by family and keeps its notice. Details still lists every family.
+const ACCOUNT_WIDE_AVAILABILITY = new Set([
+	"paused",
+	"requires_reauth",
+	"rate_limited",
+]);
+
 function routingNeedsNotice(state: AccountFamilyRoutingState) {
-	// The server copies the account's pause, re-login and cooldown into every
-	// family. The status column shows those once; the row notice is kept for
-	// facts that differ by family. Details still lists every family's state.
 	return (
 		state.reason === "ambiguous" ||
 		state.reason === "new_billing_class" ||
 		state.managedRouteAvailable ||
-		state.availability === "model_exhausted"
+		(state.availability !== null &&
+			state.availability !== "available" &&
+			!ACCOUNT_WIDE_AVAILABILITY.has(state.availability))
 	);
 }
 interface AccountListItemProps {
