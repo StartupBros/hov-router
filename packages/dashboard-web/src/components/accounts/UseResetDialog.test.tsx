@@ -220,7 +220,7 @@ describe("UseResetPanel results (R12, KTD11)", () => {
 		const html = render(flow("answered", response()));
 		const visible = text(html);
 		expect(visible).toContain("OpenAI reset this account's usage windows.");
-		expect(visible).toContain("A credit was spent.");
+		expect(visible).toContain("A banked reset was used.");
 		expect(visible).toContain("Banked resets: 2 before, 1 after.");
 		expect(buttons(html).map((button) => button.label)).not.toContain(
 			"Try again",

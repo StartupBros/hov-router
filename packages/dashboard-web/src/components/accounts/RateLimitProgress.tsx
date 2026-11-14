@@ -1,5 +1,6 @@
 import { computeWindowStartMs, registerUIRefresh } from "@better-ccflare/core";
 import type { FullUsageData } from "@better-ccflare/types";
+import { isFutureDeadline } from "@better-ccflare/ui-common";
 import { useEffect, useId, useState } from "react";
 import { formatRelativeReset } from "../../lib/pool-usage";
 import { cn, formatShortDuration } from "../../lib/utils";
@@ -150,43 +151,21 @@ export function RateLimitProgress({
 		return unregisterInterval;
 	}, [refreshId]);
 
-	// Codex has no usage-polling endpoint, so gaps in its data are routine (the
-	// weekly percentage arrives only piggybacked on real traffic). The weekly bar
-	// is its only quota bar and must stay on screen through those gaps, saying
-	// "Data unavailable" instead of vanishing — a missing bar reads as "no limit".
 	const isCodex = provider === "codex";
+	const refreshDelayed = isFutureDeadline(usageRateLimitedUntil, now);
+	const pacingActive = isFutureDeadline(usageThrottledUntil, now);
 
 	// Allow null resetIso for providers that show usage data (like NanoGPT in PayG mode)
 	// but still render null if there's no resetIso and no usage data to show
-	if (!compact && !isCodex && !resetIso && !usageData && !usageRateLimitedUntil)
-		return null;
-
-	// Show explicit rate-limited state when the Anthropic usage API returned 429
-	// and we have no cached data to show.
 	if (
-		usageRateLimitedUntil != null &&
-		!usageData &&
 		!compact &&
-		(provider === "anthropic" || provider === "codex")
-	) {
-		const retryAfterDate = new Date(usageRateLimitedUntil);
-		const retryTimeText = retryAfterDate.toLocaleTimeString(undefined, {
-			hour: "2-digit",
-			minute: "2-digit",
-		});
-		return (
-			<div className={cn("space-y-2", className)}>
-				<div className="flex items-center justify-between">
-					<span className="text-xs text-amber-700 dark:text-amber-400">
-						Rate limited — usage data unavailable
-					</span>
-					<span className="text-xs text-muted-foreground">
-						Retry after {retryTimeText}
-					</span>
-				</div>
-			</div>
-		);
-	}
+		!isCodex &&
+		!resetIso &&
+		!usageData &&
+		!refreshDelayed &&
+		!pacingActive
+	)
+		return null;
 
 	// Kilo Gateway: show credit balance in USD instead of a utilization window
 	if (!compact && providerShowsCreditsBalance(provider) && usageData) {
@@ -226,6 +205,8 @@ export function RateLimitProgress({
 		now,
 	);
 
+	const inactiveNanoGPT =
+		isNanoGPTData && (usageData as { active?: boolean }).active === false;
 	const isZaiPeak = provider === "zai" && isZaiPeakHour(now);
 	const isAnthropicPeak = provider === "anthropic" && isAnthropicPeakHour(now);
 	const throttledWindowSet = new Set(usageThrottledWindows);
@@ -244,7 +225,7 @@ export function RateLimitProgress({
 	// suppresses a window's row, so it is the only one that can orphan a notice.
 	const hasOrphanThrottledWindow =
 		isCodex &&
-		usageThrottledUntil != null &&
+		pacingActive &&
 		usageThrottledWindows.some((window) => !renderedWindows.has(window));
 
 	return (
@@ -291,7 +272,7 @@ export function RateLimitProgress({
 			{!compact && hasOrphanThrottledWindow && usageThrottledUntil != null && (
 				<div className="flex items-center justify-between">
 					<span className="text-xs text-amber-700 dark:text-amber-400">
-						Usage throttling enabled; requests are being delayed
+						Pacing active; affected windows may delay requests
 					</span>
 					<span className="text-xs text-amber-700 dark:text-amber-400">
 						{(() => {
@@ -314,17 +295,15 @@ export function RateLimitProgress({
 			{compact && usages.length === 0 && (
 				<p className="text-xs text-muted-foreground">Usage unavailable</p>
 			)}
-			{compact &&
-				usageRateLimitedUntil != null &&
-				usageRateLimitedUntil > now && (
-					<p className="col-span-2 text-xs text-amber-700 dark:text-amber-400">
-						Usage data rate limited — retry after{" "}
-						{new Date(usageRateLimitedUntil).toLocaleTimeString()}
-					</p>
-				)}
-			{compact && usageThrottledUntil != null && usageThrottledUntil > now && (
+			{refreshDelayed && usageRateLimitedUntil != null && (
 				<p className="col-span-2 text-xs text-amber-700 dark:text-amber-400">
-					Usage throttling enabled; requests are being delayed.{" "}
+					Usage refresh delayed — retry after{" "}
+					{new Date(usageRateLimitedUntil).toLocaleTimeString()}
+				</p>
+			)}
+			{compact && pacingActive && usageThrottledUntil != null && (
+				<p className="col-span-2 text-xs text-amber-700 dark:text-amber-400">
+					Pacing active; affected windows may delay requests.{" "}
 					{formatThrottledUntil(usageThrottledUntil, now).startsWith(
 						"Less than",
 					)
@@ -348,7 +327,7 @@ export function RateLimitProgress({
 			{usages.map((usage, _index) => {
 				if (compact) {
 					if (providerShowsCreditsBalance(provider)) return null;
-					if (isNanoGPTData && usage.window === "daily" && !usage.resetTime)
+					if (inactiveNanoGPT && usage.window === "daily")
 						return (
 							<p key="payg" className="text-xs text-muted-foreground">
 								No subscription (PayG mode)
@@ -463,26 +442,7 @@ export function RateLimitProgress({
 					usage.group != null && usage.group !== usages[_index - 1]?.group;
 				const groupTitle = usage.group === "session" ? "Session" : "Weekly";
 
-				// Time remaining for this specific window: rendered live via
-				// LiveCountdown (its own 1s setInterval) when a resetTime exists;
-				// windowTimeText only covers the two no-resetTime placeholder cases.
-				let windowTimeText = "";
-				if (!usage.resetTime) {
-					if (usage.window && isWeeklyWindow(usage.window)) {
-						// Weekly account/tier windows (seven_day, seven_day_opus,
-						// seven_day_sonnet, seven_day_fable, …) when reset time is unavailable.
-						windowTimeText = "Data unavailable";
-					} else if (usage.window === "daily" || usage.window === "monthly") {
-						// Special handling for NanoGPT when no subscription is active (PayG mode)
-						windowTimeText = "No subscription (PayG mode)";
-					}
-				}
-
-				// Special rendering for PayG mode - just show message without progress bar
-				if (
-					(usage.window === "daily" || usage.window === "monthly") &&
-					!usage.resetTime
-				) {
+				if (inactiveNanoGPT) {
 					return (
 						<div
 							key={`${usage.window ?? "row"}:${usage.label ?? "default"}`}
@@ -515,10 +475,10 @@ export function RateLimitProgress({
 							);
 							const isOverPacing =
 								expectedPct !== null && (percentage ?? 0) > expectedPct;
-							const isWindowThrottled = usage.window
+							const flaggedWindow = usage.window
 								? throttledWindowSet.has(usage.window)
 								: false;
-							const windowThrottleUntil = isWindowThrottled
+							const windowThrottleUntil = flaggedWindow
 								? computeWindowThrottleUntil(
 										usage.resetTime,
 										usage.window,
@@ -527,7 +487,10 @@ export function RateLimitProgress({
 									)
 								: null;
 							const throttleDisplayUntil =
-								windowThrottleUntil ?? usageThrottledUntil;
+								windowThrottleUntil ??
+								(pacingActive ? usageThrottledUntil : null);
+							const isWindowThrottled =
+								flaggedWindow && throttleDisplayUntil != null;
 							const windowLabel = usage.window
 								? displayLabel(usage)
 								: "Rate limit";
@@ -584,7 +547,7 @@ export function RateLimitProgress({
 											)}
 										</div>
 										<Progress
-											value={isAvailable ? percentage : 0}
+											value={isAvailable ? percentage : null}
 											aria-label={`${windowLabel} usage`}
 											className="h-2"
 											indicatorClassName={
@@ -616,9 +579,9 @@ export function RateLimitProgress({
 										)}
 									</div>
 									{isWindowThrottled && throttleDisplayUntil && (
-										<div className="flex items-center justify-between">
+										<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
 											<span className="text-xs text-amber-700 dark:text-amber-400">
-												Usage throttling enabled; requests are being delayed
+												Pacing active; affected windows may delay requests
 											</span>
 											<span className="text-xs text-amber-700 dark:text-amber-400">
 												{(() => {
@@ -675,21 +638,11 @@ export function RateLimitProgress({
 								</span>
 							</div>
 						)}
-						{!usage.resetTime &&
-							((usage.window && isWeeklyWindow(usage.window)) ||
-								usage.window === "daily" ||
-								usage.window === "monthly") && (
-								<div className="flex items-center justify-between">
-									<span className="text-xs text-muted-foreground">
-										{windowTimeText}
-									</span>
-									<span className="text-xs text-muted-foreground">
-										{usage.window === "daily" || usage.window === "monthly"
-											? "Using pay-as-you-go"
-											: "No reset data available"}
-									</span>
-								</div>
-							)}
+						{!usage.resetTime && (
+							<p className="text-xs text-muted-foreground">
+								{!isAvailable && "Data unavailable · "}Reset unknown
+							</p>
+						)}
 					</div>
 				);
 			})}

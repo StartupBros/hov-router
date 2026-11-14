@@ -116,6 +116,8 @@ export function BankedResetsSummary({
 							Soonest expires{" "}
 							{formatBankedResetExpiryLabel(soonestExpiresAt, now)}
 						</span>
+					) : anyStale ? (
+						"Reported balance; current balance may be unknown."
 					) : totalAvailable > 0 ? (
 						"Expiry not reported"
 					) : (

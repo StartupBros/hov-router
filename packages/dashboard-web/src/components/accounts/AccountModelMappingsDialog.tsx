@@ -4,8 +4,9 @@ import {
 	LATEST_OPUS_MODEL,
 	LATEST_SONNET_MODEL,
 } from "@better-ccflare/core";
-import React, { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Account } from "../../api";
+import { useDialogSubmission } from "../../hooks/useDialogSubmission";
 import { useCodexAccountEffectiveDefaults } from "../../hooks/useProviderModelDefaults";
 import { providerAllowsClientModelPassthrough } from "../../utils/provider-utils";
 import { ModelCombobox } from "../models/ModelCombobox";
@@ -73,6 +74,7 @@ interface AccountModelMappingsBodyProps {
 	account: Account;
 	modelMappings: Record<FamilyField, string>;
 	onInputChange: (modelType: FamilyField, value: string) => void;
+	disabled?: boolean;
 }
 
 /**
@@ -86,6 +88,7 @@ export function AccountModelMappingsBody({
 	account,
 	modelMappings,
 	onInputChange,
+	disabled = false,
 }: AccountModelMappingsBodyProps) {
 	// Same single rule as the combo slot. Here it does not block Save (mapping
 	// only the families this account actually uses is legitimate), but the
@@ -140,6 +143,7 @@ export function AccountModelMappingsBody({
 						</Label>
 						<div className="flex items-center gap-1.5">
 							<ModelCombobox
+								disabled={disabled}
 								id="fable"
 								mode="list"
 								provider={account.provider}
@@ -159,6 +163,7 @@ export function AccountModelMappingsBody({
 						</Label>
 						<div className="flex items-center gap-1.5">
 							<ModelCombobox
+								disabled={disabled}
 								id="opus"
 								mode="list"
 								provider={account.provider}
@@ -178,6 +183,7 @@ export function AccountModelMappingsBody({
 						</Label>
 						<div className="flex items-center gap-1.5">
 							<ModelCombobox
+								disabled={disabled}
 								id="sonnet"
 								mode="list"
 								provider={account.provider}
@@ -197,6 +203,7 @@ export function AccountModelMappingsBody({
 						</Label>
 						<div className="flex items-center gap-1.5">
 							<ModelCombobox
+								disabled={disabled}
 								id="haiku"
 								mode="list"
 								provider={account.provider}
@@ -233,10 +240,16 @@ export function AccountModelMappingsDialog({
 		sonnet: "",
 		haiku: "",
 	});
-	const [isLoading, setIsLoading] = useState(false);
+	const submission = useDialogSubmission(account?.id, isOpen);
+	const isLoading = submission.pending;
 
+	const initialAccount = useRef(account);
+	initialAccount.current = account;
+	const accountId = account?.id;
 	// Update form when account changes
-	React.useEffect(() => {
+	useEffect(() => {
+		if (!isOpen || !accountId) return;
+		const account = initialAccount.current;
 		if (account?.modelMappings) {
 			setModelMappings({
 				fable: formatMappingValue(account.modelMappings.fable || ""),
@@ -252,25 +265,19 @@ export function AccountModelMappingsDialog({
 				haiku: "",
 			});
 		}
-	}, [account]);
+	}, [accountId, isOpen]);
 
 	const handleSave = async () => {
 		if (!account) return;
 
-		setIsLoading(true);
-		try {
-			const mappingsToSend = mergeAccountModelMappings(
-				account.modelMappings,
-				modelMappings,
-			);
-
-			await onUpdateModelMappings(account.id, mappingsToSend);
-			onOpenChange(false);
-		} catch (error) {
-			console.error("Failed to update model mappings:", error);
-		} finally {
-			setIsLoading(false);
-		}
+		await submission.submit(
+			() =>
+				onUpdateModelMappings(
+					account.id,
+					mergeAccountModelMappings(account.modelMappings, modelMappings),
+				),
+			() => onOpenChange(false),
+		);
 	};
 
 	const handleInputChange = (
@@ -286,8 +293,14 @@ export function AccountModelMappingsDialog({
 	if (!account) return null;
 
 	return (
-		<Dialog open={isOpen} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[600px] flex flex-col max-h-[85vh]">
+		<Dialog
+			open={isOpen}
+			onOpenChange={(open) => submission.close(() => onOpenChange(open))}
+		>
+			<DialogContent
+				closeDisabled={isLoading}
+				className="sm:max-w-[600px] flex flex-col max-h-[85vh]"
+			>
 				<DialogHeader>
 					<DialogTitle>Edit Model Configuration</DialogTitle>
 					<DialogDescription>
@@ -296,15 +309,21 @@ export function AccountModelMappingsDialog({
 					</DialogDescription>
 				</DialogHeader>
 				<AccountModelMappingsBody
+					disabled={isLoading}
 					account={account}
 					modelMappings={modelMappings}
 					onInputChange={handleInputChange}
 				/>
-				<DialogFooter className="mt-2 shrink-0">
+				{submission.error && (
+					<p role="alert" className="text-sm text-destructive">
+						{submission.error}
+					</p>
+				)}
+				<DialogFooter className="mt-2 shrink-0 [&>button]:min-h-11">
 					<Button
 						type="button"
 						variant="outline"
-						onClick={() => onOpenChange(false)}
+						onClick={() => submission.close(() => onOpenChange(false))}
 						disabled={isLoading}
 					>
 						Cancel

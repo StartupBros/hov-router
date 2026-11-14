@@ -27,7 +27,6 @@ export function accountUsageWindows(
 		usageData,
 		provider,
 		showWeekly = false,
-		compact = false,
 	}: {
 		resetIso: string | null;
 		usageUtilization?: number | null;
@@ -40,8 +39,6 @@ export function accountUsageWindows(
 	now = Date.now(),
 ) {
 	const isCodex = provider === "codex";
-	const WINDOW_MS = 5 * 60 * 60 * 1000;
-	const resetTime = resetIso ? new Date(resetIso).getTime() : Date.now();
 
 	// Determine which usage windows to display
 	const usages: UsageDisplay[] = [];
@@ -240,7 +237,7 @@ export function accountUsageWindows(
 		};
 
 		// Only show usage if subscription is active
-		if (nanogptData.active) {
+		if (nanogptData.active !== false) {
 			// Daily usage
 			if (nanogptData.daily) {
 				usages.push({
@@ -274,12 +271,10 @@ export function accountUsageWindows(
 			{
 				// The flat summary describes its named window, not necessarily 5h.
 				utilization:
-					!compact || usageWindow === "five_hour"
-						? (usageUtilization ?? null)
-						: null,
-				resetTime: !compact || usageWindow === "five_hour" ? resetIso : null,
+					usageWindow === "five_hour" ? (usageUtilization ?? null) : null,
+				resetTime: usageWindow === "five_hour" ? resetIso : null,
 			},
-			compact,
+			true,
 		);
 		// Codex: drop the 5-hour row entirely. Its percentage is either absent or
 		// borrowed from the time-elapsed fallback, so the bar showed how much of
@@ -291,7 +286,7 @@ export function accountUsageWindows(
 	} else if (
 		providerShowsWeeklyUsage(provider) &&
 		((usageUtilization !== null && usageUtilization !== undefined) ||
-			(compact && resetIsoValue(resetIso) != null)) &&
+			resetIsoValue(resetIso) != null) &&
 		usageWindow &&
 		// Never let the 5-hour window back in for Codex through this fallback.
 		!(isCodex && usageWindow === "five_hour")
@@ -309,7 +304,7 @@ export function accountUsageWindows(
 		// window as unavailable instead — the render path already prints "N/A" and
 		// "Data unavailable" for a null utilization.
 		usages.push({ utilization: null, window: "seven_day", resetTime: null });
-	} else if (compact && provider === "anthropic") {
+	} else if (provider === "anthropic") {
 		usages.push(
 			...collectAnthropicUsageRows(undefined, {
 				utilization: null,
@@ -317,16 +312,13 @@ export function accountUsageWindows(
 			}),
 		);
 	} else {
-		// Use time-based percentage for non-Anthropic or when no usage data is available
+		const windowMs = 5 * 60 * 60 * 1000;
+		const resetTime = resetIso ? Date.parse(resetIso) : now;
 		const percentage = Math.min(
 			100,
-			Math.max(0, ((now - (resetTime - WINDOW_MS)) / WINDOW_MS) * 100),
+			Math.max(0, ((now - (resetTime - windowMs)) / windowMs) * 100),
 		);
-		usages.push({
-			utilization: percentage as number | null,
-			window: null,
-			resetTime: resetIso,
-		});
+		usages.push({ utilization: percentage, window: null, resetTime: resetIso });
 	}
 
 	// Codex code-review quota: a flat scalar pair on usageData (NOT a
@@ -338,7 +330,7 @@ export function accountUsageWindows(
 		if (
 			(typeof codexExtras.code_review_used_percent === "number" &&
 				Number.isFinite(codexExtras.code_review_used_percent)) ||
-			(compact && resetIsoValue(codexExtras.code_review_resets_at) != null)
+			resetIsoValue(codexExtras.code_review_resets_at) != null
 		) {
 			usages.push({
 				utilization: codexExtras.code_review_used_percent ?? null,
@@ -349,15 +341,21 @@ export function accountUsageWindows(
 		}
 	}
 
-	if (compact && isCodex && !usages.some((row) => row.window === "seven_day")) {
+	if (isCodex && !usages.some((row) => row.window === "seven_day")) {
 		usages.unshift({ window: "seven_day", utilization: null, resetTime: null });
 	}
 	return {
-		usages: (compact && provider === "anthropic"
+		usages: (provider === "anthropic"
 			? usages.filter((row) => !row.synthetic)
 			: usages
 		).map((row) => ({
 			...row,
+			utilization:
+				typeof row.utilization === "number" &&
+				Number.isFinite(row.utilization) &&
+				row.utilization >= 0
+					? row.utilization
+					: null,
 			resetTime: resetIsoValue(row.resetTime),
 		})),
 		isNanoGPTData,

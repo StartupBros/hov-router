@@ -383,7 +383,7 @@ export const OverviewTab = React.memo(() => {
 				<StorageIntegrityCard />
 			</div>
 
-			{accounts && <RateLimitInfo accounts={accounts} />}
+			{accounts && <RateLimitInfo accounts={accounts} now={now} />}
 		</div>
 	);
 });

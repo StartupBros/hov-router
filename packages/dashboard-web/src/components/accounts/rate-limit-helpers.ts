@@ -319,7 +319,7 @@ export function collectAnthropicUsageRows(
 		if (
 			isUsageWindow(window) &&
 			(preserveUnknown || window.utilization != null) &&
-			window.resets_at !== null
+			(preserveUnknown || window.resets_at !== null)
 		) {
 			rows.push({
 				utilization: window.utilization,

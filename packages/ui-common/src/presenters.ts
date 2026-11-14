@@ -3,13 +3,40 @@ import type {
 	AccountDisplay,
 	AccountResponse,
 } from "@better-ccflare/types";
+import { classifyAccountStatus } from "./account-status";
 import { formatTimestamp } from "./formatters";
 
 /**
  * Account presenter - formats account data for display
  */
 export class AccountPresenter {
-	constructor(private account: Account | AccountResponse | AccountDisplay) {}
+	constructor(
+		private account: Account | AccountResponse | AccountDisplay,
+		private now = Date.now(),
+	) {}
+
+	get status() {
+		const a = this.account;
+		return classifyAccountStatus(
+			{
+				...a,
+				pauseReason:
+					"pauseReason" in a
+						? a.pauseReason
+						: "pause_reason" in a
+							? a.pause_reason
+							: null,
+				rateLimitedUntil:
+					"rateLimitedUntil" in a
+						? a.rateLimitedUntil
+						: "rate_limited_until" in a
+							? a.rate_limited_until
+							: null,
+				rateLimitStatus: this.rateLimitStatus,
+			},
+			this.now,
+		);
+	}
 
 	get tokenStatus(): "valid" | "expired" {
 		if ("tokenStatus" in this.account) {
@@ -30,7 +57,7 @@ export class AccountPresenter {
 			"rate_limited_until" in this.account &&
 			this.account.rate_limited_until
 		) {
-			const isRateLimited = this.account.rate_limited_until > Date.now();
+			const isRateLimited = this.account.rate_limited_until > this.now;
 			return isRateLimited
 				? `Rate limited until ${formatTimestamp(this.account.rate_limited_until)}`
 				: "OK";
@@ -73,13 +100,6 @@ export class AccountPresenter {
 	}
 
 	get isRateLimited(): boolean {
-		if ("rate_limited_until" in this.account) {
-			return Boolean(
-				this.account.rate_limited_until &&
-					this.account.rate_limited_until > Date.now(),
-			);
-		}
-		const status = this.rateLimitStatus.toLowerCase();
-		return status !== "ok" && !status.startsWith("allowed");
+		return this.status.capacityAttention;
 	}
 }

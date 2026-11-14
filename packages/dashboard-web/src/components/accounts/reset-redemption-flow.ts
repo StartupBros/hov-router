@@ -68,10 +68,10 @@ const OPEN_STATES: ReadonlySet<CodexResetRedemptionState> = new Set([
 ]);
 
 const SPEND_SENTENCE: Record<RedeemResetSpend, string> = {
-	spent: "A credit was spent.",
-	not_spent: "No credit was spent.",
+	spent: "A banked reset was used.",
+	not_spent: "No banked reset was used.",
 	not_confirmed:
-		"Not confirmed yet whether a credit was spent. Refresh usage to see the current count.",
+		"Not confirmed yet whether a banked reset was used. Refresh usage to see the current count.",
 };
 
 function outcomeSentence(response: RedeemResetResponse): string {

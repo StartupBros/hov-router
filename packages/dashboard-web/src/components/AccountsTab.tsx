@@ -546,34 +546,23 @@ export function AccountsTab() {
 	};
 
 	const handleConfirmDelete = async () => {
-		if (confirmDelete.confirmInput !== confirmDelete.accountName) {
-			setActionError(
+		const target = confirmDelete;
+		if (target.confirmInput !== target.accountName)
+			throw new Error(
 				"Account name does not match. Please type the exact account name.",
 			);
-			return;
-		}
-
-		try {
-			const accountId = confirmDelete.accountId;
-			if (!accountId) {
-				setActionError("Missing account id; cannot delete.");
-				return;
-			}
-			await removeAccount.mutateAsync({
-				id: accountId,
-				name: confirmDelete.accountName,
-				confirmInput: confirmDelete.confirmInput,
-			});
-			setConfirmDelete({
-				show: false,
-				accountId: "",
-				accountName: "",
-				confirmInput: "",
-			});
-			setActionError(null);
-		} catch (err) {
-			setActionError(formatError(err));
-		}
+		if (!target.accountId)
+			throw new Error("Missing account id; cannot delete.");
+		await removeAccount.mutateAsync({
+			id: target.accountId,
+			name: target.accountName,
+			confirmInput: target.confirmInput,
+		});
+		setConfirmDelete((current) =>
+			current === target
+				? { show: false, accountId: "", accountName: "", confirmInput: "" }
+				: current,
+		);
 	};
 
 	const handleRename = (account: Account) => {
@@ -582,17 +571,10 @@ export function AccountsTab() {
 
 	const handleConfirmRename = async (newName: string) => {
 		if (!renameDialog.account) return;
-
-		try {
-			await renameAccount.mutateAsync({
-				accountId: renameDialog.account.id,
-				newName,
-			});
-			setRenameDialog({ isOpen: false, account: null });
-			setActionError(null);
-		} catch (err) {
-			setActionError(formatError(err));
-		}
+		await renameAccount.mutateAsync({
+			accountId: renameDialog.account.id,
+			newName,
+		});
 	};
 
 	const handlePauseToggle = async (account: Account) => {
@@ -905,6 +887,7 @@ export function AccountsTab() {
 
 			{confirmDelete.show && (
 				<DeleteConfirmationDialog
+					key={confirmDelete.accountId}
 					accountName={confirmDelete.accountName}
 					confirmInput={confirmDelete.confirmInput}
 					onConfirmInputChange={(value) =>
@@ -928,9 +911,16 @@ export function AccountsTab() {
 
 			{renameDialog.isOpen && renameDialog.account && (
 				<RenameAccountDialog
+					key={renameDialog.account.id}
 					isOpen={renameDialog.isOpen}
 					currentName={renameDialog.account.name}
-					onClose={() => setRenameDialog({ isOpen: false, account: null })}
+					onClose={() =>
+						setRenameDialog((current) =>
+							current === renameDialog
+								? { isOpen: false, account: null }
+								: current,
+						)
+					}
 					onRename={handleConfirmRename}
 					isLoading={renameAccount.isPending}
 				/>
@@ -956,13 +946,18 @@ export function AccountsTab() {
 
 			{priorityDialog.isOpen && priorityDialog.account && (
 				<AccountPriorityDialog
+					key={priorityDialog.account.id}
 					account={priorityDialog.account}
 					isOpen={priorityDialog.isOpen}
 					onOpenChange={(open) =>
-						setPriorityDialog({
-							isOpen: open,
-							account: open ? priorityDialog.account : null,
-						})
+						setPriorityDialog((current) =>
+							current === priorityDialog
+								? {
+										isOpen: open,
+										account: open ? priorityDialog.account : null,
+									}
+								: current,
+						)
 					}
 					onUpdatePriority={handleUpdatePriority}
 				/>
@@ -970,26 +965,36 @@ export function AccountsTab() {
 
 			{customEndpointDialog.isOpen && customEndpointDialog.account && (
 				<AccountCustomEndpointDialog
+					key={customEndpointDialog.account.id}
 					isOpen={customEndpointDialog.isOpen}
 					account={customEndpointDialog.account}
 					onOpenChange={(open) =>
-						setCustomEndpointDialog({
-							isOpen: open,
-							account: open ? customEndpointDialog.account : null,
-						})
+						setCustomEndpointDialog((current) =>
+							current === customEndpointDialog
+								? {
+										isOpen: open,
+										account: open ? customEndpointDialog.account : null,
+									}
+								: current,
+						)
 					}
 					onUpdateEndpoint={handleUpdateCustomEndpoint}
 				/>
 			)}
 			{modelMappingsDialog.isOpen && modelMappingsDialog.account && (
 				<AccountModelMappingsDialog
+					key={modelMappingsDialog.account.id}
 					isOpen={modelMappingsDialog.isOpen}
 					account={modelMappingsDialog.account}
 					onOpenChange={(open) =>
-						setModelMappingsDialog({
-							isOpen: open,
-							account: open ? modelMappingsDialog.account : null,
-						})
+						setModelMappingsDialog((current) =>
+							current === modelMappingsDialog
+								? {
+										isOpen: open,
+										account: open ? modelMappingsDialog.account : null,
+									}
+								: current,
+						)
 					}
 					onUpdateModelMappings={handleUpdateModelMappings}
 				/>

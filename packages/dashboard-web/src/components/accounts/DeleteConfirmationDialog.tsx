@@ -1,4 +1,5 @@
 import { AlertCircle } from "lucide-react";
+import { useDialogSubmission } from "../../hooks/useDialogSubmission";
 import { Button } from "../ui/button";
 import {
 	Dialog,
@@ -15,7 +16,7 @@ interface DeleteConfirmationDialogProps {
 	accountName: string;
 	confirmInput: string;
 	onConfirmInputChange: (value: string) => void;
-	onConfirm: () => void;
+	onConfirm: () => void | Promise<void>;
 	onCancel: () => void;
 }
 
@@ -26,15 +27,18 @@ export function DeleteConfirmationDialog({
 	onConfirm,
 	onCancel,
 }: DeleteConfirmationDialogProps) {
+	const submission = useDialogSubmission(accountName, true);
+	const busy = submission.pending;
 	return (
 		<Dialog
 			open
 			onOpenChange={(open) => {
-				if (!open) onCancel();
+				if (!open) submission.close(onCancel);
 			}}
 		>
 			<DialogContent
 				role="alertdialog"
+				closeDisabled={busy}
 				className="max-w-md"
 				// A stray click outside must not dismiss a typed-name confirmation.
 				onInteractOutside={(event) => event.preventDefault()}
@@ -49,8 +53,8 @@ export function DeleteConfirmationDialog({
 						<p className="font-medium">Warning</p>
 					</div>
 					<p className="text-sm mt-2">
-						You are about to permanently remove the account '{accountName}'.
-						This will delete all associated data and cannot be recovered.
+						You are about to remove the account '{accountName}' from this
+						router. Historical request records are retained.
 					</p>
 				</div>
 				<div className="space-y-2">
@@ -60,22 +64,35 @@ export function DeleteConfirmationDialog({
 					</Label>
 					<Input
 						id="confirm-input"
+						disabled={busy}
 						value={confirmInput}
 						onChange={(e) => onConfirmInputChange(e.target.value)}
 						placeholder="Enter account name"
 						autoComplete="off"
 					/>
 				</div>
-				<DialogFooter>
-					<Button variant="outline" onClick={onCancel}>
+				{submission.error && (
+					<p role="alert" className="text-sm text-destructive">
+						{submission.error}
+					</p>
+				)}
+				<DialogFooter className="[&>button]:min-h-11">
+					<Button
+						variant="outline"
+						disabled={busy}
+						onClick={() => submission.close(onCancel)}
+					>
 						Cancel
 					</Button>
 					<Button
 						variant="destructive"
-						onClick={onConfirm}
-						disabled={confirmInput !== accountName}
+						onClick={() => {
+							if (confirmInput === accountName)
+								void submission.submit(onConfirm, () => {});
+						}}
+						disabled={busy || confirmInput !== accountName}
 					>
-						Delete Account
+						{busy ? "Removing..." : "Remove account"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

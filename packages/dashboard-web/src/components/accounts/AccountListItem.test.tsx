@@ -62,6 +62,56 @@ function withoutDetailsContent(html: string): string {
 async function noopAsync() {}
 
 describe("account scan layout", () => {
+	it("shows a single cooldown state over saved allowed, and soft observations never promise rejection", () => {
+		const cooldown = withoutDetailsContent(
+			renderToStaticMarkup(
+				<AccountListItem
+					account={makeAccount({
+						paused: false,
+						rateLimitStatus: "allowed",
+						rateLimitedUntil: 2000,
+					})}
+					now={1000}
+					{...requiredHandlers}
+				/>,
+			),
+		);
+		expect(cooldown).toContain("Cooling down");
+		expect(cooldown).toContain("Router retry");
+		expect(cooldown).not.toContain("Not blocked");
+		for (const rateLimitStatus of [
+			"queueing_soft",
+			"allowed_warning",
+			"future_status",
+		]) {
+			const html = withoutDetailsContent(
+				renderToStaticMarkup(
+					<AccountListItem
+						account={makeAccount({ paused: false, rateLimitStatus })}
+						{...requiredHandlers}
+					/>,
+				),
+			);
+			expect(html).not.toContain("Requests are rejected");
+			expect(html).not.toContain("Clear cooldown");
+		}
+	});
+	it("disables both Resume controls for reauthentication pauses", () => {
+		const html = renderToStaticMarkup(
+			<AccountListItem
+				account={makeAccount({
+					paused: true,
+					pauseReason: "oauth_invalid_grant",
+				})}
+				{...requiredHandlers}
+			/>,
+		);
+		const resume = (
+			html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? []
+		).filter((b) => b.includes("Resume account"));
+		expect(resume).toHaveLength(2);
+		for (const button of resume) expect(button).toContain("disabled");
+	});
 	it("distinguishes unavailable data from an empty collection", () => {
 		const unavailable = renderToStaticMarkup(
 			<AccountList accounts={undefined} {...requiredHandlers} />,
@@ -122,7 +172,8 @@ describe("account scan layout", () => {
 				{...requiredHandlers}
 			/>,
 		);
-		expect(allowed).toContain("Allowed");
+		expect(withoutDetailsContent(allowed)).toContain("Not blocked");
+		expect(withoutDetailsContent(allowed)).not.toContain("Allowed");
 		expect(allowed).not.toContain("No local block");
 		const unspecified = renderToStaticMarkup(
 			<AccountListItem
@@ -130,7 +181,7 @@ describe("account scan layout", () => {
 				{...requiredHandlers}
 			/>,
 		);
-		expect(unspecified).toContain("No local block");
+		expect(unspecified).toContain("Not blocked");
 	});
 	it("keeps force reset outside disclosures and missing quota explicit", () => {
 		const html = renderToStaticMarkup(
@@ -262,7 +313,7 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 			/>,
 		);
 
-		expect(html).toContain("Re-authentication required");
+		expect(html).toContain("Reconnect required");
 		expect(html).toContain("Refresh token invalid — re-authenticate");
 		expect(html).toContain(">Re-authenticate<");
 		expect(reauthButton(html)).toContain(" bg-primary ");
@@ -279,7 +330,7 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 			/>,
 		);
 
-		expect(html).toContain("Re-authentication required");
+		expect(html).toContain("Reconnect required");
 		// The visible button label (as opposed to its static tooltip title,
 		// which always reads "Re-authenticate this Anthropic account..."
 		// regardless of pause reason) -- ">Re-authenticate<" only appears when
@@ -302,7 +353,7 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		);
 
 		expect(html).toContain("Paused");
-		expect(html).not.toContain("Re-authentication required");
+		expect(html).not.toContain("Reconnect required");
 		expect(html).not.toContain(">Re-authenticate<");
 		expect(reauthButton(html)).toBeUndefined();
 	});
@@ -335,7 +386,7 @@ describe("AccountListItem (P2 review: pause-reason rendering)", () => {
 		expect(html).not.toContain(
 			"some future reason this build does not know about",
 		);
-		expect(html).not.toContain("Re-authentication required");
+		expect(html).not.toContain("Reconnect required");
 		expect(html).not.toContain(">Re-authenticate<");
 		expect(reauthButton(html)).toBeUndefined();
 	});

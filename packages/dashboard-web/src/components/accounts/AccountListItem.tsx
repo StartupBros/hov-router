@@ -1,7 +1,6 @@
 import { PRODUCT_NAME } from "@better-ccflare/core/product-identity";
 import { AccountPresenter } from "@better-ccflare/ui-common";
 import {
-	AlertCircle,
 	ChevronDown,
 	Edit2,
 	Ellipsis,
@@ -36,18 +35,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import type { AccountFamilyRoutingState } from "./account-routing";
 import { accountUsageWindows } from "./account-usage-windows";
 import { BankedResetsStatus } from "./BankedResetsStatus";
-import { pauseStatusDisplay } from "./pause-status";
 import { RateLimitProgress } from "./RateLimitProgress";
 import {
 	describeBindingConstraint,
 	displayLabel,
 	formatRateLimitStatus,
 } from "./rate-limit-helpers";
-import {
-	STATUS_PILL_CLASS,
-	STATUS_TONE_CLASS,
-	type StatusTone,
-} from "./status-tones";
+import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from "./status-tones";
 
 export { BankedResetsStatus } from "./BankedResetsStatus";
 
@@ -74,13 +68,6 @@ function formatPauseReason(reason: string | null): string | null {
 
 function formatRoutingFamily(family: string): string {
 	return family.charAt(0).toUpperCase() + family.slice(1);
-}
-
-function rateLimitStatusTone(status: string): StatusTone {
-	const lower = status.toLowerCase();
-	if (lower.startsWith("allowed_warning")) return "warning";
-	if (lower.startsWith("allowed")) return "ok";
-	return "bad";
 }
 
 // The accounts API sends "-" (and some add-account responses "No active
@@ -140,6 +127,7 @@ function routingNeedsNotice(state: AccountFamilyRoutingState) {
 	);
 }
 interface AccountListItemProps {
+	now?: number;
 	sortReset?: { label: string; resetTime: string } | null;
 	settingsError?: string | null;
 	onClearSettingsError?: (accountId: string) => void;
@@ -259,6 +247,7 @@ export function PublicValueControl({
 }
 
 export function AccountListItem({
+	now = Date.now(),
 	sortReset,
 	settingsError,
 	onClearSettingsError,
@@ -298,47 +287,22 @@ export function AccountListItem({
 		account.bankedResets?.tracked &&
 		account.bankedResets.availableCount === 0 &&
 		!account.bankedResets.stale;
-	const presenter = new AccountPresenter(account);
-	const pauseStatus = pauseStatusDisplay(account.pauseReason);
+	const presenter = new AccountPresenter(account, now);
+	const status = presenter.status;
 	// Display-only: the window actually closest to blocking this account,
 	// including per-model caps that the routing utilization deliberately omits.
 	const bindingConstraint = describeBindingConstraint(
 		account.bindingConstraint,
 		account.usageWindow,
 	);
-	// requiresReauth is derived from the authoritative oauth_invalid_grant
-	// pause reason by the API. The OR keeps older API payloads compatible.
-	const reauthRequired = account.requiresReauth || pauseStatus.reauthRequired;
-	// Only hard-limit statuses mean the account is actually blocked; soft warnings
-	// like "allowed_warning" / "queueing_soft" mean the account is still usable.
-	const HARD_LIMIT_PREFIXES = [
-		"rate_limited",
-		"blocked",
-		"queueing_hard",
-		"payment_required",
-	];
-	const isHardLimited = HARD_LIMIT_PREFIXES.some((prefix) =>
-		presenter.rateLimitStatus.toLowerCase().startsWith(prefix),
-	);
-	// Also show Force Reset when rate_limited_until is in the future even if
-	// rate_limit_status is soft/OK — the selector still skips the account.
-	const isBlockedByLegacyLock =
-		typeof account.rateLimitedUntil === "number" &&
-		account.rateLimitedUntil > Date.now();
-	const showForceReset =
-		(isHardLimited || isBlockedByLegacyLock) && !presenter.isPaused;
+	const reauthRequired = status.reauth;
+	const showForceReset = status.clearCooldown;
 	// staleLockDetected only fires when numeric usage data exists (Anthropic accounts);
 	// Zai/NanoGPT accounts have usageUtilization === null and are correctly excluded
 	const staleLockDetected =
 		showForceReset &&
 		typeof account.usageUtilization === "number" &&
 		account.usageUtilization < 100;
-	const isUsageThrottled =
-		typeof account.usageThrottledUntil === "number" &&
-		account.usageThrottledUntil > Date.now();
-	const isUsageLimited =
-		typeof account.usageRateLimitedUntil === "number" &&
-		account.usageRateLimitedUntil > Date.now();
 	const codexUsageExtras = getCodexUsageExtras(account);
 	const codexCreditsBalance =
 		typeof codexUsageExtras?.credits_balance === "number" &&
@@ -360,8 +324,6 @@ export function AccountListItem({
 	}
 
 	const pauseReasonLabel = formatPauseReason(account.pauseReason);
-	const showRateLimitStatus =
-		!presenter.isPaused && presenter.rateLimitStatus !== "OK";
 	const sessionInfo = presenter.sessionInfo;
 	const showSessionInfo = !EMPTY_SESSION_INFO.has(sessionInfo);
 	const modelMappingCount = account.modelMappings
@@ -516,7 +478,10 @@ export function AccountListItem({
 						variant="ghost"
 						size="sm"
 						className="h-11 w-11 p-0"
-						onClick={() => onPauseToggle(account)}
+						disabled={account.paused && !status.canResume}
+						onClick={() => {
+							if (!account.paused || status.canResume) onPauseToggle(account);
+						}}
 						aria-label={account.paused ? "Resume account" : "Pause account"}
 						title={account.paused ? "Resume account" : "Pause account"}
 					>
@@ -620,68 +585,29 @@ export function AccountListItem({
 				<span className="text-xs font-medium text-muted-foreground xl:sr-only">
 					Router status
 				</span>
-				{!reauthRequired &&
-					!presenter.isPaused &&
-					!isHardLimited &&
-					!isBlockedByLegacyLock &&
-					!isUsageThrottled &&
-					!isUsageLimited &&
-					!presenter.isRateLimited &&
-					!showRateLimitStatus && (
-						<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
-							No local block
-						</span>
-					)}
-				{isBlockedByLegacyLock && !isHardLimited && (
-					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}>
-						Rate limited
-					</span>
-				)}
-				{reauthRequired ? (
+				<span
+					className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS[status.tone]}`}
+					title={
+						reauthRequired
+							? "Refresh token invalid — re-authenticate"
+							: status.reason === "pacing"
+								? "Pacing may apply to specific model windows, not every request."
+								: undefined
+					}
+				>
+					{status.reason === "paused" && pauseReasonLabel
+						? `Paused (${pauseReasonLabel})`
+						: status.label}
+				</span>
+				{status.notices.includes("soft-warning") && (
 					<span
-						className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.bad}`}
-						title="Refresh token invalid — re-authenticate"
+						className="text-xs text-muted-foreground"
+						title={status.reportedStatus}
 					>
-						Re-authentication required
-					</span>
-				) : (
-					presenter.isPaused && (
-						<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.muted}`}>
-							{pauseReasonLabel ? `Paused (${pauseReasonLabel})` : "Paused"}
-						</span>
-					)
-				)}
-				{showRateLimitStatus && (
-					<span
-						className={`${STATUS_PILL_CLASS} ${
-							STATUS_TONE_CLASS[rateLimitStatusTone(presenter.rateLimitStatus)]
-						}`}
-					>
-						<span
-							aria-hidden="true"
-							className="h-1.5 w-1.5 rounded-full bg-current"
-						/>
-						{formatRateLimitStatus(
-							presenter.rateLimitStatus.toLowerCase().startsWith("allowed")
-								? presenter.rateLimitStatus.replace(/\s*\(\d+m\)$/, "")
-								: presenter.rateLimitStatus,
-						)}
+						Provider warning · not a hard block
 					</span>
 				)}
-				{presenter.isRateLimited && (
-					<span title="Account is rate limited. Requests are rejected until the limit resets.">
-						<AlertCircle
-							className="h-4 w-4 text-yellow-600"
-							aria-hidden="true"
-						/>
-						<span className="sr-only">
-							Account is rate limited. Requests are rejected until the limit
-							resets.
-						</span>
-					</span>
-				)}
-
-				{isBlockedByLegacyLock && (
+				{status.routerRetryAt != null && (
 					<span
 						className="text-xs text-muted-foreground"
 						title={new Date(
@@ -700,17 +626,14 @@ export function AccountListItem({
 						Possible stale cooldown
 					</span>
 				)}
-				{isUsageThrottled && (
-					<span
-						className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
-						title="Usage throttling is delaying requests for this account until pacing catches up"
-					>
-						Usage throttled
+				{status.pacing && status.reason !== "pacing" && (
+					<span className="text-xs text-muted-foreground">
+						Pacing active · may be model-specific
 					</span>
 				)}
-				{isUsageLimited && (
-					<span className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}>
-						Usage rate limited
+				{status.refreshDelayed && (
+					<span className="text-xs text-muted-foreground">
+						Usage refresh delayed
 					</span>
 				)}
 
@@ -837,7 +760,11 @@ export function AccountListItem({
 								<Button
 									variant="outline"
 									className="min-h-11"
-									onClick={() => onPauseToggle(account)}
+									disabled={account.paused && !status.canResume}
+									onClick={() => {
+										if (!account.paused || status.canResume)
+											onPauseToggle(account);
+									}}
 								>
 									{account.paused ? "Resume account" : "Pause account"}
 								</Button>
@@ -872,7 +799,7 @@ export function AccountListItem({
 								className="text-xs text-muted-foreground"
 								title={presenter.rateLimitStatus}
 							>
-								Reported status:{" "}
+								Reported limit status:{" "}
 								{formatRateLimitStatus(presenter.rateLimitStatus)}
 							</p>
 							{account.provider === "codex" && account.bankedResets && (
