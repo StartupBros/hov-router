@@ -39,7 +39,7 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 - **Powerful CLI** - Complete command-line interface for account management and configuration
 - **REST API** - Complete API for automation and integration
 - **Claude Code `/model` Route Profiles** - Discover operator-defined exact-account or capability-pool routes in Claude Code's native picker and pin one authenticated session tree when caller/session identity is available, without changing other sessions. An exact local profile can opt its standalone WebSearch helpers into approved Anthropic subscription accounts ([opt-in](configuration.md#subscription-websearch-helper-opt-in)). See [configuration](configuration.md#claude-code-model-route-profiles) and [routing semantics](routing-architecture.md#claude-code-model-route-profiles)
-- **Standalone Linux x86_64 Binary** - Router 5.0.1 runs without Node.js or Bun; other platforms use the source-build path
+- **Standalone Linux x86_64 Binary** - Router 5.1.0 runs without Node.js or Bun; other platforms use the source-build path
 - **Comprehensive Logging** - Request/response tracking with searchable history
 - **Alert Webhooks** - With an empty `ALERT_WEBHOOK_TYPES` list, Discord keeps cache-efficiency observations (including recovery) and unknown-model catalog observations in alert history and the dashboard stream without sending a notification. Authentication failures, capacity warnings, actual stale-policy model rewrites, and cache telemetry gaps (including recovery) remain eligible. A nonempty list admits exactly the named types, including these observations. Generic webhooks retain their legacy admission and `{type, alert}` body. Discord presents the affected thing, observation, impact, action, and where to find evidence; raw messages remain in history. Persistence is not a delivery receipt: failed sends are logged, and the existing engine can record an opening that never arrived and later send its recovery.
 - **Database Integration** - SQLite for persistent storage and analytics
@@ -61,9 +61,9 @@ This project builds upon the foundation of [snipeship/ccflare](https://github.co
 
 ### Install the Linux x86_64 release
 
-[Release 5.0.1](https://github.com/StartupBros/hov-router/releases/tag/v5.0.1) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
+[Release 5.1.0](https://github.com/StartupBros/hov-router/releases/tag/v5.1.0) contains one standalone Linux x86_64 binary; Node.js and Bun are not required to run it. For other platforms or a local build, use [Install from source](#install-from-source).
 
-The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 5.0.1 prints `HoV Router v5.0.1` through every command name it is installed under. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed an earlier release with this guide, install 5.0.1 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install). 5.0.1 runs on SQLite only, sends no auto-refresh messages, and answers `410 Gone` for removed API endpoints: if your install used PostgreSQL, had auto-refresh on, or runs scripts against the router's API, read [PostgreSQL support removed](hov-router-migration.md#postgresql-support-removed), [Auto-refresh removed](hov-router-migration.md#auto-refresh-removed) and [Removed in 5.0.0](hov-router-migration.md#removed-in-500) first.
+The public home is `StartupBros/hov-router`, repository ID `1278801682` ([repository move](hov-router-migration.md#repository-move)). Use the current download and clone URLs below. Release 5.1.0 prints `HoV Router v5.1.0` through every command name it is installed under. The earlier 3.6.2 release keeps its historical bytes and signing identity and still prints its original product name. If you installed an earlier release with this guide, install 5.1.0 below, then [upgrade the earlier install](#upgrade-an-earlier-binary-install). 5.1.0 runs on SQLite only, sends no auto-refresh messages, and answers `410 Gone` for removed API endpoints: if your install used PostgreSQL, had auto-refresh on, or runs scripts against the router's API, read [PostgreSQL support removed](hov-router-migration.md#postgresql-support-removed), [Auto-refresh removed](hov-router-migration.md#auto-refresh-removed) and [Removed in 5.0.0](hov-router-migration.md#removed-in-500) first.
 
 Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, `chmod`). No GitHub CLI, Node.js, or Bun is needed.
 
@@ -74,13 +74,13 @@ Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, 
 (
   set -eu
   umask 077
-  version_dir="$HOME/.local/lib/hov-router/5.0.1"
+  version_dir="$HOME/.local/lib/hov-router/5.1.0"
   mkdir -p "$HOME/.local/lib/hov-router"
   mkdir "$version_dir"
   cd "$version_dir"
   curl -q --fail --location --proto '=https' --proto-redir '=https' \
-    --output hov-router https://github.com/StartupBros/hov-router/releases/download/v5.0.1/better-ccflare-linux-amd64
-  digest=1ac3321405e3afa9332080a31d9c022f880d3bb9bbbe0a4f1ea787f3eb4b2eb5
+    --output hov-router https://github.com/StartupBros/hov-router/releases/download/v5.1.0/better-ccflare-linux-amd64
+  digest=036b0b7b2d867c719a5f2fc4f7d1c1c9e7bc02c641d86397d6dedbfafe445ce8
   printf '%s  hov-router\n' "$digest" | sha256sum --check --strict -
   chmod 755 hov-router
 )
@@ -89,13 +89,13 @@ Requires Bash on Linux x86_64, `curl`, and GNU coreutils (`sha256sum`, `mkdir`, 
 
 The checksum verifies the bytes against this trusted reference; it does not independently prove who built them. Before the first run, you can also [verify signed build provenance](hov-router-releases.md#optional-consumer-provenance-verification). That optional check verifies the binary against the exact repository, source commit, tag, workflow identity, signer commit, and hosted runner that built it.
 
-If any command fails, stop: do not run the binary. The block refuses any existing `5.0.1` path, including a symlink, and leaves partial downloads for inspection rather than deleting or overwriting them. Inspect the error and existing files before retrying.
+If any command fails, stop: do not run the binary. The block refuses any existing `5.1.0` path, including a symlink, and leaves partial downloads for inspection rather than deleting or overwriting them. Inspect the error and existing files before retrying.
 
 **2. Run.** After the checksum (and optional provenance check) succeeds:
 
 <!-- router-release-run -->
 ```bash
-"$HOME/.local/lib/hov-router/5.0.1/hov-router" --help
+"$HOME/.local/lib/hov-router/5.1.0/hov-router" --help
 ```
 <!-- /router-release-run -->
 
@@ -109,7 +109,7 @@ After verification succeeds, create `hov-router` and `better-ccflare` in `$HOME/
 ```bash
 (
   set -eu
-  binary="$HOME/.local/lib/hov-router/5.0.1/hov-router"
+  binary="$HOME/.local/lib/hov-router/5.1.0/hov-router"
   bin_dir="$HOME/.local/bin"
   test -x "$binary"
   mkdir -p "$bin_dir"
@@ -136,7 +136,7 @@ Each release installs into its own version directory, so step 1 leaves an earlie
 ```bash
 (
   set -eu
-  binary="$HOME/.local/lib/hov-router/5.0.1/hov-router"
+  binary="$HOME/.local/lib/hov-router/5.1.0/hov-router"
   bin_dir="$HOME/.local/bin"
   test -x "$binary"
   mkdir -p "$bin_dir"
@@ -168,7 +168,7 @@ Each release installs into its own version directory, so step 1 leaves an earlie
 ```
 <!-- /router-release-upgrade -->
 
-Then `hov-router --version` should print `HoV Router v5.0.1`. The block does not delete the earlier version directory or change a running service. To roll back, set `binary` to the earlier release's path, such as `$HOME/.local/lib/hov-router/5.0.0/hov-router` or `$HOME/.local/lib/wstack-router/3.6.2/wstack-router`, and run the block again.
+Then `hov-router --version` should print `HoV Router v5.1.0`. The block does not delete the earlier version directory or change a running service. To roll back, set `binary` to the earlier release's path, such as `$HOME/.local/lib/hov-router/5.0.1/hov-router` or `$HOME/.local/lib/wstack-router/3.6.2/wstack-router`, and run the block again.
 
 ### Install from source
 
@@ -202,7 +202,7 @@ The PATH change applies to this shell only. To keep it, add the printed director
 
 ### Start the local server
 
-The commands below assume you completed the optional [PATH setup](#optional-add-commands-to-path) or the source install. If you skipped PATH setup, replace `hov-router` (or the `better-ccflare` compatibility command) in these examples with `"$HOME/.local/lib/hov-router/5.0.1/hov-router"`.
+The commands below assume you completed the optional [PATH setup](#optional-add-commands-to-path) or the source install. If you skipped PATH setup, replace `hov-router` (or the `better-ccflare` compatibility command) in these examples with `"$HOME/.local/lib/hov-router/5.1.0/hov-router"`.
 
 For a new local setup, start the server and dashboard with:
 
@@ -1212,7 +1212,7 @@ Full documentation available in [the documentation index](index.md):
 
 ## Platform Support
 
-HoV Router 5.0.1, like the earlier 5.0.0, 4.0.0, 3.7.x and 3.6.2 releases, provides a **Linux x86_64 binary only**. No Router Linux ARM64, macOS, or native Windows binary is published. The [source-build path](#install-from-source) remains available; its acceptance check runs on Linux x86_64, not macOS or native Windows.
+HoV Router 5.1.0, like the earlier 5.0.1, 5.0.0, 4.0.0, 3.7.x and 3.6.2 releases, provides a **Linux x86_64 binary only**. No Router Linux ARM64, macOS, or native Windows binary is published. The [source-build path](#install-from-source) remains available; its acceptance check runs on Linux x86_64, not macOS or native Windows.
 
 The table and device list below describe the retained **upstream distribution** recipes, not HoV Router artifacts.
 
