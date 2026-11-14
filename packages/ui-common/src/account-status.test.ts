@@ -24,6 +24,25 @@ test("normal, soft and unknown observations never claim rejection", () => {
 	expect(s.reportedStatus).toBe("future_value");
 	expect(s.overview).toBe(false);
 });
+test("presentation colors distinguish clear, caution, blocked and paused states", () => {
+	const examples = [
+		{ input: { rateLimitStatus: "allowed" }, tone: "ok" },
+		{ input: { rateLimitStatus: "OK" }, tone: "ok" },
+		{ input: { rateLimitStatus: "allowed_warning" }, tone: "warning" },
+		{ input: { rateLimitStatus: "queueing_soft" }, tone: "warning" },
+		{ input: { usageRateLimitedUntil: now + 1 }, tone: "warning" },
+		{ input: { usageThrottledUntil: now + 1 }, tone: "warning" },
+		{ input: { rateLimitStatus: "future_status" }, tone: "warning" },
+		{ input: { rateLimitedUntil: now + 1 }, tone: "bad" },
+		{ input: { rateLimitStatus: "usage_exhausted" }, tone: "bad" },
+		{ input: { rateLimitStatus: "blocked" }, tone: "bad" },
+		{ input: { paused: true, requiresReauth: true }, tone: "bad" },
+		{ input: { paused: true }, tone: "muted" },
+	];
+	for (const { input, tone } of examples) {
+		expect(classifyAccountStatus(input, now).tone).toBe(tone);
+	}
+});
 test("precedence, independent signals and frozen clear-cooldown predicate", () => {
 	const a = {
 		rateLimitStatus: "usage_exhausted (90m)",

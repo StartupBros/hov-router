@@ -79,14 +79,16 @@ export function classifyAccountStatus(input: AccountStatusInput, now: number) {
 	if (soft) notices.push("soft-warning");
 	if (refreshDelayed) notices.push("usage-refresh");
 	if (pacing) notices.push("pacing");
+	let tone: "ok" | "warning" | "bad" | "muted";
+	if (reason === "paused") tone = "muted";
+	else if (["reauth", "cooldown", "exhausted", "hard-limit"].includes(reason))
+		tone = "bad";
+	else if (reason === "normal" && notices.length === 0) tone = "ok";
+	else tone = "warning";
 	return {
 		reason,
 		label: labels[reason],
-		tone: (["reauth", "exhausted", "hard-limit"].includes(reason)
-			? "bad"
-			: ["cooldown", "pacing", "unknown"].includes(reason)
-				? "warning"
-				: "muted") as "bad" | "warning" | "muted",
+		tone,
 		reportedStatus,
 		notices,
 		refreshDelayed,
