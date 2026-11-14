@@ -1,5 +1,24 @@
 # Changelog
 
+## [5.1.0](https://github.com/StartupBros/hov-router/compare/v5.0.1...v5.1.0) (2026-11-14)
+
+
+### Features
+
+* **dashboard:** expand account details inline with tabs ([#806](https://github.com/StartupBros/hov-router/issues/806)) ([c0970ca](https://github.com/StartupBros/hov-router/commit/c0970cadd703025bccd9fdf1b379e3cbc04b1307)), refs [#766](https://github.com/StartupBros/hov-router/issues/766)
+* **dashboard:** make Accounts scan-first and responsive ([#767](https://github.com/StartupBros/hov-router/issues/767)) ([58ce8fe](https://github.com/StartupBros/hov-router/commit/58ce8fee4adef7e42fab13907a383229cf1ee428)), refs [#766](https://github.com/StartupBros/hov-router/issues/766)
+* **dashboard:** simplify account comparison and quota hierarchy ([#805](https://github.com/StartupBros/hov-router/issues/805)) ([02e45b1](https://github.com/StartupBros/hov-router/commit/02e45b1cd6bb308a01197e25569a7cdd49b186bf))
+* **dashboard:** stack account quotas and add reset-aware sorting ([#802](https://github.com/StartupBros/hov-router/issues/802)) ([d0d52e2](https://github.com/StartupBros/hov-router/commit/d0d52e23ca52d358d44cfe770937291f3b01be15))
+
+
+### Bug Fixes
+
+* **dashboard:** align account status, usage and action feedback ([#810](https://github.com/StartupBros/hov-router/issues/810)) ([ab9d505](https://github.com/StartupBros/hov-router/commit/ab9d50591516f584c4ed58a329e64ace3fc45e5a))
+* **dashboard:** clarify account usage and control labels ([#807](https://github.com/StartupBros/hov-router/issues/807)) ([32c1a79](https://github.com/StartupBros/hov-router/commit/32c1a79715a4fb6e584cb3ebb19cc9840185e557)), refs [#766](https://github.com/StartupBros/hov-router/issues/766)
+* **dashboard:** restore account status colors and icons ([#811](https://github.com/StartupBros/hov-router/issues/811)) ([949e17f](https://github.com/StartupBros/hov-router/commit/949e17fbe92f89c765513448a8aac3e77f89b9e7)), refs [#808](https://github.com/StartupBros/hov-router/issues/808) [#766](https://github.com/StartupBros/hov-router/issues/766)
+* **external-usage:** skip Codex sessions that ran through the router ([#804](https://github.com/StartupBros/hov-router/issues/804)) ([f96efb5](https://github.com/StartupBros/hov-router/commit/f96efb5ce66ec661d13016484be63744f4a69507))
+* **usage:** keep one writer for a request's token counts ([#803](https://github.com/StartupBros/hov-router/issues/803)) ([900eb55](https://github.com/StartupBros/hov-router/commit/900eb55213093316147b7d7d4fb3e4c4d7ad7f87))
+
 ## [5.0.1](https://github.com/StartupBros/hov-router/compare/v5.0.0...v5.0.1) (2026-11-11)
 
 
