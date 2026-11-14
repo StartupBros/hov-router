@@ -63,12 +63,10 @@ function formatTokenCount(n: number): string {
 
 function formatPauseReason(reason: string | null): string | null {
 	// Keep internal/future pause reasons private and safely renderable. Only
-	// reasons with intentional operator-facing copy are expanded here.
+	// automatic pauses name their cause; a manual pause reads as plain "Paused".
 	switch (reason) {
-		case "manual":
-			return "manual";
 		case "failure_threshold":
-			return "failure threshold";
+			return "repeated failures";
 		case "overage":
 			return "overage";
 		default:
@@ -380,6 +378,18 @@ export function AccountListItem({
 		...rateLimitProgressProps,
 		compact: true,
 	}).usages;
+	// A ready account can still have one window spent (often a per-model cap).
+	const fullWindowLabels =
+		status.reason === "normal"
+			? visibleWindows
+					.filter(
+						(row) =>
+							!row.synthetic &&
+							typeof row.utilization === "number" &&
+							row.utilization >= 100,
+					)
+					.map(displayLabel)
+			: [];
 	// Match the exact window, scope, value and reset. A same-named limit with
 	// different observations must retain its exception instead of disappearing.
 	const representedBinding = visibleWindows.find((row) => {
@@ -415,7 +425,7 @@ export function AccountListItem({
 	return (
 		<article
 			aria-label={account.name}
-			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,3.2fr)_minmax(0,0.9fr)_11rem] xl:items-center xl:gap-3 xl:space-y-0 ${
+			className={`min-w-0 space-y-3 border-b bg-card px-3 py-3 transition-colors [overflow-wrap:anywhere] xl:grid xl:grid-cols-[minmax(12.5rem,1.6fr)_minmax(0,3.2fr)_minmax(10rem,0.9fr)_11rem] xl:items-center xl:gap-3 xl:space-y-0 ${
 				isPrimary
 					? "border-border border-l-2 border-l-primary"
 					: "border-border hover:border-muted-foreground/50"
@@ -585,12 +595,6 @@ export function AccountListItem({
 				</div>
 			</div>
 
-			{showForceReset && (
-				<p className="text-xs text-muted-foreground xl:col-span-full">
-					Clear cooldown removes the router’s block, not the provider’s usage
-					limit.
-				</p>
-			)}
 			{/* Concise local status; diagnostics and request totals live in Details. */}
 			<div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-sm [&>span]:max-w-full [&>span]:whitespace-normal xl:col-start-3 xl:row-start-1 xl:flex-col xl:items-start">
 				<span className="text-xs font-medium text-muted-foreground xl:sr-only">
@@ -603,22 +607,25 @@ export function AccountListItem({
 							? "Refresh token invalid — re-authenticate"
 							: status.reason === "pacing"
 								? "Pacing may apply to specific model windows, not every request."
-								: status.reason === "normal"
-									? "No reported hard limit or current router block. Provider capacity is not guaranteed."
-									: undefined
+								: status.notices.includes("soft-warning")
+									? `Provider reported ${status.reportedStatus}. Requests still route here.`
+									: status.notices.includes("usage-refresh")
+										? "Usage refresh delayed; the usage shown may be out of date."
+										: undefined
 					}
 				>
 					<StatusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-					{status.reason === "paused" && pauseReasonLabel
-						? `Paused (${pauseReasonLabel})`
-						: status.label}
+					{/* The status track's 10rem floor fits the longest label on one line. */}
+					<span className="whitespace-nowrap">{status.label}</span>
 				</span>
-				{status.notices.includes("soft-warning") && (
-					<span
-						className="text-xs text-muted-foreground"
-						title={status.reportedStatus}
-					>
-						Provider warning · not a hard block
+				{status.reason === "paused" && pauseReasonLabel && (
+					<span className="text-xs text-muted-foreground">
+						{`Auto-paused: ${pauseReasonLabel}`}
+					</span>
+				)}
+				{fullWindowLabels.length > 0 && (
+					<span className="text-xs text-muted-foreground">
+						{fullWindowLabels.join(", ")} at limit
 					</span>
 				)}
 				{status.routerRetryAt != null && (
@@ -635,19 +642,9 @@ export function AccountListItem({
 				{staleLockDetected && (
 					<span
 						className={`${STATUS_PILL_CLASS} ${STATUS_TONE_CLASS.warning}`}
-						title="Reported usage is below 100%, but the router still has a rate-limit block. Provider capacity is not guaranteed."
+						title="Reported usage is below 100%, but the router still has a rate-limit block."
 					>
 						Possible stale cooldown
-					</span>
-				)}
-				{status.pacing && status.reason !== "pacing" && (
-					<span className="text-xs text-muted-foreground">
-						Pacing active · may be model-specific
-					</span>
-				)}
-				{status.refreshDelayed && (
-					<span className="text-xs text-muted-foreground">
-						Usage refresh delayed
 					</span>
 				)}
 

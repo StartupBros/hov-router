@@ -73,7 +73,7 @@ export function classifyAccountStatus(input: AccountStatusInput, now: number) {
 		"hard-limit": "Reported hard limit",
 		pacing: "Pacing active",
 		unknown: "Status unknown",
-		normal: "Not blocked",
+		normal: soft ? "Provider warning" : "Ready",
 	};
 	const notices: ("soft-warning" | "usage-refresh" | "pacing")[] = [];
 	if (soft) notices.push("soft-warning");
